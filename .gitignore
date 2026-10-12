@@ -1,0 +1,24 @@
+# Visual Studio files
+.vs/
+*.VC.db
+*.opendb
+x64/
+Debug/
+Release/
+M2Draw/x64/
+M2Draw/Debug/
+M2Draw/Release/
+
+# Build results
+*.exe
+*.ilk
+*.pdb
+*.tlog
+*.obj
+*.res
+*.idb
+*.log
+*.lastbuildstate
+
+# User-specific files
+*.vcxproj.user
