@@ -104,16 +104,6 @@ int CPropertiesWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 	m_wndD2DProp.SetPaneMode(m_paneMode);
 
-	m_wndToolBar.Create(this, AFX_DEFAULT_TOOLBAR_STYLE, IDR_PROPERTIES);
-	m_wndToolBar.LoadToolBar(IDR_PROPERTIES, 0, 0, TRUE /* 잠금 */);
-	m_wndToolBar.CleanUpLockedImages();
-	m_wndToolBar.LoadBitmap(IDR_PROPERTIES, 0, 0, TRUE /* 잠금 */);
-
-	m_wndToolBar.SetPaneStyle(m_wndToolBar.GetPaneStyle() | CBRS_TOOLTIPS | CBRS_FLYBY);
-	m_wndToolBar.SetPaneStyle(m_wndToolBar.GetPaneStyle() & ~(CBRS_GRIPPER | CBRS_SIZE_DYNAMIC | CBRS_BORDER_TOP | CBRS_BORDER_BOTTOM | CBRS_BORDER_LEFT | CBRS_BORDER_RIGHT));
-	m_wndToolBar.SetOwner(this);
-	m_wndToolBar.SetRouteCommandsViaFrame(FALSE);
-
 	AdjustLayout();
 	return 0;
 }
@@ -134,15 +124,8 @@ void CPropertiesWnd::AdjustLayout()
 	CRect rectClient;
 	GetClientRect(rectClient);
 
-	int cyTlb = 0;
-	if (m_wndToolBar.GetSafeHwnd())
-	{
-		cyTlb = m_wndToolBar.CalcFixedLayout(FALSE, TRUE).cy;
-		m_wndToolBar.SetWindowPos(nullptr, rectClient.left, rectClient.top, rectClient.Width(), cyTlb, SWP_NOACTIVATE | SWP_NOZORDER);
-	}
-
-	int yContent = rectClient.top + cyTlb;
-	int hContent = rectClient.Height() - cyTlb;
+	int yContent = rectClient.top;
+	int hContent = rectClient.Height();
 	if (hContent < 0) hContent = 0;
 
 	// 이전 클래식 PropertyGrid는 숨김
