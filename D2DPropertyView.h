@@ -5,12 +5,12 @@
 
 class CM2DrawDoc;
 
-// Inkscape / Illustrator 스타일의 다크 테마 D2D 그래픽 컨트롤 테스트 뷰
-class CD2DTestView : public CWnd
+// Inkscape / Illustrator 스타일의 다크 테마 D2D 그래픽 속성 뷰
+class CD2DPropertyView : public CWnd
 {
 public:
-	CD2DTestView();
-	virtual ~CD2DTestView();
+	CD2DPropertyView();
+	virtual ~CD2DPropertyView();
 
 	enum GuiTab
 	{

@@ -1,7 +1,7 @@
 #pragma once
 #include <d2d1.h>
 
-#include "D2DTestView.h"
+#include "D2DPropertyView.h"
 
 class CM2DrawDoc;
 
@@ -41,7 +41,7 @@ protected:
 	CComboBox m_wndObjectCombo;
 	CPropertiesToolBar m_wndToolBar;
 	CMFCPropertyGridCtrl m_wndPropList;
-	CD2DTestView m_wndD2DTest;
+	CD2DPropertyView m_wndD2DProp;
 
 	int m_selectedShapeIndex = -1;
 	CM2DrawDoc* m_pActiveDoc = nullptr;

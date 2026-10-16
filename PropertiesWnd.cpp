@@ -103,16 +103,16 @@ int CPropertiesWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		return -1;
 	}
 
-	// D2D Vector GUI 테스트 뷰 생성 (전용 윈도우 클래스 등록)
+	// D2D Vector GUI 속성 뷰 생성 (전용 윈도우 클래스 등록)
 	CString strD2DClass = AfxRegisterWndClass(CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS, ::LoadCursor(nullptr, IDC_ARROW), (HBRUSH)::GetStockObject(BLACK_BRUSH), nullptr);
-	if (!m_wndD2DTest.Create(strD2DClass, _T("D2DTestView"), WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, rectDummy, this, 3))
+	if (!m_wndD2DProp.Create(strD2DClass, _T("D2DPropertyView"), WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, rectDummy, this, 3))
 	{
-		TRACE0("D2D 테스트 뷰를 만들지 못했습니다.\n");
+		TRACE0("D2D 속성 뷰를 만들지 못했습니다.\n");
 	}
 
 	// 탭 메뉴 추가: 1. 캔버스 설정, 2. 속성 (Direct2D 커스텀 벡터 UI)
-	m_wndTabs.AddTab(&m_wndD2DTest, _T("캔버스 설정"), (UINT)0, FALSE);
-	m_wndTabs.AddTab(&m_wndD2DTest, _T("속성"), (UINT)1, FALSE);
+	m_wndTabs.AddTab(&m_wndD2DProp, _T("캔버스 설정"), (UINT)0, FALSE);
+	m_wndTabs.AddTab(&m_wndD2DProp, _T("속성"), (UINT)1, FALSE);
 	m_wndTabs.SetActiveTab(1); // 속성 탭 기본 활성화
 
 	m_wndToolBar.Create(this, AFX_DEFAULT_TOOLBAR_STYLE, IDR_PROPERTIES);
@@ -180,12 +180,12 @@ void CPropertiesWnd::AdjustLayout()
 	{
 		m_wndPropList.ShowWindow(SW_HIDE);
 	}
-	if (m_wndD2DTest.GetSafeHwnd())
+	if (m_wndD2DProp.GetSafeHwnd())
 	{
-		m_wndD2DTest.SetPaneMode(isCanvasMode ? CD2DTestView::MODE_CANVAS : CD2DTestView::MODE_SHAPE);
-		m_wndD2DTest.SetWindowPos(nullptr, rectClient.left, yContent, rectClient.Width(), hContent, SWP_NOACTIVATE | SWP_NOZORDER);
-		m_wndD2DTest.ShowWindow(SW_SHOW);
-		m_wndD2DTest.Invalidate();
+		m_wndD2DProp.SetPaneMode(isCanvasMode ? CD2DPropertyView::MODE_CANVAS : CD2DPropertyView::MODE_SHAPE);
+		m_wndD2DProp.SetWindowPos(nullptr, rectClient.left, yContent, rectClient.Width(), hContent, SWP_NOACTIVATE | SWP_NOZORDER);
+		m_wndD2DProp.ShowWindow(SW_SHOW);
+		m_wndD2DProp.Invalidate();
 	}
 }
 
@@ -198,15 +198,15 @@ LRESULT CPropertiesWnd::OnTabChanged(WPARAM wParam, LPARAM /*lParam*/)
 		m_wndTabs.GetTabLabel(activeTab, tabLabel);
 	}
 
-	if (m_wndD2DTest.GetSafeHwnd())
+	if (m_wndD2DProp.GetSafeHwnd())
 	{
 		if (tabLabel.Find(_T("캔버스")) >= 0)
 		{
-			m_wndD2DTest.SetPaneMode(CD2DTestView::MODE_CANVAS);
+			m_wndD2DProp.SetPaneMode(CD2DPropertyView::MODE_CANVAS);
 		}
 		else
 		{
-			m_wndD2DTest.SetPaneMode(CD2DTestView::MODE_SHAPE);
+			m_wndD2DProp.SetPaneMode(CD2DPropertyView::MODE_SHAPE);
 		}
 	}
 
@@ -322,17 +322,17 @@ void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
 			m_wndTabs.SetTabLabel(1, strTitle);
 		}
 
-		if (m_wndD2DTest.GetSafeHwnd())
+		if (m_wndD2DProp.GetSafeHwnd())
 		{
-			m_wndD2DTest.SetTargetShape(pDoc, shapeIndex);
-			m_wndD2DTest.SetPaneMode(CD2DTestView::MODE_SHAPE);
+			m_wndD2DProp.SetTargetShape(pDoc, shapeIndex);
+			m_wndD2DProp.SetPaneMode(CD2DPropertyView::MODE_SHAPE);
 		}
 	}
 	else
 	{
-		if (m_wndD2DTest.GetSafeHwnd())
+		if (m_wndD2DProp.GetSafeHwnd())
 		{
-			m_wndD2DTest.SetTargetShape(nullptr, -1);
+			m_wndD2DProp.SetTargetShape(nullptr, -1);
 		}
 
 		// 기본 "속성" 레이블 복원

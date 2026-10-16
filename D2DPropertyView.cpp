@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "D2DTestView.h"
+#include "D2DPropertyView.h"
 #include "M2DrawDoc.h"
 #include "M2Draw.h"
 #include "D2DVectorEngine.h"
@@ -151,7 +151,7 @@ namespace
 	}
 }
 
-BEGIN_MESSAGE_MAP(CD2DTestView, CWnd)
+BEGIN_MESSAGE_MAP(CD2DPropertyView, CWnd)
 	ON_WM_PAINT()
 	ON_WM_SIZE()
 	ON_WM_ERASEBKGND()
@@ -160,11 +160,11 @@ BEGIN_MESSAGE_MAP(CD2DTestView, CWnd)
 	ON_WM_LBUTTONUP()
 END_MESSAGE_MAP()
 
-CD2DTestView::CD2DTestView()
+CD2DPropertyView::CD2DPropertyView()
 {
 }
 
-void CD2DTestView::SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex)
+void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex)
 {
 	m_pActiveDoc = pDoc;
 	m_selectedShapeIndex = shapeIndex;
@@ -206,7 +206,7 @@ void CD2DTestView::SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex)
 	Invalidate(FALSE);
 }
 
-void CD2DTestView::ApplyToShape()
+void CD2DPropertyView::ApplyToShape()
 {
 	if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size()))
 		return;
@@ -241,7 +241,7 @@ void CD2DTestView::ApplyToShape()
 	m_pActiveDoc->UpdateAllViews(nullptr);
 }
 
-void CD2DTestView::ApplyCanvasSettings()
+void CD2DPropertyView::ApplyCanvasSettings()
 {
 	CWinApp* pApp = AfxGetApp();
 	if (pApp)
@@ -266,7 +266,7 @@ void CD2DTestView::ApplyCanvasSettings()
 	}
 }
 
-CD2DTestView::~CD2DTestView()
+CD2DPropertyView::~CD2DPropertyView()
 {
 	DiscardDeviceResources();
 	if (m_pTextFormatCenter) m_pTextFormatCenter->Release();
@@ -277,12 +277,12 @@ CD2DTestView::~CD2DTestView()
 	if (m_pD2DFactory) m_pD2DFactory->Release();
 }
 
-BOOL CD2DTestView::OnEraseBkgnd(CDC* /*pDC*/)
+BOOL CD2DPropertyView::OnEraseBkgnd(CDC* /*pDC*/)
 {
 	return TRUE; // 깜빡임 방지
 }
 
-HRESULT CD2DTestView::CreateDeviceResources()
+HRESULT CD2DPropertyView::CreateDeviceResources()
 {
 	HRESULT hr = S_OK;
 
@@ -388,13 +388,13 @@ HRESULT CD2DTestView::CreateDeviceResources()
 	return hr;
 }
 
-void CD2DTestView::DiscardDeviceResources()
+void CD2DPropertyView::DiscardDeviceResources()
 {
 	if (m_pBrush) { m_pBrush->Release(); m_pBrush = nullptr; }
 	if (m_pRenderTarget) { m_pRenderTarget->Release(); m_pRenderTarget = nullptr; }
 }
 
-void CD2DTestView::OnSize(UINT nType, int cx, int cy)
+void CD2DPropertyView::OnSize(UINT nType, int cx, int cy)
 {
 	CWnd::OnSize(nType, cx, cy);
 	if (m_pRenderTarget)
@@ -404,7 +404,7 @@ void CD2DTestView::OnSize(UINT nType, int cx, int cy)
 	Invalidate(FALSE);
 }
 
-void CD2DTestView::DrawColorWheel(D2D1_POINT_2F center, float radiusOuter, float radiusInner, float activeHue, float activeSat, float activeLight)
+void CD2DPropertyView::DrawColorWheel(D2D1_POINT_2F center, float radiusOuter, float radiusInner, float activeHue, float activeSat, float activeLight)
 {
 	if (!m_pRenderTarget || !m_pBrush) return;
 
@@ -571,7 +571,7 @@ void CD2DTestView::DrawColorWheel(D2D1_POINT_2F center, float radiusOuter, float
 	m_pRenderTarget->FillEllipse(D2D1::Ellipse(handlePt, 5.0f, 5.0f), m_pBrush);
 }
 
-void CD2DTestView::DrawTabHeaders(float width, float& y)
+void CD2DPropertyView::DrawTabHeaders(float width, float& y)
 {
 	// 상단 탭 버튼 3개 (D2D Custom / ImGui Dark / MFC Style)
 	float tabW = (width - 20.0f) / 3.0f;
@@ -610,7 +610,7 @@ void CD2DTestView::DrawTabHeaders(float width, float& y)
 // -------------------------------------------------------------
 // [1. Direct2D 탭] Inkscape/Illustrator 스타일 미려한 벡터 UI
 // -------------------------------------------------------------
-void CD2DTestView::DrawD2DContent(float width, float y)
+void CD2DPropertyView::DrawD2DContent(float width, float y)
 {
 	// 1. 배지 / 선택된 쉐이프 이름 및 상태
 	CString strHeader;
@@ -883,7 +883,7 @@ void CD2DTestView::DrawD2DContent(float width, float y)
 // -------------------------------------------------------------
 // [2. Dear ImGui 탭] 블렌더 / 언리얼 엔진 / 게임 툴 스타일
 // -------------------------------------------------------------
-void CD2DTestView::DrawImGuiContent(float width, float y)
+void CD2DPropertyView::DrawImGuiContent(float width, float y)
 {
 	// 배지 / 설명
 	m_pBrush->SetColor(D2D1::ColorF(0.95f, 0.55f, 0.15f));
@@ -1010,7 +1010,7 @@ void CD2DTestView::DrawImGuiContent(float width, float y)
 // -------------------------------------------------------------
 // [3. MFC Classic 탭] 윈도우 기본 대화상자 컨트롤 스타일
 // -------------------------------------------------------------
-void CD2DTestView::DrawMFCContent(float width, float y)
+void CD2DPropertyView::DrawMFCContent(float width, float y)
 {
 	// 배지 / 설명
 	m_pBrush->SetColor(D2D1::ColorF(0.3f, 0.7f, 0.9f));
@@ -1128,7 +1128,7 @@ void CD2DTestView::DrawMFCContent(float width, float y)
 // -------------------------------------------------------------
 // [캔버스 설정 탭] Inkscape 스타일 Direct2D 커스텀 설정 뷰
 // -------------------------------------------------------------
-void CD2DTestView::DrawCanvasContent(float width, float y)
+void CD2DPropertyView::DrawCanvasContent(float width, float y)
 {
 	GridRenderer& grid = GetApp()->GetGrid();
 	RulerRenderer& ruler = GetApp()->GetRuler();
@@ -1383,7 +1383,7 @@ void CD2DTestView::DrawCanvasContent(float width, float y)
 	y += 24.0f;
 }
 
-void CD2DTestView::OnPaint()
+void CD2DPropertyView::OnPaint()
 {
 	CPaintDC dc(this);
 
@@ -1419,7 +1419,7 @@ void CD2DTestView::OnPaint()
 	}
 }
 
-void CD2DTestView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
+void CD2DPropertyView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 {
 	CRect rc;
 	GetClientRect(&rc);
@@ -1807,7 +1807,7 @@ void CD2DTestView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 		}
 }
 
-void CD2DTestView::OnMouseMove(UINT /*nFlags*/, CPoint point)
+void CD2DPropertyView::OnMouseMove(UINT /*nFlags*/, CPoint point)
 {
 	CRect rc;
 	GetClientRect(&rc);
@@ -2003,7 +2003,7 @@ void CD2DTestView::OnMouseMove(UINT /*nFlags*/, CPoint point)
 	}
 }
 
-void CD2DTestView::OnLButtonUp(UINT /*nFlags*/, CPoint /*point*/)
+void CD2DPropertyView::OnLButtonUp(UINT /*nFlags*/, CPoint /*point*/)
 {
 	if (m_isDraggingWheel || m_isDraggingTriangle || m_isDraggingOpacitySlider || m_isDraggingStrokeWidthSlider || m_isDraggingSlider ||
 		m_isDraggingStepSlider || m_isDraggingMajorSlider || m_isDraggingCanvasOpacity)
