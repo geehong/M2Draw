@@ -23,10 +23,12 @@ public:
 class CPropertiesWnd : public CDockablePane
 {
 public:
-	CPropertiesWnd() noexcept;
+	CPropertiesWnd(CD2DPropertyView::PaneMode mode = CD2DPropertyView::MODE_SHAPE) noexcept;
 
 	void AdjustLayout();
 	void SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc);
+	CD2DPropertyView::PaneMode GetPaneMode() const { return m_paneMode; }
+	CD2DPropertyView& GetD2DPropView() { return m_wndD2DProp; }
 
 public:
 	void SetVSDotNetLook(BOOL bSet)
@@ -36,8 +38,8 @@ public:
 	}
 
 protected:
+	CD2DPropertyView::PaneMode m_paneMode;
 	CFont m_fntPropList;
-	CMFCTabCtrl m_wndTabs;
 	CComboBox m_wndObjectCombo;
 	CPropertiesToolBar m_wndToolBar;
 	CMFCPropertyGridCtrl m_wndPropList;

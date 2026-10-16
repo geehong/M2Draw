@@ -9,7 +9,13 @@ class CM2DrawDoc;
 class CD2DPropertyView : public CWnd
 {
 public:
-	CD2DPropertyView();
+	enum PaneMode
+	{
+		MODE_SHAPE = 0,    // 도형 속성 (채움 / 윤곽선 / 컬러휠 등)
+		MODE_CANVAS = 1    // 캔버스 & 격자 설정 (그리드, 스냅, 눈금자, 단위, 색상)
+	};
+
+	CD2DPropertyView(PaneMode initialMode = MODE_SHAPE);
 	virtual ~CD2DPropertyView();
 
 	enum GuiTab
@@ -27,11 +33,6 @@ public:
 	CString     m_strShapeName;
 	CString     m_strShapeType;
 
-	enum PaneMode
-	{
-		MODE_SHAPE = 0,    // 도형 속성 (채움 / 윤곽선 / 컬러휠 등)
-		MODE_CANVAS = 1    // 캔버스 & 격자 설정 (그리드, 스냅, 눈금자, 단위, 색상)
-	};
 	PaneMode m_paneMode = MODE_SHAPE;
 
 	void SetPaneMode(PaneMode mode)

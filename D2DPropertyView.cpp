@@ -160,7 +160,8 @@ BEGIN_MESSAGE_MAP(CD2DPropertyView, CWnd)
 	ON_WM_LBUTTONUP()
 END_MESSAGE_MAP()
 
-CD2DPropertyView::CD2DPropertyView()
+CD2DPropertyView::CD2DPropertyView(PaneMode initialMode)
+	: m_paneMode(initialMode)
 {
 }
 

@@ -1,4 +1,4 @@
-﻿
+
 // MainFrm.cpp: CMainFrame 클래스의 구현
 //
 
@@ -39,8 +39,9 @@ static UINT indicators[] =
 // CMainFrame 생성/소멸
 
 CMainFrame::CMainFrame() noexcept
+	: m_wndProperties(CD2DPropertyView::MODE_SHAPE)
+	, m_wndCanvasProp(CD2DPropertyView::MODE_CANVAS)
 {
-	// TODO: 여기에 멤버 초기화 코드를 추가합니다.
 }
 
 CMainFrame::~CMainFrame()
@@ -129,6 +130,11 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	DockPane(&m_wndOutput);
 	m_wndProperties.EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndProperties);
+	m_wndCanvasProp.EnableDocking(CBRS_ALIGN_ANY);
+	DockPane(&m_wndCanvasProp);
+
+	// 작업환경설정 창을 오브젝트 설정 창의 아래(위아래 분할)로 기본 도킹
+	m_wndCanvasProp.DockToWindow(&m_wndProperties, CBRS_ALIGN_BOTTOM);
 
 
 	// 모든 사용자 인터페이스 요소를 그리는 데 사용하는 비주얼 관리자를 설정합니다.
@@ -212,14 +218,20 @@ BOOL CMainFrame::CreateDockingWindows()
 		return FALSE; // 만들지 못했습니다.
 	}
 
-	// 속성 창을 만듭니다.
-	CString strPropertiesWnd;
-	bNameValid = strPropertiesWnd.LoadString(IDS_PROPERTIES_WND);
-	ASSERT(bNameValid);
+	// 오브젝트 설정 창을 만듭니다.
+	CString strPropertiesWnd = _T("오브젝트 설정");
 	if (!m_wndProperties.Create(strPropertiesWnd, this, CRect(0, 0, 200, 200), TRUE, ID_VIEW_PROPERTIESWND, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
 	{
-		TRACE0("속성 창을 만들지 못했습니다.\n");
+		TRACE0("오브젝트 설정 창을 만들지 못했습니다.\n");
 		return FALSE; // 만들지 못했습니다.
+	}
+
+	// 작업환경설정 창을 만듭니다.
+	CString strCanvasWnd = _T("작업환경설정");
+	if (!m_wndCanvasProp.Create(strCanvasWnd, this, CRect(0, 0, 200, 200), TRUE, ID_VIEW_PROPERTIESWND + 1, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
+	{
+		TRACE0("작업환경설정 창을 만들지 못했습니다.\n");
+		return FALSE;
 	}
 
 	SetDockingWindowIcons(theApp.m_bHiColorIcons);
@@ -233,6 +245,7 @@ void CMainFrame::SetDockingWindowIcons(BOOL bHiColorIcons)
 
 	HICON hPropertiesBarIcon = (HICON) ::LoadImage(::AfxGetResourceHandle(), MAKEINTRESOURCE(bHiColorIcons ? IDI_PROPERTIES_WND_HC : IDI_PROPERTIES_WND), IMAGE_ICON, ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), 0);
 	m_wndProperties.SetIcon(hPropertiesBarIcon, FALSE);
+	m_wndCanvasProp.SetIcon(hPropertiesBarIcon, FALSE);
 
 	UpdateMDITabbedBarsIcons();
 }

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "OutputWnd.h"
 #include "PropertiesWnd.h"
 #include "ToolBoxPane.h"
@@ -28,12 +28,14 @@ protected:  // 컨트롤 모음이 포함된 멤버입니다.
 	CToolBoxPane      m_wndToolBox;
 	COutputWnd        m_wndOutput;
 	CPropertiesWnd    m_wndProperties;
+	CPropertiesWnd    m_wndCanvasProp;
 
 public:
 	COutputWnd& GetOutputWnd() { return m_wndOutput; }
 	CToolBoxPane& GetToolBox() { return m_wndToolBox; }
 	CMFCStatusBar& GetStatusBar() { return m_wndStatusBar; }
 	CPropertiesWnd& GetPropertiesWnd() { return m_wndProperties; }
+	CPropertiesWnd& GetCanvasPropertiesWnd() { return m_wndCanvasProp; }
 	void SetStatusMessage(const CString& strMsg)
 	{
 		m_wndStatusBar.SetPaneText(0, strMsg);
