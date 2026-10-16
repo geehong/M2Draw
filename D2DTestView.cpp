@@ -530,7 +530,7 @@ void CD2DTestView::DrawColorWheel(D2D1_POINT_2F center, float radiusOuter, float
 		pTriGeo->Release();
 	}
 
-	// 3. 내부 삼각형 채도/명도 선택 핸들 (사용자 요청: 지금의 1.5배정도 더 키움)
+	// 3. 내부 삼각형 채도/명도 선택 핸들 (피커 역활의 동그라미)
 	float wHue, wWhite, wBlack;
 	SLToBarycentric(activeSat, activeLight, wHue, wWhite, wBlack);
 	D2D1_POINT_2F triHandlePt = D2D1::Point2F(
@@ -539,36 +539,36 @@ void CD2DTestView::DrawColorWheel(D2D1_POINT_2F center, float radiusOuter, float
 	);
 
 	// 바깥 그림자 테두리 (블랙 외곽)
-	m_pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.85f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(triHandlePt, 13.0f, 13.0f), m_pBrush, 3.0f);
+	m_pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.8f));
+	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(triHandlePt, 7.5f, 7.5f), m_pBrush, 2.0f);
 
-	// 메인 흰색 링 (선명하고 두꺼운 링)
+	// 메인 흰색 링
 	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(triHandlePt, 11.5f, 11.5f), m_pBrush, 2.5f);
+	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(triHandlePt, 6.5f, 6.5f), m_pBrush, 1.5f);
 
-	// 중심 현재 색상 채움 원 (반지름 8.5px)
+	// 중심 현재 색상 채움 원
 	D2D1_COLOR_F curHandleColor = HSLtoRGB(activeHue, activeSat, activeLight);
 	m_pBrush->SetColor(curHandleColor);
-	m_pRenderTarget->FillEllipse(D2D1::Ellipse(triHandlePt, 8.5f, 8.5f), m_pBrush);
+	m_pRenderTarget->FillEllipse(D2D1::Ellipse(triHandlePt, 5.0f, 5.0f), m_pBrush);
 
-	// 4. 외곽 링 위의 현재 선택 Hue 핸들 (동그라미 핀도 1.5배 확대)
+	// 4. 외곽 링 위의 현재 선택 Hue 핸들 (피커 동그라미)
 	float radTarget = static_cast<float>(activeHue * (M_PI / 180.0));
 	float midR = (radiusOuter + radiusInner) * 0.5f;
 	D2D1_POINT_2F handlePt = D2D1::Point2F(center.x + std::cos(radTarget) * midR, center.y + std::sin(radTarget) * midR);
 
-	// 잉크스케이프 스타일: 링을 관통하는 슬릿 라인
-	D2D1_POINT_2F pOuter = D2D1::Point2F(center.x + std::cos(radTarget) * (radiusOuter + 2.0f), center.y + std::sin(radTarget) * (radiusOuter + 2.0f));
-	D2D1_POINT_2F pInner = D2D1::Point2F(center.x + std::cos(radTarget) * (radiusInner - 2.0f), center.y + std::sin(radTarget) * (radiusInner - 2.0f));
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.95f));
-	m_pRenderTarget->DrawLine(pInner, pOuter, m_pBrush, 2.5f);
+	// 링을 관통하는 슬릿 라인
+	D2D1_POINT_2F pOuter = D2D1::Point2F(center.x + std::cos(radTarget) * (radiusOuter + 1.0f), center.y + std::sin(radTarget) * (radiusOuter + 1.0f));
+	D2D1_POINT_2F pInner = D2D1::Point2F(center.x + std::cos(radTarget) * (radiusInner - 1.0f), center.y + std::sin(radTarget) * (radiusInner - 1.0f));
+	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.9f));
+	m_pRenderTarget->DrawLine(pInner, pOuter, m_pBrush, 2.0f);
 
-	// 외곽 링 원형 핀 (1.5배 확대: 반지름 12px)
-	m_pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.85f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(handlePt, 13.5f, 13.5f), m_pBrush, 3.0f);
+	// 외곽 링 원형 핀
+	m_pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.8f));
+	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(handlePt, 7.5f, 7.5f), m_pBrush, 2.0f);
 	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(handlePt, 12.0f, 12.0f), m_pBrush, 2.5f);
+	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(handlePt, 6.5f, 6.5f), m_pBrush, 1.5f);
 	m_pBrush->SetColor(HSLtoRGB(activeHue, 1.0f, 0.5f));
-	m_pRenderTarget->FillEllipse(D2D1::Ellipse(handlePt, 9.0f, 9.0f), m_pBrush);
+	m_pRenderTarget->FillEllipse(D2D1::Ellipse(handlePt, 5.0f, 5.0f), m_pBrush);
 }
 
 void CD2DTestView::DrawTabHeaders(float width, float& y)
@@ -763,7 +763,8 @@ void CD2DTestView::DrawD2DContent(float width, float y)
 	float curHue = isFillActive ? m_fFillHue : m_fStrokeHue;
 	float curSat = isFillActive ? m_fFillSat : m_fStrokeSat;
 	float curLight = isFillActive ? m_fFillLight : m_fStrokeLight;
-	DrawColorWheel(wheelCenter, wheelRadius, wheelRadius - 22.0f, curHue, curSat, curLight);
+	float ringThickness = 44.0f; // 기존(22.0f)의 2배 두께
+	DrawColorWheel(wheelCenter, wheelRadius, wheelRadius - ringThickness, curHue, curSat, curLight);
 	y += wheelRadius * 2.0f + 14.0f;
 
 	// 5. 활성 색상 스와치 프리뷰 바 (단일 와이드 바)
@@ -1342,7 +1343,8 @@ void CD2DTestView::DrawCanvasContent(float width, float y)
 	float activeHue = isMinorActive ? m_fMinorHue : m_fMajorHue;
 	float activeSat = isMinorActive ? m_fMinorSat : m_fMajorSat;
 	float activeLight = isMinorActive ? m_fMinorLight : m_fMajorLight;
-	DrawColorWheel(wheelCenter, wheelRadius, wheelRadius - 22.0f, activeHue, activeSat, activeLight);
+	float ringThickness = 44.0f; // 기존(22.0f)의 2배 두께
+	DrawColorWheel(wheelCenter, wheelRadius, wheelRadius - ringThickness, activeHue, activeSat, activeLight);
 	y += wheelRadius * 2.0f + 14.0f;
 
 	// 8. 현재 선택된 색상 와이드 바 프리뷰
@@ -1550,7 +1552,7 @@ void CD2DTestView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 		float dx = point.x - wheelCenter.x;
 		float dy = point.y - wheelCenter.y;
 		float dist = std::sqrt(dx * dx + dy * dy);
-		float radiusInner = wheelRadius - 22.0f;
+		float radiusInner = wheelRadius - 44.0f;
 
 		// 6-1. 외곽 Hue 링 클릭 및 드래그 시작
 		if (dist >= radiusInner && dist <= wheelRadius + 8.0f)
@@ -1715,7 +1717,7 @@ void CD2DTestView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 		float dx = point.x - wheelCenter.x;
 		float dy = point.y - wheelCenter.y;
 		float dist = std::sqrt(dx * dx + dy * dy);
-		float radiusInner = wheelRadius - 22.0f;
+		float radiusInner = wheelRadius - 44.0f;
 
 		// 3-1. 외곽 링 클릭
 		if (dist >= radiusInner && dist <= wheelRadius + 8.0f)
@@ -1970,7 +1972,7 @@ void CD2DTestView::OnMouseMove(UINT /*nFlags*/, CPoint point)
 		float yCur = 248.0f;
 		float wheelRadius = max(60.0f, (width - 24.0f) * 0.5f);
 		D2D1_POINT_2F wheelCenter = D2D1::Point2F(width * 0.5f, yCur + wheelRadius);
-		float radiusInner = wheelRadius - 22.0f;
+		float radiusInner = wheelRadius - 44.0f;
 
 		if (m_isDraggingWheel)
 		{
@@ -2075,7 +2077,7 @@ void CD2DTestView::OnMouseMove(UINT /*nFlags*/, CPoint point)
 		}
 		float wheelRadius = max(60.0f, (width - 24.0f) * 0.5f);
 		D2D1_POINT_2F wheelCenter = D2D1::Point2F(width * 0.5f, yCur + wheelRadius);
-		float radiusInner = wheelRadius - 22.0f;
+		float radiusInner = wheelRadius - 44.0f;
 
 		if (m_isDraggingWheel)
 		{
