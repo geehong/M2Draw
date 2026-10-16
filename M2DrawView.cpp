@@ -1,4 +1,4 @@
-﻿// M2DrawView.cpp: CM2DrawView 클래스의 구현
+// M2DrawView.cpp: CM2DrawView 클래스의 구현
 //
 
 #include "pch.h"
@@ -231,6 +231,26 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
 	CM2DrawDoc* pDoc = GetDocument();
+
+	// 펜/다각형 작성 중 더블클릭: 더블클릭 시 추가된 중복 정점 정리 후 현재 패스 완료 및 선택 도구로 전환
+	ToolType activeType = GetApp()->GetToolManager().GetActiveType();
+	if (pDoc && pDoc->GetCurrentPath() && (activeType == ToolType::Pen || activeType == ToolType::Polygon))
+	{
+		auto& currentPath = pDoc->GetCurrentPath();
+		if (!currentPath->paths.empty() && currentPath->paths.back().nodes.size() > 1)
+		{
+			// 더블클릭으로 인해 같은 위치에 한 번 더 추가된 마지막 정점 제거
+			currentPath->paths.back().nodes.pop_back();
+			currentPath->Invalidate();
+		}
+
+		GetApp()->GetToolManager().GetActiveTool()->OnKeyDown(VK_RETURN, pDoc);
+		GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+		Invalidate(FALSE);
+		CView::OnLButtonDblClk(nFlags, point);
+		return;
+	}
+
 	if (pDoc)
 	{
 		// 마우스 클릭 위치에 도형이 있는지 검사
@@ -328,7 +348,18 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	if (pTool)
 	{
 		pTool->OnMove(e);
-		if (nFlags & MK_LBUTTON)
+
+		ToolType activeType = GetApp()->GetToolManager().GetActiveType();
+		bool isShapeTool = (activeType == ToolType::Pen ||
+		                    activeType == ToolType::Line ||
+		                    activeType == ToolType::Rect ||
+		                    activeType == ToolType::Ellipse ||
+		                    activeType == ToolType::Polygon);
+
+		// 버튼을 누른 채 드래그 중이거나, 패스 작성 중이거나, 쉐이프 도구 호버 미리보기 중이면 다시 그림
+		if ((nFlags & MK_LBUTTON) ||
+		    (GetDocument() && GetDocument()->GetCurrentPath()) ||
+		    isShapeTool)
 		{
 			Invalidate(FALSE);
 		}

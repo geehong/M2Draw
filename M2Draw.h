@@ -46,3 +46,5 @@ inline CM2DrawApp* GetApp() { return (CM2DrawApp*)AfxGetApp(); }
 void LogAppEvent(const CString& strMsg, int tabIndex = 0);
 
 void SetAppStatusText(const CString& strMsg);
+
+void UpdateShapePropertiesSelection(int shapeIndex, CM2DrawDoc* pDoc);

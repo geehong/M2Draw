@@ -1,10 +1,13 @@
-﻿#pragma once
+#pragma once
 #include <afxdockablepane.h>
 #include <d2d1.h>
+#include <wincodec.h>
 #include <vector>
+#include <map>
 #include "ToolManager.h"
 
 #pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "windowscodecs.lib")
 
 struct ToolButtonItem
 {
@@ -29,6 +32,11 @@ protected:
 	ID2D1Factory*          m_pD2DFactory;
 	ID2D1HwndRenderTarget* m_pRenderTarget;
 	ID2D1SolidColorBrush*  m_pBrush;
+	IWICImagingFactory*    m_pWICFactory;
+
+	// 아이콘 비트맵 캐시 (일반 / 활성화)
+	std::map<ToolType, ID2D1Bitmap*> m_iconNormal;
+	std::map<ToolType, ID2D1Bitmap*> m_iconActive;
 
 	int  m_hoverIndex;
 	bool m_bTrackingMouse;
@@ -36,6 +44,7 @@ protected:
 
 	HRESULT CreateDeviceResources();
 	void DiscardDeviceResources();
+	ID2D1Bitmap* LoadBitmapFromFile(const wchar_t* filePath);
 
 	void DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	                    ToolType type, D2D1_RECT_F btnRect, bool isSelected);

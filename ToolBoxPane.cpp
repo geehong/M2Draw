@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "ToolBoxPane.h"
 #include "M2Draw.h"
 
@@ -23,23 +23,33 @@ CToolBoxPane::CToolBoxPane() noexcept
 	: m_pD2DFactory(nullptr)
 	, m_pRenderTarget(nullptr)
 	, m_pBrush(nullptr)
+	, m_pWICFactory(nullptr)
 	, m_hoverIndex(-1)
 	, m_bTrackingMouse(false)
 {
 	m_buttons = {
-		{ ToolType::Select,  L"선택 (V)",     L'V', CRect() },
-		{ ToolType::Pan,     L"손도구 (H)",   L'H', CRect() },
-		{ ToolType::Pen,     L"펜도구 (P)",   L'P', CRect() },
-		{ ToolType::Line,    L"직선 (L)",     L'L', CRect() },
-		{ ToolType::Rect,    L"사각형 (M)",   L'M', CRect() },
-		{ ToolType::Ellipse, L"타원 (E)",     L'E', CRect() },
-		{ ToolType::Polygon, L"다각형 (G)",   L'G', CRect() }
+		{ ToolType::Select,      L"선택 (V)",        L'V', CRect() },
+		{ ToolType::Pan,         L"손도구 (H)",      L'H', CRect() },
+		{ ToolType::Pen,         L"펜도구 (P)",      L'P', CRect() },
+		{ ToolType::Line,        L"직선 (L)",        L'L', CRect() },
+		{ ToolType::Rect,        L"사각형 (M)",      L'M', CRect() },
+		{ ToolType::Ellipse,     L"타원 (E)",        L'E', CRect() },
+		{ ToolType::Polygon,     L"다각형 (G)",      L'G', CRect() },
+		{ ToolType::Text,        L"텍스트 (T)",      L'T', CRect() },
+		{ ToolType::PaintBucket, L"페인트 통 (K)",   L'K', CRect() },
+		{ ToolType::ZoomIn,      L"돋보기 확대 (Z)", L'Z', CRect() },
+		{ ToolType::ZoomOut,     L"돋보기 축소 (X)", L'X', CRect() }
 	};
 }
 
 CToolBoxPane::~CToolBoxPane()
 {
 	DiscardDeviceResources();
+	if (m_pWICFactory)
+	{
+		m_pWICFactory->Release();
+		m_pWICFactory = nullptr;
+	}
 	if (m_pD2DFactory)
 	{
 		m_pD2DFactory->Release();
@@ -51,6 +61,14 @@ int CToolBoxPane::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
 	if (CDockablePane::OnCreate(lpCreateStruct) == -1)
 		return -1;
+
+	// WIC Imaging Factory 생성
+	CoCreateInstance(
+		CLSID_WICImagingFactory,
+		nullptr,
+		CLSCTX_INPROC_SERVER,
+		IID_PPV_ARGS(&m_pWICFactory)
+	);
 
 	// ToolManager 변경 알림 등록
 	GetApp()->GetToolManager().AddListener(this);
@@ -69,12 +87,73 @@ void CToolBoxPane::OnToolChanged(ToolType /*newTool*/)
 		Invalidate(FALSE);
 }
 
+ID2D1Bitmap* CToolBoxPane::LoadBitmapFromFile(const wchar_t* filePath)
+{
+	if (!m_pRenderTarget || !m_pWICFactory)
+		return nullptr;
+
+	IWICBitmapDecoder* pDecoder = nullptr;
+	HRESULT hr = m_pWICFactory->CreateDecoderFromFilename(
+		filePath,
+		nullptr,
+		GENERIC_READ,
+		WICDecodeMetadataCacheOnDemand,
+		&pDecoder
+	);
+
+	if (FAILED(hr) || !pDecoder)
+		return nullptr;
+
+	IWICBitmapFrameDecode* pSource = nullptr;
+	hr = pDecoder->GetFrame(0, &pSource);
+
+	IWICFormatConverter* pConverter = nullptr;
+	if (SUCCEEDED(hr))
+	{
+		hr = m_pWICFactory->CreateFormatConverter(&pConverter);
+	}
+
+	if (SUCCEEDED(hr))
+	{
+		hr = pConverter->Initialize(
+			pSource,
+			GUID_WICPixelFormat32bppPBGRA,
+			WICBitmapDitherTypeNone,
+			nullptr,
+			0.0f,
+			WICBitmapPaletteTypeCustom
+		);
+	}
+
+	ID2D1Bitmap* pBitmap = nullptr;
+	if (SUCCEEDED(hr))
+	{
+		hr = m_pRenderTarget->CreateBitmapFromWicBitmap(pConverter, nullptr, &pBitmap);
+	}
+
+	if (pConverter) pConverter->Release();
+	if (pSource) pSource->Release();
+	if (pDecoder) pDecoder->Release();
+
+	return SUCCEEDED(hr) ? pBitmap : nullptr;
+}
+
 HRESULT CToolBoxPane::CreateDeviceResources()
 {
 	HRESULT hr = S_OK;
 	if (!m_pD2DFactory)
 	{
 		hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &m_pD2DFactory);
+	}
+
+	if (!m_pWICFactory)
+	{
+		CoCreateInstance(
+			CLSID_WICImagingFactory,
+			nullptr,
+			CLSCTX_INPROC_SERVER,
+			IID_PPV_ARGS(&m_pWICFactory)
+		);
 	}
 
 	if (SUCCEEDED(hr) && !m_pRenderTarget)
@@ -102,12 +181,63 @@ HRESULT CToolBoxPane::CreateDeviceResources()
 				&m_pBrush
 			);
 		}
+
+		// 아이콘 비트맵 로드 및 캐시
+		if (SUCCEEDED(hr))
+		{
+			// 실행 파일 또는 리소스 기준 경로 구성
+			wchar_t exePath[MAX_PATH] = { 0 };
+			GetModuleFileName(nullptr, exePath, MAX_PATH);
+			PathRemoveFileSpec(exePath);
+
+			// 프로젝트 및 설치 경로 모두 탐색
+			CString basePath = _T("c:\\www\\project\\desktop\\ApiDDraw\\M2Draw\\res\\icon\\png\\");
+
+			struct IconMapItem {
+				ToolType type;
+				const wchar_t* normName;
+				const wchar_t* actName;
+			} mappings[] = {
+				{ ToolType::Select,      L"cursor-line.png",     L"cursor-line_active.png" },
+				{ ToolType::Pan,         L"hand.png",            L"hand_active.png" },
+				{ ToolType::Pen,         L"spline-pointer.png",  L"spline-pointer_active.png" },
+				{ ToolType::Line,        L"slash.png",           L"slash_active.png" },
+				{ ToolType::Rect,        L"square-line.png",     L"square-line_active.png" },
+				{ ToolType::Ellipse,     L"circle-line.png",     L"circle-line_active.png" },
+				{ ToolType::Polygon,     L"hexagon-line.png",    L"hexagon-line_active.png" },
+				{ ToolType::Text,        L"type.png",            L"type_active.png" },
+				{ ToolType::PaintBucket, L"paint-bucket.png",    L"paint-bucket_active.png" },
+				{ ToolType::ZoomIn,      L"zoom-in-line.png",    L"zoom-in-line_active.png" },
+				{ ToolType::ZoomOut,     L"zoom-out-line.png",   L"zoom-out-line_active.png" }
+			};
+
+			for (const auto& item : mappings)
+			{
+				CString normalPath = basePath + item.normName;
+				CString activePath = basePath + item.actName;
+
+				m_iconNormal[item.type] = LoadBitmapFromFile(normalPath);
+				m_iconActive[item.type] = LoadBitmapFromFile(activePath);
+			}
+		}
 	}
 	return hr;
 }
 
 void CToolBoxPane::DiscardDeviceResources()
 {
+	for (auto& pair : m_iconNormal)
+	{
+		if (pair.second) { pair.second->Release(); }
+	}
+	m_iconNormal.clear();
+
+	for (auto& pair : m_iconActive)
+	{
+		if (pair.second) { pair.second->Release(); }
+	}
+	m_iconActive.clear();
+
 	if (m_pBrush)
 	{
 		m_pBrush->Release();
@@ -213,7 +343,43 @@ void CToolBoxPane::OnPaint()
 void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
                                  ToolType type, D2D1_RECT_F btnRect, bool isSelected)
 {
-	// 아이콘 색상 설정
+	// 1. 등록된 고해상도 투명 PNG 비트맵이 있으면 비트맵을 우선 렌더링
+	ID2D1Bitmap* pBmp = nullptr;
+	if (isSelected)
+	{
+		auto it = m_iconActive.find(type);
+		if (it != m_iconActive.end() && it->second) pBmp = it->second;
+	}
+	if (!pBmp)
+	{
+		auto it = m_iconNormal.find(type);
+		if (it != m_iconNormal.end() && it->second) pBmp = it->second;
+	}
+
+	if (pBmp)
+	{
+		// 버튼 내부 중앙에 22x22 또는 24x24 크기로 부드럽게 스케일링하여 렌더링
+		const float iconSize = 22.0f;
+		float cx = (btnRect.left + btnRect.right) * 0.5f;
+		float cy = (btnRect.top + btnRect.bottom) * 0.5f;
+
+		D2D1_RECT_F destRect = D2D1::RectF(
+			cx - iconSize * 0.5f,
+			cy - iconSize * 0.5f,
+			cx + iconSize * 0.5f,
+			cy + iconSize * 0.5f
+		);
+
+		rt->DrawBitmap(
+			pBmp,
+			destRect,
+			1.0f,
+			D2D1_BITMAP_INTERPOLATION_MODE_LINEAR
+		);
+		return;
+	}
+
+	// 2. 비트맵이 없을 경우 벡터 지오메트리 폴백
 	D2D1_COLOR_F iconColor = isSelected ? D2D1::ColorF(0.12f, 0.35f, 0.80f) : D2D1::ColorF(0.25f, 0.28f, 0.35f);
 	brush->SetColor(iconColor);
 

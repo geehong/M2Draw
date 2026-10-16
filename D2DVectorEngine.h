@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <d2d1_1.h>
 #include <d2d1helper.h>
@@ -91,6 +91,24 @@ struct BezierNode {
             hIn = D2D1::Point2F(oppDir.x * lenIn, oppDir.y * lenIn);
         }
     }
+
+    void SetHandleIn(D2D1_POINT_2F offset) {
+        hIn = offset;
+        if (type == Type::Corner) return;
+
+        float lenIn = std::sqrt(offset.x * offset.x + offset.y * offset.y);
+        if (lenIn < 0.0001f) return;
+
+        D2D1_POINT_2F oppDir = D2D1::Point2F(-offset.x / lenIn, -offset.y / lenIn);
+
+        if (type == Type::Symmetric) {
+            hOut = D2D1::Point2F(oppDir.x * lenIn, oppDir.y * lenIn);
+        } else if (type == Type::Smooth) {
+            float lenOut = std::sqrt(hOut.x * hOut.x + hOut.y * hOut.y);
+            if (lenOut < 0.0001f) lenOut = lenIn;
+            hOut = D2D1::Point2F(oppDir.x * lenOut, oppDir.y * lenOut);
+        }
+    }
 };
 
 struct SubPath {
@@ -98,10 +116,18 @@ struct SubPath {
     bool closed = false;
 };
 
+enum class FillType : uint8_t {
+    None = 0,    // 채움 없음 (투명)
+    Solid = 1,   // 단색 채움
+    Pattern = 2  // 무늬 / 패턴 (향후 확장)
+};
+
 struct ShapeStyle {
-    D2D1_COLOR_F fill   = D2D1::ColorF(0, 0, 0, 0.0f);
-    D2D1_COLOR_F stroke = D2D1::ColorF(D2D1::ColorF::DodgerBlue);
-    float strokeWidth   = 2.0f;
+    FillType     fillType    = FillType::None;
+    D2D1_COLOR_F fill        = D2D1::ColorF(0.2f, 0.6f, 1.0f, 0.25f); // 기본 채움색
+    D2D1_COLOR_F stroke      = D2D1::ColorF(D2D1::ColorF::DodgerBlue);
+    float        strokeWidth = 2.0f;
+    D2D1_DASH_STYLE dashStyle = D2D1_DASH_STYLE_SOLID;
 };
 
 struct HitResult {
@@ -118,13 +144,19 @@ public:
     virtual ~Shape() = default;
     virtual std::unique_ptr<Shape> Clone() const = 0;
     virtual ID2D1Geometry* GetGeometry(ID2D1Factory* f) = 0;
+    virtual const wchar_t* GetShapeTypeName() const { return L"쉐이프"; }
 
+    CString name; // 개별 쉐이프 이름 (예: "직선 1", "사각형 2")
     D2D1::Matrix3x2F xf = D2D1::Matrix3x2F::Identity();
     ShapeStyle style;
 
     void Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, ID2D1Factory* f, const ViewportTransform& view) {
+        if (!rt || !brush) return;
+        // 팩토리가 nullptr이면 렌더 타깃의 팩토리를 사용 (nullptr 시 Rebuild 실패 → 아무것도 안 그려지는 버그 방지)
+        ComPtr<ID2D1Factory> rtFactory;
+        if (!f) { rt->GetFactory(&rtFactory); f = rtFactory.Get(); }
         auto* geo = GetGeometry(f);
-        if (!geo || !rt || !brush) return;
+        if (!geo) return;
 
         D2D1_MATRIX_3X2_F previous;
         rt->GetTransform(&previous);
@@ -133,13 +165,34 @@ public:
         D2D1::Matrix3x2F composite = xf * view.ToMatrix();
         rt->SetTransform(composite);
 
-        if (style.fill.a > 0.0f) {
+        // 1. 채움 렌더링
+        if (style.fillType == FillType::Solid && style.fill.a > 0.0f) {
             brush->SetColor(style.fill);
             rt->FillGeometry(geo, brush);
+        } else if (style.fillType == FillType::Pattern) {
+            // 향후 무늬 / 패턴 브러시 렌더링 확장 슬롯 (임시 반투명 미리보기)
+            D2D1_COLOR_F patternPreview = style.fill;
+            patternPreview.a = 0.35f;
+            brush->SetColor(patternPreview);
+            rt->FillGeometry(geo, brush);
         }
+
+        // 2. 외곽선(스트로크) 렌더링 (D2D ID2D1StrokeStyle 지원)
         if (style.stroke.a > 0.0f && style.strokeWidth > 0.0f) {
             brush->SetColor(style.stroke);
-            rt->DrawGeometry(geo, brush, style.strokeWidth);
+            if (f && style.dashStyle != D2D1_DASH_STYLE_SOLID) {
+                D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(
+                    D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_ROUND,
+                    D2D1_LINE_JOIN_MITER, 10.0f, style.dashStyle, 0.0f);
+                ComPtr<ID2D1StrokeStyle> strokeStyle;
+                if (SUCCEEDED(f->CreateStrokeStyle(sp, nullptr, 0, &strokeStyle))) {
+                    rt->DrawGeometry(geo, brush, style.strokeWidth, strokeStyle.Get());
+                } else {
+                    rt->DrawGeometry(geo, brush, style.strokeWidth);
+                }
+            } else {
+                rt->DrawGeometry(geo, brush, style.strokeWidth);
+            }
         }
 
         rt->SetTransform(previous);
@@ -185,6 +238,49 @@ public:
         node.type = BezierNode::Type::Corner;
         paths.back().nodes.push_back(node);
         Invalidate();
+    }
+
+    bool GetLocalBounds(ID2D1Factory* f, D2D1_RECT_F& outBounds) override {
+        // 1. D2D Geometry Bounds 시도
+        auto* geo = GetGeometry(f);
+        if (geo) {
+            D2D1_RECT_F b{};
+            if (SUCCEEDED(geo->GetBounds(nullptr, &b))) {
+                if (b.right > b.left || b.bottom > b.top) {
+                    outBounds = b;
+                    return true;
+                }
+            }
+        }
+
+        // 2. Geometry Bounds가 비어있거나 실패한 경우 (열린 직선/곡선 등), 노드/핸들 좌표 기반 AABB 직접 계산
+        bool hasAnyPoint = false;
+        float minX = 1e9f, minY = 1e9f, maxX = -1e9f, maxY = -1e9f;
+
+        for (const auto& sp : paths) {
+            for (const auto& node : sp.nodes) {
+                auto updateBox = [&](D2D1_POINT_2F pt) {
+                    minX = (std::min)(minX, pt.x);
+                    minY = (std::min)(minY, pt.y);
+                    maxX = (std::max)(maxX, pt.x);
+                    maxY = (std::max)(maxY, pt.y);
+                    hasAnyPoint = true;
+                };
+                updateBox(node.anchor);
+                if (node.HasIn()) updateBox(node.AbsIn());
+                if (node.HasOut()) updateBox(node.AbsOut());
+            }
+        }
+
+        if (hasAnyPoint) {
+            // 완전 수평선이나 수직선이어도 0 크기가 되지 않도록 최소 1px 여백 부여
+            if (maxX - minX < 2.0f) { minX -= 1.0f; maxX += 1.0f; }
+            if (maxY - minY < 2.0f) { minY -= 1.0f; maxY += 1.0f; }
+            outBounds = D2D1::RectF(minX, minY, maxX, maxY);
+            return true;
+        }
+
+        return false;
     }
 
     HitResult HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, const ViewportTransform& view, ID2D1Factory* f) {
@@ -348,7 +444,7 @@ public:
         if (!shape) shape = std::make_unique<PathShape>();
 
         D2D1_POINT_2F worldPt = view.ScreenToWorld(screenPt);
-        D2D1_POINT_2F snappedWorld = worldPt; // 그리드 스냅 연동
+        D2D1_POINT_2F snappedWorld = grid.SnapPoint(worldPt); // 그리드 스냅 연동
 
         D2D1::Matrix3x2F invShape = shape->xf;
         if (!invShape.Invert()) {
@@ -382,7 +478,7 @@ public:
         m_needNewSubPath = false;
     }
 
-    void OnMouseMove(std::unique_ptr<PathShape>& shape, D2D1_POINT_2F screenPt, const ViewportTransform& view) {
+    void OnMouseMove(std::unique_ptr<PathShape>& shape, const GridRenderer& grid, D2D1_POINT_2F screenPt, const ViewportTransform& view) {
         if (!shape || shape->paths.empty()) return;
         auto& sp = shape->paths.back();
         if (sp.nodes.empty()) return;
@@ -397,11 +493,15 @@ public:
         }
 
         if (m_state == State::DraggingHandle) {
-            auto localPtOpt = CoordinateSpace::ScreenToLocal(screenPt, shape->xf, view);
-            if (!localPtOpt.has_value()) return;
+            D2D1_POINT_2F worldPt = view.ScreenToWorld(screenPt);
+            D2D1_POINT_2F snappedWorld = grid.SnapPoint(worldPt);
+
+            D2D1::Matrix3x2F invShape = shape->xf;
+            if (!invShape.Invert()) return;
+            D2D1_POINT_2F localPt = invShape.TransformPoint(snappedWorld);
 
             auto& node = sp.nodes.back();
-            D2D1_POINT_2F offset = D2D1::Point2F(localPtOpt->x - node.anchor.x, localPtOpt->y - node.anchor.y);
+            D2D1_POINT_2F offset = D2D1::Point2F(localPt.x - node.anchor.x, localPt.y - node.anchor.y);
 
             node.SetHandleOut(offset);
             shape->Invalidate();

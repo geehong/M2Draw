@@ -33,6 +33,7 @@ public:
 	COutputWnd& GetOutputWnd() { return m_wndOutput; }
 	CToolBoxPane& GetToolBox() { return m_wndToolBox; }
 	CMFCStatusBar& GetStatusBar() { return m_wndStatusBar; }
+	CPropertiesWnd& GetPropertiesWnd() { return m_wndProperties; }
 	void SetStatusMessage(const CString& strMsg)
 	{
 		m_wndStatusBar.SetPaneText(0, strMsg);

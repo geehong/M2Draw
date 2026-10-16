@@ -1,11 +1,20 @@
-Ôªø#pragma once
+#pragma once
+#include <d2d1.h>
+
+#include "D2DTestView.h"
+
+class CM2DrawDoc;
 
 class CPropertiesToolBar : public CMFCToolBar
 {
 public:
 	virtual void OnUpdateCmdUI(CFrameWnd* /*pTarget*/, BOOL bDisableIfNoHndler)
 	{
-		CMFCToolBar::OnUpdateCmdUI((CFrameWnd*) GetOwner(), bDisableIfNoHndler);
+		CFrameWnd* pFrame = DYNAMIC_DOWNCAST(CFrameWnd, AfxGetMainWnd());
+		if (pFrame != nullptr)
+		{
+			CMFCToolBar::OnUpdateCmdUI(pFrame, bDisableIfNoHndler);
+		}
 	}
 
 	virtual BOOL AllowShowOnList() const { return FALSE; }
@@ -13,13 +22,12 @@ public:
 
 class CPropertiesWnd : public CDockablePane
 {
-// ÉùÑ±ûÖãàã§.
 public:
 	CPropertiesWnd() noexcept;
 
 	void AdjustLayout();
+	void SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc);
 
-// äπÑ±ûÖãàã§.
 public:
 	void SetVSDotNetLook(BOOL bSet)
 	{
@@ -29,11 +37,15 @@ public:
 
 protected:
 	CFont m_fntPropList;
+	CMFCTabCtrl m_wndTabs;
 	CComboBox m_wndObjectCombo;
 	CPropertiesToolBar m_wndToolBar;
 	CMFCPropertyGridCtrl m_wndPropList;
+	CD2DTestView m_wndD2DTest;
 
-// Íµ¨ÌòÑûÖãàã§.
+	int m_selectedShapeIndex = -1;
+	CM2DrawDoc* m_pActiveDoc = nullptr;
+
 public:
 	virtual ~CPropertiesWnd();
 
@@ -50,13 +62,16 @@ protected:
 	afx_msg void OnUpdateProperties2(CCmdUI* pCmdUI);
 	afx_msg void OnSetFocus(CWnd* pOldWnd);
 	afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
+	afx_msg void OnComboSelectChanged();
+	afx_msg LRESULT OnTabChanged(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPropertyChanged(WPARAM wParam, LPARAM lParam);
 
 	DECLARE_MESSAGE_MAP()
 
-	void InitPropList();
+	void InitCanvasPropList();
+	void InitShapePropList();
+	void InitTestPropList();
 	void SetPropListFont();
 
 	int m_nComboHeight;
 };
-

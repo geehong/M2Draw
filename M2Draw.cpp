@@ -252,3 +252,13 @@ void SetAppStatusText(const CString& strMsg)
 		pMainFrame->SetStatusMessage(strMsg);
 	}
 }
+
+void UpdateShapePropertiesSelection(int shapeIndex, CM2DrawDoc* pDoc)
+{
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+	{
+		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
+		pMainFrame->GetPropertiesWnd().SetSelectedShape(shapeIndex, pDoc);
+	}
+}
