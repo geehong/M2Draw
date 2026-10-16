@@ -1408,23 +1408,8 @@ void CD2DTestView::OnPaint()
 	}
 	else
 	{
-		// 쉐이프 / GUI TEST 모드
-		// 최상단 3개 탭 헤더 그리기
-		DrawTabHeaders(width, y);
-
-		// 선택된 탭에 따라 각각 다른 스타일로 렌더링
-		switch (m_currentTab)
-		{
-		case TAB_D2D:
-			DrawD2DContent(width, y);
-			break;
-		case TAB_IMGUI:
-			DrawImGuiContent(width, y);
-			break;
-		case TAB_MFC:
-			DrawMFCContent(width, y);
-			break;
-		}
+		// 도형 속성 모드 (Inkscape D2D 커스텀 벡터 UI)
+		DrawD2DContent(width, y);
 	}
 
 	HRESULT hr = m_pRenderTarget->EndDraw();
@@ -1637,36 +1622,21 @@ void CD2DTestView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 		return;
 	}
 
-	// 1. 최상단 3개 탭 클릭 판정 (y: 10 ~ 36)
-	if (point.y >= 10 && point.y <= 36)
+	// 도형 속성 컨트롤 상호작용 (D2D Vector UI)
+	float yCur = 10.0f; // 최상단 시작
+	yCur += 22.0f; // 32.0f (도형 이름 헤더 아래)
+
+	// 1. [채움(Fill)] vs [윤곽선(Stroke)] 상단 탭 버튼 클릭 (y: yCur ~ yCur + 26)
+	float halfW = (width - 24.0f) * 0.5f;
+	if (point.y >= yCur && point.y <= yCur + 26.0f)
 	{
-		float tabW = (width - 20.0f) / 3.0f;
-		int clickedTab = static_cast<int>((point.x - 10.0f) / tabW);
-		if (clickedTab >= 0 && clickedTab < 3)
+		if (point.x >= 12.0f && point.x <= 12.0f + halfW)
 		{
-			m_currentTab = static_cast<GuiTab>(clickedTab);
+			m_colorTarget = 0; // 채움(Fill)
+			m_fOpacity = m_fillColor.a * 100.0f;
 			Invalidate(FALSE);
 			return;
 		}
-	}
-
-	// 2. 탭별 컨트롤 상호작용
-	if (m_currentTab == TAB_D2D)
-	{
-		float yCur = 10.0f + 34.0f; // 44.0f
-		yCur += 22.0f; // 66.0f (도형 이름 헤더 아래)
-
-		// 1. [채움(Fill)] vs [윤곽선(Stroke)] 상단 탭 버튼 클릭 (y: yCur ~ yCur + 26)
-		float halfW = (width - 24.0f) * 0.5f;
-		if (point.y >= yCur && point.y <= yCur + 26.0f)
-		{
-			if (point.x >= 12.0f && point.x <= 12.0f + halfW)
-			{
-				m_colorTarget = 0; // 채움(Fill)
-				m_fOpacity = m_fillColor.a * 100.0f;
-				Invalidate(FALSE);
-				return;
-			}
 			else if (point.x >= 12.0f + halfW && point.x <= width - 12.0f)
 			{
 				m_colorTarget = 1; // 선(Stroke)
@@ -1835,129 +1805,6 @@ void CD2DTestView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 				}
 			}
 		}
-	}
-	else if (m_currentTab == TAB_IMGUI)
-	{
-		// ImGui 가로 Hue 바 클릭 (y: 44 + 20 + 22 + 12 + 20 + 32 = 150)
-		float hueBarY = 44.0f + 20.0f + 22.0f + 12.0f + 20.0f + 32.0f;
-		if (point.y >= hueBarY && point.y <= hueBarY + 16.0f)
-		{
-			float hueBarW = width - 32.0f;
-			float frac = ((float)point.x - 16.0f) / hueBarW;
-			if (frac < 0.0f) frac = 0.0f;
-			if (frac > 1.0f) frac = 1.0f;
-			m_fHue = frac * 360.0f;
-			Invalidate(FALSE);
-			return;
-		}
-
-		// ImGui 체크박스
-		float imChkY = hueBarY + 26.0f + 20.0f;
-		if (point.x >= 14 && point.x <= width - 14)
-		{
-			if (point.y >= imChkY && point.y <= imChkY + 18.0f)
-			{
-				m_bSnapAll = !m_bSnapAll;
-				Invalidate(FALSE);
-				return;
-			}
-			if (point.y >= imChkY + 20.0f && point.y <= imChkY + 38.0f)
-			{
-				m_bSnapBBox = !m_bSnapBBox;
-				Invalidate(FALSE);
-				return;
-			}
-			if (point.y >= imChkY + 40.0f && point.y <= imChkY + 58.0f)
-			{
-				m_bSnapNode = !m_bSnapNode;
-				Invalidate(FALSE);
-				return;
-			}
-		}
-
-		// ImGui SliderFloat
-		float imSliderY = imChkY + 24.0f + 20.0f + 20.0f + 20.0f;
-		if (point.y >= imSliderY && point.y <= imSliderY + 22.0f)
-		{
-			m_isDraggingSlider = true;
-			float val = ((float)point.x - 16.0f) / (width - 32.0f);
-			if (val < 0.0f) val = 0.0f;
-			if (val > 1.0f) val = 1.0f;
-			m_fOpacity = val * 100.0f;
-			SetCapture();
-			Invalidate(FALSE);
-			return;
-		}
-
-		// ImGui Combo 클릭 순환
-		float comboY = imSliderY + 32.0f + 20.0f;
-		if (point.y >= comboY && point.y <= comboY + 24.0f)
-		{
-			m_selectedBlend = (m_selectedBlend + 1) % 4;
-			Invalidate(FALSE);
-			return;
-		}
-	}
-	else if (m_currentTab == TAB_MFC)
-	{
-		// MFC 색상 선택 버튼 클릭 시 Hue 순환
-		float mfcColorY = 44.0f + 20.0f + 22.0f + 12.0f + 20.0f;
-		if (point.y >= mfcColorY && point.y <= mfcColorY + 24.0f)
-		{
-			m_fHue = std::fmod(m_fHue + 45.0f, 360.0f);
-			Invalidate(FALSE);
-			return;
-		}
-
-		// MFC 체크박스
-		float mfcChkY = mfcColorY + 32.0f + 20.0f;
-		if (point.x >= 14 && point.x <= width - 14)
-		{
-			if (point.y >= mfcChkY && point.y <= mfcChkY + 18.0f)
-			{
-				m_bSnapAll = !m_bSnapAll;
-				Invalidate(FALSE);
-				return;
-			}
-			if (point.y >= mfcChkY + 20.0f && point.y <= mfcChkY + 38.0f)
-			{
-				m_bSnapBBox = !m_bSnapBBox;
-				Invalidate(FALSE);
-				return;
-			}
-			if (point.y >= mfcChkY + 40.0f && point.y <= mfcChkY + 58.0f)
-			{
-				m_bSnapNode = !m_bSnapNode;
-				Invalidate(FALSE);
-				return;
-			}
-		}
-
-		// MFC CSliderCtrl 드래그
-		float mfcSliderY = mfcChkY + 24.0f + 20.0f + 20.0f + 20.0f;
-		if (point.y >= mfcSliderY && point.y <= mfcSliderY + 22.0f)
-		{
-			m_isDraggingSlider = true;
-			float sLeft = 20.0f;
-			float sRight = width - 20.0f;
-			float val = ((float)point.x - sLeft) / (sRight - sLeft);
-			if (val < 0.0f) val = 0.0f;
-			if (val > 1.0f) val = 1.0f;
-			m_fOpacity = val * 100.0f;
-			SetCapture();
-			Invalidate(FALSE);
-			return;
-		}
-
-		// MFC CComboBox 클릭 순환
-		float mfcComboY = mfcSliderY + 28.0f + 20.0f;
-		if (point.y >= mfcComboY && point.y <= mfcComboY + 24.0f)
-		{
-			m_selectedBlend = (m_selectedBlend + 1) % 4;
-			Invalidate(FALSE);
-			return;
-		}
-	}
 }
 
 void CD2DTestView::OnMouseMove(UINT /*nFlags*/, CPoint point)
@@ -2068,9 +1915,8 @@ void CD2DTestView::OnMouseMove(UINT /*nFlags*/, CPoint point)
 		return;
 	}
 
-	if (m_currentTab == TAB_D2D)
 	{
-		float yCur = 44.0f + 22.0f + 32.0f;
+		float yCur = 10.0f + 22.0f + 32.0f;
 		if (m_colorTarget == 0) // 채움 모드일 때 모드 툴바 36px 추가
 		{
 			yCur += 36.0f;
@@ -2154,16 +2000,6 @@ void CD2DTestView::OnMouseMove(UINT /*nFlags*/, CPoint point)
 			ApplyToShape();
 			Invalidate(FALSE);
 		}
-	}
-	else if (m_isDraggingSlider || m_isDraggingOpacitySlider)
-	{
-		float sliderLeft = (m_currentTab == TAB_MFC) ? 20.0f : 14.0f;
-		float sliderRight = (m_currentTab == TAB_MFC) ? (width - 20.0f) : (width - 14.0f);
-		float val = ((float)point.x - sliderLeft) / (sliderRight - sliderLeft);
-		if (val < 0.0f) val = 0.0f;
-		if (val > 1.0f) val = 1.0f;
-		m_fOpacity = val * 100.0f;
-		Invalidate(FALSE);
 	}
 }
 

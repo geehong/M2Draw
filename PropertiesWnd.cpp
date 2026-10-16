@@ -110,12 +110,10 @@ int CPropertiesWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		TRACE0("D2D 테스트 뷰를 만들지 못했습니다.\n");
 	}
 
-	// 탭 메뉴 추가: 1. 캔버스/그리드 설정, 2. 도형 속성 설정, 3. 속성 GUI TEST (Inkscape/D2D/ImGui)
-	m_wndTabs.AddTab(&m_wndPropList, _T("캔버스 설정"), (UINT)0, FALSE);
-	m_wndTabs.AddTab(&m_wndD2DTest, _T("⚡ 속성 GUI TEST"), (UINT)1, FALSE);
-	m_wndTabs.SetActiveTab(1); // Inkscape D2D 테스트 탭 기본 활성화
-
-	InitCanvasPropList();
+	// 탭 메뉴 추가: 1. 캔버스 설정, 2. 속성 (Direct2D 커스텀 벡터 UI)
+	m_wndTabs.AddTab(&m_wndD2DTest, _T("캔버스 설정"), (UINT)0, FALSE);
+	m_wndTabs.AddTab(&m_wndD2DTest, _T("속성"), (UINT)1, FALSE);
+	m_wndTabs.SetActiveTab(1); // 속성 탭 기본 활성화
 
 	m_wndToolBar.Create(this, AFX_DEFAULT_TOOLBAR_STYLE, IDR_PROPERTIES);
 	m_wndToolBar.LoadToolBar(IDR_PROPERTIES, 0, 0, TRUE /* 잠금 */);
@@ -176,41 +174,18 @@ void CPropertiesWnd::AdjustLayout()
 	}
 
 	bool isCanvasMode = (tabLabel.Find(_T("캔버스")) >= 0);
-	bool isTestMode = (tabLabel.Find(_T("GUI TEST")) >= 0);
 
-	if (isCanvasMode || isTestMode)
+	// 이전 클래식 PropertyGrid는 숨기고, D2D Vector View로 전면 교체
+	if (m_wndPropList.GetSafeHwnd())
 	{
-		if (m_wndPropList.GetSafeHwnd())
-		{
-			m_wndPropList.ShowWindow(SW_HIDE);
-		}
-		if (m_wndD2DTest.GetSafeHwnd())
-		{
-			if (isCanvasMode)
-			{
-				m_wndD2DTest.SetPaneMode(CD2DTestView::MODE_CANVAS);
-			}
-			else
-			{
-				m_wndD2DTest.SetPaneMode(CD2DTestView::MODE_SHAPE);
-			}
-
-			m_wndD2DTest.SetWindowPos(nullptr, rectClient.left, yContent, rectClient.Width(), hContent, SWP_NOACTIVATE | SWP_NOZORDER);
-			m_wndD2DTest.ShowWindow(SW_SHOW);
-			m_wndD2DTest.Invalidate();
-		}
+		m_wndPropList.ShowWindow(SW_HIDE);
 	}
-	else
+	if (m_wndD2DTest.GetSafeHwnd())
 	{
-		if (m_wndD2DTest.GetSafeHwnd())
-		{
-			m_wndD2DTest.ShowWindow(SW_HIDE);
-		}
-		if (m_wndPropList.GetSafeHwnd())
-		{
-			m_wndPropList.SetWindowPos(nullptr, rectClient.left, yContent, rectClient.Width(), hContent, SWP_NOACTIVATE | SWP_NOZORDER);
-			m_wndPropList.ShowWindow(SW_SHOW);
-		}
+		m_wndD2DTest.SetPaneMode(isCanvasMode ? CD2DTestView::MODE_CANVAS : CD2DTestView::MODE_SHAPE);
+		m_wndD2DTest.SetWindowPos(nullptr, rectClient.left, yContent, rectClient.Width(), hContent, SWP_NOACTIVATE | SWP_NOZORDER);
+		m_wndD2DTest.ShowWindow(SW_SHOW);
+		m_wndD2DTest.Invalidate();
 	}
 }
 
@@ -223,23 +198,16 @@ LRESULT CPropertiesWnd::OnTabChanged(WPARAM wParam, LPARAM /*lParam*/)
 		m_wndTabs.GetTabLabel(activeTab, tabLabel);
 	}
 
-	if (tabLabel.Find(_T("캔버스")) >= 0)
+	if (m_wndD2DTest.GetSafeHwnd())
 	{
-		if (m_wndD2DTest.GetSafeHwnd())
+		if (tabLabel.Find(_T("캔버스")) >= 0)
 		{
 			m_wndD2DTest.SetPaneMode(CD2DTestView::MODE_CANVAS);
 		}
-	}
-	else if (tabLabel.Find(_T("GUI TEST")) >= 0)
-	{
-		if (m_wndD2DTest.GetSafeHwnd())
+		else
 		{
 			m_wndD2DTest.SetPaneMode(CD2DTestView::MODE_SHAPE);
 		}
-	}
-	else if (tabLabel.Find(_T("도형")) >= 0 || tabLabel.Find(_T("설정")) >= 0)
-	{
-		InitShapePropList();
 	}
 
 	AdjustLayout();
@@ -341,32 +309,23 @@ void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
 		Shape* shape = pDoc->GetShapes()[shapeIndex].get();
 		CString strTitle;
 		if (!shape->name.IsEmpty())
-			strTitle.Format(_T("{%s} 설정"), (LPCTSTR)shape->name);
+			strTitle.Format(_T("{%s} 속성"), (LPCTSTR)shape->name);
 		else
-			strTitle.Format(_T("{%s #%d} 설정"), shape->GetShapeTypeName(), shapeIndex + 1);
+			strTitle.Format(_T("{%s #%d} 속성"), shape->GetShapeTypeName(), shapeIndex + 1);
 
 		int inserted = m_wndObjectCombo.InsertString(1, strTitle);
 		m_wndObjectCombo.SetCurSel(inserted);
 
-		// 탭 컨트롤에도 도형 탭 레이블 업데이트
-		if (m_wndTabs.GetSafeHwnd())
+		// 탭 이름 업데이트 (탭 1: 속성)
+		if (m_wndTabs.GetSafeHwnd() && m_wndTabs.GetTabsNum() >= 2)
 		{
-			// 기존 3번째 탭 확인 및 도형 탭 동적 추가/이름 변경
-			if (m_wndTabs.GetTabsNum() == 2)
-			{
-				m_wndTabs.InsertTab(&m_wndPropList, strTitle, 1, (UINT)-1, FALSE);
-			}
-			else if (m_wndTabs.GetTabsNum() >= 3)
-			{
-				m_wndTabs.SetTabLabel(1, strTitle);
-			}
+			m_wndTabs.SetTabLabel(1, strTitle);
 		}
-
-		InitShapePropList();
 
 		if (m_wndD2DTest.GetSafeHwnd())
 		{
 			m_wndD2DTest.SetTargetShape(pDoc, shapeIndex);
+			m_wndD2DTest.SetPaneMode(CD2DTestView::MODE_SHAPE);
 		}
 	}
 	else
@@ -376,10 +335,10 @@ void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
 			m_wndD2DTest.SetTargetShape(nullptr, -1);
 		}
 
-		// 선택된 도형이 없으면 도형 설정 탭 제거
-		if (m_wndTabs.GetSafeHwnd() && m_wndTabs.GetTabsNum() >= 3)
+		// 기본 "속성" 레이블 복원
+		if (m_wndTabs.GetSafeHwnd() && m_wndTabs.GetTabsNum() >= 2)
 		{
-			m_wndTabs.RemoveTab(1);
+			m_wndTabs.SetTabLabel(1, _T("속성"));
 		}
 
 		// 선택된 도형이 없고 현재 쉐이프 설정이 선택되어 있었다면 캔버스 설정으로 복귀
