@@ -146,9 +146,28 @@ public:
     virtual ID2D1Geometry* GetGeometry(ID2D1Factory* f) = 0;
     virtual const wchar_t* GetShapeTypeName() const { return L"쉐이프"; }
 
-    CString name; // 개별 쉐이프 이름 (예: "직선 1", "사각형 2")
-    D2D1::Matrix3x2F xf = D2D1::Matrix3x2F::Identity();
-    ShapeStyle style;
+    // Getter / Setter
+    const CString& GetName() const { return m_name; }
+    void SetName(const CString& val) { m_name = val; }
+
+    const D2D1::Matrix3x2F& GetTransform() const { return m_xf; }
+    void SetTransform(const D2D1::Matrix3x2F& val) { m_xf = val; Invalidate(); }
+
+    const ShapeStyle& GetStyle() const { return m_style; }
+    ShapeStyle& GetStyleRef() { return m_style; } // Invalidate는 스타일 변경 후 직접 호출하거나 SetStyle 사용
+    void SetStyle(const ShapeStyle& val) { m_style = val; Invalidate(); }
+
+    // 기존 멤버 접근 호환용 레퍼런스 (하위 호환성 유지)
+    CString& name = m_name;
+    D2D1::Matrix3x2F& xf = m_xf;
+    ShapeStyle& style = m_style;
+
+protected:
+    CString m_name; // 개별 쉐이프 이름 (예: "직선 1", "사각형 2")
+    D2D1::Matrix3x2F m_xf = D2D1::Matrix3x2F::Identity();
+    ShapeStyle m_style;
+
+public:
 
     void Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, ID2D1Factory* f, const ViewportTransform& view) {
         if (!rt || !brush) return;
@@ -320,7 +339,21 @@ protected:
 
 class PathShape : public Shape {
 public:
-    std::vector<SubPath> paths;
+    // Path Vector Getter / Setter
+    const std::vector<SubPath>& GetPaths() const { return m_paths; }
+    std::vector<SubPath>& GetPathsRef() { return m_paths; }
+    void SetPaths(const std::vector<SubPath>& newPaths) { m_paths = newPaths; Invalidate(); }
+
+    void ClearPaths() { m_paths.clear(); Invalidate(); }
+    void AddSubPath(const SubPath& sp) { m_paths.push_back(sp); Invalidate(); }
+
+    // 기존 멤버 접근 호환용 레퍼런스 (하위 호환성 유지)
+    std::vector<SubPath>& paths = m_paths;
+
+protected:
+    std::vector<SubPath> m_paths;
+
+public:
 
     std::unique_ptr<Shape> Clone() const override {
         auto copy = std::make_unique<PathShape>(*this);

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <d2d1.h>
 #include <cmath>
 #pragma comment(lib, "d2d1.lib")
@@ -51,28 +51,80 @@ inline float GetPixelsPerCanvasUnit(CanvasUnit unit)
 	}
 }
 
+struct GridOptions
+{
+	bool          enabled        = true;
+	bool          snapToGrid     = false;
+	CanvasUnit    unit           = CanvasUnit::Pixel;
+	float         stepInUnit     = 20.0f;
+	int           majorEvery     = 5;
+	float         minStepPx      = 8.0f;
+	D2D1_COLOR_F  minor          = D2D1::ColorF(0.75f, 0.78f, 0.88f, 0.5f);
+	D2D1_COLOR_F  major          = D2D1::ColorF(0.60f, 0.64f, 0.80f, 0.8f);
+
+	// X, Y 기준 좌표축 (Origin Axis)
+	bool          showAxis       = true;
+	D2D1_POINT_2F originWorld    = { 0.0f, 0.0f };
+	float         axisThickness  = 1.5f;
+	float         axisOpacity    = 0.85f;
+	D2D1_COLOR_F  axisXColor     = D2D1::ColorF(0.95f, 0.35f, 0.35f); // Red
+	D2D1_COLOR_F  axisYColor     = D2D1::ColorF(0.35f, 0.80f, 0.45f); // Green
+};
+
 class GridRenderer
 {
 public:
-	bool         enabled;
-	bool         snapToGrid;   // 그리드 스냅 활성화 여부
-	CanvasUnit   unit;
-	float        stepInUnit;   // 선택한 단위 기준의 간격 (예: 20px, 10mm, 1in, 1rem)
-	int          majorEvery;   // N번째마다 주(Major) 격자선
-	float        minStepPx;    // LOD 화면 최소 픽셀 (기본 8.0px)
-	D2D1_COLOR_F minor;
-	D2D1_COLOR_F major;
+	bool          enabled;
+	bool          snapToGrid;   // 그리드 스냅 활성화 여부
+	CanvasUnit    unit;
+	float         stepInUnit;   // 선택한 단위 기준의 간격 (예: 20px, 10mm, 1in, 1rem)
+	int           majorEvery;   // N번째마다 주(Major) 격자선
+	float         minStepPx;    // LOD 화면 최소 픽셀 (기본 8.0px)
+	D2D1_COLOR_F  minor;
+	D2D1_COLOR_F  major;
+
+	// X, Y 기준 좌표축
+	bool          showAxis;
+	D2D1_POINT_2F originWorld;
+	float         axisThickness;
+	float         axisOpacity;
+	D2D1_COLOR_F  axisXColor;
+	D2D1_COLOR_F  axisYColor;
 
 	GridRenderer()
-		: enabled(true)
-		, snapToGrid(false)
-		, unit(CanvasUnit::Pixel)
-		, stepInUnit(20.0f)
-		, majorEvery(5)
-		, minStepPx(8.0f)
-		, minor(D2D1::ColorF(0.75f, 0.78f, 0.88f, 0.5f))
-		, major(D2D1::ColorF(0.60f, 0.64f, 0.80f, 0.8f))
+		: GridRenderer(GridOptions{})
 	{
+	}
+
+	GridRenderer(const GridOptions& opt)
+		: enabled(opt.enabled)
+		, snapToGrid(opt.snapToGrid)
+		, unit(opt.unit)
+		, stepInUnit(opt.stepInUnit)
+		, majorEvery(opt.majorEvery)
+		, minStepPx(opt.minStepPx)
+		, minor(opt.minor)
+		, major(opt.major)
+		, showAxis(opt.showAxis)
+		, originWorld(opt.originWorld)
+		, axisThickness(opt.axisThickness)
+		, axisOpacity(opt.axisOpacity)
+		, axisXColor(opt.axisXColor)
+		, axisYColor(opt.axisYColor)
+	{
+	}
+
+	// 단위 변경 시 기존 물리적 화면 픽셀 거리를 보존하며 stepInUnit 자동 환산 동기화
+	void SetUnit(CanvasUnit newUnit)
+	{
+		if (unit == newUnit) return;
+		float currentPx = GetStepPx();
+		unit = newUnit;
+		float pxPerUnit = GetPixelsPerCanvasUnit(newUnit);
+		if (pxPerUnit > 0.0001f)
+		{
+			stepInUnit = currentPx / pxPerUnit;
+		}
 	}
 
 	// 실제 월드 px 단위 간격 계산
@@ -81,15 +133,17 @@ public:
 		return stepInUnit * GetPixelsPerCanvasUnit(unit);
 	}
 
-	// 월드 좌표를 그리드 간격에 맞게 스냅 처리
+	// 월드 좌표를 그리드 간격에 맞게 스냅 처리 (기준 원점 오프셋 반영)
 	D2D1_POINT_2F SnapPoint(D2D1_POINT_2F worldPt) const
 	{
 		if (!snapToGrid) return worldPt;
 		float step = GetStepPx();
 		if (step <= 0.001f) return worldPt;
 
-		float sx = static_cast<float>(std::round(worldPt.x / step)) * step;
-		float sy = static_cast<float>(std::round(worldPt.y / step)) * step;
+		float relX = worldPt.x - originWorld.x;
+		float relY = worldPt.y - originWorld.y;
+		float sx = originWorld.x + static_cast<float>(std::round(relX / step)) * step;
+		float sy = originWorld.y + static_cast<float>(std::round(relY / step)) * step;
 		return D2D1::Point2F(sx, sy);
 	}
 

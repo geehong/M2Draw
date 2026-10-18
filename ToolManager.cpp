@@ -25,7 +25,7 @@ void PenTool::OnDown(const ToolEvent& e)
 	if (!currentPath) currentPath = std::make_unique<PathShape>();
 
 	D2D1_POINT_2F screenD2D = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
-	D2D1_POINT_2F snappedWorld = GetApp()->GetGrid().SnapPoint(e.worldPt);
+	D2D1_POINT_2F snappedWorld = e.worldPt;
 
 	D2D1::Matrix3x2F invShape = currentPath->xf;
 	if (!invShape.Invert()) return;
@@ -87,7 +87,7 @@ void PenTool::OnMove(const ToolEvent& e)
 
 	if (m_state == State::DraggingHandle)
 	{
-		D2D1_POINT_2F snappedWorld = GetApp()->GetGrid().SnapPoint(e.worldPt);
+		D2D1_POINT_2F snappedWorld = e.worldPt;
 		D2D1::Matrix3x2F invShape = currentPath->xf;
 		if (!invShape.Invert()) return;
 		D2D1_POINT_2F localPt = invShape.TransformPoint(snappedWorld);

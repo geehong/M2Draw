@@ -2,7 +2,7 @@
 #include "D2DPropertyView.h"
 #include "M2DrawDoc.h"
 #include "M2Draw.h"
-#include "D2DVectorEngine.h"
+#include "MainFrm.h"
 #include <cmath>
 
 #ifndef M_PI
@@ -11,7 +11,6 @@
 
 namespace
 {
-	// HSL(0~360, 0~1, 0~1)을 RGB로 변환하는 함수
 	D2D1_COLOR_F HSLtoRGB(float h, float s, float l, float a = 1.0f)
 	{
 		float c = (1.0f - std::abs(2.0f * l - 1.0f)) * s;
@@ -19,7 +18,7 @@ namespace
 		float m = l - c / 2.0f;
 		float r = 0, g = 0, b = 0;
 
-		if (h >= 0 && h < 60)       { r = c; g = x; b = 0; }
+		if (h >= 0 && h < 60)        { r = c; g = x; b = 0; }
 		else if (h >= 60 && h < 120) { r = x; g = c; b = 0; }
 		else if (h >= 120 && h < 180){ r = 0; g = c; b = x; }
 		else if (h >= 180 && h < 240){ r = 0; g = x; b = c; }
@@ -56,102 +55,10 @@ namespace
 
 		if (h < 0.0f) h += 360.0f;
 	}
-
-	float RGBtoHue(const D2D1_COLOR_F& clr)
-	{
-		float h, s, l;
-		RGBtoHSL(clr, h, s, l);
-		return h;
-	}
-
-	// 삼각형 꼭짓점 계산: 꼭짓점(ptHue), ptWhite, ptBlack
-	void GetTriangleVertices(D2D1_POINT_2F center, float radiusInner, float activeHue,
-		D2D1_POINT_2F& ptHue, D2D1_POINT_2F& ptWhite, D2D1_POINT_2F& ptBlack)
-	{
-		float triR = radiusInner - 4.0f;
-		float radHue = static_cast<float>(activeHue * (M_PI / 180.0));
-		ptHue = D2D1::Point2F(center.x + std::cos(radHue) * triR, center.y + std::sin(radHue) * triR);
-		ptWhite = D2D1::Point2F(center.x + std::cos(radHue + 2.0943951f) * triR, center.y + std::sin(radHue + 2.0943951f) * triR);
-		ptBlack = D2D1::Point2F(center.x + std::cos(radHue + 4.1887902f) * triR, center.y + std::sin(radHue + 4.1887902f) * triR);
-	}
-
-	// 점 pt에서 삼각형 가중치(wHue, wWhite, wBlack) 계산 (클램프 지원)
-	void CalcBarycentric(D2D1_POINT_2F pt, D2D1_POINT_2F pA, D2D1_POINT_2F pB, D2D1_POINT_2F pC,
-		float& wA, float& wB, float& wC)
-	{
-		float det = (pB.y - pC.y) * (pA.x - pC.x) + (pC.x - pB.x) * (pA.y - pC.y);
-		if (std::abs(det) < 0.0001f) { wA = 0.33f; wB = 0.33f; wC = 0.34f; return; }
-
-		wA = ((pB.y - pC.y) * (pt.x - pC.x) + (pC.x - pB.x) * (pt.y - pC.y)) / det;
-		wB = ((pC.y - pA.y) * (pt.x - pC.x) + (pA.x - pC.x) * (pt.y - pC.y)) / det;
-		wC = 1.0f - wA - wB;
-
-		// 삼각형 내부로 클램프
-		if (wA < 0.0f) wA = 0.0f;
-		if (wB < 0.0f) wB = 0.0f;
-		if (wC < 0.0f) wC = 0.0f;
-		float sum = wA + wB + wC;
-		if (sum > 0.0001f)
-		{
-			wA /= sum;
-			wB /= sum;
-			wC /= sum;
-		}
-	}
-
-	// wHue, wWhite, wBlack 가중치로부터 Saturation과 Lightness 역계산
-	void BarycentricToSL(float wHue, float wWhite, float wBlack, float& sat, float& light)
-	{
-		// ptWhite: L=1.0, S=0.0
-		// ptBlack: L=0.0, S=0.0
-		// ptHue:   L=0.5, S=1.0
-		light = wWhite * 1.0f + wHue * 0.5f + wBlack * 0.0f;
-		if (light < 0.0f) light = 0.0f;
-		if (light > 1.0f) light = 1.0f;
-
-		// 순수 Hue 비중에 따른 채도
-		float maxSatLight = 1.0f - std::abs(2.0f * light - 1.0f);
-		if (maxSatLight > 0.0001f)
-		{
-			sat = wHue / maxSatLight;
-			if (sat < 0.0f) sat = 0.0f;
-			if (sat > 1.0f) sat = 1.0f;
-		}
-		else
-		{
-			sat = 0.0f;
-		}
-	}
-
-	// Saturation과 Lightness로부터 삼각형 가중치 wHue, wWhite, wBlack 계산
-	void SLToBarycentric(float sat, float light, float& wHue, float& wWhite, float& wBlack)
-	{
-		// C = (1 - |2L - 1|) * S
-		float c = (1.0f - std::abs(2.0f * light - 1.0f)) * sat;
-		wHue = c;
-		if (wHue < 0.0f) wHue = 0.0f;
-		if (wHue > 1.0f) wHue = 1.0f;
-
-		// L = wWhite + 0.5 * wHue
-		wWhite = light - 0.5f * wHue;
-		if (wWhite < 0.0f) wWhite = 0.0f;
-		if (wWhite > 1.0f) wWhite = 1.0f;
-
-		wBlack = 1.0f - wHue - wWhite;
-		if (wBlack < 0.0f) wBlack = 0.0f;
-		if (wBlack > 1.0f) wBlack = 1.0f;
-
-		float sum = wHue + wWhite + wBlack;
-		if (sum > 0.0001f)
-		{
-			wHue /= sum;
-			wWhite /= sum;
-			wBlack /= sum;
-		}
-	}
 }
 
 BEGIN_MESSAGE_MAP(CD2DPropertyView, CWnd)
+	ON_WM_CREATE()
 	ON_WM_PAINT()
 	ON_WM_SIZE()
 	ON_WM_ERASEBKGND()
@@ -163,6 +70,41 @@ END_MESSAGE_MAP()
 CD2DPropertyView::CD2DPropertyView(PaneMode initialMode)
 	: m_paneMode(initialMode)
 {
+	InitControls();
+}
+
+int CD2DPropertyView::OnCreate(LPCREATESTRUCT lpCreateStruct)
+{
+	if (CWnd::OnCreate(lpCreateStruct) == -1)
+		return -1;
+
+	InitControls();
+	return 0;
+}
+
+CD2DPropertyView::~CD2DPropertyView()
+{
+	DiscardDeviceResources();
+
+	if (m_pTextFormatCenter) { m_pTextFormatCenter->Release(); m_pTextFormatCenter = nullptr; }
+	if (m_pTextFormatSmall)  { m_pTextFormatSmall->Release();  m_pTextFormatSmall = nullptr; }
+	if (m_pTextFormatBold)   { m_pTextFormatBold->Release();   m_pTextFormatBold = nullptr; }
+	if (m_pTextFormat)       { m_pTextFormat->Release();       m_pTextFormat = nullptr; }
+	if (m_pDWriteFactory)    { m_pDWriteFactory->Release();    m_pDWriteFactory = nullptr; }
+	if (m_pD2DFactory)       { m_pD2DFactory->Release();       m_pD2DFactory = nullptr; }
+}
+
+void CD2DPropertyView::SetPaneMode(PaneMode mode)
+{
+	m_paneMode = mode;
+	InitControls();
+	if (GetSafeHwnd())
+	{
+		CRect rc;
+		GetClientRect(&rc);
+		UpdateLayout(static_cast<float>(rc.Width()), static_cast<float>(rc.Height()));
+		SafeInvalidate(FALSE);
+	}
 }
 
 void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex)
@@ -176,35 +118,35 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex)
 		m_strShapeType = shape->GetShapeTypeName();
 		m_strShapeName = shape->name.IsEmpty() ? m_strShapeType : shape->name;
 
-		// 1. 채움 여부 및 채움 색상
 		m_bFillEnabled = (shape->style.fillType != FillType::None);
 		m_fillColor = shape->style.fill;
 		RGBtoHSL(m_fillColor, m_fFillHue, m_fFillSat, m_fFillLight);
 
-		// 2. 선 굵기 및 선 색상
-		m_fStrokeWidth = shape->style.strokeWidth;
+		CanvasUnit curUnit = GetApp()->GetGrid().unit;
+		float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+		if (pxPerUnit <= 0.0f) pxPerUnit = 1.0f;
+		m_fStrokeWidth = shape->style.strokeWidth / pxPerUnit;
 		m_strokeColor = shape->style.stroke;
 		RGBtoHSL(m_strokeColor, m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
 
-		// 기본 불투명도 및 포커스 색상
-		m_fOpacity = (m_colorTarget == 0 ? m_strokeColor.a : m_fillColor.a) * 100.0f;
+		m_fOpacity = (m_colorTarget == 0 ? m_fillColor.a : m_strokeColor.a) * 100.0f;
 
-		// 3. 대시 스타일
 		switch (shape->style.dashStyle)
 		{
 		case D2D1_DASH_STYLE_DASH:      m_selectedDash = 1; break;
 		case D2D1_DASH_STYLE_DOT:       m_selectedDash = 2; break;
 		case D2D1_DASH_STYLE_DASH_DOT:  m_selectedDash = 3; break;
-		default:                         m_selectedDash = 0; break;
+		default:                        m_selectedDash = 0; break;
 		}
 	}
 	else
 	{
-		m_strShapeName = _T("선택된 도형 없음");
+		m_strShapeName = _T("No Selection");
 		m_strShapeType.Empty();
 	}
 
-	Invalidate(FALSE);
+	SyncControlsFromData();
+	SafeInvalidate(FALSE);
 }
 
 void CD2DPropertyView::ApplyToShape()
@@ -213,8 +155,8 @@ void CD2DPropertyView::ApplyToShape()
 		return;
 
 	Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+	if (!shape) return;
 
-	// 1. 채움 적용
 	if (m_bFillEnabled)
 	{
 		shape->style.fillType = FillType::Solid;
@@ -225,11 +167,12 @@ void CD2DPropertyView::ApplyToShape()
 		shape->style.fillType = FillType::None;
 	}
 
-	// 2. 선 색상 및 선 굵기 적용
 	shape->style.stroke = m_strokeColor;
-	shape->style.strokeWidth = m_fStrokeWidth;
 
-	// 3. 선 대시 스타일 적용
+	CanvasUnit curUnit = GetApp()->GetGrid().unit;
+	float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+	shape->style.strokeWidth = max(0.1f, m_fStrokeWidth * pxPerUnit);
+
 	switch (m_selectedDash)
 	{
 	case 1: shape->style.dashStyle = D2D1_DASH_STYLE_DASH; break;
@@ -265,22 +208,923 @@ void CD2DPropertyView::ApplyCanvasSettings()
 			}
 		}
 	}
+
+	// 그리드 설정(단위 등)이 변경되었을 때 오브젝트 설정 창의 단위 및 값 즉시 동기화
+	CMainFrame* pMain = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd());
+	if (pMain)
+	{
+		CD2DPropertyView& objPropView = pMain->GetPropertiesWnd().GetD2DPropView();
+		if (objPropView.GetSafeHwnd())
+		{
+			objPropView.SyncControlsFromData();
+			objPropView.SafeInvalidate(FALSE);
+		}
+	}
 }
 
-CD2DPropertyView::~CD2DPropertyView()
+void CD2DPropertyView::InitControls()
 {
-	DiscardDeviceResources();
-	if (m_pTextFormatCenter) m_pTextFormatCenter->Release();
-	if (m_pTextFormatSmall) m_pTextFormatSmall->Release();
-	if (m_pTextFormatBold) m_pTextFormatBold->Release();
-	if (m_pTextFormat) m_pTextFormat->Release();
-	if (m_pDWriteFactory) m_pDWriteFactory->Release();
-	if (m_pD2DFactory) m_pD2DFactory->Release();
+	m_pCurrentPanel = std::make_shared<M2DrawPanel>();
+
+	if (m_paneMode == MODE_SHAPE)
+	{
+		// 1. Header Label
+		m_lblShapeHeader = std::make_shared<M2DrawLabel>(L"● No Selection (Preview Mode)");
+		m_pCurrentPanel->AddChild(m_lblShapeHeader);
+
+		// 2. Tabs: [Fill] vs [Stroke]
+		m_btnTabFill = std::make_shared<M2DrawButton>(L"Fill");
+		m_btnTabFill->SetToggleMode(true);
+		m_btnTabFill->SetChecked(m_colorTarget == 0);
+		m_btnTabFill->SetOnClick([this](M2DrawButton* /*pBtn*/) {
+			m_colorTarget = 0;
+			m_btnTabFill->SetChecked(true);
+			m_btnTabStroke->SetChecked(false);
+			m_fOpacity = m_fillColor.a * 100.0f;
+			SyncControlsFromData();
+			if (GetSafeHwnd())
+			{
+				CRect rc;
+				GetClientRect(&rc);
+				UpdateLayout(static_cast<float>(rc.Width()), static_cast<float>(rc.Height()));
+				SafeInvalidate(FALSE);
+			}
+		});
+		m_pCurrentPanel->AddChild(m_btnTabFill);
+
+		m_btnTabStroke = std::make_shared<M2DrawButton>(L"Stroke");
+		m_btnTabStroke->SetToggleMode(true);
+		m_btnTabStroke->SetChecked(m_colorTarget == 1);
+		m_btnTabStroke->SetOnClick([this](M2DrawButton* /*pBtn*/) {
+			m_colorTarget = 1;
+			m_btnTabFill->SetChecked(false);
+			m_btnTabStroke->SetChecked(true);
+			m_fOpacity = m_strokeColor.a * 100.0f;
+			SyncControlsFromData();
+			if (GetSafeHwnd())
+			{
+				CRect rc;
+				GetClientRect(&rc);
+				UpdateLayout(static_cast<float>(rc.Width()), static_cast<float>(rc.Height()));
+				SafeInvalidate(FALSE);
+			}
+		});
+		m_pCurrentPanel->AddChild(m_btnTabStroke);
+
+		// 3. Fill Mode Toolbar (5 modes)
+		const wchar_t* modeTitles[] = { L"None", L"Solid", L"Linear", L"Radial", L"Pattern" };
+		m_btnFillModes.clear();
+		for (int i = 0; i < 5; ++i)
+		{
+			auto btn = std::make_shared<M2DrawButton>(modeTitles[i]);
+			btn->SetToggleMode(true);
+			btn->SetChecked(static_cast<int>(m_fillMode) == i);
+			btn->SetOnClick([this, i](M2DrawButton* /*pBtn*/) {
+				m_fillMode = static_cast<FillMode>(i);
+				m_bFillEnabled = (m_fillMode != FILL_NONE);
+				for (int k = 0; k < 5; ++k)
+					m_btnFillModes[k]->SetChecked(k == i);
+				ApplyToShape();
+				SafeInvalidate(FALSE);
+			});
+			m_btnFillModes.push_back(btn);
+			m_pCurrentPanel->AddChild(btn);
+		}
+
+		// 4. Standard 16-Color Palette
+		m_palette16 = std::make_shared<M2DrawColorPalette>();
+		m_palette16->SetOnColorSelected([this](M2DrawColorPalette* /*pPal*/, D2D1_COLOR_F clr) {
+			if (m_colorTarget == 0) // Fill
+			{
+				m_fillColor = D2D1::ColorF(clr.r, clr.g, clr.b, m_fOpacity / 100.0f);
+				RGBtoHSL(m_fillColor, m_fFillHue, m_fFillSat, m_fFillLight);
+				if (m_shapeWheel) m_shapeWheel->SetColorHSL(m_fFillHue, m_fFillSat, m_fFillLight);
+			}
+			else // Stroke
+			{
+				m_strokeColor = D2D1::ColorF(clr.r, clr.g, clr.b, m_fOpacity / 100.0f);
+				RGBtoHSL(m_strokeColor, m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
+				if (m_shapeWheel) m_shapeWheel->SetColorHSL(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
+			}
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_palette16);
+
+		// 5. Color Wheel Expander
+		m_expShapeWheel = std::make_shared<M2DrawExpander>(L"Color Wheel", true);
+		m_shapeWheel = std::make_shared<M2DrawColorWheel>();
+		m_shapeWheel->SetOnColorChanged([this](float h, float s, float l, bool /*isFinal*/) {
+			if (m_colorTarget == 0)
+			{
+				m_fFillHue = h; m_fFillSat = s; m_fFillLight = l;
+				m_fillColor = HSLtoRGB(m_fFillHue, m_fFillSat, m_fFillLight, m_fOpacity / 100.0f);
+				if (m_palette16) m_palette16->SetSelectedColor(m_fillColor);
+			}
+			else
+			{
+				m_fStrokeHue = h; m_fStrokeSat = s; m_fStrokeLight = l;
+				m_strokeColor = HSLtoRGB(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight, m_fOpacity / 100.0f);
+				if (m_palette16) m_palette16->SetSelectedColor(m_strokeColor);
+			}
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_expShapeWheel->AddChild(m_shapeWheel);
+		m_expShapeWheel->SetOnToggle([this](M2DrawExpander* /*pExp*/, bool /*bExpanded*/) {
+			if (GetSafeHwnd())
+			{
+				CRect rc;
+				GetClientRect(&rc);
+				UpdateLayout(static_cast<float>(rc.Width()), static_cast<float>(rc.Height()));
+				SafeInvalidate(FALSE);
+			}
+		});
+		m_pCurrentPanel->AddChild(m_expShapeWheel);
+
+		// 6. Opacity Label & Slider Bar & Number Input
+		m_lblOpacity = std::make_shared<M2DrawLabel>(L"Opacity (%)");
+		m_pCurrentPanel->AddChild(m_lblOpacity);
+
+		m_sliderOpacity = std::make_shared<M2DrawSlider>(0.0f, 100.0f, m_fOpacity);
+		m_sliderOpacity->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
+			m_fOpacity = val;
+			if (m_spinOpacity) m_spinOpacity->SetValue(val);
+			if (m_colorTarget == 0)
+				m_fillColor.a = m_fOpacity / 100.0f;
+			else
+				m_strokeColor.a = m_fOpacity / 100.0f;
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_sliderOpacity);
+
+		m_spinOpacity = std::make_shared<M2DrawNumericInput>(0.0, 100.0, m_fOpacity, 1.0);
+		m_spinOpacity->SetSuffix(L"%");
+		m_spinOpacity->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			m_fOpacity = static_cast<float>(val);
+			if (m_sliderOpacity) m_sliderOpacity->SetValue(m_fOpacity);
+			if (m_colorTarget == 0)
+				m_fillColor.a = m_fOpacity / 100.0f;
+			else
+				m_strokeColor.a = m_fOpacity / 100.0f;
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_spinOpacity);
+
+		// 7. Stroke Width Label & Slider Bar & Number Input
+		CanvasUnit curUnit = GetApp()->GetGrid().unit;
+		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
+		CString strStrokeLbl;
+		strStrokeLbl.Format(_T("Stroke Width (%s)"), unitSuffix);
+		m_lblStrokeWidth = std::make_shared<M2DrawLabel>((LPCTSTR)strStrokeLbl);
+		m_pCurrentPanel->AddChild(m_lblStrokeWidth);
+
+		float defaultMax = 50.0f;
+		double stepVal = 0.5;
+		switch (curUnit)
+		{
+		case CanvasUnit::Pixel: defaultMax = 50.0f; stepVal = 0.5; break;
+		case CanvasUnit::MM:    defaultMax = 20.0f; stepVal = 0.2; break;
+		case CanvasUnit::CM:    defaultMax = 5.0f;  stepVal = 0.05; break;
+		case CanvasUnit::Inch:  defaultMax = 2.0f;  stepVal = 0.02; break;
+		case CanvasUnit::Rem:   defaultMax = 5.0f;  stepVal = 0.1; break;
+		}
+
+		float initMaxSlider = max(defaultMax, m_fStrokeWidth * 1.5f);
+		m_sliderStrokeWidth = std::make_shared<M2DrawSlider>(0.1f, initMaxSlider, m_fStrokeWidth);
+		m_sliderStrokeWidth->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
+			m_fStrokeWidth = val;
+			if (m_spinStrokeWidth) m_spinStrokeWidth->SetValue(val);
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_sliderStrokeWidth);
+
+		m_spinStrokeWidth = std::make_shared<M2DrawNumericInput>(0.01, 1000000.0, m_fStrokeWidth, stepVal);
+		m_spinStrokeWidth->SetSuffix(unitSuffix);
+		m_spinStrokeWidth->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			m_fStrokeWidth = static_cast<float>(val);
+			if (m_sliderStrokeWidth)
+			{
+				if (m_fStrokeWidth > m_sliderStrokeWidth->GetMaxVal())
+				{
+					m_sliderStrokeWidth->SetRange(0.1f, m_fStrokeWidth * 1.5f);
+				}
+				m_sliderStrokeWidth->SetValue(m_fStrokeWidth);
+			}
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_spinStrokeWidth);
+
+		// 8. Dash Styles 4 Buttons
+		const wchar_t* dashTitles[] = { L"Solid", L"Dash", L"Dot", L"Dash-Dot" };
+		m_btnDashStyles.clear();
+		for (int i = 0; i < 4; ++i)
+		{
+			auto btn = std::make_shared<M2DrawButton>(dashTitles[i]);
+			btn->SetToggleMode(true);
+			btn->SetChecked(m_selectedDash == i);
+			btn->SetOnClick([this, i](M2DrawButton* /*pBtn*/) {
+				m_selectedDash = i;
+				for (int k = 0; k < 4; ++k)
+					m_btnDashStyles[k]->SetChecked(k == i);
+				ApplyToShape();
+				SafeInvalidate(FALSE);
+			});
+			m_btnDashStyles.push_back(btn);
+			m_pCurrentPanel->AddChild(btn);
+		}
+
+		// 9. Close Shape Checkbox (For Multi-point / Path Shapes)
+		m_chkCloseShape = std::make_shared<M2DrawCheckBox>(L"Close Path (Connect start/end)", false);
+		m_chkCloseShape->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
+			if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+			{
+				PathShape* pathShape = dynamic_cast<PathShape*>(m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get());
+				if (pathShape)
+				{
+					for (auto& sp : pathShape->GetPathsRef())
+					{
+						sp.closed = bChecked;
+					}
+					pathShape->Invalidate();
+					m_pActiveDoc->UpdateAllViews(nullptr);
+					SafeInvalidate(FALSE);
+				}
+			}
+		});
+		m_pCurrentPanel->AddChild(m_chkCloseShape);
+	}
+	else if (m_paneMode == MODE_GRID)
+	{
+		// [2. Grid Settings Mode]
+		GridRenderer& grid = GetApp()->GetGrid();
+		RulerRenderer& ruler = GetApp()->GetRuler();
+
+		// Header
+		m_lblGridHeader = std::make_shared<M2DrawLabel>(L"■ Grid & Ruler Settings");
+		m_pCurrentPanel->AddChild(m_lblGridHeader);
+
+		// Checkboxes: View Grid, Snap to Grid, View Ruler
+		m_chkGridView = std::make_shared<M2DrawCheckBox>(L"View Grid", grid.enabled);
+		m_chkGridView->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
+			GetApp()->GetGrid().enabled = bChecked;
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_chkGridView);
+
+		m_chkGridSnap = std::make_shared<M2DrawCheckBox>(L"Snap to Grid", grid.snapToGrid);
+		m_chkGridSnap->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
+			GetApp()->GetGrid().snapToGrid = bChecked;
+			GetApp()->GetSnapManager().EnableTarget(SnapTargets::Grid, bChecked);
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_chkGridSnap);
+
+		m_chkRulerView = std::make_shared<M2DrawCheckBox>(L"View Ruler", ruler.enabled);
+		m_chkRulerView->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
+			GetApp()->GetRuler().enabled = bChecked;
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_chkRulerView);
+
+		// Unit ComboBox (Dropdown)
+		m_lblUnit = std::make_shared<M2DrawLabel>(L"● Measurement Unit");
+		m_pCurrentPanel->AddChild(m_lblUnit);
+
+		m_cboUnit = std::make_shared<M2DrawComboBox>();
+		m_cboUnit->AddItem(L"Pixel (px)");
+		m_cboUnit->AddItem(L"Millimeter (mm)");
+		m_cboUnit->AddItem(L"Centimeter (cm)");
+		m_cboUnit->AddItem(L"Inch (in)");
+		m_cboUnit->AddItem(L"Web REM (rem)");
+		m_cboUnit->SetCurSel(static_cast<int>(grid.unit));
+		m_cboUnit->SetOnSelectionChanged([this](M2DrawComboBox* /*pCombo*/, int sel) {
+			GetApp()->GetGrid().SetUnit(static_cast<CanvasUnit>(sel));
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_cboUnit);
+
+		// Grid Step: Bar & Number Input (최소값 1.0으로 수정)
+		m_lblGridStep = std::make_shared<M2DrawLabel>(L"● Grid Step");
+		m_pCurrentPanel->AddChild(m_lblGridStep);
+
+		m_sliderGridStep = std::make_shared<M2DrawSlider>(1.0f, 200.0f, max(1.0f, grid.stepInUnit));
+		m_sliderGridStep->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
+			GetApp()->GetGrid().stepInUnit = val;
+			if (m_spinGridStep) m_spinGridStep->SetValue(val);
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_sliderGridStep);
+
+		m_spinGridStep = std::make_shared<M2DrawNumericInput>(1.0, 500.0, max(1.0f, grid.stepInUnit), 1.0);
+		m_spinGridStep->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			GetApp()->GetGrid().stepInUnit = static_cast<float>(val);
+			if (m_sliderGridStep) m_sliderGridStep->SetValue(static_cast<float>(val));
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_spinGridStep);
+
+		// Major Every: Bar & Number Input
+		m_lblGridMajor = std::make_shared<M2DrawLabel>(L"● Major Line Frequency");
+		m_pCurrentPanel->AddChild(m_lblGridMajor);
+
+		m_sliderGridMajor = std::make_shared<M2DrawSlider>(1.0f, 20.0f, static_cast<float>(grid.majorEvery));
+		m_sliderGridMajor->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
+			int ival = static_cast<int>(val + 0.5f);
+			GetApp()->GetGrid().majorEvery = ival;
+			if (m_spinGridMajor) m_spinGridMajor->SetValue(ival);
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_sliderGridMajor);
+
+		m_spinGridMajor = std::make_shared<M2DrawNumericInput>(1.0, 20.0, static_cast<double>(grid.majorEvery), 1.0);
+		m_spinGridMajor->SetSuffix(L"x");
+		m_spinGridMajor->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			int ival = static_cast<int>(val);
+			GetApp()->GetGrid().majorEvery = ival;
+			if (m_sliderGridMajor) m_sliderGridMajor->SetValue(static_cast<float>(ival));
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_spinGridMajor);
+
+		// Minor vs Major Color Tabs
+		m_btnGridMinorClr = std::make_shared<M2DrawButton>(L"Minor Grid Color");
+		m_btnGridMinorClr->SetToggleMode(true);
+		m_btnGridMinorClr->SetChecked(m_canvasColorTarget == 0);
+		m_btnGridMinorClr->SetOnClick([this](M2DrawButton* /*pBtn*/) {
+			m_canvasColorTarget = 0;
+			m_btnGridMinorClr->SetChecked(true);
+			m_btnGridMajorClr->SetChecked(false);
+			if (m_gridWheel) m_gridWheel->SetColorHSL(m_fMinorHue, m_fMinorSat, m_fMinorLight);
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_btnGridMinorClr);
+
+		m_btnGridMajorClr = std::make_shared<M2DrawButton>(L"Major Grid Color");
+		m_btnGridMajorClr->SetToggleMode(true);
+		m_btnGridMajorClr->SetChecked(m_canvasColorTarget == 1);
+		m_btnGridMajorClr->SetOnClick([this](M2DrawButton* /*pBtn*/) {
+			m_canvasColorTarget = 1;
+			m_btnGridMinorClr->SetChecked(false);
+			m_btnGridMajorClr->SetChecked(true);
+			if (m_gridWheel) m_gridWheel->SetColorHSL(m_fMajorHue, m_fMajorSat, m_fMajorLight);
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_btnGridMajorClr);
+
+		// Grid Color Wheel Expander
+		m_expGridWheel = std::make_shared<M2DrawExpander>(L"Grid Color Wheel", true);
+		m_gridWheel = std::make_shared<M2DrawColorWheel>();
+		m_gridWheel->SetOnColorChanged([this](float h, float s, float l, bool /*isFinal*/) {
+			GridRenderer& g = GetApp()->GetGrid();
+			if (m_canvasColorTarget == 0)
+			{
+				m_fMinorHue = h; m_fMinorSat = s; m_fMinorLight = l;
+				g.minor = HSLtoRGB(m_fMinorHue, m_fMinorSat, m_fMinorLight, g.minor.a);
+			}
+			else
+			{
+				m_fMajorHue = h; m_fMajorSat = s; m_fMajorLight = l;
+				g.major = HSLtoRGB(m_fMajorHue, m_fMajorSat, m_fMajorLight, g.major.a);
+			}
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_expGridWheel->AddChild(m_gridWheel);
+		m_expGridWheel->SetOnToggle([this](M2DrawExpander* /*pExp*/, bool /*bExpanded*/) {
+			if (GetSafeHwnd())
+			{
+				CRect rc;
+				GetClientRect(&rc);
+				UpdateLayout(static_cast<float>(rc.Width()), static_cast<float>(rc.Height()));
+				SafeInvalidate(FALSE);
+			}
+		});
+		m_pCurrentPanel->AddChild(m_expGridWheel);
+
+		// Grid Opacity: Bar & Number Input
+		m_lblGridOpacity = std::make_shared<M2DrawLabel>(L"Grid Line Opacity (%)");
+		m_pCurrentPanel->AddChild(m_lblGridOpacity);
+
+		float initGridAlpha = (m_canvasColorTarget == 0 ? grid.minor.a : grid.major.a) * 100.0f;
+		m_sliderGridOpacity = std::make_shared<M2DrawSlider>(0.0f, 100.0f, initGridAlpha);
+		m_sliderGridOpacity->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
+			GridRenderer& g = GetApp()->GetGrid();
+			if (m_spinGridOpacity) m_spinGridOpacity->SetValue(val);
+			if (m_canvasColorTarget == 0)
+				g.minor.a = val / 100.0f;
+			else
+				g.major.a = val / 100.0f;
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_sliderGridOpacity);
+
+		m_spinGridOpacity = std::make_shared<M2DrawNumericInput>(0.0, 100.0, initGridAlpha, 5.0);
+		m_spinGridOpacity->SetSuffix(L"%");
+		m_spinGridOpacity->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			GridRenderer& g = GetApp()->GetGrid();
+			if (m_sliderGridOpacity) m_sliderGridOpacity->SetValue(static_cast<float>(val));
+			if (m_canvasColorTarget == 0)
+				g.minor.a = static_cast<float>(val) / 100.0f;
+			else
+				g.major.a = static_cast<float>(val) / 100.0f;
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_spinGridOpacity);
+	}
+	else
+	{
+		// [3. Canvas Settings Mode (MODE_CANVAS)]
+		m_lblCanvasHeader = std::make_shared<M2DrawLabel>(L"■ Canvas Settings");
+		m_pCurrentPanel->AddChild(m_lblCanvasHeader);
+
+		m_lblCanvasSize = std::make_shared<M2DrawLabel>(L"● Canvas Dimensions (W x H)");
+		m_pCurrentPanel->AddChild(m_lblCanvasSize);
+
+		m_spinCanvasW = std::make_shared<M2DrawNumericInput>(100.0, 10000.0, 1920.0, 50.0);
+		m_spinCanvasW->SetSuffix(L"px");
+		m_spinCanvasW->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double /*val*/) {
+			ApplyCanvasSettings();
+		});
+		m_pCurrentPanel->AddChild(m_spinCanvasW);
+
+		m_spinCanvasH = std::make_shared<M2DrawNumericInput>(100.0, 10000.0, 1080.0, 50.0);
+		m_spinCanvasH->SetSuffix(L"px");
+		m_spinCanvasH->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double /*val*/) {
+			ApplyCanvasSettings();
+		});
+		m_pCurrentPanel->AddChild(m_spinCanvasH);
+
+		m_lblCanvasBg = std::make_shared<M2DrawLabel>(L"● Background Color");
+		m_pCurrentPanel->AddChild(m_lblCanvasBg);
+
+		m_paletteCanvasBg = std::make_shared<M2DrawColorPalette>();
+		m_paletteCanvasBg->SetOnColorSelected([this](M2DrawColorPalette* /*pPal*/, D2D1_COLOR_F /*clr*/) {
+			ApplyCanvasSettings();
+		});
+		m_pCurrentPanel->AddChild(m_paletteCanvasBg);
+	}
+
+	SyncControlsFromData();
 }
 
-BOOL CD2DPropertyView::OnEraseBkgnd(CDC* /*pDC*/)
+void CD2DPropertyView::SyncControlsFromData()
 {
-	return TRUE; // 깜빡임 방지
+	if (m_paneMode == MODE_SHAPE)
+	{
+		if (m_lblShapeHeader)
+		{
+			CString str;
+			if (m_pActiveDoc && m_selectedShapeIndex >= 0)
+				str.Format(_T("● Shape: [%s]"), (LPCTSTR)m_strShapeName);
+			else
+				str = _T("● No Selection (Preview Mode)");
+			m_lblShapeHeader->SetText((LPCTSTR)str);
+		}
+
+		if (m_btnTabFill)   m_btnTabFill->SetChecked(m_colorTarget == 0);
+		if (m_btnTabStroke) m_btnTabStroke->SetChecked(m_colorTarget == 1);
+
+		for (int i = 0; i < static_cast<int>(m_btnFillModes.size()); ++i)
+			m_btnFillModes[i]->SetChecked(static_cast<int>(m_fillMode) == i);
+
+		D2D1_COLOR_F curActiveClr = (m_colorTarget == 0) ? m_fillColor : m_strokeColor;
+		if (m_palette16) m_palette16->SetSelectedColor(curActiveClr);
+
+		if (m_shapeWheel)
+		{
+			if (m_colorTarget == 0)
+				m_shapeWheel->SetColorHSL(m_fFillHue, m_fFillSat, m_fFillLight);
+			else
+				m_shapeWheel->SetColorHSL(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
+		}
+
+		if (m_sliderOpacity) m_sliderOpacity->SetValue(m_fOpacity);
+		if (m_spinOpacity)   m_spinOpacity->SetValue(m_fOpacity);
+
+		CanvasUnit curUnit = GetApp()->GetGrid().unit;
+		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
+		float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+		if (pxPerUnit <= 0.0f) pxPerUnit = 1.0f;
+
+		// 만약 선택된 도형이 있다면 도형의 픽셀 단위 선 굵기로부터 현재 단위값 갱신
+		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		{
+			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (shape)
+			{
+				m_fStrokeWidth = shape->style.strokeWidth / pxPerUnit;
+			}
+		}
+
+		if (m_lblStrokeWidth)
+		{
+			CString strStrokeLbl;
+			strStrokeLbl.Format(_T("Stroke Width (%s)"), unitSuffix);
+			m_lblStrokeWidth->SetText((LPCTSTR)strStrokeLbl);
+		}
+
+		float defaultMax = 50.0f;
+		double stepVal = 0.5;
+		switch (curUnit)
+		{
+		case CanvasUnit::Pixel: defaultMax = 50.0f; stepVal = 0.5; break;
+		case CanvasUnit::MM:    defaultMax = 20.0f; stepVal = 0.2; break;
+		case CanvasUnit::CM:    defaultMax = 5.0f;  stepVal = 0.05; break;
+		case CanvasUnit::Inch:  defaultMax = 2.0f;  stepVal = 0.02; break;
+		case CanvasUnit::Rem:   defaultMax = 5.0f;  stepVal = 0.1; break;
+		}
+
+		if (m_sliderStrokeWidth)
+		{
+			float safeVal = max(0.1f, m_fStrokeWidth);
+			float targetMax = max(defaultMax, safeVal * 1.5f);
+			m_sliderStrokeWidth->SetRange(0.1f, targetMax);
+			m_sliderStrokeWidth->SetValue(safeVal);
+		}
+
+		if (m_spinStrokeWidth)
+		{
+			m_spinStrokeWidth->SetSuffix(unitSuffix);
+			m_spinStrokeWidth->SetStep(stepVal);
+			m_spinStrokeWidth->SetRange(0.01, 1000000.0);
+			m_spinStrokeWidth->SetValue(m_fStrokeWidth);
+		}
+
+		for (int i = 0; i < static_cast<int>(m_btnDashStyles.size()); ++i)
+			m_btnDashStyles[i]->SetChecked(m_selectedDash == i);
+
+		if (m_chkCloseShape)
+		{
+			bool isClosed = false;
+			if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+			{
+				PathShape* pathShape = dynamic_cast<PathShape*>(m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get());
+				if (pathShape && !pathShape->GetPaths().empty())
+				{
+					isClosed = pathShape->GetPaths()[0].closed;
+				}
+			}
+			m_chkCloseShape->SetChecked(isClosed);
+		}
+	}
+	else if (m_paneMode == MODE_GRID)
+	{
+		GridRenderer& grid = GetApp()->GetGrid();
+		RulerRenderer& ruler = GetApp()->GetRuler();
+
+		if (m_chkGridView)  m_chkGridView->SetChecked(grid.enabled);
+		if (m_chkGridSnap)  m_chkGridSnap->SetChecked(grid.snapToGrid);
+		if (m_chkRulerView) m_chkRulerView->SetChecked(ruler.enabled);
+
+		if (m_cboUnit) m_cboUnit->SetCurSel(static_cast<int>(grid.unit));
+
+		if (m_sliderGridStep) m_sliderGridStep->SetValue(grid.stepInUnit);
+		if (m_spinGridStep)   m_spinGridStep->SetValue(grid.stepInUnit);
+
+		if (m_sliderGridMajor) m_sliderGridMajor->SetValue(static_cast<float>(grid.majorEvery));
+		if (m_spinGridMajor)   m_spinGridMajor->SetValue(static_cast<double>(grid.majorEvery));
+
+		if (m_btnGridMinorClr) m_btnGridMinorClr->SetChecked(m_canvasColorTarget == 0);
+		if (m_btnGridMajorClr) m_btnGridMajorClr->SetChecked(m_canvasColorTarget == 1);
+
+		if (m_gridWheel)
+		{
+			if (m_canvasColorTarget == 0)
+				m_gridWheel->SetColorHSL(m_fMinorHue, m_fMinorSat, m_fMinorLight);
+			else
+				m_gridWheel->SetColorHSL(m_fMajorHue, m_fMajorSat, m_fMajorLight);
+		}
+
+		float curAlpha = (m_canvasColorTarget == 0 ? grid.minor.a : grid.major.a) * 100.0f;
+		if (m_sliderGridOpacity) m_sliderGridOpacity->SetValue(curAlpha);
+		if (m_spinGridOpacity)   m_spinGridOpacity->SetValue(curAlpha);
+	}
+	else
+	{
+		// Canvas Settings Mode
+		// Future expansion
+	}
+}
+
+void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
+{
+	if (!m_pCurrentPanel) return;
+
+	float left = 14.0f;
+	float right = width - 14.0f;
+	// 패널이 임의로 넓어지더라도 내부 컨트롤들이 기형적으로 늘어나지 않도록 최대 폭 제한
+	float contentW = right - left;
+	if (contentW > 400.0f)
+	{
+		contentW = 400.0f;
+		right = left + contentW;
+	}
+	float y = 14.0f;
+
+	if (m_paneMode == MODE_SHAPE)
+	{
+		// 1. Header Label
+		if (m_lblShapeHeader)
+		{
+			m_lblShapeHeader->SetBounds(left, y, right, y + 20.0f);
+			y += 24.0f;
+		}
+
+		// 2. Tabs: [Fill] vs [Stroke]
+		float halfTabW = (contentW - 6.0f) * 0.5f;
+		if (m_btnTabFill)   m_btnTabFill->SetBounds(left, y, left + halfTabW, y + 26.0f);
+		if (m_btnTabStroke) m_btnTabStroke->SetBounds(left + halfTabW + 6.0f, y, right, y + 26.0f);
+		y += 32.0f;
+
+		bool isFill = (m_colorTarget == 0);
+
+		// 3. Fill Mode Toolbar (5 modes)
+		if (isFill)
+		{
+			float btnW = (contentW - (4.0f * 6.0f)) / 5.0f;
+			for (int i = 0; i < 5; ++i)
+			{
+				float bx1 = left + i * (btnW + 6.0f);
+				m_btnFillModes[i]->SetVisible(true);
+				m_btnFillModes[i]->SetBounds(bx1, y, bx1 + btnW, y + 24.0f);
+			}
+			y += 30.0f;
+		}
+		else
+		{
+			for (int i = 0; i < 5; ++i)
+				m_btnFillModes[i]->SetVisible(false);
+		}
+
+		// 4. Standard 16-Color Palette
+		if (m_palette16)
+		{
+			m_palette16->SetVisible(true);
+			m_palette16->SetBounds(left, y, right, y + 42.0f);
+			y += 48.0f;
+		}
+
+		// 5. Color Wheel Expander
+		if (m_expShapeWheel)
+		{
+			m_expShapeWheel->SetVisible(true);
+			float expH = m_expShapeWheel->GetHeaderHeight();
+			if (m_expShapeWheel->IsExpanded())
+			{
+				float wheelH = min(contentW, 220.0f);
+				float wheelLeft = left + (contentW - wheelH) * 0.5f;
+				expH += wheelH + 10.0f;
+				if (m_shapeWheel)
+				{
+					m_shapeWheel->SetVisible(true);
+					m_shapeWheel->SetBounds(wheelLeft, y + m_expShapeWheel->GetHeaderHeight() + 6.0f, wheelLeft + wheelH, y + expH - 4.0f);
+				}
+			}
+			else
+			{
+				if (m_shapeWheel) m_shapeWheel->SetVisible(false);
+			}
+			m_expShapeWheel->SetBounds(left, y, right, y + expH);
+			y += expH + 12.0f;
+		}
+
+		// 6. Opacity (Label + Slider Bar + Number Input)
+		if (m_lblOpacity)
+		{
+			m_lblOpacity->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+		float numW = 80.0f; // 100% 텍스트가 잘리거나 줄바꿈되지 않도록 80px로 넉넉하게 확장
+		float sliderW = contentW - numW - 8.0f;
+		if (m_sliderOpacity)
+		{
+			m_sliderOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+		}
+		if (m_spinOpacity)
+		{
+			m_spinOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+		}
+		y += 30.0f;
+
+		// 7. Stroke Width & Dash Styles (Stroke Mode only)
+		if (!isFill)
+		{
+			if (m_lblStrokeWidth)
+			{
+				m_lblStrokeWidth->SetVisible(true);
+				m_lblStrokeWidth->SetBounds(left, y, right, y + 18.0f);
+				y += 20.0f;
+			}
+			if (m_sliderStrokeWidth)
+			{
+				m_sliderStrokeWidth->SetVisible(true);
+				m_sliderStrokeWidth->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+			}
+			if (m_spinStrokeWidth)
+			{
+				m_spinStrokeWidth->SetVisible(true);
+				m_spinStrokeWidth->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+			}
+			y += 30.0f;
+
+			float dashW = (contentW - (3.0f * 6.0f)) / 4.0f;
+			for (int i = 0; i < 4; ++i)
+			{
+				float bx1 = left + i * (dashW + 6.0f);
+				m_btnDashStyles[i]->SetVisible(true);
+				m_btnDashStyles[i]->SetBounds(bx1, y, bx1 + dashW, y + 24.0f);
+			}
+			y += 32.0f;
+		}
+		else
+		{
+			if (m_lblStrokeWidth) m_lblStrokeWidth->SetVisible(false);
+			if (m_sliderStrokeWidth) m_sliderStrokeWidth->SetVisible(false);
+			if (m_spinStrokeWidth) m_spinStrokeWidth->SetVisible(false);
+			for (int i = 0; i < 4; ++i)
+				m_btnDashStyles[i]->SetVisible(false);
+		}
+
+		// 8. Close Shape Checkbox (For PathShape)
+		if (m_chkCloseShape)
+		{
+			bool isPath = false;
+			if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+			{
+				isPath = (dynamic_cast<PathShape*>(m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get()) != nullptr);
+			}
+			m_chkCloseShape->SetVisible(isPath);
+			if (isPath)
+			{
+				m_chkCloseShape->SetBounds(left, y, right, y + 24.0f);
+				y += 30.0f;
+			}
+		}
+	}
+	else if (m_paneMode == MODE_GRID)
+	{
+		// [MODE_GRID: Grid & Ruler Settings]
+		// 1. Header
+		if (m_lblGridHeader)
+		{
+			m_lblGridHeader->SetBounds(left, y, right, y + 20.0f);
+			y += 24.0f;
+		}
+
+		// 2. Checkboxes (View Grid, Snap to Grid, View Ruler)
+		float chkW = (contentW - 12.0f) / 3.0f;
+		if (m_chkGridView)  m_chkGridView->SetBounds(left, y, left + chkW, y + 24.0f);
+		if (m_chkGridSnap)  m_chkGridSnap->SetBounds(left + chkW + 6.0f, y, left + (chkW * 2.0f) + 6.0f, y + 24.0f);
+		if (m_chkRulerView) m_chkRulerView->SetBounds(left + (chkW * 2.0f) + 12.0f, y, right, y + 24.0f);
+		y += 32.0f;
+
+		// 3. Measurement Unit ComboBox (Dropdown)
+		if (m_lblUnit)
+		{
+			m_lblUnit->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+		if (m_cboUnit)
+		{
+			m_cboUnit->SetBounds(left, y, right, y + 26.0f);
+			y += 34.0f;
+		}
+
+		// 4. Grid Step (Label + Bar + Number Input)
+		if (m_lblGridStep)
+		{
+			m_lblGridStep->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+		float numW = 75.0f;
+		float sliderW = contentW - numW - 8.0f;
+		if (m_sliderGridStep)
+		{
+			m_sliderGridStep->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+		}
+		if (m_spinGridStep)
+		{
+			m_spinGridStep->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+		}
+		y += 30.0f;
+
+		// 5. Major Line Frequency (Label + Bar + Number Input)
+		if (m_lblGridMajor)
+		{
+			m_lblGridMajor->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+		if (m_sliderGridMajor)
+		{
+			m_sliderGridMajor->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+		}
+		if (m_spinGridMajor)
+		{
+			m_spinGridMajor->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+		}
+		y += 32.0f;
+
+		// 6. Minor vs Major Grid Color Tabs
+		float halfTabW = (contentW - 6.0f) * 0.5f;
+		if (m_btnGridMinorClr) m_btnGridMinorClr->SetBounds(left, y, left + halfTabW, y + 26.0f);
+		if (m_btnGridMajorClr) m_btnGridMajorClr->SetBounds(left + halfTabW + 6.0f, y, right, y + 26.0f);
+		y += 32.0f;
+
+		// 7. Grid Color Wheel Expander
+		if (m_expGridWheel)
+		{
+			m_expGridWheel->SetVisible(true);
+			float expH = m_expGridWheel->GetHeaderHeight();
+			if (m_expGridWheel->IsExpanded())
+			{
+				float wheelH = min(contentW, 220.0f);
+				float wheelLeft = left + (contentW - wheelH) * 0.5f;
+				expH += wheelH + 10.0f;
+				if (m_gridWheel)
+				{
+					m_gridWheel->SetVisible(true);
+					m_gridWheel->SetBounds(wheelLeft, y + m_expGridWheel->GetHeaderHeight() + 6.0f, wheelLeft + wheelH, y + expH - 4.0f);
+				}
+			}
+			else
+			{
+				if (m_gridWheel) m_gridWheel->SetVisible(false);
+			}
+			m_expGridWheel->SetBounds(left, y, right, y + expH);
+			y += expH + 12.0f;
+		}
+
+		// 8. Grid Line Opacity (Label + Bar + Number Input)
+		if (m_lblGridOpacity)
+		{
+			m_lblGridOpacity->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+		if (m_sliderGridOpacity)
+		{
+			m_sliderGridOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+		}
+		if (m_spinGridOpacity)
+		{
+			m_spinGridOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+		}
+		y += 30.0f;
+	}
+	else
+	{
+		// [MODE_CANVAS: Canvas Settings]
+		if (m_lblCanvasHeader)
+		{
+			m_lblCanvasHeader->SetBounds(left, y, right, y + 20.0f);
+			y += 24.0f;
+		}
+
+		if (m_lblCanvasSize)
+		{
+			m_lblCanvasSize->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+
+		float halfW = (contentW - 6.0f) * 0.5f;
+		if (m_spinCanvasW)
+		{
+			m_spinCanvasW->SetBounds(left, y, left + halfW, y + 26.0f);
+		}
+		if (m_spinCanvasH)
+		{
+			m_spinCanvasH->SetBounds(left + halfW + 6.0f, y, right, y + 26.0f);
+		}
+		y += 34.0f;
+
+		if (m_lblCanvasBg)
+		{
+			m_lblCanvasBg->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+
+		if (m_paletteCanvasBg)
+		{
+			m_paletteCanvasBg->SetBounds(left, y, right, y + 42.0f);
+			y += 48.0f;
+		}
+	}
+
+	m_pCurrentPanel->SetBounds(0, 0, width, max(y + 20.0f, 600.0f));
 }
 
 HRESULT CD2DPropertyView::CreateDeviceResources()
@@ -304,56 +1148,40 @@ HRESULT CD2DPropertyView::CreateDeviceResources()
 	if (SUCCEEDED(hr) && !m_pTextFormat && m_pDWriteFactory)
 	{
 		m_pDWriteFactory->CreateTextFormat(
-			L"Segoe UI",
-			nullptr,
-			DWRITE_FONT_WEIGHT_NORMAL,
-			DWRITE_FONT_STYLE_NORMAL,
-			DWRITE_FONT_STRETCH_NORMAL,
-			12.0f,
-			L"ko-kr",
-			&m_pTextFormat
+			L"Segoe UI", nullptr,
+			DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+			12.0f, L"ko-kr", &m_pTextFormat
 		);
 	}
 
 	if (SUCCEEDED(hr) && !m_pTextFormatBold && m_pDWriteFactory)
 	{
 		m_pDWriteFactory->CreateTextFormat(
-			L"Segoe UI",
-			nullptr,
-			DWRITE_FONT_WEIGHT_BOLD,
-			DWRITE_FONT_STYLE_NORMAL,
-			DWRITE_FONT_STRETCH_NORMAL,
-			13.0f,
-			L"ko-kr",
-			&m_pTextFormatBold
+			L"Segoe UI", nullptr,
+			DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+			13.0f, L"ko-kr", &m_pTextFormatBold
 		);
 	}
 
 	if (SUCCEEDED(hr) && !m_pTextFormatSmall && m_pDWriteFactory)
 	{
 		m_pDWriteFactory->CreateTextFormat(
-			L"Segoe UI",
-			nullptr,
-			DWRITE_FONT_WEIGHT_NORMAL,
-			DWRITE_FONT_STYLE_NORMAL,
-			DWRITE_FONT_STRETCH_NORMAL,
-			11.0f,
-			L"ko-kr",
-			&m_pTextFormatSmall
+			L"Segoe UI", nullptr,
+			DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+			11.0f, L"ko-kr", &m_pTextFormatSmall
 		);
+		if (m_pTextFormatSmall)
+		{
+			m_pTextFormatSmall->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+		}
 	}
 
 	if (SUCCEEDED(hr) && !m_pTextFormatCenter && m_pDWriteFactory)
 	{
 		m_pDWriteFactory->CreateTextFormat(
-			L"Segoe UI",
-			nullptr,
-			DWRITE_FONT_WEIGHT_NORMAL,
-			DWRITE_FONT_STYLE_NORMAL,
-			DWRITE_FONT_STRETCH_NORMAL,
-			11.0f,
-			L"ko-kr",
-			&m_pTextFormatCenter
+			L"Segoe UI", nullptr,
+			DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+			11.0f, L"ko-kr", &m_pTextFormatCenter
 		);
 		if (m_pTextFormatCenter)
 		{
@@ -365,7 +1193,7 @@ HRESULT CD2DPropertyView::CreateDeviceResources()
 	if (SUCCEEDED(hr) && !m_pRenderTarget)
 	{
 		CRect rc;
-		GetClientRect(&rc);
+		if (GetSafeHwnd()) GetClientRect(&rc);
 		D2D1_SIZE_U size = D2D1::SizeU(max(1, rc.Width()), max(1, rc.Height()));
 
 		D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties(
@@ -395,6 +1223,11 @@ void CD2DPropertyView::DiscardDeviceResources()
 	if (m_pRenderTarget) { m_pRenderTarget->Release(); m_pRenderTarget = nullptr; }
 }
 
+BOOL CD2DPropertyView::OnEraseBkgnd(CDC* /*pDC*/)
+{
+	return TRUE;
+}
+
 void CD2DPropertyView::OnSize(UINT nType, int cx, int cy)
 {
 	CWnd::OnSize(nType, cx, cy);
@@ -402,986 +1235,8 @@ void CD2DPropertyView::OnSize(UINT nType, int cx, int cy)
 	{
 		m_pRenderTarget->Resize(D2D1::SizeU(cx, cy));
 	}
-	Invalidate(FALSE);
-}
-
-void CD2DPropertyView::DrawColorWheel(D2D1_POINT_2F center, float radiusOuter, float radiusInner, float activeHue, float activeSat, float activeLight)
-{
-	if (!m_pRenderTarget || !m_pBrush) return;
-
-	// 1. 외곽 Hue 링 (360개 1도 단위 초미세 렌더링으로 끊김 없는 매끄러운 그라데이션)
-	const int segments = 360;
-	const float stepRad = static_cast<float>((2.0 * M_PI) / segments);
-
-	for (int i = 0; i < segments; ++i)
-	{
-		float a1 = i * stepRad;
-		float a2 = (i + 1.15f) * stepRad; // 틈새 없이 안티에일리어싱 매끄럽게 연결
-		float hueMid = (i + 0.5f) * (360.0f / segments);
-
-		D2D1_POINT_2F p1 = D2D1::Point2F(center.x + std::cos(a1) * radiusOuter, center.y + std::sin(a1) * radiusOuter);
-		D2D1_POINT_2F p2 = D2D1::Point2F(center.x + std::cos(a2) * radiusOuter, center.y + std::sin(a2) * radiusOuter);
-		D2D1_POINT_2F p3 = D2D1::Point2F(center.x + std::cos(a2) * radiusInner, center.y + std::sin(a2) * radiusInner);
-		D2D1_POINT_2F p4 = D2D1::Point2F(center.x + std::cos(a1) * radiusInner, center.y + std::sin(a1) * radiusInner);
-
-		ID2D1PathGeometry* pGeo = nullptr;
-		m_pD2DFactory->CreatePathGeometry(&pGeo);
-		if (pGeo)
-		{
-			ID2D1GeometrySink* pSink = nullptr;
-			pGeo->Open(&pSink);
-			if (pSink)
-			{
-				pSink->BeginFigure(p1, D2D1_FIGURE_BEGIN_FILLED);
-				pSink->AddLine(p2);
-				pSink->AddLine(p3);
-				pSink->AddLine(p4);
-				pSink->EndFigure(D2D1_FIGURE_END_CLOSED);
-				pSink->Close();
-				pSink->Release();
-
-				m_pBrush->SetColor(HSLtoRGB(hueMid, 1.0f, 0.5f));
-				m_pRenderTarget->FillGeometry(pGeo, m_pBrush);
-			}
-			pGeo->Release();
-		}
-	}
-
-	// 외곽/내곽 링 다듬기 테두리선
-	m_pBrush->SetColor(D2D1::ColorF(0.12f, 0.12f, 0.14f, 0.9f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(center, radiusOuter, radiusOuter), m_pBrush, 1.0f);
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(center, radiusInner, radiusInner), m_pBrush, 1.0f);
-
-	// 2. 내부 삼각형: 꼭짓점(선택된 Hue 원색) -> 밑변(흰색과 검은색) 그라데이션
-	D2D1_POINT_2F ptHue, ptWhite, ptBlack;
-	GetTriangleVertices(center, radiusInner, activeHue, ptHue, ptWhite, ptBlack);
-
-	ID2D1PathGeometry* pTriGeo = nullptr;
-	m_pD2DFactory->CreatePathGeometry(&pTriGeo);
-	if (pTriGeo)
-	{
-		ID2D1GeometrySink* pSink = nullptr;
-		pTriGeo->Open(&pSink);
-		if (pSink)
-		{
-			pSink->BeginFigure(ptHue, D2D1_FIGURE_BEGIN_FILLED);
-			pSink->AddLine(ptWhite);
-			pSink->AddLine(ptBlack);
-			pSink->EndFigure(D2D1_FIGURE_END_CLOSED);
-			pSink->Close();
-			pSink->Release();
-
-			// 밑변 중심 (White와 Black의 중간)
-			D2D1_POINT_2F ptBaseMid = D2D1::Point2F((ptWhite.x + ptBlack.x) * 0.5f, (ptWhite.y + ptBlack.y) * 0.5f);
-
-			// 1차 리니어 그라데이션: 밑변(중간 회색) -> 꼭짓점(Hue 원색)
-			ID2D1GradientStopCollection* pStops = nullptr;
-			D2D1_GRADIENT_STOP stops[2];
-			stops[0].position = 0.0f;
-			stops[0].color = D2D1::ColorF(0.5f, 0.5f, 0.5f, 1.0f);
-			stops[1].position = 1.0f;
-			stops[1].color = HSLtoRGB(activeHue, 1.0f, 0.5f);
-
-			m_pRenderTarget->CreateGradientStopCollection(stops, 2, &pStops);
-			if (pStops)
-			{
-				ID2D1LinearGradientBrush* pLinBrush = nullptr;
-				m_pRenderTarget->CreateLinearGradientBrush(
-					D2D1::LinearGradientBrushProperties(ptBaseMid, ptHue),
-					pStops,
-					&pLinBrush
-				);
-				if (pLinBrush)
-				{
-					m_pRenderTarget->FillGeometry(pTriGeo, pLinBrush);
-					pLinBrush->Release();
-				}
-				pStops->Release();
-			}
-
-			// 2차 리니어 그라데이션 (Black -> White 명암 블렌딩)
-			ID2D1GradientStopCollection* pStopsBW = nullptr;
-			D2D1_GRADIENT_STOP stopsBW[2];
-			stopsBW[0].position = 0.0f;
-			stopsBW[0].color = D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.85f);
-			stopsBW[1].position = 1.0f;
-			stopsBW[1].color = D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.85f);
-
-			m_pRenderTarget->CreateGradientStopCollection(stopsBW, 2, &pStopsBW);
-			if (pStopsBW)
-			{
-				ID2D1LinearGradientBrush* pLinBrushBW = nullptr;
-				m_pRenderTarget->CreateLinearGradientBrush(
-					D2D1::LinearGradientBrushProperties(ptBlack, ptWhite),
-					pStopsBW,
-					&pLinBrushBW
-				);
-				if (pLinBrushBW)
-				{
-					m_pRenderTarget->FillGeometry(pTriGeo, pLinBrushBW);
-					pLinBrushBW->Release();
-				}
-				pStopsBW->Release();
-			}
-
-			// 삼각형 외곽선
-			m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.18f, 0.20f, 0.9f));
-			m_pRenderTarget->DrawGeometry(pTriGeo, m_pBrush, 1.2f);
-		}
-		pTriGeo->Release();
-	}
-
-	// 3. 내부 삼각형 채도/명도 선택 핸들 (피커 역활의 동그라미)
-	float wHue, wWhite, wBlack;
-	SLToBarycentric(activeSat, activeLight, wHue, wWhite, wBlack);
-	D2D1_POINT_2F triHandlePt = D2D1::Point2F(
-		wHue * ptHue.x + wWhite * ptWhite.x + wBlack * ptBlack.x,
-		wHue * ptHue.y + wWhite * ptWhite.y + wBlack * ptBlack.y
-	);
-
-	// 바깥 그림자 테두리 (블랙 외곽)
-	m_pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.8f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(triHandlePt, 7.5f, 7.5f), m_pBrush, 2.0f);
-
-	// 메인 흰색 링
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(triHandlePt, 6.5f, 6.5f), m_pBrush, 1.5f);
-
-	// 중심 현재 색상 채움 원
-	D2D1_COLOR_F curHandleColor = HSLtoRGB(activeHue, activeSat, activeLight);
-	m_pBrush->SetColor(curHandleColor);
-	m_pRenderTarget->FillEllipse(D2D1::Ellipse(triHandlePt, 5.0f, 5.0f), m_pBrush);
-
-	// 4. 외곽 링 위의 현재 선택 Hue 핸들 (피커 동그라미)
-	float radTarget = static_cast<float>(activeHue * (M_PI / 180.0));
-	float midR = (radiusOuter + radiusInner) * 0.5f;
-	D2D1_POINT_2F handlePt = D2D1::Point2F(center.x + std::cos(radTarget) * midR, center.y + std::sin(radTarget) * midR);
-
-	// 링을 관통하는 슬릿 라인
-	D2D1_POINT_2F pOuter = D2D1::Point2F(center.x + std::cos(radTarget) * (radiusOuter + 1.0f), center.y + std::sin(radTarget) * (radiusOuter + 1.0f));
-	D2D1_POINT_2F pInner = D2D1::Point2F(center.x + std::cos(radTarget) * (radiusInner - 1.0f), center.y + std::sin(radTarget) * (radiusInner - 1.0f));
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.9f));
-	m_pRenderTarget->DrawLine(pInner, pOuter, m_pBrush, 2.0f);
-
-	// 외곽 링 원형 핀
-	m_pBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.8f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(handlePt, 7.5f, 7.5f), m_pBrush, 2.0f);
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(handlePt, 6.5f, 6.5f), m_pBrush, 1.5f);
-	m_pBrush->SetColor(HSLtoRGB(activeHue, 1.0f, 0.5f));
-	m_pRenderTarget->FillEllipse(D2D1::Ellipse(handlePt, 5.0f, 5.0f), m_pBrush);
-}
-
-void CD2DPropertyView::DrawTabHeaders(float width, float& y)
-{
-	// 상단 탭 버튼 3개 (D2D Custom / ImGui Dark / MFC Style)
-	float tabW = (width - 20.0f) / 3.0f;
-	const wchar_t* tabTitles[] = { L"1. D2D Custom", L"2. ImGui Dark", L"3. MFC Classic" };
-
-	for (int i = 0; i < 3; ++i)
-	{
-		D2D1_RECT_F tabRect = D2D1::RectF(10.0f + i * tabW, y, 10.0f + (i + 1) * tabW - 3.0f, y + 26.0f);
-		bool isActive = (m_currentTab == i);
-
-		if (isActive)
-		{
-			// 활성 탭: 하이라이트 색상 (D2D: 퍼플/블루, ImGui: 오렌지/다크차콜, MFC: 윈도우 블루)
-			D2D1_COLOR_F activeClr = (i == 0) ? D2D1::ColorF(0.18f, 0.52f, 0.95f) :
-			                         (i == 1) ? D2D1::ColorF(0.92f, 0.45f, 0.12f) :
-			                                    D2D1::ColorF(0.0f, 0.47f, 0.84f);
-			m_pBrush->SetColor(activeClr);
-			m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(tabRect, 4.0f, 4.0f), m_pBrush);
-			m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-			m_pRenderTarget->DrawText(tabTitles[i], (UINT32)wcslen(tabTitles[i]), m_pTextFormatBold, tabRect, m_pBrush);
-		}
-		else
-		{
-			// 비활성 탭
-			m_pBrush->SetColor(D2D1::ColorF(0.20f, 0.20f, 0.23f));
-			m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(tabRect, 4.0f, 4.0f), m_pBrush);
-			m_pBrush->SetColor(D2D1::ColorF(0.35f, 0.35f, 0.38f));
-			m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(tabRect, 4.0f, 4.0f), m_pBrush, 1.0f);
-			m_pBrush->SetColor(D2D1::ColorF(0.65f, 0.65f, 0.68f));
-			m_pRenderTarget->DrawText(tabTitles[i], (UINT32)wcslen(tabTitles[i]), m_pTextFormatSmall, tabRect, m_pBrush);
-		}
-	}
-	y += 34.0f;
-}
-
-// -------------------------------------------------------------
-// [1. Direct2D 탭] Inkscape/Illustrator 스타일 미려한 벡터 UI
-// -------------------------------------------------------------
-void CD2DPropertyView::DrawD2DContent(float width, float y)
-{
-	// 1. 배지 / 선택된 쉐이프 이름 및 상태
-	CString strHeader;
-	if (m_pActiveDoc && m_selectedShapeIndex >= 0)
-	{
-		strHeader.Format(_T("● 도형 연결: [%s]"), (LPCTSTR)m_strShapeName);
-		m_pBrush->SetColor(D2D1::ColorF(0.2f, 0.85f, 0.4f));
-	}
-	else
-	{
-		strHeader = _T("● 도형 미선택 (프리뷰 모드)");
-		m_pBrush->SetColor(D2D1::ColorF(0.7f, 0.7f, 0.7f));
-	}
-	m_pRenderTarget->DrawText(strHeader, (UINT32)strHeader.GetLength(), m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 22.0f;
-
-	// 2. Inkscape 스타일 상단 탭: [채움(Fill)] 이 먼저, [윤곽선(Stroke)] 이 뒤로
-	// 잉크스케이프처럼 탭 하단 인디케이터 라인 포함
-	float halfW = (width - 24.0f) * 0.5f;
-	D2D1_RECT_F btnFill = D2D1::RectF(12.0f, y, 12.0f + halfW - 2.0f, y + 26.0f);
-	D2D1_RECT_F btnStroke = D2D1::RectF(12.0f + halfW + 2.0f, y, width - 12.0f, y + 26.0f);
-
-	bool isFillActive = (m_colorTarget == 0);
-
-	// [채움(Fill)] 탭 버튼
-	m_pBrush->SetColor(isFillActive ? D2D1::ColorF(0.18f, 0.52f, 0.95f) : D2D1::ColorF(0.20f, 0.20f, 0.23f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(btnFill, 4.0f, 4.0f), m_pBrush);
-	m_pBrush->SetColor(isFillActive ? D2D1::ColorF(1.0f, 1.0f, 1.0f) : D2D1::ColorF(0.7f, 0.7f, 0.7f));
-	m_pRenderTarget->DrawText(L"■ 채움(Fill)", 9, m_pTextFormatCenter, btnFill, m_pBrush);
-
-	// [윤곽선(Stroke)] 탭 버튼
-	m_pBrush->SetColor(!isFillActive ? D2D1::ColorF(0.18f, 0.52f, 0.95f) : D2D1::ColorF(0.20f, 0.20f, 0.23f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(btnStroke, 4.0f, 4.0f), m_pBrush);
-	m_pBrush->SetColor(!isFillActive ? D2D1::ColorF(1.0f, 1.0f, 1.0f) : D2D1::ColorF(0.7f, 0.7f, 0.7f));
-	m_pRenderTarget->DrawText(L"□ 윤곽선(Stroke)", 12, m_pTextFormatCenter, btnStroke, m_pBrush);
-	y += 32.0f;
-
-	// 3. 채움 탭 활성화 시: Inkscape 스타일 채우기 모드 툴바 5개 버튼 표시
-	// [X] (채우기 없음) | [■] (단색) | [선형 그라디언트] | [방사형 그라디언트] | [패턴]
-	if (isFillActive)
-	{
-		const int numModes = 5;
-		float modeBtnW = 28.0f;
-		float modeSpacing = 6.0f;
-		float totalModeW = numModes * modeBtnW + (numModes - 1) * modeSpacing;
-		float startX = 14.0f;
-
-		for (int i = 0; i < numModes; ++i)
-		{
-			D2D1_RECT_F rBtn = D2D1::RectF(startX + i * (modeBtnW + modeSpacing), y, startX + i * (modeBtnW + modeSpacing) + modeBtnW, y + modeBtnW);
-			bool isSelectedMode = (static_cast<int>(m_fillMode) == i);
-
-			// 버튼 배경
-			m_pBrush->SetColor(isSelectedMode ? D2D1::ColorF(0.12f, 0.35f, 0.65f) : D2D1::ColorF(0.20f, 0.20f, 0.23f));
-			m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rBtn, 3.0f, 3.0f), m_pBrush);
-			m_pBrush->SetColor(isSelectedMode ? D2D1::ColorF(0.25f, 0.65f, 1.0f) : D2D1::ColorF(0.32f, 0.32f, 0.35f));
-			m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rBtn, 3.0f, 3.0f), m_pBrush, isSelectedMode ? 1.5f : 1.0f);
-
-			// 각 모드별 아이콘 렌더링
-			if (i == 0) // [X] 채우기 없음
-			{
-				m_pBrush->SetColor(D2D1::ColorF(0.9f, 0.3f, 0.3f));
-				m_pRenderTarget->DrawLine(D2D1::Point2F(rBtn.left + 7.0f, rBtn.top + 7.0f), D2D1::Point2F(rBtn.right - 7.0f, rBtn.bottom - 7.0f), m_pBrush, 2.0f);
-				m_pRenderTarget->DrawLine(D2D1::Point2F(rBtn.right - 7.0f, rBtn.top + 7.0f), D2D1::Point2F(rBtn.left + 7.0f, rBtn.bottom - 7.0f), m_pBrush, 2.0f);
-			}
-			else if (i == 1) // [■] 단색 채움 (현재 채움색 표시)
-			{
-				D2D1_RECT_F rSolid = D2D1::RectF(rBtn.left + 6.0f, rBtn.top + 6.0f, rBtn.right - 6.0f, rBtn.bottom - 6.0f);
-				m_pBrush->SetColor(m_fillColor);
-				m_pRenderTarget->FillRectangle(rSolid, m_pBrush);
-				m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.8f));
-				m_pRenderTarget->DrawRectangle(rSolid, m_pBrush, 1.0f);
-			}
-			else if (i == 2) // [선형 그라디언트]
-			{
-				D2D1_RECT_F rGrad = D2D1::RectF(rBtn.left + 6.0f, rBtn.top + 6.0f, rBtn.right - 6.0f, rBtn.bottom - 6.0f);
-				ID2D1GradientStopCollection* pGradStops = nullptr;
-				D2D1_GRADIENT_STOP gStops[2];
-				gStops[0].position = 0.0f;
-				gStops[0].color = m_fillColor;
-				gStops[1].position = 1.0f;
-				gStops[1].color = D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.2f);
-				if (SUCCEEDED(m_pRenderTarget->CreateGradientStopCollection(gStops, 2, &pGradStops)))
-				{
-					ID2D1LinearGradientBrush* pLinB = nullptr;
-					m_pRenderTarget->CreateLinearGradientBrush(
-						D2D1::LinearGradientBrushProperties(D2D1::Point2F(rGrad.left, rGrad.top), D2D1::Point2F(rGrad.right, rGrad.top)),
-						pGradStops,
-						&pLinB
-					);
-					if (pLinB)
-					{
-						m_pRenderTarget->FillRectangle(rGrad, pLinB);
-						pLinB->Release();
-					}
-					pGradStops->Release();
-				}
-				m_pBrush->SetColor(D2D1::ColorF(0.6f, 0.6f, 0.6f));
-				m_pRenderTarget->DrawRectangle(rGrad, m_pBrush, 1.0f);
-			}
-			else if (i == 3) // [방사형 그라디언트]
-			{
-				D2D1_RECT_F rRad = D2D1::RectF(rBtn.left + 6.0f, rBtn.top + 6.0f, rBtn.right - 6.0f, rBtn.bottom - 6.0f);
-				D2D1_POINT_2F ptC = D2D1::Point2F((rRad.left + rRad.right) * 0.5f, (rRad.top + rRad.bottom) * 0.5f);
-				ID2D1GradientStopCollection* pRadStops = nullptr;
-				D2D1_GRADIENT_STOP gStops[2];
-				gStops[0].position = 0.0f;
-				gStops[0].color = m_fillColor;
-				gStops[1].position = 1.0f;
-				gStops[1].color = D2D1::ColorF(0.1f, 0.1f, 0.1f, 1.0f);
-				if (SUCCEEDED(m_pRenderTarget->CreateGradientStopCollection(gStops, 2, &pRadStops)))
-				{
-					ID2D1RadialGradientBrush* pRadB = nullptr;
-					m_pRenderTarget->CreateRadialGradientBrush(
-						D2D1::RadialGradientBrushProperties(ptC, D2D1::Point2F(0, 0), 8.0f, 8.0f),
-						pRadStops,
-						&pRadB
-					);
-					if (pRadB)
-					{
-						m_pRenderTarget->FillRectangle(rRad, pRadB);
-						pRadB->Release();
-					}
-					pRadStops->Release();
-				}
-				m_pBrush->SetColor(D2D1::ColorF(0.6f, 0.6f, 0.6f));
-				m_pRenderTarget->DrawRectangle(rRad, m_pBrush, 1.0f);
-			}
-			else if (i == 4) // [패턴 / 바둑판]
-			{
-				D2D1_RECT_F rPat = D2D1::RectF(rBtn.left + 6.0f, rBtn.top + 6.0f, rBtn.right - 6.0f, rBtn.bottom - 6.0f);
-				m_pBrush->SetColor(D2D1::ColorF(0.25f, 0.25f, 0.28f));
-				m_pRenderTarget->FillRectangle(rPat, m_pBrush);
-				m_pBrush->SetColor(D2D1::ColorF(0.7f, 0.7f, 0.75f));
-				float midX = (rPat.left + rPat.right) * 0.5f;
-				float midY = (rPat.top + rPat.bottom) * 0.5f;
-				m_pRenderTarget->FillRectangle(D2D1::RectF(rPat.left, rPat.top, midX, midY), m_pBrush);
-				m_pRenderTarget->FillRectangle(D2D1::RectF(midX, midY, rPat.right, rPat.bottom), m_pBrush);
-				m_pBrush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f));
-				m_pRenderTarget->DrawRectangle(rPat, m_pBrush, 1.0f);
-			}
-		}
-		y += 36.0f;
-	}
-
-	// 4. Inkscape 스타일의 대형 컬러휠 (너비에 맞춰 좌우 여백 12px만 남기고 꽉 차게 확장)
-	// 요구사항 2: 중앙의 색선택(삼각 원)을 잉크스케이프와 같이 탭메뉴 좌우로 꽉차게(약간의 여백) 해줘
-	float wheelRadius = max(60.0f, (width - 24.0f) * 0.5f);
-	D2D1_POINT_2F wheelCenter = D2D1::Point2F(width * 0.5f, y + wheelRadius);
-	float curHue = isFillActive ? m_fFillHue : m_fStrokeHue;
-	float curSat = isFillActive ? m_fFillSat : m_fStrokeSat;
-	float curLight = isFillActive ? m_fFillLight : m_fStrokeLight;
-	float ringThickness = 44.0f; // 기존(22.0f)의 2배 두께
-	DrawColorWheel(wheelCenter, wheelRadius, wheelRadius - ringThickness, curHue, curSat, curLight);
-	y += wheelRadius * 2.0f + 14.0f;
-
-	// 5. 활성 색상 스와치 프리뷰 바 (단일 와이드 바)
-	D2D1_RECT_F swatchBar = D2D1::RectF(14.0f, y, width - 14.0f, y + 20.0f);
-	D2D1_COLOR_F activeClr = isFillActive ? m_fillColor : m_strokeColor;
-	m_pBrush->SetColor(activeClr);
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(swatchBar, 3.0f, 3.0f), m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f));
-	m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(swatchBar, 3.0f, 3.0f), m_pBrush, 1.0f);
-	y += 26.0f;
-
-	// 6. 불투명도(Opacity) 슬라이더 (0% ~ 100%) - 채움과 선 공통 지원
-	wchar_t szSliderText[64];
-	swprintf_s(szSliderText, L"● 불투명도 조절 바: %.0f%%", m_fOpacity);
-	m_pBrush->SetColor(D2D1::ColorF(0.85f, 0.85f, 0.85f));
-	m_pRenderTarget->DrawText(szSliderText, (UINT32)wcslen(szSliderText), m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	float sliderLeft = 14.0f;
-	float sliderRight = width - 14.0f;
-	float sliderW = sliderRight - sliderLeft;
-	D2D1_RECT_F trackRectO = D2D1::RectF(sliderLeft, y + 3.0f, sliderRight, y + 9.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.2f, 0.2f, 0.22f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackRectO, 3.0f, 3.0f), m_pBrush);
-
-	float fillXO = sliderLeft + (m_fOpacity / 100.0f) * sliderW;
-	D2D1_RECT_F fillRectO = D2D1::RectF(sliderLeft, y + 3.0f, fillXO, y + 9.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(fillRectO, 3.0f, 3.0f), m_pBrush);
-
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(fillXO, y + 6.0f), 7.0f, 7.0f), m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(fillXO, y + 6.0f), 7.0f, 7.0f), m_pBrush, 1.5f);
-	y += 26.0f;
-
-	// 요구사항 3: 채움을 선택하면 선굵기와 선 종류 아이콘이 안나오게 함!
-	// 선(Stroke)을 선택했을 때만 선 굵기 및 선 종류 아이콘 컨트롤 노출
-	if (!isFillActive)
-	{
-		// 7. 선 굵기(Stroke Width) 슬라이더 (0.5px ~ 20.0px)
-		wchar_t szWidthText[64];
-		swprintf_s(szWidthText, L"● 선 굵기 (Stroke Width): %.1f px", m_fStrokeWidth);
-		m_pBrush->SetColor(D2D1::ColorF(0.85f, 0.85f, 0.85f));
-		m_pRenderTarget->DrawText(szWidthText, (UINT32)wcslen(szWidthText), m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-		y += 20.0f;
-
-		D2D1_RECT_F trackRectW = D2D1::RectF(sliderLeft, y + 3.0f, sliderRight, y + 9.0f);
-		m_pBrush->SetColor(D2D1::ColorF(0.2f, 0.2f, 0.22f));
-		m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackRectW, 3.0f, 3.0f), m_pBrush);
-
-		float wNorm = (m_fStrokeWidth - 0.5f) / 19.5f;
-		if (wNorm < 0.0f) wNorm = 0.0f;
-		if (wNorm > 1.0f) wNorm = 1.0f;
-		float fillXW = sliderLeft + wNorm * sliderW;
-		D2D1_RECT_F fillRectW = D2D1::RectF(sliderLeft, y + 3.0f, fillXW, y + 9.0f);
-		m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-		m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(fillRectW, 3.0f, 3.0f), m_pBrush);
-
-		m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-		m_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(fillXW, y + 6.0f), 7.0f, 7.0f), m_pBrush);
-		m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-		m_pRenderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(fillXW, y + 6.0f), 7.0f, 7.0f), m_pBrush, 1.5f);
-		y += 26.0f;
-
-		// 8. 선 대시 스타일 버튼 4구 (텍스트가 아닌 실제 벡터 선 모양 아이콘: —, - -, ···, — · —)
-		float btnW = (width - 28.0f) / 4.0f;
-		for (int i = 0; i < 4; ++i)
-		{
-			D2D1_RECT_F btnRect = D2D1::RectF(14.0f + i * btnW, y, 14.0f + (i + 1) * btnW - 3.0f, y + 26.0f);
-			bool isSel = (m_selectedDash == i);
-
-			// 버튼 배경
-			m_pBrush->SetColor(isSel ? D2D1::ColorF(0.18f, 0.52f, 0.95f) : D2D1::ColorF(0.20f, 0.20f, 0.23f));
-			m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(btnRect, 3.0f, 3.0f), m_pBrush);
-			m_pBrush->SetColor(isSel ? D2D1::ColorF(0.3f, 0.7f, 1.0f) : D2D1::ColorF(0.35f, 0.35f, 0.38f));
-			m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(btnRect, 3.0f, 3.0f), m_pBrush, isSel ? 1.5f : 1.0f);
-
-			// 버튼 내부 선 아이콘 렌더링
-			float lineY = (btnRect.top + btnRect.bottom) * 0.5f;
-			float lLeft = btnRect.left + 6.0f;
-			float lRight = btnRect.right - 6.0f;
-			float lWidth = lRight - lLeft;
-
-			m_pBrush->SetColor(isSel ? D2D1::ColorF(1.0f, 1.0f, 1.0f) : D2D1::ColorF(0.75f, 0.75f, 0.78f));
-
-			if (i == 0) // 실선: —
-			{
-				m_pRenderTarget->DrawLine(D2D1::Point2F(lLeft, lineY), D2D1::Point2F(lRight, lineY), m_pBrush, 2.0f);
-			}
-			else if (i == 1) // 대시선: - - -
-			{
-				float seg = lWidth / 5.0f;
-				m_pRenderTarget->DrawLine(D2D1::Point2F(lLeft, lineY), D2D1::Point2F(lLeft + seg * 1.5f, lineY), m_pBrush, 2.0f);
-				m_pRenderTarget->DrawLine(D2D1::Point2F(lLeft + seg * 2.5f, lineY), D2D1::Point2F(lLeft + seg * 4.0f, lineY), m_pBrush, 2.0f);
-			}
-			else if (i == 2) // 점선: · · · ·
-			{
-				float step = lWidth / 4.0f;
-				for (int d = 0; d < 4; ++d)
-				{
-					m_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(lLeft + d * step + 2.0f, lineY), 1.5f, 1.5f), m_pBrush);
-				}
-			}
-			else if (i == 3) // 대시점선: — · —
-			{
-				float seg = lWidth / 7.0f;
-				m_pRenderTarget->DrawLine(D2D1::Point2F(lLeft, lineY), D2D1::Point2F(lLeft + seg * 2.2f, lineY), m_pBrush, 2.0f);
-				m_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(lLeft + seg * 3.5f, lineY), 1.5f, 1.5f), m_pBrush);
-				m_pRenderTarget->DrawLine(D2D1::Point2F(lLeft + seg * 4.8f, lineY), D2D1::Point2F(lRight, lineY), m_pBrush, 2.0f);
-			}
-		}
-	}
-}
-
-// -------------------------------------------------------------
-// [2. Dear ImGui 탭] 블렌더 / 언리얼 엔진 / 게임 툴 스타일
-// -------------------------------------------------------------
-void CD2DPropertyView::DrawImGuiContent(float width, float y)
-{
-	// 배지 / 설명
-	m_pBrush->SetColor(D2D1::ColorF(0.95f, 0.55f, 0.15f));
-	m_pRenderTarget->DrawText(L"[Dear ImGui 스타일] Dark 테마 & 슬림 UI", 26, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-	m_pBrush->SetColor(D2D1::ColorF(0.65f, 0.65f, 0.68f));
-	m_pRenderTarget->DrawText(L"특징: 컴팩트한 사각 위젯, ColorEdit4, SliderFloat", 29, m_pTextFormatSmall, D2D1::RectF(14.0f, y, width - 14.0f, y + 16.0f), m_pBrush);
-	y += 22.0f;
-
-	m_pBrush->SetColor(D2D1::ColorF(0.28f, 0.28f, 0.30f));
-	m_pRenderTarget->DrawLine(D2D1::Point2F(14.0f, y), D2D1::Point2F(width - 14.0f, y), m_pBrush, 1.0f);
-	y += 12.0f;
-
-	// 1. ImGui의 ColorEdit4 버튼 & 사각 컬러 팔레트
-	m_pBrush->SetColor(D2D1::ColorF(0.88f, 0.88f, 0.88f));
-	m_pRenderTarget->DrawText(L"● ImGui::ColorPicker3 (RGB / Hue 휠)", 26, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	// ImGui 사각 컬러 스와치 & RGB 값 입력 박스
-	D2D1_RECT_F imColorBtn = D2D1::RectF(16.0f, y, 46.0f, y + 26.0f);
-	m_pBrush->SetColor(HSLtoRGB(m_fHue, 1.0f, 0.5f));
-	m_pRenderTarget->FillRectangle(imColorBtn, m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.45f, 0.45f, 0.48f));
-	m_pRenderTarget->DrawRectangle(imColorBtn, m_pBrush, 1.0f);
-
-	D2D1_RECT_F imColorInput = D2D1::RectF(52.0f, y, width - 16.0f, y + 26.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.12f, 0.12f, 0.14f));
-	m_pRenderTarget->FillRectangle(imColorInput, m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.35f, 0.35f, 0.38f));
-	m_pRenderTarget->DrawRectangle(imColorInput, m_pBrush, 1.0f);
-
-	wchar_t szRgbText[64];
-	D2D1_COLOR_F rgb = HSLtoRGB(m_fHue, 1.0f, 0.5f);
-	swprintf_s(szRgbText, L"R:%.2f  G:%.2f  B:%.2f", rgb.r, rgb.g, rgb.b);
-	m_pBrush->SetColor(D2D1::ColorF(0.85f, 0.85f, 0.85f));
-	m_pRenderTarget->DrawText(szRgbText, (UINT32)wcslen(szRgbText), m_pTextFormatSmall, D2D1::RectF(58.0f, y + 4.0f, width - 20.0f, y + 24.0f), m_pBrush);
-	y += 32.0f;
-
-	// ImGui 스타일 컴팩트 컬러 바 (가로 Hue 바)
-	float hueBarW = width - 32.0f;
-	for (int i = 0; i < 30; ++i)
-	{
-		float segX1 = 16.0f + (i / 30.0f) * hueBarW;
-		float segX2 = 16.0f + ((i + 1) / 30.0f) * hueBarW;
-		m_pBrush->SetColor(HSLtoRGB(i * 12.0f, 1.0f, 0.5f));
-		m_pRenderTarget->FillRectangle(D2D1::RectF(segX1, y, segX2, y + 14.0f), m_pBrush);
-	}
-	m_pBrush->SetColor(D2D1::ColorF(0.3f, 0.3f, 0.3f));
-	m_pRenderTarget->DrawRectangle(D2D1::RectF(16.0f, y, width - 16.0f, y + 14.0f), m_pBrush, 1.0f);
-	// 선택 포인터
-	float selX = 16.0f + (m_fHue / 360.0f) * hueBarW;
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->DrawRectangle(D2D1::RectF(selX - 2.0f, y - 2.0f, selX + 2.0f, y + 16.0f), m_pBrush, 2.0f);
-	y += 26.0f;
-
-	// 2. ImGui 스타일 사각 체크박스
-	m_pBrush->SetColor(D2D1::ColorF(0.88f, 0.88f, 0.88f));
-	m_pRenderTarget->DrawText(L"● ImGui::Checkbox (클릭 토글)", 19, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	auto drawImChk = [&](float topY, bool checked, const wchar_t* label)
-	{
-		D2D1_RECT_F box = D2D1::RectF(16.0f, topY, 30.0f, topY + 14.0f);
-		m_pBrush->SetColor(D2D1::ColorF(0.16f, 0.16f, 0.18f));
-		m_pRenderTarget->FillRectangle(box, m_pBrush);
-		m_pBrush->SetColor(D2D1::ColorF(0.4f, 0.4f, 0.45f));
-		m_pRenderTarget->DrawRectangle(box, m_pBrush, 1.0f);
-
-		if (checked)
-		{
-			// ImGui 특유의 X자 또는 사각 체크마크
-			m_pBrush->SetColor(D2D1::ColorF(0.92f, 0.45f, 0.12f)); // 오렌지 테마
-			m_pRenderTarget->FillRectangle(D2D1::RectF(19.0f, topY + 3.0f, 27.0f, topY + 11.0f), m_pBrush);
-		}
-		m_pBrush->SetColor(D2D1::ColorF(0.85f, 0.85f, 0.85f));
-		m_pRenderTarget->DrawText(label, (UINT32)wcslen(label), m_pTextFormat, D2D1::RectF(36.0f, topY - 1.0f, width - 20.0f, topY + 16.0f), m_pBrush);
-	};
-
-	drawImChk(y, m_bSnapAll, L"ImGui::SnapAll"); y += 20.0f;
-	drawImChk(y, m_bSnapBBox, L"ImGui::SnapBBox"); y += 20.0f;
-	drawImChk(y, m_bSnapNode, L"ImGui::SnapNode"); y += 24.0f;
-
-	// 3. ImGui::SliderFloat (내부에 숫자 텍스트가 들어가는 일체형 바)
-	m_pBrush->SetColor(D2D1::ColorF(0.88f, 0.88f, 0.88f));
-	m_pRenderTarget->DrawText(L"● ImGui::SliderFloat (드래그 조절)", 22, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	D2D1_RECT_F imSlider = D2D1::RectF(16.0f, y, width - 16.0f, y + 22.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.14f, 0.14f, 0.16f));
-	m_pRenderTarget->FillRectangle(imSlider, m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.35f, 0.35f, 0.38f));
-	m_pRenderTarget->DrawRectangle(imSlider, m_pBrush, 1.0f);
-
-	float fillW = (m_fOpacity / 100.0f) * (width - 32.0f);
-	D2D1_RECT_F imFill = D2D1::RectF(16.0f, y, 16.0f + fillW, y + 22.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.92f, 0.45f, 0.12f, 0.75f)); // ImGui 오렌지 그랩
-	m_pRenderTarget->FillRectangle(imFill, m_pBrush);
-
-	wchar_t szImSliderText[64];
-	swprintf_s(szImSliderText, L"Opacity: %.1f%%", m_fOpacity);
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->DrawText(szImSliderText, (UINT32)wcslen(szImSliderText), m_pTextFormatBold, imSlider, m_pBrush);
-	y += 32.0f;
-
-	// 4. ImGui::Combo 드롭다운 스타일 버튼
-	m_pBrush->SetColor(D2D1::ColorF(0.88f, 0.88f, 0.88f));
-	m_pRenderTarget->DrawText(L"● ImGui::Combo (드롭다운)", 16, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	const wchar_t* blendModes[] = { L"Normal", L"Multiply", L"Screen", L"Overlay" };
-	D2D1_RECT_F comboRect = D2D1::RectF(16.0f, y, width - 16.0f, y + 22.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.20f, 0.20f, 0.23f));
-	m_pRenderTarget->FillRectangle(comboRect, m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.40f, 0.40f, 0.44f));
-	m_pRenderTarget->DrawRectangle(comboRect, m_pBrush, 1.0f);
-
-	m_pBrush->SetColor(D2D1::ColorF(0.9f, 0.9f, 0.9f));
-	m_pRenderTarget->DrawText(blendModes[m_selectedBlend], (UINT32)wcslen(blendModes[m_selectedBlend]), m_pTextFormat, D2D1::RectF(24.0f, y + 2.0f, width - 40.0f, y + 22.0f), m_pBrush);
-	// 화살표 v
-	m_pBrush->SetColor(D2D1::ColorF(0.6f, 0.6f, 0.6f));
-	m_pRenderTarget->DrawText(L"▼", 1, m_pTextFormatSmall, D2D1::RectF(width - 32.0f, y + 3.0f, width - 16.0f, y + 22.0f), m_pBrush);
-}
-
-// -------------------------------------------------------------
-// [3. MFC Classic 탭] 윈도우 기본 대화상자 컨트롤 스타일
-// -------------------------------------------------------------
-void CD2DPropertyView::DrawMFCContent(float width, float y)
-{
-	// 배지 / 설명
-	m_pBrush->SetColor(D2D1::ColorF(0.3f, 0.7f, 0.9f));
-	m_pRenderTarget->DrawText(L"[MFC Classic 스타일] Windows 공용 컨트롤", 28, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-	m_pBrush->SetColor(D2D1::ColorF(0.65f, 0.65f, 0.68f));
-	m_pRenderTarget->DrawText(L"특징: 친숙한 Win32 OS 표준 대화상자 & 프로퍼티 그리드", 32, m_pTextFormatSmall, D2D1::RectF(14.0f, y, width - 14.0f, y + 16.0f), m_pBrush);
-	y += 22.0f;
-
-	m_pBrush->SetColor(D2D1::ColorF(0.28f, 0.28f, 0.30f));
-	m_pRenderTarget->DrawLine(D2D1::Point2F(14.0f, y), D2D1::Point2F(width - 14.0f, y), m_pBrush, 1.0f);
-	y += 12.0f;
-
-	// 1. MFC CColorDialog 스타일 컬러 박스 & [기타...] 푸시버튼
-	m_pBrush->SetColor(D2D1::ColorF(0.88f, 0.88f, 0.88f));
-	m_pRenderTarget->DrawText(L"● CColorDialog / CMFCColorButton", 23, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	D2D1_RECT_F mfcColorBtn = D2D1::RectF(16.0f, y, width - 90.0f, y + 24.0f);
-	m_pBrush->SetColor(HSLtoRGB(m_fHue, 1.0f, 0.5f));
-	m_pRenderTarget->FillRectangle(mfcColorBtn, m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.4f, 0.4f, 0.4f));
-	m_pRenderTarget->DrawRectangle(mfcColorBtn, m_pBrush, 1.0f);
-
-	D2D1_RECT_F mfcBtnOther = D2D1::RectF(width - 85.0f, y, width - 16.0f, y + 24.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.25f, 0.25f, 0.28f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(mfcBtnOther, 2.0f, 2.0f), m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.45f, 0.45f, 0.48f));
-	m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(mfcBtnOther, 2.0f, 2.0f), m_pBrush, 1.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.9f, 0.9f, 0.9f));
-	m_pRenderTarget->DrawText(L"선택...", 3, m_pTextFormatCenter, mfcBtnOther, m_pBrush);
-	y += 32.0f;
-
-	// 2. MFC BS_AUTOCHECKBOX 스타일 체크박스 (흰 배경에 파란 V체크)
-	m_pBrush->SetColor(D2D1::ColorF(0.88f, 0.88f, 0.88f));
-	m_pRenderTarget->DrawText(L"● CButton (BS_AUTOCHECKBOX)", 20, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	auto drawMfcChk = [&](float topY, bool checked, const wchar_t* label)
-	{
-		D2D1_RECT_F box = D2D1::RectF(18.0f, topY, 31.0f, topY + 13.0f);
-		m_pBrush->SetColor(D2D1::ColorF(0.95f, 0.95f, 0.95f)); // 윈도우 스타일 흰색 박스
-		m_pRenderTarget->FillRectangle(box, m_pBrush);
-		m_pBrush->SetColor(D2D1::ColorF(0.35f, 0.35f, 0.38f));
-		m_pRenderTarget->DrawRectangle(box, m_pBrush, 1.0f);
-
-		if (checked)
-		{
-			m_pBrush->SetColor(D2D1::ColorF(0.0f, 0.45f, 0.85f));
-			m_pRenderTarget->DrawLine(D2D1::Point2F(20.5f, topY + 6.5f), D2D1::Point2F(23.5f, topY + 10.0f), m_pBrush, 2.0f);
-			m_pRenderTarget->DrawLine(D2D1::Point2F(23.5f, topY + 10.0f), D2D1::Point2F(28.5f, topY + 3.5f), m_pBrush, 2.0f);
-		}
-		m_pBrush->SetColor(D2D1::ColorF(0.85f, 0.85f, 0.85f));
-		m_pRenderTarget->DrawText(label, (UINT32)wcslen(label), m_pTextFormat, D2D1::RectF(38.0f, topY - 1.0f, width - 20.0f, topY + 16.0f), m_pBrush);
-	};
-
-	drawMfcChk(y, m_bSnapAll, L"스냅 사용 (&S)"); y += 20.0f;
-	drawMfcChk(y, m_bSnapBBox, L"경계 상자 맞춤 (&B)"); y += 20.0f;
-	drawMfcChk(y, m_bSnapNode, L"노드 맞춤 (&N)"); y += 24.0f;
-
-	// 3. MFC CSliderCtrl (트랙바 + 눈금 스타일)
-	wchar_t szMfcSlider[64];
-	swprintf_s(szMfcSlider, L"● CSliderCtrl (위치: %d)", (int)m_fOpacity);
-	m_pBrush->SetColor(D2D1::ColorF(0.88f, 0.88f, 0.88f));
-	m_pRenderTarget->DrawText(szMfcSlider, (UINT32)wcslen(szMfcSlider), m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	// 트랙바 선
-	float sLeft = 20.0f;
-	float sRight = width - 20.0f;
-	m_pBrush->SetColor(D2D1::ColorF(0.4f, 0.4f, 0.42f));
-	m_pRenderTarget->DrawLine(D2D1::Point2F(sLeft, y + 8.0f), D2D1::Point2F(sRight, y + 8.0f), m_pBrush, 2.0f);
-
-	// 눈금 5개
-	for (int i = 0; i <= 4; ++i)
-	{
-		float tickX = sLeft + (i / 4.0f) * (sRight - sLeft);
-		m_pRenderTarget->DrawLine(D2D1::Point2F(tickX, y + 12.0f), D2D1::Point2F(tickX, y + 16.0f), m_pBrush, 1.0f);
-	}
-
-	// 윈도우 스타일 삼각 썸
-	float thumbX = sLeft + (m_fOpacity / 100.0f) * (sRight - sLeft);
-	D2D1_RECT_F thumbRect = D2D1::RectF(thumbX - 5.0f, y + 1.0f, thumbX + 5.0f, y + 14.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.8f, 0.8f, 0.82f));
-	m_pRenderTarget->FillRectangle(thumbRect, m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.3f, 0.3f, 0.32f));
-	m_pRenderTarget->DrawRectangle(thumbRect, m_pBrush, 1.0f);
-	y += 28.0f;
-
-	// 4. MFC CComboBox 스타일
-	m_pBrush->SetColor(D2D1::ColorF(0.88f, 0.88f, 0.88f));
-	m_pRenderTarget->DrawText(L"● CComboBox (CBS_DROPDOWNLIST)", 22, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	const wchar_t* mfcModes[] = { L"정상 (Normal)", L"곱하기 (Multiply)", L"스크린 (Screen)", L"오버레이 (Overlay)" };
-	D2D1_RECT_F mfcCombo = D2D1::RectF(16.0f, y, width - 16.0f, y + 24.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.95f, 0.95f, 0.95f));
-	m_pRenderTarget->FillRectangle(mfcCombo, m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.45f, 0.45f, 0.48f));
-	m_pRenderTarget->DrawRectangle(mfcCombo, m_pBrush, 1.0f);
-
-	m_pBrush->SetColor(D2D1::ColorF(0.1f, 0.1f, 0.1f)); // 윈도우 기본 콤보 텍스트 (어두운 글자)
-	m_pRenderTarget->DrawText(mfcModes[m_selectedBlend], (UINT32)wcslen(mfcModes[m_selectedBlend]), m_pTextFormat, D2D1::RectF(24.0f, y + 3.0f, width - 40.0f, y + 24.0f), m_pBrush);
-
-	// 드롭다운 버튼 영역
-	D2D1_RECT_F dropBtn = D2D1::RectF(width - 36.0f, y, width - 16.0f, y + 24.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.88f, 0.88f, 0.90f));
-	m_pRenderTarget->FillRectangle(dropBtn, m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f));
-	m_pRenderTarget->DrawRectangle(dropBtn, m_pBrush, 1.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.2f, 0.2f, 0.2f));
-	m_pRenderTarget->DrawText(L"▼", 1, m_pTextFormatSmall, dropBtn, m_pBrush);
-}
-
-// -------------------------------------------------------------
-// [캔버스 설정 탭] Inkscape 스타일 Direct2D 커스텀 설정 뷰
-// -------------------------------------------------------------
-void CD2DPropertyView::DrawCanvasContent(float width, float y)
-{
-	GridRenderer& grid = GetApp()->GetGrid();
-	RulerRenderer& ruler = GetApp()->GetRuler();
-
-	// 1. 섹션 헤더: "격자 및 캔버스 설정"
-	m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-	m_pRenderTarget->DrawText(L"■ 격자 및 캔버스 설정", 13, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 20.0f), m_pBrush);
-	y += 24.0f;
-
-	// 2. 3개 토글 스위치 버튼: [그리드 표시], [그리드 스냅], [눈금자 표시]
-	struct ToggleBtn {
-		const wchar_t* label;
-		bool state;
-	} toggles[3] = {
-		{ L"격자 표시", grid.enabled },
-		{ L"격자 스냅", grid.snapToGrid },
-		{ L"눈금자 표시", ruler.enabled }
-	};
-
-	float btnW = (width - 28.0f - 12.0f) / 3.0f;
-	for (int i = 0; i < 3; ++i)
-	{
-		float bx1 = 14.0f + i * (btnW + 6.0f);
-		float bx2 = bx1 + btnW;
-		D2D1_RECT_F rBtn = D2D1::RectF(bx1, y, bx2, y + 28.0f);
-
-		if (toggles[i].state)
-		{
-			// ON 상태: 액센트 배경
-			m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f, 0.25f));
-			m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rBtn, 4.0f, 4.0f), m_pBrush);
-			m_pBrush->SetColor(D2D1::ColorF(0.25f, 0.65f, 1.0f));
-			m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rBtn, 4.0f, 4.0f), m_pBrush, 1.5f);
-
-			// LED 인디케이터 녹색
-			m_pBrush->SetColor(D2D1::ColorF(0.2f, 0.9f, 0.4f));
-			m_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bx1 + 8.0f, y + 14.0f), 3.0f, 3.0f), m_pBrush);
-
-			m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-			m_pRenderTarget->DrawText(toggles[i].label, (UINT32)wcslen(toggles[i].label), m_pTextFormatSmall,
-				D2D1::RectF(bx1 + 14.0f, y + 5.0f, bx2 - 2.0f, y + 24.0f), m_pBrush);
-		}
-		else
-		{
-			// OFF 상태: 짙은 회색 배경
-			m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.18f, 0.22f));
-			m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rBtn, 4.0f, 4.0f), m_pBrush);
-			m_pBrush->SetColor(D2D1::ColorF(0.32f, 0.32f, 0.36f));
-			m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rBtn, 4.0f, 4.0f), m_pBrush, 1.0f);
-
-			// LED 인디케이터 오프(회색)
-			m_pBrush->SetColor(D2D1::ColorF(0.45f, 0.45f, 0.50f));
-			m_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(bx1 + 8.0f, y + 14.0f), 3.0f, 3.0f), m_pBrush);
-
-			m_pBrush->SetColor(D2D1::ColorF(0.6f, 0.6f, 0.65f));
-			m_pRenderTarget->DrawText(toggles[i].label, (UINT32)wcslen(toggles[i].label), m_pTextFormatSmall,
-				D2D1::RectF(bx1 + 14.0f, y + 5.0f, bx2 - 2.0f, y + 24.0f), m_pBrush);
-		}
-	}
-	y += 36.0f;
-
-	// 3. 측정 단위 선택 세그먼트 (px, mm, cm, in, rem)
-	m_pBrush->SetColor(D2D1::ColorF(0.85f, 0.85f, 0.88f));
-	m_pRenderTarget->DrawText(L"● 측정 단위 (Unit)", 13, m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	const wchar_t* unitLabels[] = { L"px/pt", L"mm", L"cm", L"in", L"rem" };
-	float unitBtnW = (width - 28.0f - 16.0f) / 5.0f;
-	int curUnitIdx = static_cast<int>(grid.unit);
-
-	for (int i = 0; i < 5; ++i)
-	{
-		float ux1 = 14.0f + i * (unitBtnW + 4.0f);
-		float ux2 = ux1 + unitBtnW;
-		D2D1_RECT_F rUnit = D2D1::RectF(ux1, y, ux2, y + 24.0f);
-
-		bool isSelected = (curUnitIdx == i);
-		if (isSelected)
-		{
-			m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-			m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rUnit, 3.0f, 3.0f), m_pBrush);
-			m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-			m_pRenderTarget->DrawText(unitLabels[i], (UINT32)wcslen(unitLabels[i]), m_pTextFormatCenter, rUnit, m_pBrush);
-		}
-		else
-		{
-			m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.18f, 0.22f));
-			m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rUnit, 3.0f, 3.0f), m_pBrush);
-			m_pBrush->SetColor(D2D1::ColorF(0.32f, 0.32f, 0.36f));
-			m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(rUnit, 3.0f, 3.0f), m_pBrush, 1.0f);
-			m_pBrush->SetColor(D2D1::ColorF(0.70f, 0.70f, 0.75f));
-			m_pRenderTarget->DrawText(unitLabels[i], (UINT32)wcslen(unitLabels[i]), m_pTextFormatCenter, rUnit, m_pBrush);
-		}
-	}
-	y += 32.0f;
-
-	// 4. 격자 간격 슬라이더 (5 ~ 100 stepInUnit)
-	wchar_t szStepText[64];
-	swprintf_s(szStepText, L"● 그리드 간격: %.1f %s", grid.stepInUnit, GetCanvasUnitSuffix(grid.unit));
-	m_pBrush->SetColor(D2D1::ColorF(0.85f, 0.85f, 0.88f));
-	m_pRenderTarget->DrawText(szStepText, (UINT32)wcslen(szStepText), m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	float sliderLeft = 14.0f;
-	float sliderRight = width - 14.0f;
-	float sliderW = sliderRight - sliderLeft;
-
-	// 슬라이더 배경 트랙
-	D2D1_RECT_F trackStep = D2D1::RectF(sliderLeft, y + 6.0f, sliderRight, y + 10.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.20f, 0.20f, 0.24f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackStep, 2.0f, 2.0f), m_pBrush);
-
-	// 슬라이더 채움 트랙
-	float fracStep = (grid.stepInUnit - 5.0f) / 95.0f;
-	if (fracStep < 0.0f) fracStep = 0.0f;
-	if (fracStep > 1.0f) fracStep = 1.0f;
-	float thumbStepX = sliderLeft + fracStep * sliderW;
-
-	D2D1_RECT_F fillStep = D2D1::RectF(sliderLeft, y + 6.0f, thumbStepX, y + 10.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(fillStep, 2.0f, 2.0f), m_pBrush);
-
-	// 썸
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(thumbStepX, y + 8.0f), 7.0f, 7.0f), m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(thumbStepX, y + 8.0f), 7.0f, 7.0f), m_pBrush, 1.5f);
-	y += 24.0f;
-
-	// 5. 주 격자선 배율 슬라이더 (2 ~ 20)
-	wchar_t szMajorText[64];
-	swprintf_s(szMajorText, L"● 주 격자선 배율: %d칸마다 (LOD 최소: %.0fpx)", grid.majorEvery, grid.minStepPx);
-	m_pBrush->SetColor(D2D1::ColorF(0.85f, 0.85f, 0.88f));
-	m_pRenderTarget->DrawText(szMajorText, (UINT32)wcslen(szMajorText), m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	D2D1_RECT_F trackMajor = D2D1::RectF(sliderLeft, y + 6.0f, sliderRight, y + 10.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.20f, 0.20f, 0.24f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackMajor, 2.0f, 2.0f), m_pBrush);
-
-	float fracMajor = (static_cast<float>(grid.majorEvery) - 2.0f) / 18.0f;
-	if (fracMajor < 0.0f) fracMajor = 0.0f;
-	if (fracMajor > 1.0f) fracMajor = 1.0f;
-	float thumbMajorX = sliderLeft + fracMajor * sliderW;
-
-	D2D1_RECT_F fillMajor = D2D1::RectF(sliderLeft, y + 6.0f, thumbMajorX, y + 10.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.95f, 0.45f, 0.18f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(fillMajor, 2.0f, 2.0f), m_pBrush);
-
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(thumbMajorX, y + 8.0f), 7.0f, 7.0f), m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.95f, 0.45f, 0.18f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(thumbMajorX, y + 8.0f), 7.0f, 7.0f), m_pBrush, 1.5f);
-	y += 28.0f;
-
-	// 6. 격자 색상 설정 탭: [보조 격자선 색상] vs [주 격자선 색상]
-	float tabHalfW = (width - 28.0f) * 0.5f;
-	D2D1_RECT_F rTabMinor = D2D1::RectF(14.0f, y, 14.0f + tabHalfW - 2.0f, y + 26.0f);
-	D2D1_RECT_F rTabMajor = D2D1::RectF(14.0f + tabHalfW + 2.0f, y, width - 14.0f, y + 26.0f);
-
-	bool isMinorActive = (m_canvasColorTarget == 0);
-
-	// 보조선 탭
-	if (isMinorActive)
-	{
-		m_pBrush->SetColor(D2D1::ColorF(0.22f, 0.22f, 0.28f));
-		m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rTabMinor, 4.0f, 4.0f), m_pBrush);
-		m_pBrush->SetColor(D2D1::ColorF(0.2f, 0.6f, 1.0f));
-		m_pRenderTarget->DrawLine(D2D1::Point2F(rTabMinor.left + 6.0f, rTabMinor.bottom - 2.0f),
-			D2D1::Point2F(rTabMinor.right - 6.0f, rTabMinor.bottom - 2.0f), m_pBrush, 2.5f);
-		m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-	}
-	else
-	{
-		m_pBrush->SetColor(D2D1::ColorF(0.15f, 0.15f, 0.18f));
-		m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rTabMinor, 4.0f, 4.0f), m_pBrush);
-		m_pBrush->SetColor(D2D1::ColorF(0.55f, 0.55f, 0.60f));
-	}
-	m_pRenderTarget->DrawText(L"보조선 색상", 6, m_pTextFormatCenter, rTabMinor, m_pBrush);
-
-	// 보조선 색상 미리보기 작은 칩
-	m_pBrush->SetColor(grid.minor);
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(rTabMinor.left + 6.0f, rTabMinor.top + 6.0f, rTabMinor.left + 20.0f, rTabMinor.bottom - 6.0f), 2.0f, 2.0f), m_pBrush);
-
-	// 주선 탭
-	if (!isMinorActive)
-	{
-		m_pBrush->SetColor(D2D1::ColorF(0.22f, 0.22f, 0.28f));
-		m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rTabMajor, 4.0f, 4.0f), m_pBrush);
-		m_pBrush->SetColor(D2D1::ColorF(0.95f, 0.45f, 0.18f));
-		m_pRenderTarget->DrawLine(D2D1::Point2F(rTabMajor.left + 6.0f, rTabMajor.bottom - 2.0f),
-			D2D1::Point2F(rTabMajor.right - 6.0f, rTabMajor.bottom - 2.0f), m_pBrush, 2.5f);
-		m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-	}
-	else
-	{
-		m_pBrush->SetColor(D2D1::ColorF(0.15f, 0.15f, 0.18f));
-		m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(rTabMajor, 4.0f, 4.0f), m_pBrush);
-		m_pBrush->SetColor(D2D1::ColorF(0.55f, 0.55f, 0.60f));
-	}
-	m_pRenderTarget->DrawText(L"주선 색상", 5, m_pTextFormatCenter, rTabMajor, m_pBrush);
-
-	// 주선 색상 미리보기 작은 칩
-	m_pBrush->SetColor(grid.major);
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(rTabMajor.left + 6.0f, rTabMajor.top + 6.0f, rTabMajor.left + 20.0f, rTabMajor.bottom - 6.0f), 2.0f, 2.0f), m_pBrush);
-
-	y += 34.0f;
-
-	// 7. 대형 컬러 휠 (보조선 또는 주선 색상 조절)
-	float wheelRadius = max(60.0f, (width - 24.0f) * 0.5f);
-	D2D1_POINT_2F wheelCenter = D2D1::Point2F(width * 0.5f, y + wheelRadius);
-	float activeHue = isMinorActive ? m_fMinorHue : m_fMajorHue;
-	float activeSat = isMinorActive ? m_fMinorSat : m_fMajorSat;
-	float activeLight = isMinorActive ? m_fMinorLight : m_fMajorLight;
-	float ringThickness = 44.0f; // 기존(22.0f)의 2배 두께
-	DrawColorWheel(wheelCenter, wheelRadius, wheelRadius - ringThickness, activeHue, activeSat, activeLight);
-	y += wheelRadius * 2.0f + 14.0f;
-
-	// 8. 현재 선택된 색상 와이드 바 프리뷰
-	D2D1_RECT_F colorBar = D2D1::RectF(14.0f, y, width - 14.0f, y + 20.0f);
-	m_pBrush->SetColor(isMinorActive ? grid.minor : grid.major);
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(colorBar, 3.0f, 3.0f), m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f));
-	m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(colorBar, 3.0f, 3.0f), m_pBrush, 1.0f);
-	y += 26.0f;
-
-	// 9. 그리드선 투명도(Opacity) 슬라이더 (0% ~ 100%)
-	float curAlpha = (isMinorActive ? grid.minor.a : grid.major.a) * 100.0f;
-	wchar_t szGridOpacityText[64];
-	swprintf_s(szGridOpacityText, L"● 그리드 투명도 (Opacity): %.0f%%", curAlpha);
-	m_pBrush->SetColor(D2D1::ColorF(0.85f, 0.85f, 0.88f));
-	m_pRenderTarget->DrawText(szGridOpacityText, (UINT32)wcslen(szGridOpacityText), m_pTextFormatBold, D2D1::RectF(14.0f, y, width - 14.0f, y + 18.0f), m_pBrush);
-	y += 20.0f;
-
-	D2D1_RECT_F trackAlpha = D2D1::RectF(sliderLeft, y + 6.0f, sliderRight, y + 10.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.20f, 0.20f, 0.24f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(trackAlpha, 2.0f, 2.0f), m_pBrush);
-
-	float fracAlpha = curAlpha / 100.0f;
-	if (fracAlpha < 0.0f) fracAlpha = 0.0f;
-	if (fracAlpha > 1.0f) fracAlpha = 1.0f;
-	float thumbAlphaX = sliderLeft + fracAlpha * sliderW;
-
-	D2D1_RECT_F fillAlpha = D2D1::RectF(sliderLeft, y + 6.0f, thumbAlphaX, y + 10.0f);
-	m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-	m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(fillAlpha, 2.0f, 2.0f), m_pBrush);
-
-	m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f));
-	m_pRenderTarget->FillEllipse(D2D1::Ellipse(D2D1::Point2F(thumbAlphaX, y + 8.0f), 7.0f, 7.0f), m_pBrush);
-	m_pBrush->SetColor(D2D1::ColorF(0.18f, 0.52f, 0.95f));
-	m_pRenderTarget->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(thumbAlphaX, y + 8.0f), 7.0f, 7.0f), m_pBrush, 1.5f);
-	y += 24.0f;
+	UpdateLayout(static_cast<float>(cx), static_cast<float>(cy));
+	SafeInvalidate(FALSE);
 }
 
 void CD2DPropertyView::OnPaint()
@@ -1397,20 +1252,15 @@ void CD2DPropertyView::OnPaint()
 	m_pRenderTarget->Clear(D2D1::ColorF(0.12f, 0.12f, 0.14f, 1.0f));
 
 	CRect rc;
-	GetClientRect(&rc);
+	if (GetSafeHwnd()) GetClientRect(&rc);
 	float width = static_cast<float>(rc.Width());
+	float height = static_cast<float>(rc.Height());
+	UpdateLayout(width, height);
 
-	float y = 10.0f;
-
-	if (m_paneMode == MODE_CANVAS)
+	// M2DrawControl 객체 기반 렌더링
+	if (m_pCurrentPanel)
 	{
-		// 캔버스 설정 모드
-		DrawCanvasContent(width, y);
-	}
-	else
-	{
-		// 도형 속성 모드 (Inkscape D2D 커스텀 벡터 UI)
-		DrawD2DContent(width, y);
+		m_pCurrentPanel->Draw(m_pRenderTarget, m_pBrush, m_pDWriteFactory, m_pTextFormatSmall);
 	}
 
 	HRESULT hr = m_pRenderTarget->EndDraw();
@@ -1422,601 +1272,43 @@ void CD2DPropertyView::OnPaint()
 
 void CD2DPropertyView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 {
-	CRect rc;
-	GetClientRect(&rc);
-	float width = static_cast<float>(rc.Width());
+	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
 
-	// -------------------------------------------------------------
-	// 캔버스 설정 모드 (MODE_CANVAS) 상호작용
-	// -------------------------------------------------------------
-	if (m_paneMode == MODE_CANVAS)
+	if (m_pCurrentPanel)
 	{
-		GridRenderer& grid = GetApp()->GetGrid();
-		RulerRenderer& ruler = GetApp()->GetRuler();
-		float y = 10.0f + 24.0f; // 34.0f (헤더 아래)
-
-		// 1. 토글 버튼 3구 (y: 34 ~ 62)
-		float btnW = (width - 28.0f - 12.0f) / 3.0f;
-		if (point.y >= y && point.y <= y + 28.0f)
+		if (m_pCurrentPanel->OnLButtonDown(ptD2D))
 		{
-			for (int i = 0; i < 3; ++i)
-			{
-				float bx1 = 14.0f + i * (btnW + 6.0f);
-				float bx2 = bx1 + btnW;
-				if (point.x >= bx1 && point.x <= bx2)
-				{
-					if (i == 0) grid.enabled = !grid.enabled;
-					else if (i == 1) grid.snapToGrid = !grid.snapToGrid;
-					else if (i == 2) ruler.enabled = !ruler.enabled;
-
-					ApplyCanvasSettings();
-					Invalidate(FALSE);
-					return;
-				}
-			}
-		}
-		y += 36.0f; // 70.0f
-
-		// 2. 측정 단위 세그먼트 (px, mm, cm, in, rem) (y: 70 + 20 = 90 ~ 114)
-		y += 20.0f; // 90.0f
-		if (point.y >= y && point.y <= y + 24.0f)
-		{
-			float unitBtnW = (width - 28.0f - 16.0f) / 5.0f;
-			for (int i = 0; i < 5; ++i)
-			{
-				float ux1 = 14.0f + i * (unitBtnW + 4.0f);
-				float ux2 = ux1 + unitBtnW;
-				if (point.x >= ux1 && point.x <= ux2)
-				{
-					grid.unit = static_cast<CanvasUnit>(i);
-					ApplyCanvasSettings();
-					Invalidate(FALSE);
-					return;
-				}
-			}
-		}
-		y += 32.0f; // 122.0f
-
-		// 3. 그리드 간격 슬라이더 (5 ~ 100) (y: 122 + 20 = 142 ~ 162)
-		y += 20.0f; // 142.0f
-		float sliderLeft = 14.0f;
-		float sliderRight = width - 14.0f;
-		float sliderW = sliderRight - sliderLeft;
-
-		if (point.y >= y - 5.0f && point.y <= y + 20.0f)
-		{
-			m_isDraggingStepSlider = true;
-			float frac = ((float)point.x - sliderLeft) / sliderW;
-			if (frac < 0.0f) frac = 0.0f;
-			if (frac > 1.0f) frac = 1.0f;
-			grid.stepInUnit = 5.0f + frac * 95.0f;
 			SetCapture();
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-			return;
+			SafeInvalidate(FALSE);
 		}
-		y += 24.0f; // 166.0f
-
-		// 4. 주 격자선 배율 슬라이더 (2 ~ 20) (y: 166 + 20 = 186 ~ 206)
-		y += 20.0f; // 186.0f
-		if (point.y >= y - 5.0f && point.y <= y + 20.0f)
-		{
-			m_isDraggingMajorSlider = true;
-			float frac = ((float)point.x - sliderLeft) / sliderW;
-			if (frac < 0.0f) frac = 0.0f;
-			if (frac > 1.0f) frac = 1.0f;
-			grid.majorEvery = 2 + static_cast<int>(std::round(frac * 18.0f));
-			SetCapture();
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-			return;
-		}
-		y += 28.0f; // 214.0f
-
-		// 5. 격자 색상 탭: [보조선 색상] vs [주선 색상] (y: 214 ~ 240)
-		float tabHalfW = (width - 28.0f) * 0.5f;
-		if (point.y >= y && point.y <= y + 26.0f)
-		{
-			if (point.x >= 14.0f && point.x <= 14.0f + tabHalfW)
-			{
-				m_canvasColorTarget = 0; // 보조선
-				Invalidate(FALSE);
-				return;
-			}
-			else if (point.x >= 14.0f + tabHalfW && point.x <= width - 14.0f)
-			{
-				m_canvasColorTarget = 1; // 주선
-				Invalidate(FALSE);
-				return;
-			}
-		}
-		y += 34.0f; // 248.0f
-
-		// 6. Inkscape 대형 컬러휠 클릭 (보조/주 격자선 색상 조절)
-		float wheelRadius = max(60.0f, (width - 24.0f) * 0.5f);
-		D2D1_POINT_2F wheelCenter = D2D1::Point2F(width * 0.5f, y + wheelRadius);
-		float dx = point.x - wheelCenter.x;
-		float dy = point.y - wheelCenter.y;
-		float dist = std::sqrt(dx * dx + dy * dy);
-		float radiusInner = wheelRadius - 44.0f;
-
-		// 6-1. 외곽 Hue 링 클릭 및 드래그 시작
-		if (dist >= radiusInner && dist <= wheelRadius + 8.0f)
-		{
-			m_isDraggingWheel = true;
-			float angle = std::atan2(dy, dx) * (180.0f / 3.14159265f);
-			if (angle < 0.0f) angle += 360.0f;
-
-			if (m_canvasColorTarget == 0)
-			{
-				m_fMinorHue = angle;
-				grid.minor = HSLtoRGB(m_fMinorHue, m_fMinorSat, m_fMinorLight, 0.7f);
-			}
-			else
-			{
-				m_fMajorHue = angle;
-				grid.major = HSLtoRGB(m_fMajorHue, m_fMajorSat, m_fMajorLight, 0.9f);
-			}
-
-			SetCapture();
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-			return;
-		}
-		// 6-2. 내부 삼각형 클릭 및 드래그 시작 (요구사항 1: 세모 안 색상 선택)
-		else if (dist < radiusInner)
-		{
-			m_isDraggingTriangle = true;
-			float activeHue = (m_canvasColorTarget == 0) ? m_fMinorHue : m_fMajorHue;
-			D2D1_POINT_2F ptHue, ptWhite, ptBlack;
-			GetTriangleVertices(wheelCenter, radiusInner, activeHue, ptHue, ptWhite, ptBlack);
-
-			float wA, wB, wC;
-			CalcBarycentric(D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y)), ptHue, ptWhite, ptBlack, wA, wB, wC);
-
-			float sat, light;
-			BarycentricToSL(wA, wB, wC, sat, light);
-
-			if (m_canvasColorTarget == 0)
-			{
-				m_fMinorSat = sat;
-				m_fMinorLight = light;
-				grid.minor = HSLtoRGB(m_fMinorHue, m_fMinorSat, m_fMinorLight, 0.7f);
-			}
-			else
-			{
-				m_fMajorSat = sat;
-				m_fMajorLight = light;
-				grid.major = HSLtoRGB(m_fMajorHue, m_fMajorSat, m_fMajorLight, 0.9f);
-			}
-
-			SetCapture();
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-			return;
-		}
-
-		// 7. 그리드선 투명도(Opacity) 슬라이더 클릭 (y: 248 + wheelRadius*2 + 14 + 26 + 20)
-		y += wheelRadius * 2.0f + 14.0f + 26.0f + 20.0f;
-		if (point.y >= y - 5.0f && point.y <= y + 20.0f)
-		{
-			m_isDraggingCanvasOpacity = true;
-			float frac = ((float)point.x - sliderLeft) / sliderW;
-			if (frac < 0.0f) frac = 0.0f;
-			if (frac > 1.0f) frac = 1.0f;
-
-			if (m_canvasColorTarget == 0)
-			{
-				grid.minor.a = frac;
-			}
-			else
-			{
-				grid.major.a = frac;
-			}
-
-			SetCapture();
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-			return;
-		}
-
-		return;
 	}
-
-	// 도형 속성 컨트롤 상호작용 (D2D Vector UI)
-	float yCur = 10.0f; // 최상단 시작
-	yCur += 22.0f; // 32.0f (도형 이름 헤더 아래)
-
-	// 1. [채움(Fill)] vs [윤곽선(Stroke)] 상단 탭 버튼 클릭 (y: yCur ~ yCur + 26)
-	float halfW = (width - 24.0f) * 0.5f;
-	if (point.y >= yCur && point.y <= yCur + 26.0f)
-	{
-		if (point.x >= 12.0f && point.x <= 12.0f + halfW)
-		{
-			m_colorTarget = 0; // 채움(Fill)
-			m_fOpacity = m_fillColor.a * 100.0f;
-			Invalidate(FALSE);
-			return;
-		}
-			else if (point.x >= 12.0f + halfW && point.x <= width - 12.0f)
-			{
-				m_colorTarget = 1; // 선(Stroke)
-				m_fOpacity = m_strokeColor.a * 100.0f;
-				Invalidate(FALSE);
-				return;
-			}
-		}
-		yCur += 32.0f; // 98.0f
-
-		bool isFillActive = (m_colorTarget == 0);
-
-		// 2. 채움 모드일 때: 5개 모드 버튼 클릭 (None, Solid, Linear, Radial, Pattern)
-		if (isFillActive)
-		{
-			if (point.y >= yCur && point.y <= yCur + 28.0f)
-			{
-				float modeBtnW = 28.0f;
-				float modeSpacing = 6.0f;
-				float startX = 14.0f;
-				for (int i = 0; i < 5; ++i)
-				{
-					float bx1 = startX + i * (modeBtnW + modeSpacing);
-					float bx2 = bx1 + modeBtnW;
-					if (point.x >= bx1 && point.x <= bx2)
-					{
-						m_fillMode = static_cast<FillMode>(i);
-						if (m_fillMode == FILL_NONE)
-						{
-							m_bFillEnabled = false;
-						}
-						else
-						{
-							m_bFillEnabled = true;
-						}
-						ApplyToShape();
-						Invalidate(FALSE);
-						return;
-					}
-				}
-			}
-			yCur += 36.0f;
-		}
-
-		// 3. Inkscape 대형 컬러휠 클릭 및 드래그 시작
-		float wheelRadius = max(60.0f, (width - 24.0f) * 0.5f);
-		D2D1_POINT_2F wheelCenter = D2D1::Point2F(width * 0.5f, yCur + wheelRadius);
-		float dx = point.x - wheelCenter.x;
-		float dy = point.y - wheelCenter.y;
-		float dist = std::sqrt(dx * dx + dy * dy);
-		float radiusInner = wheelRadius - 44.0f;
-
-		// 3-1. 외곽 링 클릭
-		if (dist >= radiusInner && dist <= wheelRadius + 8.0f)
-		{
-			m_isDraggingWheel = true;
-			float angle = std::atan2(dy, dx) * (180.0f / 3.14159265f);
-			if (angle < 0.0f) angle += 360.0f;
-			
-			if (m_colorTarget == 0) // 채움
-			{
-				m_fFillHue = angle;
-				m_fillColor = HSLtoRGB(m_fFillHue, m_fFillSat, m_fFillLight, m_fOpacity / 100.0f);
-			}
-			else // 선
-			{
-				m_fStrokeHue = angle;
-				m_strokeColor = HSLtoRGB(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight, m_fOpacity / 100.0f);
-			}
-			SetCapture();
-			ApplyToShape();
-			Invalidate(FALSE);
-			return;
-		}
-		// 3-2. 내부 삼각형 클릭 (요구사항 1: 세모 안 색상 선택)
-		else if (dist < radiusInner)
-		{
-			m_isDraggingTriangle = true;
-			float activeHue = (m_colorTarget == 0) ? m_fFillHue : m_fStrokeHue;
-			D2D1_POINT_2F ptHue, ptWhite, ptBlack;
-			GetTriangleVertices(wheelCenter, radiusInner, activeHue, ptHue, ptWhite, ptBlack);
-
-			float wA, wB, wC;
-			CalcBarycentric(D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y)), ptHue, ptWhite, ptBlack, wA, wB, wC);
-
-			float sat, light;
-			BarycentricToSL(wA, wB, wC, sat, light);
-
-			if (m_colorTarget == 0) // 채움
-			{
-				m_fFillSat = sat;
-				m_fFillLight = light;
-				m_fillColor = HSLtoRGB(m_fFillHue, m_fFillSat, m_fFillLight, m_fOpacity / 100.0f);
-			}
-			else // 선
-			{
-				m_fStrokeSat = sat;
-				m_fStrokeLight = light;
-				m_strokeColor = HSLtoRGB(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight, m_fOpacity / 100.0f);
-			}
-
-			SetCapture();
-			ApplyToShape();
-			Invalidate(FALSE);
-			return;
-		}
-		yCur += wheelRadius * 2.0f + 14.0f; // 스와치 바 위치
-
-		// 4. 스와치 바
-		yCur += 26.0f;
-
-		// 5. 불투명도(Opacity) 슬라이더 (0% ~ 100%)
-		float sliderLeft = 14.0f;
-		float sliderRight = width - 14.0f;
-		float sliderW = sliderRight - sliderLeft;
-		float opacitySliderY = yCur + 20.0f;
-		if (point.y >= opacitySliderY - 5.0f && point.y <= opacitySliderY + 18.0f)
-		{
-			m_isDraggingOpacitySlider = true;
-			float val = ((float)point.x - sliderLeft) / sliderW;
-			if (val < 0.0f) val = 0.0f;
-			if (val > 1.0f) val = 1.0f;
-			m_fOpacity = val * 100.0f;
-			if (m_colorTarget == 0)
-				m_fillColor = HSLtoRGB(m_fFillHue, 1.0f, 0.5f, m_fOpacity / 100.0f);
-			else
-				m_strokeColor = HSLtoRGB(m_fStrokeHue, 1.0f, 0.5f, m_fOpacity / 100.0f);
-
-			SetCapture();
-			ApplyToShape();
-			Invalidate(FALSE);
-			return;
-		}
-		yCur = opacitySliderY + 26.0f;
-
-		// 6. 선(Stroke) 탭일 때만 선 굵기 및 선 종류 아이콘 버튼 상호작용
-		if (!isFillActive)
-		{
-			// 선 굵기(Stroke Width) 슬라이더 (0.5 ~ 20.0px)
-			float widthSliderY = yCur + 20.0f;
-			if (point.y >= widthSliderY - 5.0f && point.y <= widthSliderY + 18.0f)
-			{
-				m_isDraggingStrokeWidthSlider = true;
-				float frac = ((float)point.x - sliderLeft) / sliderW;
-				if (frac < 0.0f) frac = 0.0f;
-				if (frac > 1.0f) frac = 1.0f;
-				m_fStrokeWidth = 0.5f + frac * 19.5f;
-				SetCapture();
-				ApplyToShape();
-				Invalidate(FALSE);
-				return;
-			}
-			yCur = widthSliderY + 26.0f;
-
-			// 선 스타일 세그먼트 버튼 4구 (실선, 대시선, 점선, 대시점선)
-			if (point.y >= yCur && point.y <= yCur + 28.0f)
-			{
-				float btnW = (width - 28.0f) / 4.0f;
-				int idx = static_cast<int>((point.x - 14.0f) / btnW);
-				if (idx >= 0 && idx < 4)
-				{
-					m_selectedDash = idx;
-					ApplyToShape();
-					Invalidate(FALSE);
-					return;
-				}
-			}
-		}
 }
 
 void CD2DPropertyView::OnMouseMove(UINT /*nFlags*/, CPoint point)
 {
-	CRect rc;
-	GetClientRect(&rc);
-	float width = static_cast<float>(rc.Width());
+	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
 
-	if (m_paneMode == MODE_CANVAS)
+	if (m_pCurrentPanel)
 	{
-		GridRenderer& grid = GetApp()->GetGrid();
-		float yCur = 248.0f;
-		float wheelRadius = max(60.0f, (width - 24.0f) * 0.5f);
-		D2D1_POINT_2F wheelCenter = D2D1::Point2F(width * 0.5f, yCur + wheelRadius);
-		float radiusInner = wheelRadius - 44.0f;
-
-		if (m_isDraggingWheel)
+		if (m_pCurrentPanel->OnMouseMove(ptD2D))
 		{
-			float dx = point.x - wheelCenter.x;
-			float dy = point.y - wheelCenter.y;
-			float angle = std::atan2(dy, dx) * (180.0f / 3.14159265f);
-			if (angle < 0.0f) angle += 360.0f;
-
-			if (m_canvasColorTarget == 0)
-			{
-				m_fMinorHue = angle;
-				grid.minor = HSLtoRGB(m_fMinorHue, m_fMinorSat, m_fMinorLight, 0.7f);
-			}
-			else
-			{
-				m_fMajorHue = angle;
-				grid.major = HSLtoRGB(m_fMajorHue, m_fMajorSat, m_fMajorLight, 0.9f);
-			}
-
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-		}
-		else if (m_isDraggingTriangle)
-		{
-			float activeHue = (m_canvasColorTarget == 0) ? m_fMinorHue : m_fMajorHue;
-			D2D1_POINT_2F ptHue, ptWhite, ptBlack;
-			GetTriangleVertices(wheelCenter, radiusInner, activeHue, ptHue, ptWhite, ptBlack);
-
-			float wA, wB, wC;
-			CalcBarycentric(D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y)), ptHue, ptWhite, ptBlack, wA, wB, wC);
-
-			float sat, light;
-			BarycentricToSL(wA, wB, wC, sat, light);
-
-			if (m_canvasColorTarget == 0)
-			{
-				m_fMinorSat = sat;
-				m_fMinorLight = light;
-				grid.minor = HSLtoRGB(m_fMinorHue, m_fMinorSat, m_fMinorLight, 0.7f);
-			}
-			else
-			{
-				m_fMajorSat = sat;
-				m_fMajorLight = light;
-				grid.major = HSLtoRGB(m_fMajorHue, m_fMajorSat, m_fMajorLight, 0.9f);
-			}
-
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-		}
-		else if (m_isDraggingStepSlider)
-		{
-			float sliderLeft = 14.0f;
-			float sliderRight = width - 14.0f;
-			float frac = ((float)point.x - sliderLeft) / (sliderRight - sliderLeft);
-			if (frac < 0.0f) frac = 0.0f;
-			if (frac > 1.0f) frac = 1.0f;
-			grid.stepInUnit = 5.0f + frac * 95.0f;
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-		}
-		else if (m_isDraggingMajorSlider)
-		{
-			float sliderLeft = 14.0f;
-			float sliderRight = width - 14.0f;
-			float frac = ((float)point.x - sliderLeft) / (sliderRight - sliderLeft);
-			if (frac < 0.0f) frac = 0.0f;
-			if (frac > 1.0f) frac = 1.0f;
-			grid.majorEvery = 2 + static_cast<int>(std::round(frac * 18.0f));
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-		}
-		else if (m_isDraggingCanvasOpacity)
-		{
-			float sliderLeft = 14.0f;
-			float sliderRight = width - 14.0f;
-			float frac = ((float)point.x - sliderLeft) / (sliderRight - sliderLeft);
-			if (frac < 0.0f) frac = 0.0f;
-			if (frac > 1.0f) frac = 1.0f;
-
-			if (m_canvasColorTarget == 0)
-			{
-				grid.minor.a = frac;
-			}
-			else
-			{
-				grid.major.a = frac;
-			}
-
-			ApplyCanvasSettings();
-			Invalidate(FALSE);
-		}
-		return;
-	}
-
-	{
-		float yCur = 10.0f + 22.0f + 32.0f;
-		if (m_colorTarget == 0) // 채움 모드일 때 모드 툴바 36px 추가
-		{
-			yCur += 36.0f;
-		}
-		float wheelRadius = max(60.0f, (width - 24.0f) * 0.5f);
-		D2D1_POINT_2F wheelCenter = D2D1::Point2F(width * 0.5f, yCur + wheelRadius);
-		float radiusInner = wheelRadius - 44.0f;
-
-		if (m_isDraggingWheel)
-		{
-			float dx = point.x - wheelCenter.x;
-			float dy = point.y - wheelCenter.y;
-			float angle = std::atan2(dy, dx) * (180.0f / 3.14159265f);
-			if (angle < 0.0f) angle += 360.0f;
-
-			if (m_colorTarget == 0) // 채움
-			{
-				m_fFillHue = angle;
-				m_fillColor = HSLtoRGB(m_fFillHue, m_fFillSat, m_fFillLight, m_fOpacity / 100.0f);
-			}
-			else // 선
-			{
-				m_fStrokeHue = angle;
-				m_strokeColor = HSLtoRGB(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight, m_fOpacity / 100.0f);
-			}
-			ApplyToShape();
-			Invalidate(FALSE);
-		}
-		else if (m_isDraggingTriangle)
-		{
-			float activeHue = (m_colorTarget == 0) ? m_fFillHue : m_fStrokeHue;
-			D2D1_POINT_2F ptHue, ptWhite, ptBlack;
-			GetTriangleVertices(wheelCenter, radiusInner, activeHue, ptHue, ptWhite, ptBlack);
-
-			float wA, wB, wC;
-			CalcBarycentric(D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y)), ptHue, ptWhite, ptBlack, wA, wB, wC);
-
-			float sat, light;
-			BarycentricToSL(wA, wB, wC, sat, light);
-
-			if (m_colorTarget == 0) // 채움
-			{
-				m_fFillSat = sat;
-				m_fFillLight = light;
-				m_fillColor = HSLtoRGB(m_fFillHue, m_fFillSat, m_fFillLight, m_fOpacity / 100.0f);
-			}
-			else // 선
-			{
-				m_fStrokeSat = sat;
-				m_fStrokeLight = light;
-				m_strokeColor = HSLtoRGB(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight, m_fOpacity / 100.0f);
-			}
-
-			ApplyToShape();
-			Invalidate(FALSE);
-		}
-		else if (m_isDraggingStrokeWidthSlider)
-		{
-			float sliderLeft = 14.0f;
-			float sliderRight = width - 14.0f;
-			float frac = ((float)point.x - sliderLeft) / (sliderRight - sliderLeft);
-			if (frac < 0.0f) frac = 0.0f;
-			if (frac > 1.0f) frac = 1.0f;
-			m_fStrokeWidth = 0.5f + frac * 19.5f;
-			ApplyToShape();
-			Invalidate(FALSE);
-		}
-		else if (m_isDraggingOpacitySlider)
-		{
-			float sliderLeft = 14.0f;
-			float sliderRight = width - 14.0f;
-			float val = ((float)point.x - sliderLeft) / (sliderRight - sliderLeft);
-			if (val < 0.0f) val = 0.0f;
-			if (val > 1.0f) val = 1.0f;
-			m_fOpacity = val * 100.0f;
-			if (m_colorTarget == 0)
-				m_fillColor = HSLtoRGB(m_fFillHue, m_fFillSat, m_fFillLight, m_fOpacity / 100.0f);
-			else
-				m_strokeColor = HSLtoRGB(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight, m_fOpacity / 100.0f);
-
-			ApplyToShape();
-			Invalidate(FALSE);
+			SafeInvalidate(FALSE);
 		}
 	}
 }
 
-void CD2DPropertyView::OnLButtonUp(UINT /*nFlags*/, CPoint /*point*/)
+void CD2DPropertyView::OnLButtonUp(UINT /*nFlags*/, CPoint point)
 {
-	if (m_isDraggingWheel || m_isDraggingTriangle || m_isDraggingOpacitySlider || m_isDraggingStrokeWidthSlider || m_isDraggingSlider ||
-		m_isDraggingStepSlider || m_isDraggingMajorSlider || m_isDraggingCanvasOpacity)
+	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
+
+	if (m_pCurrentPanel)
 	{
-		m_isDraggingWheel = false;
-		m_isDraggingTriangle = false;
-		m_isDraggingOpacitySlider = false;
-		m_isDraggingStrokeWidthSlider = false;
-		m_isDraggingSlider = false;
-		m_isDraggingStepSlider = false;
-		m_isDraggingMajorSlider = false;
-		m_isDraggingCanvasOpacity = false;
+		m_pCurrentPanel->OnLButtonUp(ptD2D);
+	}
+
+	if (GetCapture() == this)
+	{
 		ReleaseCapture();
 	}
+	SafeInvalidate(FALSE);
 }

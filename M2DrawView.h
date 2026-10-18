@@ -1,4 +1,5 @@
-﻿#pragma once
+#pragma once
+#include "SnapManager.h"
 
 class CM2DrawView : public CView
 {
@@ -14,6 +15,7 @@ public:
 public:
 	virtual void OnDraw(CDC* pDC);
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
+	virtual void OnInitialUpdate();
 protected:
 	virtual BOOL OnPreparePrinting(CPrintInfo* pInfo);
 	virtual void OnBeginPrinting(CDC* pDC, CPrintInfo* pInfo);
@@ -33,11 +35,18 @@ protected:
 	D2D1_POINT_2F m_ptPan;
 	BOOL          m_bIsPanning;
 	CPoint        m_ptLastMouse;
+	bool          m_bCenteredOriginOnLoad = false; // 최초 로드 시 중앙 원점 맞춤 여부
+	SnapResult    m_lastSnap;                      // 마우스 포인터의 최신 스냅 결과 (인디케이터 표시용)
 
 public:
 	float GetZoom() const { return m_fZoom; }
 	void SetZoom(float fZoom) { m_fZoom = fZoom; Invalidate(FALSE); }
+	D2D1_POINT_2F GetPan() const { return m_ptPan; }
+	void SetPan(D2D1_POINT_2F ptPan) { m_ptPan = ptPan; Invalidate(FALSE); }
 	ID2D1Factory* GetD2DFactory() const { return m_pD2DFactory; }
+
+	// 캔버스의 (0,0) 원점을 화면 중앙에 맞춤
+	void CenterOrigin();
 
 // Direct2D 리소스
 protected:

@@ -38,6 +38,7 @@ BEGIN_MESSAGE_MAP(CM2DrawView, CView)
 	ON_WM_SETCURSOR()
 	ON_COMMAND(ID_VIEW_GRID, &CM2DrawView::OnViewGrid)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_GRID, &CM2DrawView::OnUpdateViewGrid)
+	ON_COMMAND(0x9999, &CM2DrawView::CenterOrigin)
 END_MESSAGE_MAP()
 
 // CM2DrawView 생성/소멸
@@ -120,6 +121,33 @@ void CM2DrawView::DiscardDeviceResources()
 	}
 }
 
+void CM2DrawView::OnInitialUpdate()
+{
+	CView::OnInitialUpdate();
+
+	// 생성 직후에는 아직 MDI 탭 및 독 패인 배치가 완료되지 않았으므로
+	// 메시지 큐를 통해 배치가 끝난 직후 1회 중앙 정렬하도록 비동기 호출
+	PostMessage(WM_COMMAND, 0x9999, 0);
+}
+
+void CM2DrawView::CenterOrigin()
+{
+	CRect rc;
+	GetClientRect(&rc);
+	if (rc.Width() > 50 && rc.Height() > 50)
+	{
+		const float rulerT = GetApp()->GetRuler().enabled ? GetApp()->GetRuler().thickness : 0.0f;
+		float availableW = static_cast<float>(rc.Width()) - rulerT;
+		float availableH = static_cast<float>(rc.Height()) - rulerT;
+
+		// 캔버스 가용 영역의 정확한 중앙에 (0, 0) 원점이 오도록 Pan 설정
+		m_ptPan.x = rulerT + availableW * 0.5f;
+		m_ptPan.y = rulerT + availableH * 0.5f;
+		m_bCenteredOriginOnLoad = true;
+		Invalidate(FALSE);
+	}
+}
+
 void CM2DrawView::OnSize(UINT nType, int cx, int cy)
 {
 	CView::OnSize(nType, cx, cy);
@@ -127,6 +155,12 @@ void CM2DrawView::OnSize(UINT nType, int cx, int cy)
 	if (m_pRenderTarget && cx > 0 && cy > 0)
 	{
 		m_pRenderTarget->Resize(D2D1::SizeU(cx, cy));
+	}
+
+	// 최초 안정화된 크기(100px 이상)로 창이 확장될 때 중앙 정렬 보정
+	if (!m_bCenteredOriginOnLoad && cx > 200 && cy > 200)
+	{
+		CenterOrigin();
 	}
 }
 
@@ -175,7 +209,13 @@ void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	float worldX = (point.x - m_ptPan.x) / m_fZoom;
 	float worldY = (point.y - m_ptPan.y) / m_fZoom;
-	D2D1_POINT_2F worldPt = GetApp()->GetGrid().SnapPoint(D2D1::Point2F(worldX, worldY));
+	D2D1_POINT_2F rawWorld = D2D1::Point2F(worldX, worldY);
+
+	CM2DrawDoc* pDoc = GetDocument();
+	const auto* pShapes = pDoc ? &pDoc->GetShapes() : nullptr;
+	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pShapes);
+	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
+
 	float unitScale = GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit);
 	const wchar_t* suffix = GetCanvasUnitSuffix(GetApp()->GetGrid().unit);
 
@@ -188,7 +228,7 @@ void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 	e.shiftDown = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
 	e.ctrlDown = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
 	e.view = { m_fZoom, m_ptPan };
-	e.pDoc = GetDocument();
+	e.pDoc = pDoc;
 	e.pD2DFactory = m_pD2DFactory;
 
 	// 활성 도구에 이벤트 전달
@@ -206,7 +246,13 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 {
 	float worldX = (point.x - m_ptPan.x) / m_fZoom;
 	float worldY = (point.y - m_ptPan.y) / m_fZoom;
-	D2D1_POINT_2F worldPt = GetApp()->GetGrid().SnapPoint(D2D1::Point2F(worldX, worldY));
+	D2D1_POINT_2F rawWorld = D2D1::Point2F(worldX, worldY);
+
+	CM2DrawDoc* pDoc = GetDocument();
+	const auto* pShapes = pDoc ? &pDoc->GetShapes() : nullptr;
+	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pShapes);
+	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
+
 	float unitScale = GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit);
 
 	ToolEvent e;
@@ -215,7 +261,7 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 	e.unitPt = D2D1::Point2F(worldPt.x / unitScale, worldPt.y / unitScale);
 	e.flags = nFlags;
 	e.view = { m_fZoom, m_ptPan };
-	e.pDoc = GetDocument();
+	e.pDoc = pDoc;
 	e.pD2DFactory = m_pD2DFactory;
 
 	ITool* pTool = GetApp()->GetToolManager().GetActiveTool();
@@ -298,13 +344,27 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	// 상태표시줄(하단 좌측 붉은색 영역)에 마우스 포인터 좌표 실시간 표시
 	float worldX = (point.x - m_ptPan.x) / m_fZoom;
 	float worldY = (point.y - m_ptPan.y) / m_fZoom;
-	D2D1_POINT_2F worldPt = GetApp()->GetGrid().SnapPoint(D2D1::Point2F(worldX, worldY));
+	D2D1_POINT_2F rawWorld = D2D1::Point2F(worldX, worldY);
+
+	CM2DrawDoc* pDoc = GetDocument();
+	const auto* pShapes = pDoc ? &pDoc->GetShapes() : nullptr;
+	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pShapes);
+	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
+
 	float unitScale = GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit);
 	const wchar_t* suffix = GetCanvasUnitSuffix(GetApp()->GetGrid().unit);
 
 	CString strStatus;
-	strStatus.Format(_T("마우스 좌표: (%d, %d) px  |  월드: (%.1f, %.1f) px  |  단위: (%.2f, %.2f) %s  |  줌: %.0f%%"),
-		point.x, point.y, worldPt.x, worldPt.y, worldPt.x / unitScale, worldPt.y / unitScale, suffix, m_fZoom * 100.0f);
+	if (m_lastSnap.snapped && m_lastSnap.description && m_lastSnap.description[0] != L'\0')
+	{
+		strStatus.Format(_T("마우스: (%d, %d) px | 월드: (%.1f, %.1f) px | 단위: (%.2f, %.2f) %s | 줌: %.0f%% | [스냅: %s]"),
+			point.x, point.y, worldPt.x, worldPt.y, worldPt.x / unitScale, worldPt.y / unitScale, suffix, m_fZoom * 100.0f, m_lastSnap.description);
+	}
+	else
+	{
+		strStatus.Format(_T("마우스: (%d, %d) px | 월드: (%.1f, %.1f) px | 단위: (%.2f, %.2f) %s | 줌: %.0f%%"),
+			point.x, point.y, worldPt.x, worldPt.y, worldPt.x / unitScale, worldPt.y / unitScale, suffix, m_fZoom * 100.0f);
+	}
 	SetAppStatusText(strStatus);
 
 	// 활성 도구에 이동 이벤트 전달
@@ -314,7 +374,7 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	e.unitPt = D2D1::Point2F(worldPt.x / unitScale, worldPt.y / unitScale);
 	e.flags = nFlags;
 	e.view = { m_fZoom, m_ptPan };
-	e.pDoc = GetDocument();
+	e.pDoc = pDoc;
 	e.pD2DFactory = m_pD2DFactory;
 
 	ITool* pTool = GetApp()->GetToolManager().GetActiveTool();
@@ -467,6 +527,12 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 	if (pSelectTool && pActiveTool != pSelectTool)
 	{
 		pSelectTool->DrawOverlay(m_pRenderTarget, m_pSolidBrush, m_fZoom, m_ptPan, pDoc);
+	}
+
+	// 4. 스냅 인디케이터(자석 원형/다이아몬드/삼각형/십자선) 렌더링
+	if (m_lastSnap.snapped)
+	{
+		GetApp()->GetSnapManager().DrawSnapIndicator(m_pRenderTarget, m_pSolidBrush, m_lastSnap, m_fZoom, m_ptPan);
 	}
 
 	if (rulerT > 0.0f)

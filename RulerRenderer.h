@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <d2d1.h>
 #include <dwrite.h>
 #include "GridRenderer.h"
@@ -17,6 +17,7 @@ public:
 private:
 	IDWriteFactory*    m_pDWriteFactory;
 	IDWriteTextFormat* m_pTextFormat;
+	IDWriteTextFormat* m_pTextFormatBold;
 
 public:
 	RulerRenderer();

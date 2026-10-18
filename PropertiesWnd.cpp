@@ -61,6 +61,8 @@ CPropertiesWnd::~CPropertiesWnd()
 BEGIN_MESSAGE_MAP(CPropertiesWnd, CDockablePane)
 	ON_WM_CREATE()
 	ON_WM_SIZE()
+	ON_WM_WINDOWPOSCHANGING()
+	ON_WM_GETMINMAXINFO()
 	ON_COMMAND(ID_EXPAND_ALL, OnExpandAllProperties)
 	ON_UPDATE_COMMAND_UI(ID_EXPAND_ALL, OnUpdateExpandAllProperties)
 	ON_COMMAND(ID_SORTPROPERTIES, OnSortProperties)
@@ -80,6 +82,9 @@ int CPropertiesWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 {
 	if (CDockablePane::OnCreate(lpCreateStruct) == -1)
 		return -1;
+
+	// 최소 도킹 크기 설정 (너비 240px, 높이 180px)
+	SetMinSize(CSize(240, 180));
 
 	CRect rectDummy;
 	rectDummy.SetRectEmpty();
@@ -106,6 +111,58 @@ int CPropertiesWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 	AdjustLayout();
 	return 0;
+}
+
+void CPropertiesWnd::OnWindowPosChanging(WINDOWPOS* lpwndpos)
+{
+	CDockablePane::OnWindowPosChanging(lpwndpos);
+
+	if (!(lpwndpos->flags & SWP_NOSIZE))
+	{
+		const int MIN_DOCK_WIDTH = 240;
+		const int MAX_DOCK_WIDTH = 420;
+
+		// 도킹되어 있거나 도킹 컨테이너 내부에 있을 때
+		if (IsDocked())
+		{
+			// 우측에 도킹되어 있는 경우 너비가 변하면 x 좌표도 보정하여 스플리터 경계와 일치시킴
+			DWORD dwAlignment = GetCurrentAlignment();
+			if (dwAlignment == CBRS_ALIGN_RIGHT)
+			{
+				if (lpwndpos->cx > MAX_DOCK_WIDTH)
+				{
+					int diff = lpwndpos->cx - MAX_DOCK_WIDTH;
+					lpwndpos->cx = MAX_DOCK_WIDTH;
+					lpwndpos->x += diff;
+				}
+				else if (lpwndpos->cx < MIN_DOCK_WIDTH)
+				{
+					int diff = MIN_DOCK_WIDTH - lpwndpos->cx;
+					lpwndpos->cx = MIN_DOCK_WIDTH;
+					lpwndpos->x -= diff;
+				}
+			}
+			else
+			{
+				if (lpwndpos->cx > MAX_DOCK_WIDTH)
+				{
+					lpwndpos->cx = MAX_DOCK_WIDTH;
+				}
+				else if (lpwndpos->cx < MIN_DOCK_WIDTH)
+				{
+					lpwndpos->cx = MIN_DOCK_WIDTH;
+				}
+			}
+		}
+	}
+}
+
+void CPropertiesWnd::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
+{
+	CDockablePane::OnGetMinMaxInfo(lpMMI);
+	lpMMI->ptMinTrackSize.x = 240; // 최소 너비 240px
+	lpMMI->ptMinTrackSize.y = 180; // 최소 높이 180px
+	lpMMI->ptMaxTrackSize.x = 420; // 최대 너비 420px
 }
 
 void CPropertiesWnd::OnSize(UINT nType, int cx, int cy)
@@ -751,29 +808,45 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	case PROP_UNIT:
 	{
 		CString strUnit = pProp->GetValue().bstrVal;
+		CanvasUnit newUnit = CanvasUnit::Pixel;
 		if (strUnit.Find(_T("밀리미터")) >= 0 || strUnit.Find(_T("mm")) >= 0)
-			GetApp()->GetGrid().unit = CanvasUnit::MM;
+			newUnit = CanvasUnit::MM;
 		else if (strUnit.Find(_T("센티미터")) >= 0 || strUnit.Find(_T("cm")) >= 0)
-			GetApp()->GetGrid().unit = CanvasUnit::CM;
+			newUnit = CanvasUnit::CM;
 		else if (strUnit.Find(_T("인치")) >= 0 || strUnit.Find(_T("in")) >= 0)
-			GetApp()->GetGrid().unit = CanvasUnit::Inch;
+			newUnit = CanvasUnit::Inch;
 		else if (strUnit.Find(_T("rem")) >= 0)
-			GetApp()->GetGrid().unit = CanvasUnit::Rem;
+			newUnit = CanvasUnit::Rem;
 		else
-			GetApp()->GetGrid().unit = CanvasUnit::Pixel;
+			newUnit = CanvasUnit::Pixel;
 
-		strLogMsg.Format(_T("[속성 변경] 측정 단위: %s (1단위 = %.2f px)"),
+		GetApp()->GetGrid().SetUnit(newUnit);
+
+		// 간격 수치가 새 단위에 맞춰 환산되었으므로 프로퍼티 리스트의 PROP_GRID_STEP 값도 갱신
+		CMFCPropertyGridProperty* pStepProp = m_wndPropList.FindItemByData(PROP_GRID_STEP);
+		if (pStepProp)
+		{
+			pStepProp->SetValue((_variant_t)(double)GetApp()->GetGrid().stepInUnit);
+		}
+
+		strLogMsg.Format(_T("[속성 변경] 측정 단위: %s (간격: %.2f %s, 1단위 = %.2f px)"),
 			GetCanvasUnitName(GetApp()->GetGrid().unit),
+			GetApp()->GetGrid().stepInUnit,
+			GetCanvasUnitSuffix(GetApp()->GetGrid().unit),
 			GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit));
 		LogAppEvent(strLogMsg);
 		break;
 	}
 	case PROP_GRID_SNAP:
+	{
 		val.ChangeType(VT_BOOL);
-		GetApp()->GetGrid().snapToGrid = (val.boolVal != VARIANT_FALSE);
-		strLogMsg.Format(_T("[속성 변경] 그리드 스냅: %s"), GetApp()->GetGrid().snapToGrid ? _T("ON") : _T("OFF"));
+		bool bSnap = (val.boolVal != VARIANT_FALSE);
+		GetApp()->GetGrid().snapToGrid = bSnap;
+		GetApp()->GetSnapManager().EnableTarget(SnapTargets::Grid, bSnap);
+		strLogMsg.Format(_T("[속성 변경] 그리드 스냅: %s"), bSnap ? _T("ON") : _T("OFF"));
 		LogAppEvent(strLogMsg);
 		break;
+	}
 
 	// 2. 쉐이프 속성 변경 처리
 	case PROP_SHAPE_NAME:

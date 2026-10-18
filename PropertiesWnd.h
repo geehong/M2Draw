@@ -51,9 +51,18 @@ protected:
 public:
 	virtual ~CPropertiesWnd();
 
+	// 최소/최대 도킹 크기 제약
+	void GetMinSize(CSize& size) const override
+	{
+		size.cx = 240; // 최소 너비 240px
+		size.cy = 180; // 최소 높이 180px
+	}
+
 protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnWindowPosChanging(WINDOWPOS* lpwndpos);
+	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
 	afx_msg void OnExpandAllProperties();
 	afx_msg void OnUpdateExpandAllProperties(CCmdUI* pCmdUI);
 	afx_msg void OnSortProperties();

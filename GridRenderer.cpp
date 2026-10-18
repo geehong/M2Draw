@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "GridRenderer.h"
 #include <cmath>
 
@@ -51,8 +51,33 @@ void GridRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 		}
 	};
 
-	pass(pan.x, view.width,  true);  // 세로선
-	pass(pan.y, view.height, false); // 가로선
+	pass(pan.x + originWorld.x * zoom, view.width,  true);  // 세로선 (원점 오프셋 연동)
+	pass(pan.y + originWorld.y * zoom, view.height, false); // 가로선 (원점 오프셋 연동)
+
+	// 3. X, Y 기준 좌표축 (Origin Axis) 렌더링
+	if (showAxis)
+	{
+		float axisScreenX = snap(originWorld.x * zoom + pan.x);
+		float axisScreenY = snap(originWorld.y * zoom + pan.y);
+
+		// X축 기준선 (가로선: Y = originWorld.y)
+		if (axisScreenY >= 0.0f && axisScreenY <= view.height)
+		{
+			D2D1_COLOR_F cX = axisXColor;
+			cX.a = axisOpacity;
+			brush->SetColor(cX);
+			rt->DrawLine(D2D1::Point2F(0.0f, axisScreenY), D2D1::Point2F(view.width, axisScreenY), brush, axisThickness);
+		}
+
+		// Y축 기준선 (세로선: X = originWorld.x)
+		if (axisScreenX >= 0.0f && axisScreenX <= view.width)
+		{
+			D2D1_COLOR_F cY = axisYColor;
+			cY.a = axisOpacity;
+			brush->SetColor(cY);
+			rt->DrawLine(D2D1::Point2F(axisScreenX, 0.0f), D2D1::Point2F(axisScreenX, view.height), brush, axisThickness);
+		}
+	}
 
 	brush->SetColor(savedColor);
 }

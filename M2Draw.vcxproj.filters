@@ -66,6 +66,12 @@
     <ClInclude Include="ITool.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="SnapManager.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="M2DrawControl.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="M2Draw.cpp">
@@ -105,6 +111,12 @@
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="PropertiesWnd.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="SnapManager.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="M2DrawControl.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="pch.cpp">

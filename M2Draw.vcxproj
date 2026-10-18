@@ -219,6 +219,8 @@
     <ClInclude Include="D2DColorWheel.h" />
     <ClInclude Include="ITool.h" />
     <ClInclude Include="ToolManager.h" />
+    <ClInclude Include="SnapManager.h" />
+    <ClInclude Include="M2DrawControl.h" />
     <ClInclude Include="ToolBoxPane.h" />
   </ItemGroup>
   <ItemGroup>
@@ -240,6 +242,8 @@
     </ClCompile>
     <ClCompile Include="PropertiesWnd.cpp" />
     <ClCompile Include="RulerRenderer.cpp" />
+    <ClCompile Include="SnapManager.cpp" />
+    <ClCompile Include="M2DrawControl.cpp" />
     <ClCompile Include="ToolManager.cpp" />
     <ClCompile Include="ToolBoxPane.cpp" />
   </ItemGroup>

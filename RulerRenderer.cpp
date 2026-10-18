@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "RulerRenderer.h"
 #include <cmath>
 #include <cwchar>
@@ -37,6 +37,23 @@ RulerRenderer::RulerRenderer()
 			m_pTextFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
 			m_pTextFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
 		}
+
+		m_pDWriteFactory->CreateTextFormat(
+			L"Segoe UI",
+			nullptr,
+			DWRITE_FONT_WEIGHT_BOLD,
+			DWRITE_FONT_STYLE_NORMAL,
+			DWRITE_FONT_STRETCH_NORMAL,
+			10.0f, // 10pt Bold
+			L"ko-kr",
+			&m_pTextFormatBold
+		);
+
+		if (m_pTextFormatBold)
+		{
+			m_pTextFormatBold->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+			m_pTextFormatBold->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+		}
 	}
 }
 
@@ -47,6 +64,11 @@ RulerRenderer::~RulerRenderer()
 
 void RulerRenderer::DiscardDeviceResources()
 {
+	if (m_pTextFormatBold)
+	{
+		m_pTextFormatBold->Release();
+		m_pTextFormatBold = nullptr;
+	}
 	if (m_pTextFormat)
 	{
 		m_pTextFormat->Release();
@@ -127,12 +149,13 @@ void RulerRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 
 	// 상단 눈금자 렌더링 (X축)
 	{
-		int i0 = static_cast<int>(ceilf((T - pan.x) / stepPx));
-		int i1 = static_cast<int>(floorf((w - pan.x) / stepPx));
+		float originScreenX = pan.x + grid.originWorld.x * zoom;
+		int i0 = static_cast<int>(ceilf((T - originScreenX) / stepPx));
+		int i1 = static_cast<int>(floorf((w - originScreenX) / stepPx));
 
 		for (int i = i0; i <= i1; ++i)
 		{
-			float screenX = snap(pan.x + i * stepPx);
+			float screenX = snap(originScreenX + i * stepPx);
 			if (screenX < T || screenX > w) continue;
 
 			// 메이저 눈금선
@@ -170,12 +193,13 @@ void RulerRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 
 	// 좌측 눈금자 렌더링 (Y축)
 	{
-		int i0 = static_cast<int>(ceilf((T - pan.y) / stepPx));
-		int i1 = static_cast<int>(floorf((h - pan.y) / stepPx));
+		float originScreenY = pan.y + grid.originWorld.y * zoom;
+		int i0 = static_cast<int>(ceilf((T - originScreenY) / stepPx));
+		int i1 = static_cast<int>(floorf((h - originScreenY) / stepPx));
 
 		for (int i = i0; i <= i1; ++i)
 		{
-			float screenY = snap(pan.y + i * stepPx);
+			float screenY = snap(originScreenY + i * stepPx);
 			if (screenY < T || screenY > h) continue;
 
 			// 메이저 눈금선
@@ -208,6 +232,37 @@ void RulerRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 					brush
 				);
 			}
+		}
+	}
+
+	// 4. X, Y 기준축 인디케이터 (네모친 부분 표시: X축은 가로선의 우측 끝에 X, Y축은 세로선의 상단 끝에 Y)
+	if (grid.showAxis && m_pTextFormatBold)
+	{
+		float originScreenX = snap(pan.x + grid.originWorld.x * zoom);
+		float originScreenY = snap(pan.y + grid.originWorld.y * zoom);
+
+		// (1) Y축 인디케이터: 상단 눈금자 위치(originScreenX) 상단에 'Y' 배지 박스 표시 (녹색 계열)
+		if (originScreenX >= T && originScreenX <= w)
+		{
+			D2D1_RECT_F rYTag = D2D1::RectF(originScreenX - 9.0f, 1.0f, originScreenX + 9.0f, T - 2.0f);
+			// 불투명 눈금자 배경 박스를 깔아서 뒤의 눈금선/숫자에 가려지지 않게 처리
+			brush->SetColor(D2D1::ColorF(0.96f, 0.96f, 0.97f, 0.95f));
+			rt->FillRoundedRectangle(D2D1::RoundedRect(rYTag, 2.0f, 2.0f), brush);
+			brush->SetColor(grid.axisYColor);
+			rt->DrawRoundedRectangle(D2D1::RoundedRect(rYTag, 2.0f, 2.0f), brush, 1.2f);
+			rt->DrawText(L"Y", 1, m_pTextFormatBold, rYTag, brush);
+		}
+
+		// (2) X축 인디케이터: 화면 우측 끝 X축 기준선 위치(originScreenY)에 'X' 배지 박스 표시 (붉은색 계열)
+		if (originScreenY >= T && originScreenY <= h)
+		{
+			D2D1_RECT_F rXTag = D2D1::RectF(w - 20.0f, originScreenY - 9.0f, w - 2.0f, originScreenY + 9.0f);
+			// 불투명 배경 박스
+			brush->SetColor(D2D1::ColorF(0.96f, 0.96f, 0.97f, 0.95f));
+			rt->FillRoundedRectangle(D2D1::RoundedRect(rXTag, 2.0f, 2.0f), brush);
+			brush->SetColor(grid.axisXColor);
+			rt->DrawRoundedRectangle(D2D1::RoundedRect(rXTag, 2.0f, 2.0f), brush, 1.2f);
+			rt->DrawText(L"X", 1, m_pTextFormatBold, rXTag, brush);
 		}
 	}
 

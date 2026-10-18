@@ -40,6 +40,7 @@ static UINT indicators[] =
 
 CMainFrame::CMainFrame() noexcept
 	: m_wndProperties(CD2DPropertyView::MODE_SHAPE)
+	, m_wndGridProp(CD2DPropertyView::MODE_GRID)
 	, m_wndCanvasProp(CD2DPropertyView::MODE_CANVAS)
 {
 }
@@ -130,11 +131,14 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	DockPane(&m_wndOutput);
 	m_wndProperties.EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndProperties);
+	m_wndGridProp.EnableDocking(CBRS_ALIGN_ANY);
+	DockPane(&m_wndGridProp);
 	m_wndCanvasProp.EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndCanvasProp);
 
-	// 작업환경설정 창을 오브젝트 설정 창의 아래(위아래 분할)로 기본 도킹
-	m_wndCanvasProp.DockToWindow(&m_wndProperties, CBRS_ALIGN_BOTTOM);
+	// Grid Settings를 Object Settings 아래로 도킹, Canvas Settings를 탭 형태로 함께 그룹핑
+	m_wndGridProp.DockToWindow(&m_wndProperties, CBRS_ALIGN_BOTTOM);
+	m_wndCanvasProp.DockToWindow(&m_wndGridProp, CBRS_ALIGN_BOTTOM);
 
 
 	// 모든 사용자 인터페이스 요소를 그리는 데 사용하는 비주얼 관리자를 설정합니다.
@@ -218,19 +222,27 @@ BOOL CMainFrame::CreateDockingWindows()
 		return FALSE; // 만들지 못했습니다.
 	}
 
-	// 오브젝트 설정 창을 만듭니다.
-	CString strPropertiesWnd = _T("오브젝트 설정");
-	if (!m_wndProperties.Create(strPropertiesWnd, this, CRect(0, 0, 200, 200), TRUE, ID_VIEW_PROPERTIESWND, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
+	// Object Settings 창을 만듭니다. (너비 260px)
+	CString strPropertiesWnd = _T("Object Settings");
+	if (!m_wndProperties.Create(strPropertiesWnd, this, CRect(0, 0, 260, 300), TRUE, ID_VIEW_PROPERTIESWND, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
 	{
-		TRACE0("오브젝트 설정 창을 만들지 못했습니다.\n");
-		return FALSE; // 만들지 못했습니다.
+		TRACE0("Object Settings 창을 만들지 못했습니다.\n");
+		return FALSE;
 	}
 
-	// 작업환경설정 창을 만듭니다.
-	CString strCanvasWnd = _T("작업환경설정");
-	if (!m_wndCanvasProp.Create(strCanvasWnd, this, CRect(0, 0, 200, 200), TRUE, ID_VIEW_PROPERTIESWND + 1, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
+	// Grid Settings 창을 만듭니다. (너비 260px)
+	CString strGridWnd = _T("Grid Settings");
+	if (!m_wndGridProp.Create(strGridWnd, this, CRect(0, 0, 260, 300), TRUE, ID_VIEW_PROPERTIESWND + 1, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
 	{
-		TRACE0("작업환경설정 창을 만들지 못했습니다.\n");
+		TRACE0("Grid Settings 창을 만들지 못했습니다.\n");
+		return FALSE;
+	}
+
+	// Canvas Settings 창을 만듭니다. (너비 260px)
+	CString strCanvasWnd = _T("Canvas Settings");
+	if (!m_wndCanvasProp.Create(strCanvasWnd, this, CRect(0, 0, 260, 300), TRUE, ID_VIEW_PROPERTIESWND + 2, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
+	{
+		TRACE0("Canvas Settings 창을 만들지 못했습니다.\n");
 		return FALSE;
 	}
 
@@ -245,6 +257,7 @@ void CMainFrame::SetDockingWindowIcons(BOOL bHiColorIcons)
 
 	HICON hPropertiesBarIcon = (HICON) ::LoadImage(::AfxGetResourceHandle(), MAKEINTRESOURCE(bHiColorIcons ? IDI_PROPERTIES_WND_HC : IDI_PROPERTIES_WND), IMAGE_ICON, ::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON), 0);
 	m_wndProperties.SetIcon(hPropertiesBarIcon, FALSE);
+	m_wndGridProp.SetIcon(hPropertiesBarIcon, FALSE);
 	m_wndCanvasProp.SetIcon(hPropertiesBarIcon, FALSE);
 
 	UpdateMDITabbedBarsIcons();

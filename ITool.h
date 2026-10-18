@@ -240,8 +240,18 @@ public:
 
 	void OnKeyDown(UINT nChar, CM2DrawDoc* pDoc) override;
 
-	// 2포인트 도형은 드래그로 이미 완성되므로 더블클릭 시 툴을 바꾸지 않고 연속 그리기 유지
-	bool OnDoubleClicked(CM2DrawDoc* pDoc) override { return false; }
+	// 더블클릭 시: 작성 중인 도형이 있으면 확정 등록하고 선택 도구로 전환
+	bool OnDoubleClicked(CM2DrawDoc* pDoc) override
+	{
+		if (m_waitingSecondClick && m_previewShape)
+		{
+			CommitShape(pDoc);
+		}
+		CancelShape();
+		m_isDragging = false;
+		m_waitingSecondClick = false;
+		return true; // 우클릭과 동일하게 선택 툴(Select)로 즉시 전환
+	}
 
 	// 시작 앵커, 이동 중인 2번째 앵커 및 미리보기 도형 오버레이 렌더링
 	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,

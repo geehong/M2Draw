@@ -324,7 +324,8 @@ void SelectTool::ApplyMove(Shape* shape)
 	float dy = m_dragCurrentWorld.y - m_dragStartWorld.y;
 
 	const auto& grid = GetApp()->GetGrid();
-	if (grid.snapToGrid)
+	const auto& snapMgr = GetApp()->GetSnapManager();
+	if (snapMgr.IsEnabled() && HasSnapTarget(snapMgr.GetTargets(), SnapTargets::Grid) && grid.enabled)
 	{
 		PathShape* ps = dynamic_cast<PathShape*>(shape);
 		if (ps && !ps->paths.empty() && !ps->paths[0].nodes.empty())

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifndef __AFXWIN_H__
 	#error "PCH에 대해 이 파일을 포함하기 전에 'pch.h'를 포함합니다."
@@ -10,19 +10,25 @@
 #include "RulerRenderer.h"
 #include "ToolManager.h"
 
+#include "SnapManager.h"
+
 class CM2DrawApp : public CWinAppEx
 {
 public:
 	CM2DrawApp() noexcept;
 
 protected:
+	GridOptions   m_defaultGridOptions;
 	GridRenderer  m_grid;
 	RulerRenderer m_ruler;
+	SnapManager   m_snapMgr;
 	ToolManager   m_toolMgr;
 
 public:
+	GridOptions&   GetDefaultGridOptions() { return m_defaultGridOptions; }
 	GridRenderer&  GetGrid() { return m_grid; }
 	RulerRenderer& GetRuler() { return m_ruler; }
+	SnapManager&   GetSnapManager() { return m_snapMgr; }
 	ToolManager&   GetToolManager() { return m_toolMgr; }
 
 public:
