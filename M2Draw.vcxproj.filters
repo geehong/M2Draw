@@ -60,12 +60,24 @@
     <ClInclude Include="D2DPropertyView.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="D2DColorWheel.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="ITool.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="M2Draw.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
+    <ClCompile Include="D2DColorWheel.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
     <ClCompile Include="D2DPropertyView.cpp">
+      <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="ITool.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
     <ClCompile Include="MainFrm.cpp">

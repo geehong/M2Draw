@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "D2DVectorEngine.h"
 
 class CM2DrawDoc : public CDocument
@@ -11,13 +11,8 @@ protected:
 public:
 	std::vector<std::unique_ptr<Shape>> m_shapes;
 	std::unique_ptr<PathShape>          m_currentPath;
-	UndoManager                         m_undo;
-	PenStateMachine                     m_penState;
-
 	std::vector<std::unique_ptr<Shape>>& GetShapes() { return m_shapes; }
 	std::unique_ptr<PathShape>&          GetCurrentPath() { return m_currentPath; }
-	UndoManager&                         GetUndo() { return m_undo; }
-	PenStateMachine&                     GetPenState() { return m_penState; }
 
 // 재정의입니다.
 public:

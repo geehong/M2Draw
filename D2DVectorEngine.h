@@ -207,6 +207,113 @@ public:
 
     void Invalidate() { m_dirty = true; }
 
+    // ------------------------------------------------------------------------
+    // 공용 기하학 변형 엔진 API (SelectTool, 속성창, 메뉴 등에서 공용 호출)
+    // ------------------------------------------------------------------------
+
+    // 1. 평행 이동 변형
+    void ApplyTranslation(D2D1_POINT_2F deltaWorld, const D2D1::Matrix3x2F& initialXf) {
+        xf = initialXf * D2D1::Matrix3x2F::Translation(deltaWorld.x, deltaWorld.y);
+    }
+
+    // 2. 바운딩 박스 8개 핸들 기준 스케일 변형
+    //    handleIdx: 1=TL, 2=T, 3=TR, 4=R, 5=BR, 6=B, 7=BL, 8=L
+    void ScaleByHandle(int handleIdx, D2D1_POINT_2F curWorld, const D2D1_RECT_F& initialLocalBounds, const D2D1::Matrix3x2F& initialXf) {
+        D2D1::Matrix3x2F invInitial = initialXf;
+        if (!invInitial.Invert()) return;
+
+        D2D1_POINT_2F curLocal = invInitial.TransformPoint(curWorld);
+        float origW = initialLocalBounds.right - initialLocalBounds.left;
+        float origH = initialLocalBounds.bottom - initialLocalBounds.top;
+        if (origW <= 0.001f || origH <= 0.001f) return;
+
+        D2D1_POINT_2F anchorLocal = { 0.0f, 0.0f };
+        float sx = 1.0f;
+        float sy = 1.0f;
+
+        switch (handleIdx) {
+        case 5: // BR -> 고정점 TL
+            anchorLocal = D2D1::Point2F(initialLocalBounds.left, initialLocalBounds.top);
+            sx = (curLocal.x - anchorLocal.x) / origW;
+            sy = (curLocal.y - anchorLocal.y) / origH;
+            break;
+        case 1: // TL -> 고정점 BR
+            anchorLocal = D2D1::Point2F(initialLocalBounds.right, initialLocalBounds.bottom);
+            sx = (anchorLocal.x - curLocal.x) / origW;
+            sy = (anchorLocal.y - curLocal.y) / origH;
+            break;
+        case 3: // TR -> 고정점 BL
+            anchorLocal = D2D1::Point2F(initialLocalBounds.left, initialLocalBounds.bottom);
+            sx = (curLocal.x - anchorLocal.x) / origW;
+            sy = (anchorLocal.y - curLocal.y) / origH;
+            break;
+        case 7: // BL -> 고정점 TR
+            anchorLocal = D2D1::Point2F(initialLocalBounds.right, initialLocalBounds.top);
+            sx = (anchorLocal.x - curLocal.x) / origW;
+            sy = (curLocal.y - anchorLocal.y) / origH;
+            break;
+        case 4: // R -> 고정점 L
+            anchorLocal = D2D1::Point2F(initialLocalBounds.left, (initialLocalBounds.top + initialLocalBounds.bottom) * 0.5f);
+            sx = (curLocal.x - anchorLocal.x) / origW;
+            sy = 1.0f;
+            break;
+        case 8: // L -> 고정점 R
+            anchorLocal = D2D1::Point2F(initialLocalBounds.right, (initialLocalBounds.top + initialLocalBounds.bottom) * 0.5f);
+            sx = (anchorLocal.x - curLocal.x) / origW;
+            sy = 1.0f;
+            break;
+        case 6: // B -> 고정점 T
+            anchorLocal = D2D1::Point2F((initialLocalBounds.left + initialLocalBounds.right) * 0.5f, initialLocalBounds.top);
+            sx = 1.0f;
+            sy = (curLocal.y - anchorLocal.y) / origH;
+            break;
+        case 2: // T -> 고정점 B
+            anchorLocal = D2D1::Point2F((initialLocalBounds.left + initialLocalBounds.right) * 0.5f, initialLocalBounds.bottom);
+            sx = 1.0f;
+            sy = (anchorLocal.y - curLocal.y) / origH;
+            break;
+        default:
+            return;
+        }
+
+        if (std::abs(sx) < 0.01f) sx = 0.01f;
+        if (std::abs(sy) < 0.01f) sy = 0.01f;
+
+        D2D1::Matrix3x2F scaleMat = D2D1::Matrix3x2F::Scale(sx, sy, anchorLocal);
+        xf = scaleMat * initialXf;
+    }
+
+    // 3. 중심점 기준 회전 변형
+    void RotateAboutCenter(D2D1_POINT_2F startWorld, D2D1_POINT_2F curWorld, const D2D1_RECT_F& initialLocalBounds, const D2D1::Matrix3x2F& initialXf) {
+        D2D1_POINT_2F centerLocal = D2D1::Point2F(
+            (initialLocalBounds.left + initialLocalBounds.right) * 0.5f,
+            (initialLocalBounds.top + initialLocalBounds.bottom) * 0.5f
+        );
+        D2D1_POINT_2F centerWorld = initialXf.TransformPoint(centerLocal);
+
+        float angleStart = std::atan2(startWorld.y - centerWorld.y, startWorld.x - centerWorld.x);
+        float angleCur   = std::atan2(curWorld.y - centerWorld.y, curWorld.x - centerWorld.x);
+        float angleDeg   = (angleCur - angleStart) * (180.0f / 3.14159265f);
+
+        xf = initialXf * D2D1::Matrix3x2F::Rotation(angleDeg, centerWorld);
+    }
+
+    // 4. 로컬 사각 바운딩박스 기준 8개 핸들 및 상단 회전 핸들 로컬 좌표 반환
+    static void GetLocalHandlePoints(const D2D1_RECT_F& b, D2D1_POINT_2F outHandles[9]) {
+        float midX = (b.left + b.right) * 0.5f;
+        float midY = (b.top + b.bottom) * 0.5f;
+
+        outHandles[0] = D2D1::Point2F(b.left,  b.top);         // TL (인덱스 0 / Handle::TL은 1 매핑)
+        outHandles[1] = D2D1::Point2F(midX,    b.top);         // T
+        outHandles[2] = D2D1::Point2F(b.right, b.top);         // TR
+        outHandles[3] = D2D1::Point2F(b.right, midY);          // R
+        outHandles[4] = D2D1::Point2F(b.right, b.bottom);      // BR
+        outHandles[5] = D2D1::Point2F(midX,    b.bottom);      // B
+        outHandles[6] = D2D1::Point2F(b.left,  b.bottom);      // BL
+        outHandles[7] = D2D1::Point2F(b.left,  midY);          // L
+        outHandles[8] = D2D1::Point2F(midX,    b.top - 20.0f); // Rotate
+    }
+
 protected:
     bool m_dirty = true;
 };
@@ -332,6 +439,33 @@ public:
         return {};
     }
 
+    // ------------------------------------------------------------------------
+    // 공용 에디트 포인트 (정점 앵커 및 베이지어 핸들) 조작 API
+    // ------------------------------------------------------------------------
+    void MoveNodeOrHandle(HitResult::Part part, int subPathIdx, int nodeIdx, D2D1_POINT_2F worldPt) {
+        if (subPathIdx < 0 || subPathIdx >= static_cast<int>(paths.size())) return;
+        auto& sp = paths[subPathIdx];
+        if (nodeIdx < 0 || nodeIdx >= static_cast<int>(sp.nodes.size())) return;
+
+        D2D1::Matrix3x2F invXf = xf;
+        if (!invXf.Invert()) return;
+        D2D1_POINT_2F curLocal = invXf.TransformPoint(worldPt);
+        auto& node = sp.nodes[nodeIdx];
+
+        if (part == HitResult::Part::Anchor) {
+            node.anchor = curLocal;
+            Invalidate();
+        } else if (part == HitResult::Part::HandleIn) {
+            D2D1_POINT_2F offset = D2D1::Point2F(curLocal.x - node.anchor.x, curLocal.y - node.anchor.y);
+            node.SetHandleIn(offset);
+            Invalidate();
+        } else if (part == HitResult::Part::HandleOut) {
+            D2D1_POINT_2F offset = D2D1::Point2F(curLocal.x - node.anchor.x, curLocal.y - node.anchor.y);
+            node.SetHandleOut(offset);
+            Invalidate();
+        }
+    }
+
 private:
     ComPtr<ID2D1PathGeometry> m_geo;
 
@@ -375,163 +509,4 @@ private:
     }
 };
 
-// ============================================================================
-// 4. Undo/Redo 트랜잭션 매니저
-// ============================================================================
-class UndoManager {
-public:
-    static constexpr size_t kMaxHistory = 50;
 
-    void BeginSnapshot(const PathShape* shape) {
-        if (shape) {
-            m_pendingSnapshot = std::unique_ptr<PathShape>(static_cast<PathShape*>(shape->Clone().release()));
-        }
-    }
-
-    void CommitSnapshot() {
-        if (m_pendingSnapshot) {
-            m_undoStack.push_back(std::move(m_pendingSnapshot));
-            if (m_undoStack.size() > kMaxHistory) m_undoStack.pop_front();
-            m_redoStack.clear();
-        }
-    }
-
-    void RollbackPending(std::unique_ptr<PathShape>& shape) {
-        if (m_pendingSnapshot) {
-            shape = std::move(m_pendingSnapshot);
-        }
-    }
-
-    bool HasPending() const { return m_pendingSnapshot != nullptr; }
-    bool CanUndo() const { return !m_undoStack.empty(); }
-    bool CanRedo() const { return !m_redoStack.empty(); }
-
-    void PerformUndo(std::unique_ptr<PathShape>& shape) {
-        if (!CanUndo() || !shape) return;
-        m_redoStack.push_back(std::move(shape));
-        shape = std::move(m_undoStack.back());
-        m_undoStack.pop_back();
-    }
-
-    void PerformRedo(std::unique_ptr<PathShape>& shape) {
-        if (!CanRedo() || !shape) return;
-        m_undoStack.push_back(std::move(shape));
-        shape = std::move(m_redoStack.back());
-        m_redoStack.pop_back();
-    }
-
-private:
-    std::unique_ptr<PathShape>             m_pendingSnapshot;
-    std::deque<std::unique_ptr<PathShape>> m_undoStack;
-    std::deque<std::unique_ptr<PathShape>> m_redoStack;
-};
-
-// ============================================================================
-// 5. PenTool 상태 머신 (패스 수명 주기 및 롤백 완결)
-// ============================================================================
-class PenStateMachine {
-public:
-    enum class State {
-        Idle,            // 도구 대기 상태
-        Placing,         // 연속 앵커 클릭 대기 (SubPath 진행 중)
-        Pressed,         // 마우스 클릭 후 드래그 임계값(4px) 판정 대기
-        DraggingHandle   // 베지에 핸들 드래그 연장 중
-    };
-
-    void OnLButtonDown(std::unique_ptr<PathShape>& shape, const GridRenderer& grid, UndoManager& undo,
-                       D2D1_POINT_2F screenPt, const ViewportTransform& view)
-    {
-        if (!shape) shape = std::make_unique<PathShape>();
-
-        D2D1_POINT_2F worldPt = view.ScreenToWorld(screenPt);
-        D2D1_POINT_2F snappedWorld = grid.SnapPoint(worldPt); // 그리드 스냅 연동
-
-        D2D1::Matrix3x2F invShape = shape->xf;
-        if (!invShape.Invert()) {
-            return;
-        }
-        D2D1_POINT_2F localPt = invShape.TransformPoint(snappedWorld);
-
-        undo.BeginSnapshot(shape.get());
-
-        m_downScreenPt = screenPt;
-        m_state = State::Pressed;
-
-        // 패스 폐합 검사 (첫 앵커와 8px 이내인지 비교)
-        if (!m_needNewSubPath && !shape->paths.empty() && !shape->paths.back().closed && shape->paths.back().nodes.size() >= 3) {
-            auto& sp = shape->paths.back();
-            D2D1_POINT_2F firstScreenPt = CoordinateSpace::LocalToScreen(sp.nodes[0].anchor, shape->xf, view);
-            float dx = firstScreenPt.x - screenPt.x;
-            float dy = firstScreenPt.y - screenPt.y;
-
-            if ((dx * dx + dy * dy) <= 64.0f) {
-                sp.closed = true;
-                shape->Invalidate();
-                undo.CommitSnapshot();
-                m_state = State::Idle;
-                m_needNewSubPath = true;
-                return;
-            }
-        }
-
-        shape->AddAnchor(localPt, m_needNewSubPath);
-        m_needNewSubPath = false;
-    }
-
-    void OnMouseMove(std::unique_ptr<PathShape>& shape, const GridRenderer& grid, D2D1_POINT_2F screenPt, const ViewportTransform& view) {
-        if (!shape || shape->paths.empty()) return;
-        auto& sp = shape->paths.back();
-        if (sp.nodes.empty()) return;
-
-        if (m_state == State::Pressed) {
-            float dx = screenPt.x - m_downScreenPt.x;
-            float dy = screenPt.y - m_downScreenPt.y;
-            if ((dx * dx + dy * dy) >= 16.0f) {
-                m_state = State::DraggingHandle;
-                sp.nodes.back().type = BezierNode::Type::Symmetric;
-            }
-        }
-
-        if (m_state == State::DraggingHandle) {
-            D2D1_POINT_2F worldPt = view.ScreenToWorld(screenPt);
-            D2D1_POINT_2F snappedWorld = grid.SnapPoint(worldPt);
-
-            D2D1::Matrix3x2F invShape = shape->xf;
-            if (!invShape.Invert()) return;
-            D2D1_POINT_2F localPt = invShape.TransformPoint(snappedWorld);
-
-            auto& node = sp.nodes.back();
-            D2D1_POINT_2F offset = D2D1::Point2F(localPt.x - node.anchor.x, localPt.y - node.anchor.y);
-
-            node.SetHandleOut(offset);
-            shape->Invalidate();
-        }
-    }
-
-    void OnLButtonUp(UndoManager& undo) {
-        if (m_state == State::DraggingHandle || m_state == State::Pressed) {
-            undo.CommitSnapshot();
-            m_state = State::Placing;
-        }
-    }
-
-    void FinishCurrentPath() {
-        m_state = State::Idle;
-        m_needNewSubPath = true;
-    }
-
-    void CancelOperation(std::unique_ptr<PathShape>& shape, UndoManager& undo) {
-        if (undo.HasPending()) {
-            undo.RollbackPending(shape);
-        }
-        m_state = State::Idle;
-        m_needNewSubPath = true;
-    }
-
-    State GetState() const { return m_state; }
-
-private:
-    State         m_state = State::Idle;
-    bool          m_needNewSubPath = true;
-    D2D1_POINT_2F m_downScreenPt{};
-};

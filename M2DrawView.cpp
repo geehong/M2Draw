@@ -231,51 +231,24 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
 	CM2DrawDoc* pDoc = GetDocument();
-
-	// 펜/다각형 작성 중 더블클릭: 더블클릭 시 추가된 중복 정점 정리 후 현재 패스 완료 및 선택 도구로 전환
 	ToolType activeType = GetApp()->GetToolManager().GetActiveType();
-	if (pDoc && pDoc->GetCurrentPath() && (activeType == ToolType::Pen || activeType == ToolType::Polygon))
+
+	// 1. 활성 도구의 OnDoubleClicked()에 더블클릭 이벤트 위임
+	// 도구가 완료 및 선택 전환 신호(true)를 보낼 때만 선택 도구로 전환
+	ITool* pActiveTool = GetApp()->GetToolManager().GetActiveTool();
+	if (pActiveTool && activeType != ToolType::Select && activeType != ToolType::Pan)
 	{
-		auto& currentPath = pDoc->GetCurrentPath();
-		if (!currentPath->paths.empty() && currentPath->paths.back().nodes.size() > 1)
-		{
-			// 더블클릭으로 인해 같은 위치에 한 번 더 추가된 마지막 정점 제거
-			currentPath->paths.back().nodes.pop_back();
-			currentPath->Invalidate();
-		}
-
-		GetApp()->GetToolManager().GetActiveTool()->OnKeyDown(VK_RETURN, pDoc);
-		GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
-		Invalidate(FALSE);
-		CView::OnLButtonDblClk(nFlags, point);
-		return;
-	}
-
-	if (pDoc)
-	{
-		// 마우스 클릭 위치에 도형이 있는지 검사
-		float worldX = (point.x - m_ptPan.x) / m_fZoom;
-		float worldY = (point.y - m_ptPan.y) / m_fZoom;
-		ViewportTransform view = { m_fZoom, m_ptPan };
-		D2D1_POINT_2F screenD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
-
-		bool hitAny = false;
-		for (auto& sp : pDoc->GetShapes())
-		{
-			PathShape* ps = dynamic_cast<PathShape*>(sp.get());
-			if (ps && ps->HitTestScreenSpace(screenD2D, 6.0f, view, m_pD2DFactory).part != HitResult::Part::None)
-			{
-				hitAny = true;
-				break;
-			}
-		}
-
-		// 빈 공간 더블클릭이면 선택 도구(SelectTool)로 자동 전환
-		if (!hitAny)
+		bool switchSelect = pActiveTool->OnDoubleClicked(pDoc);
+		if (switchSelect)
 		{
 			GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+			SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
+			if (pSelect && pDoc && !pDoc->GetShapes().empty())
+			{
+				pSelect->SetSelectedIndex(static_cast<int>(pDoc->GetShapes().size()) - 1, pDoc);
+			}
 			Invalidate(FALSE);
-			LogAppEvent(_T("[더블클릭] 빈 공간 더블클릭 -> 선택 도구로 자동 전환"));
+			return;
 		}
 	}
 
@@ -349,20 +322,8 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	{
 		pTool->OnMove(e);
 
-		ToolType activeType = GetApp()->GetToolManager().GetActiveType();
-		bool isShapeTool = (activeType == ToolType::Pen ||
-		                    activeType == ToolType::Line ||
-		                    activeType == ToolType::Rect ||
-		                    activeType == ToolType::Ellipse ||
-		                    activeType == ToolType::Polygon);
-
-		// 버튼을 누른 채 드래그 중이거나, 패스 작성 중이거나, 쉐이프 도구 호버 미리보기 중이면 다시 그림
-		if ((nFlags & MK_LBUTTON) ||
-		    (GetDocument() && GetDocument()->GetCurrentPath()) ||
-		    isShapeTool)
-		{
-			Invalidate(FALSE);
-		}
+		// 마우스 이동 시 실시간 오버레이 갱신 (호버 십자선, 드래그 미리보기 등)
+		Invalidate(FALSE);
 	}
 
 	CView::OnMouseMove(nFlags, point);
@@ -555,6 +516,29 @@ void CM2DrawView::OnEndPrinting(CDC* /*pDC*/, CPrintInfo* /*pInfo*/)
 
 void CM2DrawView::OnRButtonUp(UINT /* nFlags */, CPoint point)
 {
+	CM2DrawDoc* pDoc = GetDocument();
+	ToolType activeType = GetApp()->GetToolManager().GetActiveType();
+
+	// 1. 그리기 도구(다각형, 펜, 사각형, 원, 직선 등) 상태에서 우클릭 시:
+	// 작성 중인 도형이 있으면 완료하고, 선택 도구(Select)로 전환
+	ITool* pActiveTool = GetApp()->GetToolManager().GetActiveTool();
+	if (pActiveTool && activeType != ToolType::Select && activeType != ToolType::Pan)
+	{
+		bool switchSelect = pActiveTool->OnRightClicked(pDoc);
+		if (switchSelect)
+		{
+			GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+			SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
+			if (pSelect && pDoc && !pDoc->GetShapes().empty())
+			{
+				pSelect->SetSelectedIndex(static_cast<int>(pDoc->GetShapes().size()) - 1, pDoc);
+			}
+			Invalidate(FALSE);
+			return;
+		}
+	}
+
+	// 2. 그 외(선택 도구 등)일 때만 기본 우클릭 컨텍스트 메뉴 표시
 	ClientToScreen(&point);
 	OnContextMenu(this, point);
 }
