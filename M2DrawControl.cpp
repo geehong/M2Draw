@@ -65,6 +65,11 @@ bool M2DrawControl::OnKeyDown(UINT /*nChar*/)
 	return false;
 }
 
+bool M2DrawControl::OnChar(UINT /*nChar*/)
+{
+	return false;
+}
+
 void M2DrawControl::ResetState()
 {
 	m_bHovered = false;
@@ -396,7 +401,9 @@ void M2DrawSlider::UpdateValueFromX(float mouseX)
 {
 	float norm = (mouseX - m_bounds.left) / GetWidth();
 	norm = min(1.0f, max(0.0f, norm));
-	SetValue(m_minVal + norm * (m_maxVal - m_minVal));
+	float rawVal = m_minVal + norm * (m_maxVal - m_minVal);
+	float roundedVal = std::round(rawVal * 10.0f) / 10.0f;
+	SetValue(roundedVal);
 }
 
 void M2DrawSlider::Draw(
@@ -504,6 +511,44 @@ D2D1_RECT_F M2DrawNumericInput::GetDownButtonRect() const
 	return D2D1::RectF(m_bounds.right - btnW, midY, m_bounds.right, m_bounds.bottom);
 }
 
+D2D1_RECT_F M2DrawNumericInput::GetTextRect() const
+{
+	return D2D1::RectF(m_bounds.left + 8.0f, m_bounds.top, m_bounds.right - 26.0f, m_bounds.bottom);
+}
+
+void M2DrawNumericInput::CommitEdit()
+{
+	if (!m_bEditing) return;
+	m_bEditing = false;
+	try
+	{
+		if (!m_editText.empty())
+		{
+			double v = std::stod(m_editText);
+			SetValue(v);
+		}
+	}
+	catch (...)
+	{
+	}
+	m_editText.clear();
+}
+
+void M2DrawNumericInput::CancelEdit()
+{
+	m_bEditing = false;
+	m_editText.clear();
+}
+
+void M2DrawNumericInput::ResetState()
+{
+	if (m_bEditing)
+	{
+		CommitEdit();
+	}
+	M2DrawControl::ResetState();
+}
+
 void M2DrawNumericInput::Draw(
 	ID2D1RenderTarget* pRT,
 	ID2D1SolidColorBrush* pBrush,
@@ -512,30 +557,68 @@ void M2DrawNumericInput::Draw(
 {
 	if (!m_bVisible) return;
 
-	// 프레임 박스: 다크 테마 배경 및 부드러운 외곽선
-	DrawControlFrame(pRT, pBrush, m_bounds, 4.0f, D2D1::ColorF(0.18f, 0.18f, 0.22f, 1.0f));
-
-	// 텍스트 수치 표시
-	wchar_t buf[64];
-	bool isInteger = (std::abs(m_val - std::round(m_val)) < 0.001);
-	if (m_suffix.empty())
+	// 프레임 박스: 편집 중일 때는 포커스 강조 테두리 색상 사용
+	if (m_bEditing)
 	{
-		if (isInteger)
-			swprintf_s(buf, L"%.0f", m_val);
-		else
-			swprintf_s(buf, L"%.2f", m_val);
+		DrawControlFrame(pRT, pBrush, m_bounds, 4.0f, D2D1::ColorF(0.12f, 0.12f, 0.16f, 1.0f));
+		pBrush->SetColor(D2D1::ColorF(0.0f, 0.48f, 0.85f, 1.0f));
+		pRT->DrawRoundedRectangle(D2D1::RoundedRect(m_bounds, 4.0f, 4.0f), pBrush, 1.5f);
 	}
 	else
 	{
-		if (isInteger)
-			swprintf_s(buf, L"%.0f %s", m_val, m_suffix.c_str());
-		else
-			swprintf_s(buf, L"%.2f %s", m_val, m_suffix.c_str());
+		DrawControlFrame(pRT, pBrush, m_bounds, 4.0f, D2D1::ColorF(0.18f, 0.18f, 0.22f, 1.0f));
 	}
 
-	D2D1_RECT_F textRect = D2D1::RectF(m_bounds.left + 10.0f, m_bounds.top, m_bounds.right - 26.0f, m_bounds.bottom);
-	DrawTextLabel(pRT, pBrush, pTextFormat, buf, textRect,
-		DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, D2D1::ColorF(0.95f, 0.95f, 0.98f, 1.0f));
+	D2D1_RECT_F textRect = GetTextRect();
+
+	if (m_bEditing)
+	{
+		// 편집 중: 사용자가 입력 중인 텍스트 표시 + 깜빡이는 캐럿(커서) 표시
+		std::wstring disp = m_editText;
+		DrawTextLabel(pRT, pBrush, pTextFormat, disp.c_str(), textRect,
+			DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+
+		// 커서 렌더링 (500ms 깜빡임)
+		if ((::GetTickCount64() / 500) % 2 == 0)
+		{
+			float charWidth = 7.0f; // 평균 문자 폭 추정
+			float caretX = min(textRect.right - 4.0f, textRect.left + disp.length() * charWidth);
+			pBrush->SetColor(D2D1::ColorF(0.0f, 0.68f, 1.0f, 1.0f));
+			pRT->DrawLine(
+				D2D1::Point2F(caretX, textRect.top + 5.0f),
+				D2D1::Point2F(caretX, textRect.bottom - 5.0f),
+				pBrush, 1.5f
+			);
+		}
+	}
+	else
+	{
+		// 기본 표시: 소수점 1자리(정수면 정수 표기)
+		wchar_t numBuf[32];
+		bool isInteger = (std::abs(m_val - std::round(m_val)) < 0.0001);
+		if (m_decimals <= 0 || isInteger)
+		{
+			swprintf_s(numBuf, L"%.0f", m_val);
+		}
+		else
+		{
+			// 소수점 1자리 기본
+			swprintf_s(numBuf, L"%.1f", m_val);
+		}
+
+		wchar_t buf[64];
+		if (m_suffix.empty())
+		{
+			swprintf_s(buf, L"%s", numBuf);
+		}
+		else
+		{
+			swprintf_s(buf, L"%s %s", numBuf, m_suffix.c_str());
+		}
+
+		DrawTextLabel(pRT, pBrush, pTextFormat, buf, textRect,
+			DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, D2D1::ColorF(0.95f, 0.95f, 0.98f, 1.0f));
+	}
 
 	// 증/감 단추 (▲, ▼)
 	D2D1_RECT_F rUp = GetUpButtonRect();
@@ -567,6 +650,8 @@ bool M2DrawNumericInput::OnLButtonDown(D2D1_POINT_2F pt)
 
 	if (pt.x >= rUp.left && pt.x <= rUp.right)
 	{
+		if (m_bEditing) CommitEdit();
+
 		if (pt.y >= rUp.top && pt.y <= rUp.bottom)
 		{
 			SetValue(m_val + m_step);
@@ -580,7 +665,78 @@ bool M2DrawNumericInput::OnLButtonDown(D2D1_POINT_2F pt)
 			return true;
 		}
 	}
+
+	// 텍스트 영역 클릭 시 인라인 직접 입력 모드 활성화
+	D2D1_RECT_F textRect = GetTextRect();
+	if (pt.x >= textRect.left && pt.x <= textRect.right &&
+		pt.y >= textRect.top && pt.y <= textRect.bottom)
+	{
+		m_bEditing = true;
+		m_bFocused = true;
+		// 현재 값을 편집 버퍼로 로드 (소수점 1자리 또는 정수)
+		wchar_t buf[32];
+		if (m_decimals <= 0 || (std::abs(m_val - std::round(m_val)) < 0.0001))
+			swprintf_s(buf, L"%.0f", m_val);
+		else
+			swprintf_s(buf, L"%.1f", m_val);
+		m_editText = buf;
+		return true;
+	}
+
+	if (m_bEditing)
+	{
+		CommitEdit();
+	}
 	return M2DrawControl::OnLButtonDown(pt);
+}
+
+bool M2DrawNumericInput::OnKeyDown(UINT nChar)
+{
+	if (!m_bEditing) return false;
+
+	if (nChar == VK_RETURN)
+	{
+		CommitEdit();
+		return true;
+	}
+	else if (nChar == VK_ESCAPE)
+	{
+		CancelEdit();
+		return true;
+	}
+	else if (nChar == VK_BACK)
+	{
+		if (!m_editText.empty())
+		{
+			m_editText.pop_back();
+		}
+		return true;
+	}
+	return false;
+}
+
+bool M2DrawNumericInput::OnChar(UINT nChar)
+{
+	if (!m_bEditing) return false;
+
+	// 숫자(0~9), 마이너스(-), 소수점(.) 허용
+	if ((nChar >= '0' && nChar <= '9') || nChar == '.' || nChar == '-')
+	{
+		if (nChar == '.' && m_editText.find(L'.') != std::wstring::npos)
+		{
+			return true; // 이미 소수점이 있으면 무시
+		}
+		if (nChar == '-' && !m_editText.empty())
+		{
+			return true; // 맨 앞에만 부호 허용
+		}
+		if (m_editText.length() < 16)
+		{
+			m_editText.push_back(static_cast<wchar_t>(nChar));
+		}
+		return true;
+	}
+	return false;
 }
 
 bool M2DrawNumericInput::OnMouseMove(D2D1_POINT_2F pt)
@@ -1165,7 +1321,30 @@ bool M2DrawPanel::OnKeyDown(UINT nChar)
 {
 	if (m_capturedChild)
 	{
-		return m_capturedChild->OnKeyDown(nChar);
+		if (m_capturedChild->OnKeyDown(nChar)) return true;
+	}
+	for (auto& child : m_children)
+	{
+		if (child && child->IsVisible() && child->OnKeyDown(nChar))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool M2DrawPanel::OnChar(UINT nChar)
+{
+	if (m_capturedChild)
+	{
+		if (m_capturedChild->OnChar(nChar)) return true;
+	}
+	for (auto& child : m_children)
+	{
+		if (child && child->IsVisible() && child->OnChar(nChar))
+		{
+			return true;
+		}
 	}
 	return false;
 }
@@ -1327,7 +1506,36 @@ bool M2DrawExpander::OnKeyDown(UINT nChar)
 {
 	if (m_capturedChild)
 	{
-		return m_capturedChild->OnKeyDown(nChar);
+		if (m_capturedChild->OnKeyDown(nChar)) return true;
+	}
+	if (m_bExpanded)
+	{
+		for (auto& child : m_children)
+		{
+			if (child && child->IsVisible() && child->OnKeyDown(nChar))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool M2DrawExpander::OnChar(UINT nChar)
+{
+	if (m_capturedChild)
+	{
+		if (m_capturedChild->OnChar(nChar)) return true;
+	}
+	if (m_bExpanded)
+	{
+		for (auto& child : m_children)
+		{
+			if (child && child->IsVisible() && child->OnChar(nChar))
+			{
+				return true;
+			}
+		}
 	}
 	return false;
 }

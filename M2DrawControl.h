@@ -61,6 +61,7 @@ public:
 	virtual bool OnMouseMove(D2D1_POINT_2F pt);
 	virtual bool OnLButtonUp(D2D1_POINT_2F pt);
 	virtual bool OnKeyDown(UINT nChar);
+	virtual bool OnChar(UINT nChar);
 
 	// 상태 리셋
 	virtual void ResetState();
@@ -249,20 +250,35 @@ public:
 	void SetSuffix(const std::wstring& suffix) { m_suffix = suffix; }
 	void SetOnChanged(ChangeCallback cb) { m_onChanged = cb; }
 
+	void SetDecimals(int decimals) { m_decimals = decimals; }
+	int  GetDecimals() const { return m_decimals; }
+
 	void Draw(ID2D1RenderTarget* pRT, ID2D1SolidColorBrush* pBrush,
 		IDWriteFactory* pDWFactory, IDWriteTextFormat* pTextFormat) override;
 
 	bool OnLButtonDown(D2D1_POINT_2F pt) override;
 	bool OnMouseMove(D2D1_POINT_2F pt) override;
 	bool OnLButtonUp(D2D1_POINT_2F pt) override;
+	bool OnKeyDown(UINT nChar) override;
+	bool OnChar(UINT nChar) override;
+	void ResetState() override;
+
+	bool IsEditing() const { return m_bEditing; }
+	void CommitEdit();
+	void CancelEdit();
 
 private:
 	double         m_minVal = 0.0;
 	double         m_maxVal = 100.0;
 	double         m_val = 10.0;
 	double         m_step = 1.0;
+	int            m_decimals = 1;
 	std::wstring   m_suffix;
 	ChangeCallback m_onChanged;
+
+	// 인라인 텍스트 직접 입력/편집 상태
+	bool           m_bEditing = false;
+	std::wstring   m_editText;
 
 	// 버튼 히트 영역
 	bool           m_bHoverUp = false;
@@ -272,6 +288,7 @@ private:
 
 	D2D1_RECT_F GetUpButtonRect() const;
 	D2D1_RECT_F GetDownButtonRect() const;
+	D2D1_RECT_F GetTextRect() const;
 };
 
 // ============================================================================
@@ -358,6 +375,7 @@ public:
 	bool OnMouseMove(D2D1_POINT_2F pt) override;
 	bool OnLButtonUp(D2D1_POINT_2F pt) override;
 	bool OnKeyDown(UINT nChar) override;
+	bool OnChar(UINT nChar) override;
 
 private:
 	std::vector<std::shared_ptr<M2DrawControl>> m_children;
@@ -396,6 +414,7 @@ public:
 	bool OnMouseMove(D2D1_POINT_2F pt) override;
 	bool OnLButtonUp(D2D1_POINT_2F pt) override;
 	bool OnKeyDown(UINT nChar) override;
+	bool OnChar(UINT nChar) override;
 
 private:
 	std::wstring                                m_headerText;

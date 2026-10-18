@@ -65,6 +65,10 @@ BEGIN_MESSAGE_MAP(CD2DPropertyView, CWnd)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONUP()
+	ON_WM_KEYDOWN()
+	ON_WM_CHAR()
+	ON_WM_KILLFOCUS()
+	ON_WM_GETDLGCODE()
 END_MESSAGE_MAP()
 
 CD2DPropertyView::CD2DPropertyView(PaneMode initialMode)
@@ -1311,4 +1315,69 @@ void CD2DPropertyView::OnLButtonUp(UINT /*nFlags*/, CPoint point)
 		ReleaseCapture();
 	}
 	SafeInvalidate(FALSE);
+}
+
+void CD2DPropertyView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+	if (m_pCurrentPanel)
+	{
+		if (m_pCurrentPanel->OnKeyDown(nChar))
+		{
+			SafeInvalidate(FALSE);
+			return;
+		}
+	}
+	CWnd::OnKeyDown(nChar, nRepCnt, nFlags);
+}
+
+void CD2DPropertyView::OnChar(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+	if (m_pCurrentPanel)
+	{
+		if (m_pCurrentPanel->OnChar(nChar))
+		{
+			SafeInvalidate(FALSE);
+			return;
+		}
+	}
+	CWnd::OnChar(nChar, nRepCnt, nFlags);
+}
+
+void CD2DPropertyView::OnKillFocus(CWnd* pNewWnd)
+{
+	CWnd::OnKillFocus(pNewWnd);
+	if (m_pCurrentPanel)
+	{
+		m_pCurrentPanel->ResetState();
+		SafeInvalidate(FALSE);
+	}
+}
+
+UINT CD2DPropertyView::OnGetDlgCode()
+{
+	return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
+}
+
+BOOL CD2DPropertyView::PreTranslateMessage(MSG* pMsg)
+{
+	if (pMsg->message == WM_KEYDOWN)
+	{
+		if (pMsg->wParam == VK_RETURN || pMsg->wParam == VK_ESCAPE || pMsg->wParam == VK_BACK)
+		{
+			if (m_pCurrentPanel && m_pCurrentPanel->OnKeyDown(static_cast<UINT>(pMsg->wParam)))
+			{
+				SafeInvalidate(FALSE);
+				return TRUE;
+			}
+		}
+	}
+	else if (pMsg->message == WM_CHAR)
+	{
+		if (m_pCurrentPanel && m_pCurrentPanel->OnChar(static_cast<UINT>(pMsg->wParam)))
+		{
+			SafeInvalidate(FALSE);
+			return TRUE;
+		}
+	}
+	return CWnd::PreTranslateMessage(pMsg);
 }
