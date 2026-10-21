@@ -211,6 +211,13 @@ void CD2DPropertyView::ApplyCanvasSettings()
 				}
 			}
 		}
+
+		CWnd* pMainWnd = AfxGetMainWnd();
+		if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		{
+			CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
+			pMainFrame->GetOptionBar().SyncSelection(m_pActiveDoc, m_selectedShapeIndex);
+		}
 	}
 
 	// 그리드 설정(단위 등)이 변경되었을 때 오브젝트 설정 창의 단위 및 값 즉시 동기화
@@ -242,6 +249,7 @@ void CD2DPropertyView::InitControls()
 
 		m_spinTransX = std::make_shared<M2DrawNumericInput>(-10000.0, 10000.0, 0.0, 1.0);
 		m_spinTransX->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			if (m_bUpdating) return;
 			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			if (!shape) return;
@@ -261,6 +269,7 @@ void CD2DPropertyView::InitControls()
 
 		m_spinTransY = std::make_shared<M2DrawNumericInput>(-10000.0, 10000.0, 0.0, 1.0);
 		m_spinTransY->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			if (m_bUpdating) return;
 			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			if (!shape) return;
@@ -280,6 +289,7 @@ void CD2DPropertyView::InitControls()
 
 		m_spinTransW = std::make_shared<M2DrawNumericInput>(0.1, 10000.0, 100.0, 1.0);
 		m_spinTransW->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			if (m_bUpdating) return;
 			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			if (!shape) return;
@@ -296,7 +306,7 @@ void CD2DPropertyView::InitControls()
 						D2D1_POINT_2F origin = shape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
 						if (m_chkAspectLink && m_chkAspectLink->IsChecked()) {
 							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(factor, factor, origin);
-							if (m_spinTransH) m_spinTransH->SetValue(m_spinTransH->GetValue() * factor);
+							if (m_spinTransH) m_spinTransH->SetValue(m_spinTransH->GetValue() * factor, false);
 						} else {
 							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(factor, 1.0f, origin);
 						}
@@ -310,6 +320,7 @@ void CD2DPropertyView::InitControls()
 
 		m_spinTransH = std::make_shared<M2DrawNumericInput>(0.1, 10000.0, 100.0, 1.0);
 		m_spinTransH->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			if (m_bUpdating) return;
 			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			if (!shape) return;
@@ -562,6 +573,7 @@ void CD2DPropertyView::InitControls()
 					pathShape->Invalidate();
 					m_pActiveDoc->UpdateAllViews(nullptr);
 					SafeInvalidate(FALSE);
+					SyncOptionBarWithSelection(m_selectedShapeIndex, m_pActiveDoc);
 				}
 			}
 		});
@@ -827,10 +839,13 @@ void CD2DPropertyView::SyncControlsFromData()
 					float curW = (lb.right - lb.left) * std::sqrt(shape->xf._11 * shape->xf._11 + shape->xf._12 * shape->xf._12);
 					float curH = (lb.bottom - lb.top) * std::sqrt(shape->xf._21 * shape->xf._21 + shape->xf._22 * shape->xf._22);
 
-					if (m_spinTransX) m_spinTransX->SetValue(origin.x / pxPerUnit);
-					if (m_spinTransY) m_spinTransY->SetValue(origin.y / pxPerUnit);
-					if (m_spinTransW) m_spinTransW->SetValue(curW / pxPerUnit);
-					if (m_spinTransH) m_spinTransH->SetValue(curH / pxPerUnit);
+					const bool prev = m_bUpdating;
+					m_bUpdating = true;
+					if (m_spinTransX) m_spinTransX->SetValue(origin.x / pxPerUnit, false);
+					if (m_spinTransY) m_spinTransY->SetValue(origin.y / pxPerUnit, false);
+					if (m_spinTransW) m_spinTransW->SetValue(curW / pxPerUnit, false);
+					if (m_spinTransH) m_spinTransH->SetValue(curH / pxPerUnit, false);
+					m_bUpdating = prev;
 				}
 			}
 		}
@@ -952,6 +967,36 @@ void CD2DPropertyView::SyncControlsFromData()
 	{
 		// Canvas Settings Mode
 		// Future expansion
+	}
+}
+
+void CD2DPropertyView::SyncTransformOnly()
+{
+	if (m_paneMode != MODE_SHAPE) return;
+	if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		return;
+
+	Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+	if (!shape) return;
+
+	CanvasUnit curUnit = GetApp()->GetGrid().unit;
+	float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+	if (pxPerUnit <= 0.0f) pxPerUnit = 1.0f;
+
+	D2D1_RECT_F lb{};
+	if (shape->GetLocalBounds(nullptr, lb))
+	{
+		D2D1_POINT_2F origin = shape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
+		float curW = (lb.right - lb.left) * std::sqrt(shape->xf._11 * shape->xf._11 + shape->xf._12 * shape->xf._12);
+		float curH = (lb.bottom - lb.top) * std::sqrt(shape->xf._21 * shape->xf._21 + shape->xf._22 * shape->xf._22);
+
+		const bool prev = m_bUpdating;
+		m_bUpdating = true;
+		if (m_spinTransX) m_spinTransX->SetValue(origin.x / pxPerUnit, false);
+		if (m_spinTransY) m_spinTransY->SetValue(origin.y / pxPerUnit, false);
+		if (m_spinTransW) m_spinTransW->SetValue(curW / pxPerUnit, false);
+		if (m_spinTransH) m_spinTransH->SetValue(curH / pxPerUnit, false);
+		m_bUpdating = prev;
 	}
 }
 

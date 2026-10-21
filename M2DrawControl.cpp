@@ -378,13 +378,13 @@ void M2DrawSlider::SetRange(float minVal, float maxVal)
 	m_val = min(m_maxVal, max(m_minVal, m_val));
 }
 
-void M2DrawSlider::SetValue(float val)
+void M2DrawSlider::SetValue(float val, bool triggerCallback)
 {
 	float clamped = min(m_maxVal, max(m_minVal, val));
 	if (std::abs(m_val - clamped) > 0.0001f)
 	{
 		m_val = clamped;
-		if (m_onChanged)
+		if (triggerCallback && m_onChanged)
 		{
 			m_onChanged(this, m_val);
 		}
@@ -484,13 +484,13 @@ M2DrawNumericInput::M2DrawNumericInput(double minVal, double maxVal, double curV
 {
 }
 
-void M2DrawNumericInput::SetValue(double val)
+void M2DrawNumericInput::SetValue(double val, bool triggerCallback)
 {
 	double clamped = min(m_maxVal, max(m_minVal, val));
 	if (std::abs(m_val - clamped) > 0.0001)
 	{
 		m_val = clamped;
-		if (m_onChanged)
+		if (triggerCallback && m_onChanged)
 		{
 			m_onChanged(this, m_val);
 		}

@@ -17,6 +17,15 @@ BEGIN_MESSAGE_MAP(CToolBoxPane, CDockablePane)
 	ON_WM_MOUSEMOVE()
 	ON_WM_MOUSELEAVE()
 	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONUP()
+	ON_WM_TIMER()
+	ON_WM_CAPTURECHANGED()
+END_MESSAGE_MAP()
+
+BEGIN_MESSAGE_MAP(CToolFlyoutWnd, CWnd)
+	ON_WM_PAINT()
+	ON_WM_ERASEBKGND()
+	ON_WM_MOUSEACTIVATE()
 END_MESSAGE_MAP()
 
 CToolBoxPane::CToolBoxPane() noexcept
@@ -40,6 +49,18 @@ CToolBoxPane::CToolBoxPane() noexcept
 		{ ToolType::ZoomIn,      L"돋보기 확대 (Z)", L'Z', CRect() },
 		{ ToolType::ZoomOut,     L"돋보기 축소 (X)", L'X', CRect() }
 	};
+
+	// 사각형 그룹: 사각형 / 삼각형 (마지막 선택은 앱 설정에 저장)
+	for (auto& btn : m_buttons)
+	{
+		if (btn.type == ToolType::Rect)
+		{
+			btn.subTools = { ToolType::Rect, ToolType::Triangle };
+			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("RectGroupTool"), static_cast<int>(ToolType::Rect));
+			if (saved == static_cast<int>(ToolType::Triangle))
+				btn.type = ToolType::Triangle;
+		}
+	}
 }
 
 CToolBoxPane::~CToolBoxPane()
@@ -81,10 +102,32 @@ void CToolBoxPane::OnDestroy()
 	CDockablePane::OnDestroy();
 }
 
-void CToolBoxPane::OnToolChanged(ToolType /*newTool*/)
+void CToolBoxPane::OnToolChanged(ToolType newTool)
 {
+	// 다른 경로(단축키 등)로 서브도구가 활성화되면 그룹 대표 아이콘도 맞춥니다.
+	for (auto& btn : m_buttons)
+	{
+		for (ToolType t : btn.subTools)
+		{
+			if (t == newTool)
+				btn.type = newTool;
+		}
+	}
+
 	if (GetSafeHwnd())
 		Invalidate(FALSE);
+}
+
+bool CToolBoxPane::IsButtonActive(const ToolButtonItem& btn, ToolType active) const
+{
+	if (btn.type == active)
+		return true;
+	for (ToolType t : btn.subTools)
+	{
+		if (t == active)
+			return true;
+	}
+	return false;
 }
 
 ID2D1Bitmap* CToolBoxPane::LoadBitmapFromFile(const wchar_t* filePath)
@@ -305,7 +348,7 @@ void CToolBoxPane::OnPaint()
 			static_cast<float>(btn.rect.bottom)
 		);
 
-		bool isSelected = (btn.type == activeTool);
+		bool isSelected = IsButtonActive(btn, activeTool);
 		bool isHover = (i == m_hoverIndex);
 
 		// 버튼 배경 그리기
@@ -330,6 +373,30 @@ void CToolBoxPane::OnPaint()
 
 		// Direct2D 순수 벡터 지오메트리 아이콘 그리기 (DPI 무관 선명도 보장)
 		DrawButtonIcon(m_pRenderTarget, m_pBrush, btn.type, r, isSelected);
+
+		// 서브도구 그룹 표시: 우하단 작은 삼각형
+		if (!btn.subTools.empty() && m_pD2DFactory)
+		{
+			ID2D1PathGeometry* pInd = nullptr;
+			m_pD2DFactory->CreatePathGeometry(&pInd);
+			if (pInd)
+			{
+				ID2D1GeometrySink* pSink = nullptr;
+				pInd->Open(&pSink);
+				if (pSink)
+				{
+					pSink->BeginFigure(D2D1::Point2F(r.right - 3.0f, r.bottom - 9.0f), D2D1_FIGURE_BEGIN_FILLED);
+					pSink->AddLine(D2D1::Point2F(r.right - 3.0f, r.bottom - 3.0f));
+					pSink->AddLine(D2D1::Point2F(r.right - 9.0f, r.bottom - 3.0f));
+					pSink->EndFigure(D2D1_FIGURE_END_CLOSED);
+					pSink->Close();
+					pSink->Release();
+				}
+				m_pBrush->SetColor(isSelected ? D2D1::ColorF(0.20f, 0.45f, 0.85f) : D2D1::ColorF(0.40f, 0.43f, 0.50f));
+				m_pRenderTarget->FillGeometry(pInd, m_pBrush);
+				pInd->Release();
+			}
+		}
 	}
 
 	HRESULT hr = m_pRenderTarget->EndDraw();
@@ -487,6 +554,28 @@ void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 		}
 		break;
 	}
+	case ToolType::Triangle: // 삼각형
+	{
+		ID2D1PathGeometry* pGeo = nullptr;
+		m_pD2DFactory->CreatePathGeometry(&pGeo);
+		if (pGeo)
+		{
+			ID2D1GeometrySink* pSink = nullptr;
+			pGeo->Open(&pSink);
+			if (pSink)
+			{
+				pSink->BeginFigure(D2D1::Point2F(cx, cy - 7.0f), D2D1_FIGURE_BEGIN_HOLLOW);
+				pSink->AddLine(D2D1::Point2F(cx + 8.0f, cy + 6.0f));
+				pSink->AddLine(D2D1::Point2F(cx - 8.0f, cy + 6.0f));
+				pSink->EndFigure(D2D1_FIGURE_END_CLOSED);
+				pSink->Close();
+				pSink->Release();
+			}
+			rt->DrawGeometry(pGeo, brush, 1.8f);
+			pGeo->Release();
+		}
+		break;
+	}
 	default:
 		break;
 	}
@@ -494,6 +583,15 @@ void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 
 void CToolBoxPane::OnMouseMove(UINT nFlags, CPoint point)
 {
+	// 플라이아웃이 열려 있으면(마우스 캡처 중) 팝업 위 항목만 하이라이트
+	if (m_flyoutOpen)
+	{
+		CPoint sp = point;
+		ClientToScreen(&sp);
+		m_flyout.SetHot(m_flyout.HitTest(sp));
+		return;
+	}
+
 	int hit = -1;
 	for (int i = 0; i < static_cast<int>(m_buttons.size()); ++i)
 	{
@@ -535,14 +633,252 @@ void CToolBoxPane::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	for (size_t i = 0; i < m_buttons.size(); ++i)
 	{
-		if (m_buttons[i].rect.PtInRect(point))
+		if (!m_buttons[i].rect.PtInRect(point))
+			continue;
+
+		if (!m_buttons[i].subTools.empty())
 		{
-			// ToolManager의 활성 도구 변경
-			GetApp()->GetToolManager().SetActiveTool(m_buttons[i].type);
-			Invalidate(FALSE);
+			// 그룹 버튼: 짧게 클릭하면 대표 도구 선택, 길게 누르거나 우하단 삼각 영역이면 플라이아웃 펼침
+			m_pressIndex = static_cast<int>(i);
+			SetCapture();
+
+			const CRect& r = m_buttons[i].rect;
+			CRect indicator(r.right - 12, r.bottom - 12, r.right, r.bottom);
+			if (indicator.PtInRect(point))
+				OpenFlyout(static_cast<int>(i));
+			else
+				SetTimer(kFlyoutTimer, kFlyoutDelayMs, nullptr);
 			return;
 		}
+
+		// ToolManager의 활성 도구 변경
+		GetApp()->GetToolManager().SetActiveTool(m_buttons[i].type);
+		Invalidate(FALSE);
+		return;
 	}
 
 	CDockablePane::OnLButtonDown(nFlags, point);
+}
+
+void CToolBoxPane::OnLButtonUp(UINT nFlags, CPoint point)
+{
+	if (m_pressIndex < 0)
+	{
+		CDockablePane::OnLButtonUp(nFlags, point);
+		return;
+	}
+
+	const int idx = m_pressIndex;
+	KillTimer(kFlyoutTimer);
+
+	bool selected = false;
+	ToolType chosen = m_buttons[idx].type;
+
+	if (m_flyoutOpen)
+	{
+		// 팝업 항목 위에서 놓으면 확정, 밖이면 취소
+		CPoint sp = point;
+		ClientToScreen(&sp);
+		const int hit = m_flyout.HitTest(sp);
+		if (hit >= 0)
+		{
+			chosen = m_flyout.GetItem(hit);
+			selected = true;
+		}
+	}
+	else
+	{
+		// 짧은 클릭: 현재 대표 도구
+		selected = true;
+	}
+
+	// OnCaptureChanged가 취소 로직을 타지 않도록 먼저 상태를 해제
+	m_pressIndex = -1;
+	CloseFlyout();
+	if (GetCapture() == this)
+		ReleaseCapture();
+
+	if (selected)
+	{
+		m_buttons[idx].type = chosen;
+		if (m_buttons[idx].subTools.size() > 1 && m_buttons[idx].subTools[0] == ToolType::Rect)
+			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("RectGroupTool"), static_cast<int>(chosen));
+		GetApp()->GetToolManager().SetActiveTool(chosen);
+	}
+	Invalidate(FALSE);
+}
+
+void CToolBoxPane::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == kFlyoutTimer)
+	{
+		KillTimer(kFlyoutTimer);
+		if (m_pressIndex >= 0 && !m_flyoutOpen)
+			OpenFlyout(m_pressIndex);
+		return;
+	}
+	CDockablePane::OnTimer(nIDEvent);
+}
+
+void CToolBoxPane::OnCaptureChanged(CWnd* pWnd)
+{
+	// 포커스 상실 등으로 캡처를 잃으면 플라이아웃을 취소합니다.
+	if (m_pressIndex >= 0)
+	{
+		m_pressIndex = -1;
+		KillTimer(kFlyoutTimer);
+		CloseFlyout();
+		Invalidate(FALSE);
+	}
+	CDockablePane::OnCaptureChanged(pWnd);
+}
+
+void CToolBoxPane::OpenFlyout(int buttonIndex)
+{
+	if (buttonIndex < 0 || buttonIndex >= static_cast<int>(m_buttons.size()))
+		return;
+
+	KillTimer(kFlyoutTimer);
+	const ToolButtonItem& btn = m_buttons[buttonIndex];
+	CPoint pt(btn.rect.right + 4, btn.rect.top);
+	ClientToScreen(&pt);
+
+	if (m_flyout.Open(this, pt, btn.subTools, btn.type))
+		m_flyoutOpen = true;
+}
+
+void CToolBoxPane::CloseFlyout()
+{
+	if (m_flyout.GetSafeHwnd())
+		m_flyout.DestroyWindow();
+	m_flyoutOpen = false;
+}
+
+// ---------------------------------------------------------------------------
+// CToolFlyoutWnd
+// ---------------------------------------------------------------------------
+
+static const wchar_t* GetFlyoutToolName(ToolType t)
+{
+	switch (t)
+	{
+	case ToolType::Rect:     return L"사각형 (M)";
+	case ToolType::Triangle: return L"삼각형";
+	default:                 return L"";
+	}
+}
+
+static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color)
+{
+	CPen pen(PS_SOLID, 2, color);
+	CPen* pOldPen = dc.SelectObject(&pen);
+	CBrush* pOldBrush = static_cast<CBrush*>(dc.SelectStockObject(NULL_BRUSH));
+
+	const CPoint c = box.CenterPoint();
+	switch (t)
+	{
+	case ToolType::Rect:
+		dc.Rectangle(c.x - 8, c.y - 6, c.x + 8, c.y + 6);
+		break;
+	case ToolType::Triangle:
+	{
+		CPoint pts[3] = { CPoint(c.x, c.y - 7), CPoint(c.x + 9, c.y + 6), CPoint(c.x - 9, c.y + 6) };
+		dc.Polygon(pts, 3);
+		break;
+	}
+	default:
+		break;
+	}
+
+	dc.SelectObject(pOldBrush);
+	dc.SelectObject(pOldPen);
+}
+
+BOOL CToolFlyoutWnd::Open(CWnd* pOwner, CPoint screenTopLeft, const std::vector<ToolType>& items, ToolType current)
+{
+	if (GetSafeHwnd())
+		DestroyWindow();
+
+	m_items = items;
+	m_current = current;
+	m_hot = -1;
+
+	const int w = kItemW + 4;
+	const int h = kItemH * static_cast<int>(m_items.size()) + 4;
+
+	const CString cls = AfxRegisterWndClass(CS_DROPSHADOW | CS_HREDRAW | CS_VREDRAW, ::LoadCursor(nullptr, IDC_ARROW));
+	if (!CreateEx(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST, cls, _T(""), WS_POPUP,
+	              screenTopLeft.x, screenTopLeft.y, w, h, pOwner->GetSafeHwnd(), nullptr))
+		return FALSE;
+
+	ShowWindow(SW_SHOWNOACTIVATE);
+	return TRUE;
+}
+
+int CToolFlyoutWnd::HitTest(CPoint screenPt) const
+{
+	if (!GetSafeHwnd())
+		return -1;
+
+	CPoint pt = screenPt;
+	const_cast<CToolFlyoutWnd*>(this)->ScreenToClient(&pt);
+
+	CRect rc;
+	GetClientRect(&rc);
+	if (!rc.PtInRect(pt))
+		return -1;
+
+	const int idx = (pt.y - 2) / kItemH;
+	return (idx >= 0 && idx < static_cast<int>(m_items.size())) ? idx : -1;
+}
+
+void CToolFlyoutWnd::SetHot(int index)
+{
+	if (index != m_hot)
+	{
+		m_hot = index;
+		if (GetSafeHwnd())
+			Invalidate(FALSE);
+	}
+}
+
+BOOL CToolFlyoutWnd::OnEraseBkgnd(CDC* /*pDC*/)
+{
+	return TRUE;
+}
+
+void CToolFlyoutWnd::OnPaint()
+{
+	CPaintDC dc(this);
+
+	CRect rc;
+	GetClientRect(&rc);
+	dc.FillSolidRect(rc, RGB(250, 250, 252));
+	dc.Draw3dRect(rc, RGB(170, 175, 190), RGB(170, 175, 190));
+
+	CFont* pOldFont = static_cast<CFont*>(dc.SelectStockObject(DEFAULT_GUI_FONT));
+	dc.SetBkMode(TRANSPARENT);
+
+	for (int i = 0; i < static_cast<int>(m_items.size()); ++i)
+	{
+		CRect item(2, 2 + i * kItemH, 2 + kItemW, 2 + (i + 1) * kItemH);
+
+		const bool hot = (i == m_hot);
+		if (hot)
+			dc.FillSolidRect(item, RGB(208, 224, 250));
+
+		const COLORREF color = hot ? RGB(30, 90, 200) : RGB(60, 66, 80);
+		CRect glyph(item.left, item.top, item.left + kItemH, item.bottom);
+		DrawFlyoutGlyph(dc, m_items[i], glyph, color);
+
+		// 현재 대표 도구 표시
+		if (m_items[i] == m_current)
+			dc.FillSolidRect(item.left, item.top + 6, 3, item.Height() - 12, RGB(51, 115, 217));
+
+		CRect text(item.left + kItemH, item.top, item.right - 4, item.bottom);
+		dc.SetTextColor(color);
+		dc.DrawText(GetFlyoutToolName(m_items[i]), -1, text, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
+	}
+
+	dc.SelectObject(pOldFont);
 }

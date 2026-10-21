@@ -26,6 +26,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_COMMAND(ID_VIEW_CUSTOMIZE, &CMainFrame::OnViewCustomize)
 	ON_REGISTERED_MESSAGE(AFX_WM_CREATETOOLBAR, &CMainFrame::OnToolbarCreateNew)
 	ON_WM_SETTINGCHANGE()
+	ON_COMMAND_RANGE(ID_OPT_FIRST, ID_OPT_LAST, &CMainFrame::OnOptionBarCommit)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_OPT_LABEL, ID_OPT_LAST, &CMainFrame::OnUpdateOptionBar)
 END_MESSAGE_MAP()
 
 static UINT indicators[] =
@@ -95,6 +97,14 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	// 사용자 정의 도구 모음 작업을 허용합니다.
 	InitUserToolbars(nullptr, uiFirstUserToolBarId, uiLastUserToolBarId);
 
+	// 상단 도구 옵션바 (MFC 기본 컨트롤 기반)
+	if (!m_wndOptionBar.CreateEx(this, TBSTYLE_FLAT, WS_CHILD | WS_VISIBLE | CBRS_TOP | CBRS_TOOLTIPS | CBRS_FLYBY, CRect(1, 1, 1, 1), AFX_IDW_CONTROLBAR_FIRST + 60))
+	{
+		TRACE0("도구 옵션바를 만들지 못했습니다.\n");
+		return -1;
+	}
+	m_wndOptionBar.SetWindowText(_T("도구 옵션"));
+
 	if (!m_wndStatusBar.Create(this))
 	{
 		TRACE0("상태 표시줄을 만들지 못했습니다.\n");
@@ -105,9 +115,12 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	// TODO: 도구 모음 및 메뉴 모음을 도킹할 수 없게 하려면 이 다섯 줄을 삭제하십시오.
 	m_wndMenuBar.EnableDocking(CBRS_ALIGN_ANY);
 	m_wndToolBar.EnableDocking(CBRS_ALIGN_ANY);
+	m_wndOptionBar.EnableDocking(CBRS_ALIGN_TOP | CBRS_ALIGN_BOTTOM); // 세로 도킹 금지
 	EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndMenuBar);
 	DockPane(&m_wndToolBar);
+	DockPane(&m_wndOptionBar);
+	m_wndOptionBar.Attach();
 
 
 	// Visual Studio 2005 스타일 도킹 창 동작을 활성화합니다.
@@ -346,4 +359,14 @@ void CMainFrame::OnSettingChange(UINT uFlags, LPCTSTR lpszSection)
 {
 	CMDIFrameWndEx::OnSettingChange(uFlags, lpszSection);
 	m_wndOutput.UpdateFonts();
+}
+
+void CMainFrame::OnOptionBarCommit(UINT nID)
+{
+	m_wndOptionBar.OnOptionCommit(nID);
+}
+
+void CMainFrame::OnUpdateOptionBar(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(TRUE);
 }

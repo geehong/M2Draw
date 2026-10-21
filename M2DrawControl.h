@@ -201,7 +201,7 @@ public:
 	M2DrawSlider(float minVal = 0.0f, float maxVal = 1.0f, float curVal = 0.5f);
 
 	void SetRange(float minVal, float maxVal);
-	void SetValue(float val);
+	void SetValue(float val, bool triggerCallback = true);
 	float GetValue() const { return m_val; }
 	float GetMinVal() const { return m_minVal; }
 	float GetMaxVal() const { return m_maxVal; }
@@ -244,7 +244,7 @@ public:
 
 	void SetRange(double minVal, double maxVal) { m_minVal = minVal; m_maxVal = maxVal; }
 	void SetStep(double step) { m_step = step; }
-	void SetValue(double val);
+	void SetValue(double val, bool triggerCallback = true);
 	double GetValue() const { return m_val; }
 
 	void SetSuffix(const std::wstring& suffix) { m_suffix = suffix; }

@@ -31,6 +31,7 @@ public:
 	void ApplyToShape();
 	void ApplyCanvasSettings();
 	void SyncControlsFromData();
+	void SyncTransformOnly();
 
 	enum FillMode
 	{
@@ -45,6 +46,7 @@ protected:
 	PaneMode    m_paneMode = MODE_SHAPE;
 	CM2DrawDoc* m_pActiveDoc = nullptr;
 	int         m_selectedShapeIndex = -1;
+	bool        m_bUpdating = false;
 
 	// 도형 상태 데이터
 	CString      m_strShapeName;

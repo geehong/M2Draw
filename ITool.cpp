@@ -3,6 +3,7 @@
 #include "M2DrawDoc.h"
 #include "M2DrawView.h"
 #include "M2Draw.h"
+#include "MainFrm.h"
 
 // ============================================================================
 // SelectTool 구현 (도형 선택, 이동, 스케일, 회전, 에디트 포인트 편집)
@@ -296,6 +297,14 @@ void SelectTool::OnMove(const ToolEvent& e)
 			if (ps)
 			{
 				ApplyNodeEdit(ps, e);
+
+				static DWORD s_lastNodeTick = 0;
+				DWORD curTick = ::GetTickCount();
+				if (curTick - s_lastNodeTick >= 30)
+				{
+					s_lastNodeTick = curTick;
+					UpdateShapePropertiesSelection(m_editShapeIdx, e.pDoc);
+				}
 			}
 		}
 		return;
@@ -323,6 +332,18 @@ void SelectTool::OnMove(const ToolEvent& e)
 		break;
 	default:
 		break;
+	}
+
+	// 변형(이동, 크기 조절, 회전) 중 상단 옵션바 수치 실시간 동기화 (30ms 쓰로틀링으로 메시지 큐 지연 차단)
+	if (m_mode == Mode::Moving || m_mode == Mode::Scaling || m_mode == Mode::Rotating)
+	{
+		static DWORD s_lastDragTick = 0;
+		DWORD curTick = ::GetTickCount();
+		if (curTick - s_lastDragTick >= 30)
+		{
+			s_lastDragTick = curTick;
+			UpdateShapePropertiesSelection(primaryIdx, e.pDoc);
+		}
 	}
 }
 
@@ -454,6 +475,7 @@ void SelectTool::OnUp(const ToolEvent& e)
 	}
 	else if (m_mode != Mode::None)
 	{
+		UpdateShapePropertiesSelection(GetSelectedIndex(), e.pDoc);
 		CString str;
 		str.Format(_T("[선택 도구] 변형 완료 (모드: %d)"), static_cast<int>(m_mode));
 		LogAppEvent(str);
@@ -659,6 +681,15 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 	pDoc->GetShapes().push_back(std::move(m_previewShape));
 	m_lastCommittedIndex = static_cast<int>(pDoc->GetShapes().size()) - 1;
 	m_previewShape = nullptr;
+
+	// 방금 등록된 도형 정보 표시 (속성창 + 상단 옵션바 수정 모드)
+	UpdateShapePropertiesSelection(m_lastCommittedIndex, pDoc);
+	SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
+	if (pSelect)
+	{
+		pSelect->SetSelectedIndex(m_lastCommittedIndex, pDoc);
+	}
+
 	return true;
 }
 
@@ -776,6 +807,15 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 	m_isDragging = true;
 	m_waitingSecondClick = false;
 
+	// 상단 옵션바를 "만들기" 모드로 설정하고 시작점 고정
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+	{
+		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
+		pMainFrame->GetOptionBar().SetMode(m_toolType, false);
+	}
+	UpdateOptionBarCreationCoords(m_startPt.x, m_startPt.y, 0.0f, 0.0f, true);
+
 	// 엔진 팩토리를 통해 도형 인스턴스 생성
 	m_previewShape = CreateShapeInstance(m_startPt, m_startPt);
 	if (m_previewShape)
@@ -786,6 +826,32 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 		m_previewShape->style.fillType = m_setting.fillType;
 		m_previewShape->style.fill = m_setting.fillColor;
 		m_previewShape->Invalidate();
+	}
+}
+
+void BoxShapeTool::OnMove(const ToolEvent& e)
+{
+	BaseShapeTool::OnMove(e);
+
+	if (m_isDragging || m_waitingSecondClick)
+	{
+		// 첫 포인트 고정 후: 마우스 움직임에 따라 W, H 실시간 변동
+		float w = std::abs(e.worldPt.x - m_startPt.x);
+		float h = std::abs(e.worldPt.y - m_startPt.y);
+
+		// 정방형/정비율 제약 (Shift 누름 시)
+		if (e.shiftDown)
+		{
+			w = (std::max)(w, h);
+			h = w;
+		}
+
+		UpdateOptionBarCreationCoords(m_startPt.x, m_startPt.y, w, h, true);
+	}
+	else
+	{
+		// 첫 포인트 찍기 전: 마우스 위치를 X, Y에 실시간 표시 (하단 좌표와 동일)
+		UpdateOptionBarCreationCoords(e.worldPt.x, e.worldPt.y, 0.0f, 0.0f, false);
 	}
 }
 
@@ -814,6 +880,7 @@ void BoxShapeTool::OnUp(const ToolEvent& e)
 	else
 	{
 		m_waitingSecondClick = true;
+		UpdateOptionBarCreationCoords(m_startPt.x, m_startPt.y, 0.0f, 0.0f, true);
 	}
 }
 
@@ -908,6 +975,12 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	else if (m_kind == ShapeKind::Rect)
 	{
 		shape->name = _T("사각형");
+		shape->SetKind(::ShapeKind::Rect);
+		RectParams rp;
+		rp.rx = m_setting.cornerRx;
+		rp.ry = m_setting.cornerRy;
+		rp.linkRxRy = m_setting.bLinkRxRy;
+		shape->SetParams(rp);
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p0);
@@ -917,6 +990,10 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	else if (m_kind == ShapeKind::Ellipse)
 	{
 		shape->name = _T("타원");
+		shape->SetKind(::ShapeKind::Ellipse);
+		EllipseParams ep;
+		ep.linkRxRy = m_setting.bLinkRxRy;
+		shape->SetParams(ep);
 		SubPath sp;
 		for (int i = 0; i < 4; ++i)
 		{
@@ -930,6 +1007,10 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	else if (m_kind == ShapeKind::Triangle)
 	{
 		shape->name = _T("삼각형");
+		shape->SetKind(::ShapeKind::Triangle);
+		TriangleParams tp;
+		tp.equilateral = false;
+		shape->SetParams(tp);
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p0);

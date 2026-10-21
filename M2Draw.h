@@ -54,3 +54,7 @@ void LogAppEvent(const CString& strMsg, int tabIndex = 0);
 void SetAppStatusText(const CString& strMsg);
 
 void UpdateShapePropertiesSelection(int shapeIndex, CM2DrawDoc* pDoc);
+void SyncOptionBarWithSelection(int shapeIndex, CM2DrawDoc* pDoc);
+void SyncPropertiesWithSelection(int shapeIndex, CM2DrawDoc* pDoc);
+
+void UpdateOptionBarCreationCoords(float x, float y, float w, float h, bool hasFixedStart);

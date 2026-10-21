@@ -222,6 +222,7 @@
     <ClInclude Include="SnapManager.h" />
     <ClInclude Include="M2DrawControl.h" />
     <ClInclude Include="ToolBoxPane.h" />
+    <ClInclude Include="ToolOptionBar.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ChildFrm.cpp" />
@@ -246,6 +247,7 @@
     <ClCompile Include="M2DrawControl.cpp" />
     <ClCompile Include="ToolManager.cpp" />
     <ClCompile Include="ToolBoxPane.cpp" />
+    <ClCompile Include="ToolOptionBar.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="M2Draw.reg" />

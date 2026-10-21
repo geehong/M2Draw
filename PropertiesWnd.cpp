@@ -279,11 +279,22 @@ void CPropertiesWnd::OnComboSelectChanged()
 
 void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
 {
-	m_selectedShapeIndex = shapeIndex;
-	m_pActiveDoc = pDoc;
-
 	if (m_wndObjectCombo.GetSafeHwnd() == nullptr)
 		return;
+
+	// 이미 동일한 도형이 선택되어 있는 상태에서 수치만 바뀐 경우:
+	// 콤보박스 재구축 및 SetPaneMode(컨트롤 전체 파괴/재생성)를 건너뛰고 초고속 Transform만 동기화!
+	if (m_selectedShapeIndex == shapeIndex && m_pActiveDoc == pDoc && shapeIndex >= 0)
+	{
+		if (m_wndD2DProp.GetSafeHwnd())
+		{
+			m_wndD2DProp.SyncTransformOnly();
+		}
+		return;
+	}
+
+	m_selectedShapeIndex = shapeIndex;
+	m_pActiveDoc = pDoc;
 
 	// 기존 쉐이프 설정 항목(이름에 "설정"이 들어있고 "격자"나 "TEST"가 아닌 항목) 제거
 	for (int i = m_wndObjectCombo.GetCount() - 1; i >= 0; --i)

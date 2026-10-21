@@ -44,6 +44,8 @@ void PenTool::OnDown(const ToolEvent& e)
 	currentPath->AddAnchor(localPt, m_needNewSubPath);
 	m_needNewSubPath = false;
 
+	UpdateOptionBarCreationCoords(snappedWorld.x, snappedWorld.y, 0.0f, 0.0f, false);
+
 	CString str;
 	str.Format(_T("[펜 도구] 앵커 노드 추가: (%.1f, %.1f) px"), snappedWorld.x, snappedWorld.y);
 	LogAppEvent(str);
@@ -53,6 +55,9 @@ void PenTool::OnMove(const ToolEvent& e)
 {
 	m_hoverWorld = e.worldPt;
 	m_hasHover = true;
+
+	// 상단 옵션바에 마우스 위치 실시간 표시 (하단 좌표와 일치)
+	UpdateOptionBarCreationCoords(e.worldPt.x, e.worldPt.y, 0.0f, 0.0f, false);
 
 	if (!e.pDoc) return;
 

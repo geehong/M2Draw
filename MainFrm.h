@@ -2,6 +2,7 @@
 #include "OutputWnd.h"
 #include "PropertiesWnd.h"
 #include "ToolBoxPane.h"
+#include "ToolOptionBar.h"
 
 class CMainFrame : public CMDIFrameWndEx
 {
@@ -23,6 +24,7 @@ public:
 protected:  // 컨트롤 모음이 포함된 멤버입니다.
 	CMFCMenuBar       m_wndMenuBar;
 	CMFCToolBar       m_wndToolBar;
+	CToolOptionBar    m_wndOptionBar;
 	CMFCStatusBar     m_wndStatusBar;
 	CMFCToolBarImages m_UserImages;
 	CToolBoxPane      m_wndToolBox;
@@ -34,13 +36,19 @@ protected:  // 컨트롤 모음이 포함된 멤버입니다.
 public:
 	COutputWnd& GetOutputWnd() { return m_wndOutput; }
 	CToolBoxPane& GetToolBox() { return m_wndToolBox; }
+	CToolOptionBar& GetOptionBar() { return m_wndOptionBar; }
 	CMFCStatusBar& GetStatusBar() { return m_wndStatusBar; }
 	CPropertiesWnd& GetPropertiesWnd() { return m_wndProperties; }
 	CPropertiesWnd& GetGridPropertiesWnd() { return m_wndGridProp; }
 	CPropertiesWnd& GetCanvasPropertiesWnd() { return m_wndCanvasProp; }
 	void SetStatusMessage(const CString& strMsg)
 	{
-		m_wndStatusBar.SetPaneText(0, strMsg);
+		CString cur;
+		m_wndStatusBar.GetPaneText(0, cur);
+		if (cur != strMsg)
+		{
+			m_wndStatusBar.SetPaneText(0, strMsg);
+		}
 	}
 
 // 생성된 메시지 맵 함수
@@ -50,6 +58,8 @@ protected:
 	afx_msg void OnViewCustomize();
 	afx_msg LRESULT OnToolbarCreateNew(WPARAM wp, LPARAM lp);
 	afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
+	afx_msg void OnOptionBarCommit(UINT nID);
+	afx_msg void OnUpdateOptionBar(CCmdUI* pCmdUI);
 	DECLARE_MESSAGE_MAP()
 
 	BOOL CreateDockingWindows();

@@ -264,6 +264,9 @@ public:
 	// 1포인트 클릭: 시작 위치 기록 & 엔진 인스턴스 생성
 	void OnDown(const ToolEvent& e) override;
 
+	// 마우스 이동: 실시간 옵션바 좌표/크기 반영 및 미리보기 갱신
+	void OnMove(const ToolEvent& e) override;
+
 	// 2포인트(마우스 업): 도형 완성 및 등록 (단, 도구는 유지되어 연속 그리기 지원!)
 	void OnUp(const ToolEvent& e) override;
 

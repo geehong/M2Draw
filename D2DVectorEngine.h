@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <optional>
+#include <variant>
 #include "GridRenderer.h"
 
 #pragma comment(lib, "d2d1.lib")
@@ -135,6 +136,33 @@ struct HitResult {
     int subPath = -1;
     int node    = -1;
 };
+
+// ============================================================================
+// 2.5 파라메트릭 도형 종류 및 매개변수 구조체
+// ============================================================================
+enum class ShapeKind {
+    Path = 0,
+    Rect,
+    Triangle,
+    Ellipse,
+    Polygon,
+    Star,
+    Gear,
+    Spiral,
+    Heart
+};
+
+struct RectParams     { float rx = 0.0f; float ry = 0.0f; bool linkRxRy = true; };
+struct TriangleParams { bool equilateral = false; };
+struct EllipseParams  { bool linkRxRy = true; };
+struct PolygonParams  { int sides = 5; };
+struct StarParams     { int points = 5; float innerRatio = 0.5f; };
+struct GearParams     { int teeth = 12; float depthRatio = 0.2f; float boreRatio = 0.3f; float toothWidthRatio = 0.5f; };
+struct SpiralParams   { float turns = 3.0f; float innerRatio = 0.1f; };
+struct HeartParams    { };
+
+using ShapeParams = std::variant<std::monostate, RectParams, TriangleParams, EllipseParams,
+                                 PolygonParams, StarParams, GearParams, SpiralParams, HeartParams>;
 
 // ============================================================================
 // 3. Shape 및 PathShape 클래스
@@ -350,8 +378,24 @@ public:
     // 기존 멤버 접근 호환용 레퍼런스 (하위 호환성 유지)
     std::vector<SubPath>& paths = m_paths;
 
+    // 파라메트릭 도형 종류 및 설정
+    ShapeKind GetKind() const { return m_kind; }
+    void SetKind(ShapeKind k) { m_kind = k; }
+
+    const ShapeParams& GetParams() const { return m_params; }
+    ShapeParams& GetParamsRef() { return m_params; }
+    void SetParams(const ShapeParams& p) { m_params = p; }
+
+    template<typename T>
+    const T* GetParam() const { return std::get_if<T>(&m_params); }
+
+    template<typename T>
+    T* GetParamRef() { return std::get_if<T>(&m_params); }
+
 protected:
     std::vector<SubPath> m_paths;
+    ShapeKind m_kind = ShapeKind::Path;
+    ShapeParams m_params;
 
 public:
 

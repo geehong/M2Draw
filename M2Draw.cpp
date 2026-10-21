@@ -1,4 +1,4 @@
-﻿
+
 // M2Draw.cpp: 애플리케이션에 대한 클래스 동작을 정의합니다.
 //
 
@@ -260,5 +260,36 @@ void UpdateShapePropertiesSelection(int shapeIndex, CM2DrawDoc* pDoc)
 	{
 		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
 		pMainFrame->GetPropertiesWnd().SetSelectedShape(shapeIndex, pDoc);
+		pMainFrame->GetOptionBar().SyncSelection(pDoc, shapeIndex);
+	}
+}
+
+void SyncOptionBarWithSelection(int shapeIndex, CM2DrawDoc* pDoc)
+{
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+	{
+		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
+		pMainFrame->GetOptionBar().SyncSelection(pDoc, shapeIndex);
+	}
+}
+
+void SyncPropertiesWithSelection(int shapeIndex, CM2DrawDoc* pDoc)
+{
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+	{
+		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
+		pMainFrame->GetPropertiesWnd().SetSelectedShape(shapeIndex, pDoc);
+	}
+}
+
+void UpdateOptionBarCreationCoords(float x, float y, float w, float h, bool hasFixedStart)
+{
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+	{
+		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
+		pMainFrame->GetOptionBar().SyncCreationCoordinates(x, y, w, h, hasFixedStart);
 	}
 }
