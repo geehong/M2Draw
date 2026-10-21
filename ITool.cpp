@@ -1139,6 +1139,14 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 		int n = gp.teeth;
 		for (int i = 0; i < n * 4; ++i) shape->AddAnchor(p0);
 		shape->paths.back().closed = true;
+
+		// 2번째 서브패스: 축 구멍 4개 노드
+		shape->paths.emplace_back();
+		for (int i = 0; i < 4; ++i) {
+			BezierNode bn; bn.type = BezierNode::Type::Smooth;
+			shape->paths.back().nodes.push_back(bn);
+		}
+		shape->paths.back().closed = true;
 	}
 	else if (m_kind == ShapeKind::Spiral)
 	{
@@ -1298,8 +1306,9 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	else if (m_kind == ShapeKind::Star)
 	{
 		// 다각 별: 외경(R), 내경(r) 삼각함수 교차점
-		const StarParams* sp = pShape->GetParam<StarParams>();
+		StarParams* sp = pShape->GetParamRef<StarParams>();
 		int n = sp ? sp->points : (std::max)(3, (std::min)(32, m_setting.starPoints));
+		if (sp) { sp->radius = rx; sp->cx = cx; sp->cy = cy; }
 		auto& nodes = pShape->paths[0].nodes;
 		if (static_cast<int>(nodes.size()) != n * 2) {
 			nodes.clear();
@@ -1317,8 +1326,9 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	else if (m_kind == ShapeKind::RegularPoly)
 	{
 		// 정다각형: 원주 상의 N개 정점
-		const PolygonParams* pp = pShape->GetParam<PolygonParams>();
+		PolygonParams* pp = pShape->GetParamRef<PolygonParams>();
 		int n = pp ? pp->sides : (std::max)(3, (std::min)(32, m_setting.polySides));
+		if (pp) { pp->radius = rx; pp->cx = cx; pp->cy = cy; }
 		auto& nodes = pShape->paths[0].nodes;
 		if (static_cast<int>(nodes.size()) != n) {
 			nodes.clear();
@@ -1333,31 +1343,80 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	}
 	else if (m_kind == ShapeKind::Gear)
 	{
-		// 기어: N개 톱니 (외경 톱니 상단 2점, 내경 홈 2점)
-		const GearParams* gp = pShape->GetParam<GearParams>();
+		// 기어: N개 톱니 (외경 톱니 상단 2점, 내경 홈 2점) + 중앙 축 구멍(Bore Hole)
+		GearParams* gp = pShape->GetParamRef<GearParams>();
 		int n = gp ? gp->teeth : (std::max)(4, (std::min)(48, m_setting.gearTeeth));
-		auto& nodes = pShape->paths[0].nodes;
-		if (static_cast<int>(nodes.size()) != n * 4) {
-			nodes.clear();
-			for (int i = 0; i < n * 4; ++i) nodes.emplace_back();
+		if (gp) { gp->radius = rx; gp->cx = cx; gp->cy = cy; }
+		if (pShape->paths.empty()) {
+			pShape->paths.emplace_back();
 		}
+		auto& outerNodes = pShape->paths[0].nodes;
+		if (static_cast<int>(outerNodes.size()) != n * 4) {
+			outerNodes.clear();
+			for (int i = 0; i < n * 4; ++i) outerNodes.emplace_back();
+		}
+		pShape->paths[0].closed = true;
+
 		const float PI = 3.14159265358979323846f;
 		float depth = gp ? gp->depthRatio : (std::max)(0.05f, (std::min)(0.5f, m_setting.gearDepthRatio));
 		float rInner = 1.0f - depth;
+		float boreRatio = gp ? gp->boreRatio : (std::max)(0.05f, (std::min)(0.80f, m_setting.gearHoleRatio));
+		// 축 구멍 반경은 루트 반경보다 작아야 함 (Clamp)
+		boreRatio = (std::min)(boreRatio, rInner - 0.05f);
+		if (boreRatio < 0.05f) boreRatio = 0.05f;
 
 		for (int i = 0; i < n * 4; ++i) {
 			float angle = -PI * 0.5f + (i * 2.0f * PI / (n * 4));
 			int mod = i % 4;
 			float curR = (mod == 1 || mod == 2) ? 1.0f : rInner;
-			nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
-			nodes[i].hIn = nodes[i].hOut = { 0, 0 };
+			outerNodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
+			outerNodes[i].hIn = outerNodes[i].hOut = { 0, 0 };
 		}
+
+		// 중앙 축 구멍(Bore Hole) 서브패스: 4-노드 3차 베지어 원 (κ = 0.55228475f)
+		if (pShape->paths.size() < 2) {
+			pShape->paths.emplace_back();
+		}
+		auto& holeNodes = pShape->paths[1].nodes;
+		if (holeNodes.size() != 4) {
+			holeNodes.clear();
+			for (int i = 0; i < 4; ++i) {
+				BezierNode bn;
+				bn.type = BezierNode::Type::Smooth;
+				holeNodes.push_back(bn);
+			}
+		}
+		pShape->paths[1].closed = true;
+
+		const float KAPPA = 0.5522847498f;
+		float hx = rx * boreRatio;
+		float hy = ry * boreRatio;
+		float kx = hx * KAPPA;
+		float ky = hy * KAPPA;
+
+		// 4개 제어점: Top, Right, Bottom, Left
+		holeNodes[0].anchor = D2D1::Point2F(cx, cy - hy);
+		holeNodes[0].hIn    = D2D1::Point2F(-kx, 0.0f);
+		holeNodes[0].hOut   = D2D1::Point2F(kx, 0.0f);
+
+		holeNodes[1].anchor = D2D1::Point2F(cx + hx, cy);
+		holeNodes[1].hIn    = D2D1::Point2F(0.0f, -ky);
+		holeNodes[1].hOut   = D2D1::Point2F(0.0f, ky);
+
+		holeNodes[2].anchor = D2D1::Point2F(cx, cy + hy);
+		holeNodes[2].hIn    = D2D1::Point2F(kx, 0.0f);
+		holeNodes[2].hOut   = D2D1::Point2F(-kx, 0.0f);
+
+		holeNodes[3].anchor = D2D1::Point2F(cx - hx, cy);
+		holeNodes[3].hIn    = D2D1::Point2F(0.0f, ky);
+		holeNodes[3].hOut   = D2D1::Point2F(0.0f, -ky);
 	}
 	else if (m_kind == ShapeKind::Spiral)
 	{
 		// 아르키메데스 나선 (Open Path)
-		const SpiralParams* sp = pShape->GetParam<SpiralParams>();
+		SpiralParams* sp = pShape->GetParamRef<SpiralParams>();
 		float turns = sp ? sp->turns : m_setting.spiralTurns;
+		if (sp) { sp->radius = rx; sp->cx = cx; sp->cy = cy; }
 		int segs = static_cast<int>(turns * 4.0f);
 		if (segs < 4) segs = 4;
 		auto& nodes = pShape->paths[0].nodes;

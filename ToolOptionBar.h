@@ -23,8 +23,9 @@
 #define ID_OPT_INNER_RATIO     41017  // 별 내경 비율 % (5~95)
 #define ID_OPT_TEETH           41018  // 기어 톱니 수 (4~48)
 #define ID_OPT_DEPTH_RATIO     41019  // 기어 톱니 깊이 % (5~50)
-#define ID_OPT_TURNS           41020  // 나선 회전 수 (0.5~10.0)
-#define ID_OPT_DRAW_CENTER     41021  // 중심 => 바깥쪽 그리기 토글 [From Center✓] / [From Corner]
+#define ID_OPT_BORE_RATIO      41020  // 기어 중앙 구멍(Bore) 비율 % (5~80)
+#define ID_OPT_TURNS           41021  // 나선 회전 수 (0.5~10.0)
+#define ID_OPT_DRAW_CENTER     41022  // 중심 => 바깥쪽 그리기 토글 [From Center✓] / [From Corner]
 #define ID_OPT_FIRST           ID_OPT_X
 #define ID_OPT_LAST            ID_OPT_DRAW_CENTER
 

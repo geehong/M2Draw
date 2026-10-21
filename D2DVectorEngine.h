@@ -129,6 +129,7 @@ struct ShapeStyle {
     D2D1_COLOR_F stroke      = D2D1::ColorF(D2D1::ColorF::DodgerBlue);
     float        strokeWidth = 2.0f;
     D2D1_DASH_STYLE dashStyle = D2D1_DASH_STYLE_SOLID;
+    D2D1_FILL_MODE  fillMode  = D2D1_FILL_MODE_ALTERNATE; // 겹치는 서브패스(홀 구멍) 정상 투과를 위해 Alternate(EvenOdd) 기본 채택
 };
 
 struct HitResult {
@@ -155,10 +156,10 @@ enum class ShapeKind {
 struct RectParams     { float rx = 0.0f; float ry = 0.0f; bool linkRxRy = true; };
 struct TriangleParams { bool equilateral = false; };
 struct EllipseParams  { bool linkRxRy = true; };
-struct PolygonParams  { int sides = 5; };
-struct StarParams     { int points = 5; float innerRatio = 0.5f; };
-struct GearParams     { int teeth = 12; float depthRatio = 0.2f; float boreRatio = 0.3f; float toothWidthRatio = 0.5f; };
-struct SpiralParams   { float turns = 3.0f; float innerRatio = 0.1f; };
+struct PolygonParams  { int sides = 5; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
+struct StarParams     { int points = 5; float innerRatio = 0.5f; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
+struct GearParams     { int teeth = 12; float depthRatio = 0.2f; float boreRatio = 0.3f; float toothWidthRatio = 0.5f; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
+struct SpiralParams   { float turns = 3.0f; float innerRatio = 0.1f; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
 struct HeartParams    { };
 
 using ShapeParams = std::variant<std::monostate, RectParams, TriangleParams, EllipseParams,
@@ -560,6 +561,8 @@ private:
         ComPtr<ID2D1GeometrySink> sink;
         hr = m_geo->Open(&sink);
         if (FAILED(hr)) { m_geo.Reset(); m_dirty = true; return; }
+
+        sink->SetFillMode(style.fillMode);
 
         for (auto& sp : paths) {
             if (sp.nodes.size() < 2) continue;

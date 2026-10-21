@@ -202,6 +202,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="ChildFrm.h" />
+    <ClInclude Include="D2DGraphicEngine.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="GridRenderer.h" />
     <ClInclude Include="M2Draw.h" />
@@ -227,6 +228,7 @@
   <ItemGroup>
     <ClCompile Include="ChildFrm.cpp" />
     <ClCompile Include="D2DColorWheel.cpp" />
+    <ClCompile Include="D2DGraphicEngine.cpp" />
     <ClCompile Include="D2DPropertyView.cpp" />
     <ClCompile Include="GridRenderer.cpp" />
     <ClCompile Include="ITool.cpp" />
