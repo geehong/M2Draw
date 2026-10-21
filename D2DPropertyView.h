@@ -88,6 +88,12 @@ protected:
 
 	// [1. Object Settings (MODE_SHAPE)]
 	std::shared_ptr<M2DrawLabel>        m_lblShapeHeader;
+	std::shared_ptr<M2DrawLabel>        m_lblTransformHeader;  // "● Transform (X, Y, W, H)"
+	std::shared_ptr<M2DrawNumericInput> m_spinTransX;          // X 위치
+	std::shared_ptr<M2DrawNumericInput> m_spinTransY;          // Y 위치
+	std::shared_ptr<M2DrawNumericInput> m_spinTransW;          // W 너비
+	std::shared_ptr<M2DrawNumericInput> m_spinTransH;          // H 높이
+	std::shared_ptr<M2DrawCheckBox>     m_chkAspectLink;       // 비율 고정 🔗
 	std::shared_ptr<M2DrawButton>       m_btnTabFill;
 	std::shared_ptr<M2DrawButton>       m_btnTabStroke;
 	std::vector<std::shared_ptr<M2DrawButton>> m_btnFillModes; // 5 modes

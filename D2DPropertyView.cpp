@@ -236,6 +236,111 @@ void CD2DPropertyView::InitControls()
 		m_lblShapeHeader = std::make_shared<M2DrawLabel>(L"● No Selection (Preview Mode)");
 		m_pCurrentPanel->AddChild(m_lblShapeHeader);
 
+		// Transform Header & Inputs (X, Y, W, H, 🔗)
+		m_lblTransformHeader = std::make_shared<M2DrawLabel>(L"● Transform (X, Y, W, H)");
+		m_pCurrentPanel->AddChild(m_lblTransformHeader);
+
+		m_spinTransX = std::make_shared<M2DrawNumericInput>(-10000.0, 10000.0, 0.0, 1.0);
+		m_spinTransX->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
+			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (!shape) return;
+			CanvasUnit curUnit = GetApp()->GetGrid().unit;
+			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+			float targetPixelX = static_cast<float>(val) * pxPerUnit;
+			D2D1_RECT_F localBounds;
+			if (shape->GetLocalBounds(nullptr, localBounds)) {
+				D2D1_POINT_2F curOrigin = shape->xf.TransformPoint(D2D1::Point2F(localBounds.left, localBounds.top));
+				float dx = targetPixelX - curOrigin.x;
+				shape->xf = shape->xf * D2D1::Matrix3x2F::Translation(dx, 0.0f);
+				shape->Invalidate();
+				m_pActiveDoc->UpdateAllViews(nullptr);
+			}
+		});
+		m_pCurrentPanel->AddChild(m_spinTransX);
+
+		m_spinTransY = std::make_shared<M2DrawNumericInput>(-10000.0, 10000.0, 0.0, 1.0);
+		m_spinTransY->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
+			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (!shape) return;
+			CanvasUnit curUnit = GetApp()->GetGrid().unit;
+			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+			float targetPixelY = static_cast<float>(val) * pxPerUnit;
+			D2D1_RECT_F localBounds;
+			if (shape->GetLocalBounds(nullptr, localBounds)) {
+				D2D1_POINT_2F curOrigin = shape->xf.TransformPoint(D2D1::Point2F(localBounds.left, localBounds.top));
+				float dy = targetPixelY - curOrigin.y;
+				shape->xf = shape->xf * D2D1::Matrix3x2F::Translation(0.0f, dy);
+				shape->Invalidate();
+				m_pActiveDoc->UpdateAllViews(nullptr);
+			}
+		});
+		m_pCurrentPanel->AddChild(m_spinTransY);
+
+		m_spinTransW = std::make_shared<M2DrawNumericInput>(0.1, 10000.0, 100.0, 1.0);
+		m_spinTransW->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
+			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (!shape) return;
+			CanvasUnit curUnit = GetApp()->GetGrid().unit;
+			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+			float targetPixelW = max(1.0f, static_cast<float>(val) * pxPerUnit);
+			D2D1_RECT_F lb;
+			if (shape->GetLocalBounds(nullptr, lb)) {
+				float origW = lb.right - lb.left;
+				if (origW > 0.001f) {
+					float curScaleX = std::sqrt(shape->xf._11 * shape->xf._11 + shape->xf._12 * shape->xf._12);
+					if (curScaleX > 0.0001f) {
+						float factor = (targetPixelW / (origW * curScaleX));
+						D2D1_POINT_2F origin = shape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
+						if (m_chkAspectLink && m_chkAspectLink->IsChecked()) {
+							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(factor, factor, origin);
+							if (m_spinTransH) m_spinTransH->SetValue(m_spinTransH->GetValue() * factor);
+						} else {
+							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(factor, 1.0f, origin);
+						}
+						shape->Invalidate();
+						m_pActiveDoc->UpdateAllViews(nullptr);
+					}
+				}
+			}
+		});
+		m_pCurrentPanel->AddChild(m_spinTransW);
+
+		m_spinTransH = std::make_shared<M2DrawNumericInput>(0.1, 10000.0, 100.0, 1.0);
+		m_spinTransH->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
+			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (!shape) return;
+			CanvasUnit curUnit = GetApp()->GetGrid().unit;
+			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+			float targetPixelH = max(1.0f, static_cast<float>(val) * pxPerUnit);
+			D2D1_RECT_F lb;
+			if (shape->GetLocalBounds(nullptr, lb)) {
+				float origH = lb.bottom - lb.top;
+				if (origH > 0.001f) {
+					float curScaleY = std::sqrt(shape->xf._21 * shape->xf._21 + shape->xf._22 * shape->xf._22);
+					if (curScaleY > 0.0001f) {
+						float factor = (targetPixelH / (origH * curScaleY));
+						D2D1_POINT_2F origin = shape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
+						if (m_chkAspectLink && m_chkAspectLink->IsChecked()) {
+							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(factor, factor, origin);
+							if (m_spinTransW) m_spinTransW->SetValue(m_spinTransW->GetValue() * factor);
+						} else {
+							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(1.0f, factor, origin);
+						}
+						shape->Invalidate();
+						m_pActiveDoc->UpdateAllViews(nullptr);
+					}
+				}
+			}
+		});
+		m_pCurrentPanel->AddChild(m_spinTransH);
+
+		m_chkAspectLink = std::make_shared<M2DrawCheckBox>(L"🔗 Link Ratio", true);
+		m_pCurrentPanel->AddChild(m_chkAspectLink);
+
 		// 2. Tabs: [Fill] vs [Stroke]
 		m_btnTabFill = std::make_shared<M2DrawButton>(L"Fill");
 		m_btnTabFill->SetToggleMode(true);
@@ -700,6 +805,36 @@ void CD2DPropertyView::SyncControlsFromData()
 			m_lblShapeHeader->SetText((LPCTSTR)str);
 		}
 
+		CanvasUnit curUnit = GetApp()->GetGrid().unit;
+		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
+		float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+		if (pxPerUnit <= 0.0f) pxPerUnit = 1.0f;
+
+		if (m_spinTransX) m_spinTransX->SetSuffix(unitSuffix);
+		if (m_spinTransY) m_spinTransY->SetSuffix(unitSuffix);
+		if (m_spinTransW) m_spinTransW->SetSuffix(unitSuffix);
+		if (m_spinTransH) m_spinTransH->SetSuffix(unitSuffix);
+
+		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		{
+			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (shape)
+			{
+				D2D1_RECT_F lb;
+				if (shape->GetLocalBounds(nullptr, lb))
+				{
+					D2D1_POINT_2F origin = shape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
+					float curW = (lb.right - lb.left) * std::sqrt(shape->xf._11 * shape->xf._11 + shape->xf._12 * shape->xf._12);
+					float curH = (lb.bottom - lb.top) * std::sqrt(shape->xf._21 * shape->xf._21 + shape->xf._22 * shape->xf._22);
+
+					if (m_spinTransX) m_spinTransX->SetValue(origin.x / pxPerUnit);
+					if (m_spinTransY) m_spinTransY->SetValue(origin.y / pxPerUnit);
+					if (m_spinTransW) m_spinTransW->SetValue(curW / pxPerUnit);
+					if (m_spinTransH) m_spinTransH->SetValue(curH / pxPerUnit);
+				}
+			}
+		}
+
 		if (m_btnTabFill)   m_btnTabFill->SetChecked(m_colorTarget == 0);
 		if (m_btnTabStroke) m_btnTabStroke->SetChecked(m_colorTarget == 1);
 
@@ -719,11 +854,6 @@ void CD2DPropertyView::SyncControlsFromData()
 
 		if (m_sliderOpacity) m_sliderOpacity->SetValue(m_fOpacity);
 		if (m_spinOpacity)   m_spinOpacity->SetValue(m_fOpacity);
-
-		CanvasUnit curUnit = GetApp()->GetGrid().unit;
-		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
-		float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
-		if (pxPerUnit <= 0.0f) pxPerUnit = 1.0f;
 
 		// 만약 선택된 도형이 있다면 도형의 픽셀 단위 선 굵기로부터 현재 단위값 갱신
 		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
@@ -847,6 +977,34 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 		{
 			m_lblShapeHeader->SetBounds(left, y, right, y + 20.0f);
 			y += 24.0f;
+		}
+
+		// Transform Header & Inputs
+		if (m_lblTransformHeader)
+		{
+			m_lblTransformHeader->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+
+		float halfW = (contentW - 6.0f) * 0.5f;
+		if (m_spinTransX && m_spinTransY)
+		{
+			m_spinTransX->SetBounds(left, y, left + halfW, y + 24.0f);
+			m_spinTransY->SetBounds(left + halfW + 6.0f, y, right, y + 24.0f);
+			y += 28.0f;
+		}
+
+		if (m_spinTransW && m_spinTransH)
+		{
+			m_spinTransW->SetBounds(left, y, left + halfW, y + 24.0f);
+			m_spinTransH->SetBounds(left + halfW + 6.0f, y, right, y + 24.0f);
+			y += 28.0f;
+		}
+
+		if (m_chkAspectLink)
+		{
+			m_chkAspectLink->SetBounds(left, y, right, y + 20.0f);
+			y += 26.0f;
 		}
 
 		// 2. Tabs: [Fill] vs [Stroke]

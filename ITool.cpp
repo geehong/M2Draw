@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ITool.h"
 #include "M2DrawDoc.h"
+#include "M2DrawView.h"
 #include "M2Draw.h"
 
 // ============================================================================
@@ -198,6 +199,16 @@ void SelectTool::OnDown(const ToolEvent& e)
 		m_initialXf = selectedShape->xf;
 		selectedShape->GetLocalBounds(e.pD2DFactory, m_initialLocalBounds);
 
+		// 다중 선택된 모든 도형의 시작 Transform 캐싱
+		m_initialXfs.clear();
+		for (int idx : m_selectedIndices)
+		{
+			if (idx >= 0 && idx < static_cast<int>(shapes.size()))
+			{
+				m_initialXfs[idx] = shapes[idx]->xf;
+			}
+		}
+
 		CString str;
 		str.Format(_T("[선택 도구] 도형 #%d 선택됨 (현재 선택 수: %d개) | 이동 모드 시작"), clickedIndex + 1, (int)m_selectedIndices.size());
 		LogAppEvent(str);
@@ -211,9 +222,9 @@ void SelectTool::OnDown(const ToolEvent& e)
 			m_selectedIndices.clear();
 			UpdateShapePropertiesSelection(-1, e.pDoc);
 		}
-		m_mode = Mode::None;
+		m_mode = Mode::Marquee; // 빈 공간 드래그 시 마키(고무줄) 선택 모드 진입
 		m_handle = Handle::None;
-		LogAppEvent(_T("[선택 도구] 선택 해제"));
+		LogAppEvent(_T("[선택 도구] 마키(Marquee) 영역 선택 시작"));
 	}
 }
 
@@ -271,6 +282,12 @@ void SelectTool::OnMove(const ToolEvent& e)
 		return;
 	}
 
+	if (m_mode == Mode::Marquee)
+	{
+		// 마키(영역 선택) 드래그 중: 화면 갱신 유도
+		return;
+	}
+
 	if (m_mode == Mode::EditNode)
 	{
 		if (m_editShapeIdx >= 0 && m_editShapeIdx < static_cast<int>(shapes.size()))
@@ -296,7 +313,7 @@ void SelectTool::OnMove(const ToolEvent& e)
 	switch (m_mode)
 	{
 	case Mode::Moving:
-		ApplyMove(selectedShape);
+		ApplyMove(shapes);
 		break;
 	case Mode::Scaling:
 		ApplyScale(selectedShape);
@@ -313,13 +330,13 @@ void SelectTool::OnMove(const ToolEvent& e)
 void SelectTool::ApplyNodeEdit(PathShape* shape, const ToolEvent& e)
 {
 	if (!shape) return;
-	shape->MoveNodeOrHandle(m_editHit.part, m_editHit.subPath, m_editHit.node, e.worldPt);
+	// Alt 키가 눌려있으면 대칭/스무스 구속을 깨고 한쪽 핸들만 독립적으로 꺾음 (일러스트레이터 방식)
+	shape->MoveNodeOrHandle(m_editHit.part, m_editHit.subPath, m_editHit.node, e.worldPt, e.altDown);
 }
 
-// 엔진에 평행 이동 위임!
-void SelectTool::ApplyMove(Shape* shape)
+// 엔진에 평행 이동 위임! (선택된 모든 도형 일괄 이동)
+void SelectTool::ApplyMove(const std::vector<std::unique_ptr<Shape>>& shapes)
 {
-	if (!shape) return;
 	float dx = m_dragCurrentWorld.x - m_dragStartWorld.x;
 	float dy = m_dragCurrentWorld.y - m_dragStartWorld.y;
 
@@ -327,26 +344,40 @@ void SelectTool::ApplyMove(Shape* shape)
 	const auto& snapMgr = GetApp()->GetSnapManager();
 	if (snapMgr.IsEnabled() && HasSnapTarget(snapMgr.GetTargets(), SnapTargets::Grid) && grid.enabled)
 	{
-		PathShape* ps = dynamic_cast<PathShape*>(shape);
-		if (ps && !ps->paths.empty() && !ps->paths[0].nodes.empty())
+		// 기준 도형으로 스냅 거리 계산
+		int primaryIdx = m_selectedIndices.empty() ? -1 : *m_selectedIndices.begin();
+		if (primaryIdx >= 0 && primaryIdx < static_cast<int>(shapes.size()))
 		{
-			D2D1_POINT_2F p0 = m_initialXf.TransformPoint(ps->paths[0].nodes[0].anchor);
-			D2D1_POINT_2F targetP0 = grid.SnapPoint(D2D1::Point2F(p0.x + dx, p0.y + dy));
-			dx = targetP0.x - p0.x;
-			dy = targetP0.y - p0.y;
-		}
-		else
-		{
-			float step = grid.GetStepPx();
-			if (step > 0.001f)
+			PathShape* ps = dynamic_cast<PathShape*>(shapes[primaryIdx].get());
+			if (ps && !ps->paths.empty() && !ps->paths[0].nodes.empty())
 			{
-				dx = static_cast<float>(std::round(dx / step)) * step;
-				dy = static_cast<float>(std::round(dy / step)) * step;
+				D2D1_POINT_2F p0 = m_initialXf.TransformPoint(ps->paths[0].nodes[0].anchor);
+				D2D1_POINT_2F targetP0 = grid.SnapPoint(D2D1::Point2F(p0.x + dx, p0.y + dy));
+				dx = targetP0.x - p0.x;
+				dy = targetP0.y - p0.y;
+			}
+			else
+			{
+				float step = grid.GetStepPx();
+				if (step > 0.001f)
+				{
+					dx = static_cast<float>(std::round(dx / step)) * step;
+					dy = static_cast<float>(std::round(dy / step)) * step;
+				}
 			}
 		}
 	}
 
-	shape->ApplyTranslation(D2D1::Point2F(dx, dy), m_initialXf);
+	// 선택된 모든 도형에 동일한 이동량 적용
+	for (int idx : m_selectedIndices)
+	{
+		if (idx >= 0 && idx < static_cast<int>(shapes.size()))
+		{
+			auto it = m_initialXfs.find(idx);
+			D2D1::Matrix3x2F baseInitXf = (it != m_initialXfs.end()) ? it->second : shapes[idx]->xf;
+			shapes[idx]->ApplyTranslation(D2D1::Point2F(dx, dy), baseInitXf);
+		}
+	}
 }
 
 // 엔진에 스케일 변형 위임!
@@ -365,21 +396,100 @@ void SelectTool::ApplyRotate(Shape* shape)
 
 void SelectTool::OnUp(const ToolEvent& e)
 {
-	if (m_mode != Mode::None)
+	if (m_mode == Mode::Marquee && e.pDoc)
+	{
+		// 드래그한 마키 사각형 영역 계산 (월드 좌표)
+		float minX = (std::min)(m_dragStartWorld.x, m_dragCurrentWorld.x);
+		float maxX = (std::max)(m_dragStartWorld.x, m_dragCurrentWorld.x);
+		float minY = (std::min)(m_dragStartWorld.y, m_dragCurrentWorld.y);
+		float maxY = (std::max)(m_dragStartWorld.y, m_dragCurrentWorld.y);
+
+		// 단순 클릭이 아니라 일정 크기 이상 드래그되었을 때만 영역 선택 판정
+		if ((maxX - minX) > 2.0f || (maxY - minY) > 2.0f)
+		{
+			auto& shapes = e.pDoc->GetShapes();
+			if (!e.ctrlDown)
+			{
+				m_selectedIndices.clear();
+			}
+
+			ID2D1Factory* f = e.pD2DFactory;
+			for (int i = 0; i < static_cast<int>(shapes.size()); ++i)
+			{
+				D2D1_RECT_F localB{};
+				if (shapes[i]->GetLocalBounds(f, localB))
+				{
+					// 도형의 4개 코너를 월드 변환하여 AABB 산출
+					D2D1_POINT_2F pts[4] = {
+						shapes[i]->xf.TransformPoint(D2D1::Point2F(localB.left, localB.top)),
+						shapes[i]->xf.TransformPoint(D2D1::Point2F(localB.right, localB.top)),
+						shapes[i]->xf.TransformPoint(D2D1::Point2F(localB.right, localB.bottom)),
+						shapes[i]->xf.TransformPoint(D2D1::Point2F(localB.left, localB.bottom))
+					};
+
+					float sMinX = pts[0].x, sMaxX = pts[0].x;
+					float sMinY = pts[0].y, sMaxY = pts[0].y;
+					for (int k = 1; k < 4; ++k)
+					{
+						sMinX = (std::min)(sMinX, pts[k].x);
+						sMaxX = (std::max)(sMaxX, pts[k].x);
+						sMinY = (std::min)(sMinY, pts[k].y);
+						sMaxY = (std::max)(sMaxY, pts[k].y);
+					}
+
+					// 사각형 교차(Intersect) 판정
+					bool intersects = !(sMaxX < minX || sMinX > maxX || sMaxY < minY || sMinY > maxY);
+					if (intersects)
+					{
+						m_selectedIndices.insert(i);
+					}
+				}
+			}
+
+			UpdateShapePropertiesSelection(GetSelectedIndex(), e.pDoc);
+			CString str;
+			str.Format(_T("[선택 도구] 마키 영역 선택 완료 (선택된 도형: %d개)"), static_cast<int>(m_selectedIndices.size()));
+			LogAppEvent(str);
+		}
+	}
+	else if (m_mode != Mode::None)
 	{
 		CString str;
 		str.Format(_T("[선택 도구] 변형 완료 (모드: %d)"), static_cast<int>(m_mode));
 		LogAppEvent(str);
 	}
+
 	m_mode = Mode::None;
 	m_handle = Handle::None;
 }
 
 void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
 {
-	if (!rt || !brush || !pDoc || m_selectedIndices.empty()) return;
+	if (!rt || !brush || !pDoc) return;
 
 	ViewportTransform view = { zoom, pan };
+
+	// 1. 마키(Marquee) 드래그 선택 사각형 렌더링
+	if (m_mode == Mode::Marquee)
+	{
+		D2D1_POINT_2F p1 = view.WorldToScreen(m_dragStartWorld);
+		D2D1_POINT_2F p2 = view.WorldToScreen(m_dragCurrentWorld);
+		D2D1_RECT_F mr = D2D1::RectF(
+			(std::min)(p1.x, p2.x), (std::min)(p1.y, p2.y),
+			(std::max)(p1.x, p2.x), (std::max)(p1.y, p2.y)
+		);
+
+		// 반투명 파란색 채우기
+		brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.15f));
+		rt->FillRectangle(mr, brush);
+
+		// 점선/실선 테두리
+		brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.85f));
+		rt->DrawRectangle(mr, brush, 1.2f);
+	}
+
+	if (m_selectedIndices.empty()) return;
+
 	ID2D1Factory* f = nullptr;
 	rt->GetFactory(&f);
 	if (!f) return;
@@ -817,6 +927,59 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 		sp.closed = true;
 		shape->paths.push_back(sp);
 	}
+	else if (m_kind == ShapeKind::Triangle)
+	{
+		shape->name = _T("삼각형");
+		shape->AddAnchor(p0);
+		shape->AddAnchor(p0);
+		shape->AddAnchor(p0);
+		shape->paths.back().closed = true;
+	}
+	else if (m_kind == ShapeKind::Star)
+	{
+		shape->name = _T("별");
+		int n = (std::max)(3, m_setting.starPoints);
+		for (int i = 0; i < n * 2; ++i) shape->AddAnchor(p0);
+		shape->paths.back().closed = true;
+	}
+	else if (m_kind == ShapeKind::RegularPoly)
+	{
+		shape->name = _T("정다각형");
+		int n = (std::max)(3, m_setting.polySides);
+		for (int i = 0; i < n; ++i) shape->AddAnchor(p0);
+		shape->paths.back().closed = true;
+	}
+	else if (m_kind == ShapeKind::Gear)
+	{
+		shape->name = _T("기어");
+		int n = (std::max)(4, m_setting.gearTeeth);
+		for (int i = 0; i < n * 4; ++i) shape->AddAnchor(p0);
+		shape->paths.back().closed = true;
+	}
+	else if (m_kind == ShapeKind::Spiral)
+	{
+		shape->name = _T("스파이럴");
+		int segs = static_cast<int>(m_setting.spiralTurns * 4.0f);
+		if (segs < 4) segs = 4;
+		SubPath sp;
+		for (int i = 0; i <= segs; ++i) {
+			BezierNode n; n.type = BezierNode::Type::Smooth;
+			sp.nodes.push_back(n);
+		}
+		sp.closed = false;
+		shape->paths.push_back(sp);
+	}
+	else if (m_kind == ShapeKind::Heart)
+	{
+		shape->name = _T("하트");
+		SubPath sp;
+		for (int i = 0; i < 4; ++i) {
+			BezierNode n; n.type = BezierNode::Type::Smooth;
+			sp.nodes.push_back(n);
+		}
+		sp.closed = true;
+		shape->paths.push_back(sp);
+	}
 
 	UpdateGeometry(shape.get(), p0, p1);
 	return shape;
@@ -826,6 +989,17 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 {
 	if (!pShape || pShape->paths.empty()) return;
 
+	float left = min(p0.x, p1.x);
+	float top = min(p0.y, p1.y);
+	float right = max(p0.x, p1.x);
+	float bottom = max(p0.y, p1.y);
+	float w = max(1.0f, right - left);
+	float h = max(1.0f, bottom - top);
+	float cx = left + w * 0.5f;
+	float cy = top + h * 0.5f;
+	float rx = w * 0.5f;
+	float ry = h * 0.5f;
+
 	if (m_kind == ShapeKind::Line)
 	{
 		if (pShape->paths[0].nodes.size() < 2) return;
@@ -834,50 +1008,217 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	}
 	else if (m_kind == ShapeKind::Rect)
 	{
-		if (pShape->paths[0].nodes.size() < 4) return;
-		float left = min(p0.x, p1.x);
-		float top = min(p0.y, p1.y);
-		float right = max(p0.x, p1.x);
-		float bottom = max(p0.y, p1.y);
+		float crx = (std::min)(rx, (std::max)(0.0f, m_setting.cornerRx));
+		float cry = (std::min)(ry, (std::max)(0.0f, m_setting.cornerRy));
 
-		pShape->paths[0].nodes[0].anchor = D2D1::Point2F(left, top);
-		pShape->paths[0].nodes[1].anchor = D2D1::Point2F(right, top);
-		pShape->paths[0].nodes[2].anchor = D2D1::Point2F(right, bottom);
-		pShape->paths[0].nodes[3].anchor = D2D1::Point2F(left, bottom);
+		if (crx > 0.001f || cry > 0.001f)
+		{
+			// 둥근 사각형 (8개 앵커 + 베이지어 4분원)
+			auto& nodes = pShape->paths[0].nodes;
+			if (nodes.size() < 8) {
+				nodes.clear();
+				for (int i = 0; i < 8; ++i) {
+					BezierNode bn; bn.type = BezierNode::Type::Corner;
+					nodes.push_back(bn);
+				}
+			}
+			const float kx = crx * 0.55228475f;
+			const float ky = cry * 0.55228475f;
+
+			// Top-Left to Top-Right
+			nodes[0].anchor = D2D1::Point2F(left + crx, top);
+			nodes[0].hIn = D2D1::Point2F(-kx, 0.0f); nodes[0].hOut = D2D1::Point2F(0, 0);
+
+			nodes[1].anchor = D2D1::Point2F(right - crx, top);
+			nodes[1].hIn = D2D1::Point2F(0, 0); nodes[1].hOut = D2D1::Point2F(kx, 0.0f);
+
+			// Right edge
+			nodes[2].anchor = D2D1::Point2F(right, top + cry);
+			nodes[2].hIn = D2D1::Point2F(0.0f, -ky); nodes[2].hOut = D2D1::Point2F(0, 0);
+
+			nodes[3].anchor = D2D1::Point2F(right, bottom - cry);
+			nodes[3].hIn = D2D1::Point2F(0, 0); nodes[3].hOut = D2D1::Point2F(0.0f, ky);
+
+			// Bottom edge
+			nodes[4].anchor = D2D1::Point2F(right - crx, bottom);
+			nodes[4].hIn = D2D1::Point2F(kx, 0.0f); nodes[4].hOut = D2D1::Point2F(0, 0);
+
+			nodes[5].anchor = D2D1::Point2F(left + crx, bottom);
+			nodes[5].hIn = D2D1::Point2F(0, 0); nodes[5].hOut = D2D1::Point2F(-kx, 0.0f);
+
+			// Left edge
+			nodes[6].anchor = D2D1::Point2F(left, bottom - cry);
+			nodes[6].hIn = D2D1::Point2F(0.0f, ky); nodes[6].hOut = D2D1::Point2F(0, 0);
+
+			nodes[7].anchor = D2D1::Point2F(left, top + cry);
+			nodes[7].hIn = D2D1::Point2F(0, 0); nodes[7].hOut = D2D1::Point2F(0.0f, -ky);
+		}
+		else
+		{
+			// 일반 직각 사각형 (4개 정점)
+			auto& nodes = pShape->paths[0].nodes;
+			if (nodes.size() != 4) {
+				nodes.clear();
+				for (int i = 0; i < 4; ++i) nodes.emplace_back();
+			}
+			nodes[0].anchor = D2D1::Point2F(left, top);
+			nodes[0].hIn = nodes[0].hOut = { 0, 0 };
+			nodes[1].anchor = D2D1::Point2F(right, top);
+			nodes[1].hIn = nodes[1].hOut = { 0, 0 };
+			nodes[2].anchor = D2D1::Point2F(right, bottom);
+			nodes[2].hIn = nodes[2].hOut = { 0, 0 };
+			nodes[3].anchor = D2D1::Point2F(left, bottom);
+			nodes[3].hIn = nodes[3].hOut = { 0, 0 };
+		}
 	}
 	else if (m_kind == ShapeKind::Ellipse)
 	{
 		if (pShape->paths[0].nodes.size() < 4) return;
-		float left = min(p0.x, p1.x);
-		float top = min(p0.y, p1.y);
-		float right = max(p0.x, p1.x);
-		float bottom = max(p0.y, p1.y);
-
-		float rx = (right - left) * 0.5f;
-		float ry = (bottom - top) * 0.5f;
-		float cx = left + rx;
-		float cy = top + ry;
-
 		const float kappa = 0.55228475f;
 		float kx = rx * kappa;
 		float ky = ry * kappa;
 
 		auto& nodes = pShape->paths[0].nodes;
 		nodes[0].anchor = D2D1::Point2F(cx, cy - ry);
-		nodes[0].hIn = D2D1::Point2F(-kx, 0.0f);
-		nodes[0].hOut = D2D1::Point2F(kx, 0.0f);
+		nodes[0].hIn = D2D1::Point2F(-kx, 0.0f); nodes[0].hOut = D2D1::Point2F(kx, 0.0f);
 
 		nodes[1].anchor = D2D1::Point2F(cx + rx, cy);
-		nodes[1].hIn = D2D1::Point2F(0.0f, -ky);
-		nodes[1].hOut = D2D1::Point2F(0.0f, ky);
+		nodes[1].hIn = D2D1::Point2F(0.0f, -ky); nodes[1].hOut = D2D1::Point2F(0.0f, ky);
 
 		nodes[2].anchor = D2D1::Point2F(cx, cy + ry);
-		nodes[2].hIn = D2D1::Point2F(kx, 0.0f);
-		nodes[2].hOut = D2D1::Point2F(-kx, 0.0f);
+		nodes[2].hIn = D2D1::Point2F(kx, 0.0f); nodes[2].hOut = D2D1::Point2F(-kx, 0.0f);
 
 		nodes[3].anchor = D2D1::Point2F(cx - rx, cy);
-		nodes[3].hIn = D2D1::Point2F(0.0f, ky);
-		nodes[3].hOut = D2D1::Point2F(0.0f, -ky);
+		nodes[3].hIn = D2D1::Point2F(0.0f, ky); nodes[3].hOut = D2D1::Point2F(0.0f, -ky);
+	}
+	else if (m_kind == ShapeKind::Triangle)
+	{
+		// 이등변 삼각형: (상단 중앙, 우하단, 좌하단)
+		auto& nodes = pShape->paths[0].nodes;
+		if (nodes.size() < 3) return;
+		nodes[0].anchor = D2D1::Point2F(cx, top);
+		nodes[0].hIn = nodes[0].hOut = { 0, 0 };
+		nodes[1].anchor = D2D1::Point2F(right, bottom);
+		nodes[1].hIn = nodes[1].hOut = { 0, 0 };
+		nodes[2].anchor = D2D1::Point2F(left, bottom);
+		nodes[2].hIn = nodes[2].hOut = { 0, 0 };
+	}
+	else if (m_kind == ShapeKind::Star)
+	{
+		// 다각 별: 외경(R), 내경(r) 삼각함수 교차점
+		int n = (std::max)(3, m_setting.starPoints);
+		auto& nodes = pShape->paths[0].nodes;
+		if (static_cast<int>(nodes.size()) != n * 2) {
+			nodes.clear();
+			for (int i = 0; i < n * 2; ++i) nodes.emplace_back();
+		}
+		const float PI = 3.14159265358979323846f;
+		float innerRatio = (std::max)(0.1f, (std::min)(0.9f, m_setting.starInnerRatio));
+		for (int i = 0; i < n * 2; ++i) {
+			float angle = -PI * 0.5f + (i * PI / n);
+			float curR = (i % 2 == 0) ? 1.0f : innerRatio;
+			nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
+			nodes[i].hIn = nodes[i].hOut = { 0, 0 };
+		}
+	}
+	else if (m_kind == ShapeKind::RegularPoly)
+	{
+		// 정다각형: 원주 상의 N개 정점
+		int n = (std::max)(3, m_setting.polySides);
+		auto& nodes = pShape->paths[0].nodes;
+		if (static_cast<int>(nodes.size()) != n) {
+			nodes.clear();
+			for (int i = 0; i < n; ++i) nodes.emplace_back();
+		}
+		const float PI = 3.14159265358979323846f;
+		for (int i = 0; i < n; ++i) {
+			float angle = -PI * 0.5f + (i * 2.0f * PI / n);
+			nodes[i].anchor = D2D1::Point2F(cx + rx * std::cos(angle), cy + ry * std::sin(angle));
+			nodes[i].hIn = nodes[i].hOut = { 0, 0 };
+		}
+	}
+	else if (m_kind == ShapeKind::Gear)
+	{
+		// 기어: N개 톱니 (외경 톱니 상단 2점, 내경 홈 2점)
+		int n = (std::max)(4, m_setting.gearTeeth);
+		auto& nodes = pShape->paths[0].nodes;
+		if (static_cast<int>(nodes.size()) != n * 4) {
+			nodes.clear();
+			for (int i = 0; i < n * 4; ++i) nodes.emplace_back();
+		}
+		const float PI = 3.14159265358979323846f;
+		float depth = (std::max)(0.05f, (std::min)(0.5f, m_setting.gearDepthRatio));
+		float rInner = 1.0f - depth;
+
+		for (int i = 0; i < n * 4; ++i) {
+			float angle = -PI * 0.5f + (i * 2.0f * PI / (n * 4));
+			int mod = i % 4;
+			float curR = (mod == 1 || mod == 2) ? 1.0f : rInner;
+			nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
+			nodes[i].hIn = nodes[i].hOut = { 0, 0 };
+		}
+	}
+	else if (m_kind == ShapeKind::Spiral)
+	{
+		// 아르키메데스 나선 (Open Path)
+		int segs = static_cast<int>(m_setting.spiralTurns * 4.0f);
+		if (segs < 4) segs = 4;
+		auto& nodes = pShape->paths[0].nodes;
+		if (static_cast<int>(nodes.size()) != segs + 1) {
+			nodes.clear();
+			for (int i = 0; i <= segs; ++i) {
+				BezierNode bn; bn.type = BezierNode::Type::Smooth;
+				nodes.push_back(bn);
+			}
+		}
+		const float PI = 3.14159265358979323846f;
+		const float kappa = 0.55228475f;
+		for (int i = 0; i <= segs; ++i) {
+			float t = static_cast<float>(i) / segs;
+			float angle = t * m_setting.spiralTurns * 2.0f * PI;
+			float curR = t; // 중심에서 바깥으로 팽창
+			nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
+			// 접선 방향 베이지어 핸들
+			float tanX = -std::sin(angle) * rx * curR * (PI * 0.5f / segs);
+			float tanY = std::cos(angle) * ry * curR * (PI * 0.5f / segs);
+			nodes[i].hIn = D2D1::Point2F(-tanX, -tanY);
+			nodes[i].hOut = D2D1::Point2F(tanX, tanY);
+		}
+	}
+	else if (m_kind == ShapeKind::Heart)
+	{
+		// 하트 (상단 골짜기, 우측 볼륨, 하단 뾰족점, 좌측 볼륨)
+		auto& nodes = pShape->paths[0].nodes;
+		if (nodes.size() < 4) {
+			nodes.clear();
+			for (int i = 0; i < 4; ++i) {
+				BezierNode bn; bn.type = BezierNode::Type::Smooth;
+				nodes.push_back(bn);
+			}
+		}
+		// 0: 상단 중심 골짜기 (Corner)
+		nodes[0].type = BezierNode::Type::Corner;
+		nodes[0].anchor = D2D1::Point2F(cx, top + h * 0.28f);
+		nodes[0].hIn = D2D1::Point2F(-rx * 0.5f, -h * 0.28f);
+		nodes[0].hOut = D2D1::Point2F(rx * 0.5f, -h * 0.28f);
+
+		// 1: 우측 볼륨
+		nodes[1].type = BezierNode::Type::Smooth;
+		nodes[1].anchor = D2D1::Point2F(right, top + h * 0.42f);
+		nodes[1].hIn = D2D1::Point2F(0, -h * 0.2f);
+		nodes[1].hOut = D2D1::Point2F(0, h * 0.25f);
+
+		// 2: 하단 끝점 (Corner)
+		nodes[2].type = BezierNode::Type::Corner;
+		nodes[2].anchor = D2D1::Point2F(cx, bottom);
+		nodes[2].hIn = D2D1::Point2F(rx * 0.4f, -h * 0.25f);
+		nodes[2].hOut = D2D1::Point2F(-rx * 0.4f, -h * 0.25f);
+
+		// 3: 좌측 볼륨
+		nodes[3].type = BezierNode::Type::Smooth;
+		nodes[3].anchor = D2D1::Point2F(left, top + h * 0.42f);
+		nodes[3].hIn = D2D1::Point2F(0, h * 0.25f);
+		nodes[3].hOut = D2D1::Point2F(0, -h * 0.2f);
 	}
 
 	pShape->Invalidate();
@@ -1084,3 +1425,118 @@ void MultiPointShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrus
 		}
 	}
 }
+
+// ============================================================================
+// 5. 손 / 화면 이동 도구 (PanTool)
+// ============================================================================
+void PanTool::OnDown(const ToolEvent& e)
+{
+	m_isPanning = true;
+	m_lastScreenPt = e.screenPt;
+}
+
+void PanTool::OnMove(const ToolEvent& e)
+{
+	if (!m_isPanning || !e.pView) return;
+
+	float dx = static_cast<float>(e.screenPt.x - m_lastScreenPt.x);
+	float dy = static_cast<float>(e.screenPt.y - m_lastScreenPt.y);
+	m_lastScreenPt = e.screenPt;
+
+	D2D1_POINT_2F curPan = e.pView->GetPan();
+	curPan.x += dx;
+	curPan.y += dy;
+	e.pView->SetPan(curPan);
+}
+
+void PanTool::OnUp(const ToolEvent& e)
+{
+	m_isPanning = false;
+}
+
+// ============================================================================
+// 6. 돋보기 도구 (ZoomInTool / ZoomOutTool)
+// ============================================================================
+void ZoomInTool::OnDown(const ToolEvent& e)
+{
+	m_isDragging = true;
+	m_dragStartScreen = e.screenPt;
+	m_dragCurScreen = e.screenPt;
+}
+
+void ZoomInTool::OnMove(const ToolEvent& e)
+{
+	if (m_isDragging)
+	{
+		m_dragCurScreen = e.screenPt;
+	}
+}
+
+void ZoomInTool::OnUp(const ToolEvent& e)
+{
+	if (!m_isDragging) return;
+	m_isDragging = false;
+
+	if (!e.pView) return;
+
+	int dx = std::abs(m_dragCurScreen.x - m_dragStartScreen.x);
+	int dy = std::abs(m_dragCurScreen.y - m_dragStartScreen.y);
+
+	// 5px 미만 클릭인 경우: 마우스 휠과 동일하게 클릭 위치 기준 1.25배 확대
+	if (dx < 5 && dy < 5)
+	{
+		e.pView->ZoomAtPoint(e.screenPt, 1.25f);
+	}
+	else
+	{
+		// 드래그 영역(Marquee) 줌: 드래그한 사각형 영역을 뷰포트에 맞춤 확대
+		CRect marqueeRc(
+			min(m_dragStartScreen.x, m_dragCurScreen.x),
+			min(m_dragStartScreen.y, m_dragCurScreen.y),
+			max(m_dragStartScreen.x, m_dragCurScreen.x),
+			max(m_dragStartScreen.y, m_dragCurScreen.y)
+		);
+		e.pView->ZoomAtRect(marqueeRc);
+	}
+}
+
+void ZoomInTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+                             float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
+{
+	if (!m_isDragging || !rt || !brush) return;
+
+	float left = static_cast<float>(min(m_dragStartScreen.x, m_dragCurScreen.x));
+	float top = static_cast<float>(min(m_dragStartScreen.y, m_dragCurScreen.y));
+	float right = static_cast<float>(max(m_dragStartScreen.x, m_dragCurScreen.x));
+	float bottom = static_cast<float>(max(m_dragStartScreen.y, m_dragCurScreen.y));
+
+	if (right - left > 2.0f && bottom - top > 2.0f)
+	{
+		D2D1_RECT_F r = D2D1::RectF(left, top, right, bottom);
+
+		// 반투명 파란색 채우기 박스
+		brush->SetColor(D2D1::ColorF(0.0f, 0.48f, 1.0f, 0.15f));
+		rt->FillRectangle(r, brush);
+
+		// 외곽선
+		brush->SetColor(D2D1::ColorF(0.0f, 0.48f, 1.0f, 0.9f));
+		rt->DrawRectangle(r, brush, 1.2f);
+	}
+}
+
+void ZoomOutTool::OnDown(const ToolEvent& e)
+{
+	if (!e.pView) return;
+
+	// 마우스 휠과 동일하게 클릭 지점을 기준으로 0.8배 축소
+	e.pView->ZoomAtPoint(e.screenPt, 0.8f);
+}
+
+void ZoomOutTool::OnMove(const ToolEvent& e)
+{
+}
+
+void ZoomOutTool::OnUp(const ToolEvent& e)
+{
+}
+

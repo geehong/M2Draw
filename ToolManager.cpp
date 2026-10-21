@@ -3,18 +3,7 @@
 #include "M2DrawDoc.h"
 #include "M2Draw.h"
 
-// ---------------- PanTool ----------------
-void PanTool::OnDown(const ToolEvent& e)
-{
-}
-
-void PanTool::OnMove(const ToolEvent& e)
-{
-}
-
-void PanTool::OnUp(const ToolEvent& e)
-{
-}
+// PanTool, ZoomInTool, ZoomOutTool은 ITool.cpp에 구현되어 있습니다.
 
 // ---------------- PenTool ----------------
 void PenTool::OnDown(const ToolEvent& e)
@@ -94,7 +83,19 @@ void PenTool::OnMove(const ToolEvent& e)
 
 		auto& node = sp.nodes.back();
 		D2D1_POINT_2F offset = D2D1::Point2F(localPt.x - node.anchor.x, localPt.y - node.anchor.y);
-		node.SetHandleOut(offset);
+
+		if (e.altDown)
+		{
+			// 드래그 중 Alt를 누르면 곡선 대칭 구속을 깨고 한쪽 핸들만 각지게 꺾음 (일러스트레이터 방식)
+			node.type = BezierNode::Type::Corner;
+			node.SetHandleOut(offset);
+		}
+		else
+		{
+			if (node.type == BezierNode::Type::Corner)
+				node.type = BezierNode::Type::Symmetric;
+			node.SetHandleOut(offset);
+		}
 		currentPath->Invalidate();
 	}
 }
@@ -339,6 +340,11 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Line, ToolType::Line, L"직선 도구 (Line)", L'L'));
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Rect, ToolType::Rect, L"사각형 도구 (Rectangle)", L'M'));
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Ellipse, ToolType::Ellipse, L"타원 도구 (Ellipse)", L'E'));
+	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Triangle, ToolType::Triangle, L"삼각형 도구 (Triangle)", 0));
+	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Star, ToolType::Star, L"별 도구 (Star)", 0));
+	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Gear, ToolType::Gear, L"기어 도구 (Gear)", 0));
+	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Spiral, ToolType::Spiral, L"스파이럴 도구 (Spiral)", 0));
+	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Heart, ToolType::Heart, L"하트 도구 (Heart)", 0));
 	// MultiPointShapeTool 단일 클래스 인스턴스 주입: 다각형 (N-Point 클릭)
 	m_tools.push_back(std::make_unique<MultiPointShapeTool>(ToolType::Polygon, L"다각형 도구 (Polygon)", L'G'));
 	m_tools.push_back(std::make_unique<TextTool>());

@@ -10,18 +10,7 @@ class CM2DrawDoc;
 
 
 
-class PanTool : public ITool
-{
-public:
-	ToolType GetType() const override { return ToolType::Pan; }
-	const wchar_t* GetName() const override { return L"손 도구 (Pan)"; }
-	wchar_t GetShortcut() const override { return L'H'; }
-	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_SIZEALL); }
-
-	void OnDown(const ToolEvent& e) override;
-	void OnMove(const ToolEvent& e) override;
-	void OnUp(const ToolEvent& e) override;
-};
+// PanTool, ZoomInTool, ZoomOutTool은 ITool.h에 선언되어 있습니다.
 
 class PenTool : public ITool
 {
@@ -80,23 +69,7 @@ public:
 	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
 };
 
-class ZoomInTool : public ITool
-{
-public:
-	ToolType GetType() const override { return ToolType::ZoomIn; }
-	const wchar_t* GetName() const override { return L"돋보기 확대 도구 (Zoom In)"; }
-	wchar_t GetShortcut() const override { return L'Z'; }
-	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
-};
 
-class ZoomOutTool : public ITool
-{
-public:
-	ToolType GetType() const override { return ToolType::ZoomOut; }
-	const wchar_t* GetName() const override { return L"돋보기 축소 도구 (Zoom Out)"; }
-	wchar_t GetShortcut() const override { return L'X'; }
-	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
-};
 
 // 도구 변경 리스너
 class IToolChangeListener

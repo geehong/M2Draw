@@ -3,10 +3,12 @@
 #include <d2d1.h>
 #include <vector>
 #include <set>
+#include <map>
 #include <memory>
 #include "D2DVectorEngine.h"
 
 class CM2DrawDoc;
+class CM2DrawView;
 
 // 도구 이벤트 데이터 구조체
 struct ToolEvent
@@ -20,6 +22,7 @@ struct ToolEvent
 	bool               ctrlDown;
 	ViewportTransform  view;       // 현재 뷰포트 상태
 	CM2DrawDoc*        pDoc;       // 현재 활성 문서 포인터
+	CM2DrawView*       pView;      // 현재 활성 뷰 포인터 (줌/팬 제어용)
 	ID2D1Factory*      pD2DFactory;// Direct2D 팩토리
 
 	ToolEvent()
@@ -31,6 +34,7 @@ struct ToolEvent
 		, shiftDown(false)
 		, ctrlDown(false)
 		, pDoc(nullptr)
+		, pView(nullptr)
 		, pD2DFactory(nullptr)
 	{
 	}
@@ -46,6 +50,11 @@ enum class ToolType
 	Rect,       // M (사각형)
 	Ellipse,    // E (타원/원)
 	Polygon,    // G (다각형 프리셋)
+	Triangle,   // 삼각형
+	Star,       // 별
+	Gear,       // 기어
+	Spiral,     // 스파이럴(나선)
+	Heart,      // 하트
 	Text,       // T (텍스트 도구)
 	PaintBucket,// K (페인트/채우기 도구)
 	ZoomIn,     // Z (확대 도구)
@@ -61,6 +70,19 @@ struct ToolCreationSetting
 	D2D1_COLOR_F    fillColor   = D2D1::ColorF(0.2f, 0.6f, 1.0f, 0.25f);
 	float           strokeWidth = 2.0f;
 	D2D1_DASH_STYLE dashStyle = D2D1_DASH_STYLE_SOLID;
+
+	// 도형별 파라미터 (상단 ToolOptionBar 연동)
+	float cornerRx = 0.0f;       // 사각형 모서리 Rx
+	float cornerRy = 0.0f;       // 사각형 모서리 Ry
+	bool  bLinkRxRy = true;      // Rx=Ry 비율 고정
+	int   polySides = 5;         // 정다각형 변의 개수 (5, 6, 8 등)
+	int   starPoints = 5;        // 별 꼭짓점 수
+	float starInnerRatio = 0.5f; // 별 내경 비율 (0.1 ~ 0.9)
+	int   gearTeeth = 12;        // 기어 톱니 수
+	float gearDepthRatio = 0.2f; // 기어 톱니 깊이 비율
+	float gearHoleRatio = 0.3f;  // 기어 중앙 구멍 비율
+	float spiralTurns = 3.0f;    // 나선 회전 바퀴 수
+	float heartRound = 1.0f;     // 하트 곡률 계수
 };
 
 // ============================================================================
@@ -105,7 +127,7 @@ public:
 	ToolType GetType() const override { return ToolType::Select; }
 	const wchar_t* GetName() const override { return L"선택 도구 (Select)"; }
 	wchar_t GetShortcut() const override { return L'V'; }
-	enum class Mode { None, Moving, Scaling, Rotating, EditNode };
+	enum class Mode { None, Moving, Scaling, Rotating, EditNode, Marquee };
 	enum class Handle { None, TL, T, TR, R, BR, B, BL, L, Rotate };
 
 	HCURSOR GetCursor() const override;
@@ -133,6 +155,7 @@ private:
 	D2D1_POINT_2F m_dragStartWorld = { 0.0f, 0.0f };
 	D2D1_POINT_2F m_dragCurrentWorld = { 0.0f, 0.0f };
 	D2D1::Matrix3x2F m_initialXf = D2D1::Matrix3x2F::Identity();
+	std::map<int, D2D1::Matrix3x2F> m_initialXfs; // 다중 선택 이동을 위한 도형별 초기 변환 행렬
 	D2D1_RECT_F   m_initialLocalBounds = { 0.0f, 0.0f, 0.0f, 0.0f };
 
 	// 노드(앵커/핸들) 편집 상태 (열린 패스: 직선, 곡선 등)
@@ -145,7 +168,7 @@ private:
 
 	Handle HitHandle(D2D1_POINT_2F screenPt, const D2D1_POINT_2F handles[9], float tolPx) const;
 	bool GetHandleScreenPositions(Shape* shape, const ViewportTransform& view, ID2D1Factory* f, D2D1_POINT_2F outHandles[9], D2D1_RECT_F* outLocalBounds = nullptr) const;
-	void ApplyMove(Shape* shape);
+	void ApplyMove(const std::vector<std::unique_ptr<Shape>>& shapes);
 	void ApplyScale(Shape* shape);
 	void ApplyRotate(Shape* shape);
 };
@@ -205,7 +228,13 @@ public:
 	{
 		Line,
 		Rect,
-		Ellipse
+		Ellipse,
+		Triangle,
+		Star,
+		Gear,
+		Spiral,
+		Heart,
+		RegularPoly
 	};
 
 protected:
@@ -317,3 +346,65 @@ public:
 	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
 };
+
+// ============================================================================
+// 5. 손 / 화면 이동 도구 (PanTool)
+//    - 마우스 좌클릭 드래그로 캔버스(월드 좌표계)를 패닝 이동
+// ============================================================================
+class PanTool : public ITool
+{
+public:
+	ToolType GetType() const override { return ToolType::Pan; }
+	const wchar_t* GetName() const override { return L"손 도구 (Pan)"; }
+	wchar_t GetShortcut() const override { return L'H'; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_SIZEALL); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+
+private:
+	bool   m_isPanning = false;
+	CPoint m_lastScreenPt{ 0, 0 };
+};
+
+// ============================================================================
+// 6. 돋보기 도구 (ZoomTool / ZoomInTool / ZoomOutTool)
+//    - 클릭 시 클릭 지점 기준 Zoom In/Out
+//    - 드래그 시 지정 영역을 화면 가득 맞춤 확대 (Marquee Zoom)
+// ============================================================================
+class ZoomInTool : public ITool
+{
+public:
+	ToolType GetType() const override { return ToolType::ZoomIn; }
+	const wchar_t* GetName() const override { return L"돋보기 확대 도구 (Zoom In)"; }
+	wchar_t GetShortcut() const override { return L'Z'; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+private:
+	bool   m_isDragging = false;
+	CPoint m_dragStartScreen{ 0, 0 };
+	CPoint m_dragCurScreen{ 0, 0 };
+};
+
+class ZoomOutTool : public ITool
+{
+public:
+	ToolType GetType() const override { return ToolType::ZoomOut; }
+	const wchar_t* GetName() const override { return L"돋보기 축소 도구 (Zoom Out)"; }
+	wchar_t GetShortcut() const override { return L'X'; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+};
+
+
+

@@ -45,6 +45,10 @@ public:
 	void SetPan(D2D1_POINT_2F ptPan) { m_ptPan = ptPan; Invalidate(FALSE); }
 	ID2D1Factory* GetD2DFactory() const { return m_pD2DFactory; }
 
+	// 화면(Client) 좌표 기준 줌 인/아웃 공통 메서드 (마우스 휠 & 돋보기 도구 공용)
+	void ZoomAtPoint(CPoint clientPt, float factor);
+	void ZoomAtRect(CRect marqueeClientRc);
+
 	// 캔버스의 (0,0) 원점을 화면 중앙에 맞춤
 	void CenterOrigin();
 

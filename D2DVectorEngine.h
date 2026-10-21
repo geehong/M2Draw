@@ -475,7 +475,7 @@ public:
     // ------------------------------------------------------------------------
     // 공용 에디트 포인트 (정점 앵커 및 베이지어 핸들) 조작 API
     // ------------------------------------------------------------------------
-    void MoveNodeOrHandle(HitResult::Part part, int subPathIdx, int nodeIdx, D2D1_POINT_2F worldPt) {
+    void MoveNodeOrHandle(HitResult::Part part, int subPathIdx, int nodeIdx, D2D1_POINT_2F worldPt, bool breakTangent = false) {
         if (subPathIdx < 0 || subPathIdx >= static_cast<int>(paths.size())) return;
         auto& sp = paths[subPathIdx];
         if (nodeIdx < 0 || nodeIdx >= static_cast<int>(sp.nodes.size())) return;
@@ -484,6 +484,10 @@ public:
         if (!invXf.Invert()) return;
         D2D1_POINT_2F curLocal = invXf.TransformPoint(worldPt);
         auto& node = sp.nodes[nodeIdx];
+
+        if (breakTangent && (part == HitResult::Part::HandleIn || part == HitResult::Part::HandleOut)) {
+            node.type = BezierNode::Type::Corner;
+        }
 
         if (part == HitResult::Part::Anchor) {
             node.anchor = curLocal;
@@ -516,7 +520,7 @@ private:
         for (auto& sp : paths) {
             if (sp.nodes.size() < 2) continue;
 
-            sink->BeginFigure(sp.nodes[0].anchor, sp.closed ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
+            sink->BeginFigure(sp.nodes[0].anchor, D2D1_FIGURE_BEGIN_FILLED);
 
             size_t segCount = sp.closed ? sp.nodes.size() : sp.nodes.size() - 1;
             for (size_t i = 0; i < segCount; ++i) {

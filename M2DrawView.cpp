@@ -169,6 +169,72 @@ BOOL CM2DrawView::OnEraseBkgnd(CDC* /*pDC*/)
 	return TRUE;
 }
 
+void CM2DrawView::ZoomAtPoint(CPoint clientPt, float factor)
+{
+	float oldZoom = m_fZoom;
+	float newZoom = oldZoom * factor;
+
+	if (newZoom < 0.05f) newZoom = 0.05f;
+	if (newZoom > 32.0f) newZoom = 32.0f;
+
+	if (newZoom != oldZoom)
+	{
+		float mx = static_cast<float>(clientPt.x);
+		float my = static_cast<float>(clientPt.y);
+
+		m_ptPan.x = mx - ((mx - m_ptPan.x) / oldZoom) * newZoom;
+		m_ptPan.y = my - ((my - m_ptPan.y) / oldZoom) * newZoom;
+		m_fZoom = newZoom;
+
+		CString strLog;
+		strLog.Format(_T("[캔버스 줌] %.1f%% (%.2fx) | 앵커: (%d, %d) | Pan: (%.1f, %.1f)"),
+			m_fZoom * 100.0f, m_fZoom, clientPt.x, clientPt.y, m_ptPan.x, m_ptPan.y);
+		LogAppEvent(strLog);
+
+		Invalidate(FALSE);
+	}
+}
+
+void CM2DrawView::ZoomAtRect(CRect marqueeClientRc)
+{
+	float dx = static_cast<float>(std::abs(marqueeClientRc.Width()));
+	float dy = static_cast<float>(std::abs(marqueeClientRc.Height()));
+
+	if (dx < 5.0f || dy < 5.0f) return;
+
+	CRect clientRc;
+	GetClientRect(&clientRc);
+	float viewW = static_cast<float>(clientRc.Width());
+	float viewH = static_cast<float>(clientRc.Height());
+
+	if (viewW <= 10.0f || viewH <= 10.0f) return;
+
+	float scaleX = viewW / dx;
+	float scaleY = viewH / dy;
+	float factor = min(scaleX, scaleY);
+
+	float oldZoom = m_fZoom;
+	float newZoom = min(32.0f, max(0.05f, oldZoom * factor));
+
+	float minSX = static_cast<float>(min(marqueeClientRc.left, marqueeClientRc.right));
+	float minSY = static_cast<float>(min(marqueeClientRc.top, marqueeClientRc.bottom));
+
+	// 마키 영역 중심의 월드 좌표
+	float centerWorldX = (minSX + dx * 0.5f - m_ptPan.x) / oldZoom;
+	float centerWorldY = (minSY + dy * 0.5f - m_ptPan.y) / oldZoom;
+
+	m_ptPan.x = (viewW * 0.5f) - (centerWorldX * newZoom);
+	m_ptPan.y = (viewH * 0.5f) - (centerWorldY * newZoom);
+	m_fZoom = newZoom;
+
+	CString strLog;
+	strLog.Format(_T("[영역 확대 줌] %.1f%% (%.2fx) | Pan: (%.1f, %.1f)"),
+		m_fZoom * 100.0f, m_fZoom, m_ptPan.x, m_ptPan.y);
+	LogAppEvent(strLog);
+
+	Invalidate(FALSE);
+}
+
 BOOL CM2DrawView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 {
 	if (nFlags & MK_CONTROL)
@@ -176,29 +242,8 @@ BOOL CM2DrawView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 		CPoint clientPt = pt;
 		ScreenToClient(&clientPt);
 
-		float oldZoom = m_fZoom;
 		float factor = (zDelta > 0) ? 1.15f : (1.0f / 1.15f);
-		float newZoom = oldZoom * factor;
-
-		if (newZoom < 0.05f) newZoom = 0.05f;
-		if (newZoom > 32.0f) newZoom = 32.0f;
-
-		if (newZoom != oldZoom)
-		{
-			float mx = static_cast<float>(clientPt.x);
-			float my = static_cast<float>(clientPt.y);
-
-			m_ptPan.x = mx - ((mx - m_ptPan.x) / oldZoom) * newZoom;
-			m_ptPan.y = my - ((my - m_ptPan.y) / oldZoom) * newZoom;
-			m_fZoom = newZoom;
-
-			CString strLog;
-			strLog.Format(_T("[캔버스 줌] %.1f%% (%.2fx) | 앵커: (%d, %d) | Pan: (%.1f, %.1f)"),
-				m_fZoom * 100.0f, m_fZoom, clientPt.x, clientPt.y, m_ptPan.x, m_ptPan.y);
-			LogAppEvent(strLog);
-
-			Invalidate(FALSE);
-		}
+		ZoomAtPoint(clientPt, factor);
 		return TRUE;
 	}
 
@@ -229,6 +274,7 @@ void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 	e.ctrlDown = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
 	e.view = { m_fZoom, m_ptPan };
 	e.pDoc = pDoc;
+	e.pView = this;
 	e.pD2DFactory = m_pD2DFactory;
 
 	// 활성 도구에 이벤트 전달
@@ -260,8 +306,12 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 	e.worldPt = worldPt;
 	e.unitPt = D2D1::Point2F(worldPt.x / unitScale, worldPt.y / unitScale);
 	e.flags = nFlags;
+	e.altDown = (::GetKeyState(VK_MENU) & 0x8000) != 0;
+	e.shiftDown = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+	e.ctrlDown = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
 	e.view = { m_fZoom, m_ptPan };
 	e.pDoc = pDoc;
+	e.pView = this;
 	e.pD2DFactory = m_pD2DFactory;
 
 	ITool* pTool = GetApp()->GetToolManager().GetActiveTool();
@@ -373,8 +423,12 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	e.worldPt = worldPt;
 	e.unitPt = D2D1::Point2F(worldPt.x / unitScale, worldPt.y / unitScale);
 	e.flags = nFlags;
+	e.altDown = (::GetKeyState(VK_MENU) & 0x8000) != 0;
+	e.shiftDown = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+	e.ctrlDown = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
 	e.view = { m_fZoom, m_ptPan };
 	e.pDoc = pDoc;
+	e.pView = this;
 	e.pD2DFactory = m_pD2DFactory;
 
 	ITool* pTool = GetApp()->GetToolManager().GetActiveTool();
