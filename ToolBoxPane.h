@@ -23,7 +23,7 @@ struct ToolButtonItem
 class CToolFlyoutWnd : public CWnd
 {
 public:
-	BOOL     Open(CWnd* pOwner, CPoint screenTopLeft, const std::vector<ToolType>& items, ToolType current);
+	BOOL     Open(CWnd* pOwner, CPoint screenTopLeft, const std::vector<ToolType>& items, ToolType current, IWICImagingFactory* pWic = nullptr);
 	int      HitTest(CPoint screenPt) const;   // 팝업 밖이면 -1
 	void     SetHot(int index);
 	ToolType GetItem(int index) const { return m_items[index]; }
@@ -38,6 +38,7 @@ private:
 	std::vector<ToolType> m_items;
 	int      m_hot = -1;
 	ToolType m_current = ToolType::Select;
+	IWICImagingFactory* m_pWic = nullptr;
 	static const int kItemW = 140;
 	static const int kItemH = 32;
 };

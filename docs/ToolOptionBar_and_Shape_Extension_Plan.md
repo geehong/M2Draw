@@ -205,12 +205,21 @@ void RebuildGeometry(PathShape&, const ShapeParams&, float w, float h);   // Sub
 
 > P5는 Fill Rule 모델 보강에 의존합니다. 의존이 해소되지 않으면 기어 보어 구멍 없이 먼저 출시할 수 있습니다.
 
+### 5.6 도형 작성 기준점 모드 (From Center / From Corner)
+- **개요**: 사각형, 타원, 삼각형, 정다각형, 별, 기어, 나선, 하트 등 완성도형 생성 시 기본 모서리 시작(From Corner, 좌상단->우하단 등) 외에 중심 시작(From Center, 중심->바깥쪽 대칭 확장) 옵션을 상단 도구 옵션바(ToolOptionBar)에서 토글 지원.
+- **UI 토글 버튼**: `ID_OPT_DRAW_CENTER`
+  - `[From Center✓]`: 첫 클릭 지점을 도형의 중심(Center)으로 삼고 양방향 대칭으로 크기를 확장.
+  - `[From Corner]`: 첫 클릭 지점을 도형의 한 모서리(Corner)로 삼고 마우스 위치까지 확장.
+- **단축키/모디파이어 연동**: 드래그 중 `Alt` 키를 누르면 옵션바 설정과 무관하게 즉시 From Center 모드로 작동.
+- **중심 앵커 시각화**: From Center 모드로 드래그 중 첫 번째 클릭점(중심점)에 오렌지색 십자선 가이드 렌더링.
+
 ---
 
 ## 8. 테스트 항목
 
 - 도형별 정점/노드 수 검증 (삼각형 3, 별 2N, 기어 4T, 하트 4 등)
 - 파라미터 변경 후 로컬 바운딩 박스가 `[0,0,W,H]`와 일치하는지
+- From Center / From Corner 옵션 토글 및 Alt 키를 통한 대칭 확장 동작 검증
 - 정삼각형 구속 `H = W·√3/2`
 - 스파이럴 근사 오차 (샘플 지점과 실제 `r(θ)` 편차 < 허용치)
 - 기어 `Rb < Rr < Ro` 제약과 구멍 방향

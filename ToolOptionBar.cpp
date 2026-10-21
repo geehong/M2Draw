@@ -12,6 +12,25 @@
 // ----------------------------------------------------------------------------
 IMPLEMENT_DYNCREATE(CToolBarLabel, CMFCToolBarButton)
 
+SIZE CToolBarLabel::OnCalculateSize(CDC* pDC, const CSize& sizeDefault, BOOL /*bHorz*/)
+{
+	CFont fontBold;
+	CFont* pCurFont = pDC ? pDC->GetCurrentFont() : nullptr;
+	LOGFONT lf{};
+	if (pCurFont)
+	{
+		pCurFont->GetLogFont(&lf);
+		lf.lfWeight = FW_BOLD;
+		fontBold.CreateFontIndirect(&lf);
+	}
+	CFont* pOldFont = (fontBold.GetSafeHandle() && pDC) ? pDC->SelectObject(&fontBold) : nullptr;
+	CSize size = pDC ? pDC->GetTextExtent(m_strText) : CSize(70, 22);
+	if (pOldFont && pDC) pDC->SelectObject(pOldFont);
+	size.cx += 20; // 넉넉한 여유 패딩으로 "Rect Create" 잘림 완전 방지!
+	size.cy = (std::max)(size.cy, sizeDefault.cy);
+	return size;
+}
+
 void CToolBarLabel::OnDraw(CDC* pDC, const CRect& rect, CMFCToolBarImages* /*pImages*/,
 	BOOL /*bHorz*/, BOOL /*bCustomizeMode*/,
 	BOOL /*bHighlight*/, BOOL /*bDrawBorder*/,
@@ -123,8 +142,8 @@ void CSpinEditCtrl::OnDeltaposSpin(NMHDR* pNMHDR, LRESULT* pResult)
 		return;
 	}
 
-	// Windows 기본: iDelta < 0 이면 위쪽 화살표(▲, 증가), iDelta > 0 이면 아래쪽 화살표(▼, 감소)
-	double step = (pNMUpDown->iDelta < 0) ? 1.0 : -1.0;
+	// 위쪽 화살표(▲) 클릭 시 증가(+1.0), 아래쪽 화살표(▼) 클릭 시 감소(-1.0)
+	double step = (pNMUpDown->iDelta > 0) ? 1.0 : -1.0;
 
 	// Shift 키 누르면 10배 고속 증감
 	if (::GetKeyState(VK_SHIFT) & 0x8000)
@@ -162,9 +181,52 @@ void CSpinEditCtrl::AdjustValue(double step)
 	{
 		if (newVal < 1.0) newVal = 1.0;
 	}
-	else if (m_nFieldID == ID_OPT_RX || m_nFieldID == ID_OPT_RY)
+	else if (m_nFieldID == ID_OPT_RX || m_nFieldID == ID_OPT_RY || m_nFieldID == ID_OPT_RADIUS)
 	{
 		if (newVal < 0.0) newVal = 0.0;
+	}
+	else if (m_nFieldID == ID_OPT_SIDES || m_nFieldID == ID_OPT_POINTS || m_nFieldID == ID_OPT_TEETH)
+	{
+		double minVal = (m_nFieldID == ID_OPT_TEETH) ? 4.0 : 3.0;
+		double maxVal = (m_nFieldID == ID_OPT_TEETH) ? 48.0 : 32.0;
+		if (newVal < minVal) newVal = minVal;
+		if (newVal > maxVal) newVal = maxVal;
+		CString strVal;
+		strVal.Format(_T("%d"), static_cast<int>(newVal + 0.5));
+		SetWindowText(strVal);
+		if (m_pBar)
+		{
+			m_pBar->OnOptionCommit(m_nFieldID);
+		}
+		return;
+	}
+	else if (m_nFieldID == ID_OPT_INNER_RATIO || m_nFieldID == ID_OPT_DEPTH_RATIO)
+	{
+		double minVal = 5.0;
+		double maxVal = (m_nFieldID == ID_OPT_INNER_RATIO) ? 95.0 : 50.0;
+		if (newVal < minVal) newVal = minVal;
+		if (newVal > maxVal) newVal = maxVal;
+		CString strVal;
+		strVal.Format(_T("%.1f"), newVal);
+		SetWindowText(strVal);
+		if (m_pBar)
+		{
+			m_pBar->OnOptionCommit(m_nFieldID);
+		}
+		return;
+	}
+	else if (m_nFieldID == ID_OPT_TURNS)
+	{
+		if (newVal < 0.5) newVal = 0.5;
+		if (newVal > 10.0) newVal = 10.0;
+		CString strVal;
+		strVal.Format(_T("%.1f"), newVal);
+		SetWindowText(strVal);
+		if (m_pBar)
+		{
+			m_pBar->OnOptionCommit(m_nFieldID);
+		}
+		return;
 	}
 
 	CString strNew;
@@ -238,6 +300,37 @@ void CToolOptionBar::OnDestroy()
 	CMFCToolBar::OnDestroy();
 }
 
+CSize CToolOptionBar::CalcFixedLayout(BOOL bStretch, BOOL bHorz)
+{
+	CSize size = CMFCToolBar::CalcFixedLayout(bStretch, bHorz);
+	if (bHorz)
+	{
+		int requiredWidth = 0;
+		for (int i = 0; i < GetCount(); ++i)
+		{
+			CMFCToolBarButton* pBtn = GetButton(i);
+			if (pBtn && (pBtn->m_nStyle & TBBS_HIDDEN) == 0)
+			{
+				requiredWidth = (std::max)(requiredWidth, static_cast<int>(pBtn->Rect().right));
+			}
+		}
+		requiredWidth += 32;
+
+		CRect rcParent;
+		CWnd* pParent = GetParent();
+		if (pParent)
+		{
+			pParent->GetClientRect(&rcParent);
+			size.cx = (std::max)(requiredWidth, static_cast<int>(rcParent.Width()));
+		}
+		else
+		{
+			size.cx = (std::max)(static_cast<int>(size.cx), requiredWidth);
+		}
+	}
+	return size;
+}
+
 void CToolOptionBar::OnToolChanged(ToolType newTool)
 {
 	m_selectedIndex = -1;
@@ -301,6 +394,14 @@ void CToolOptionBar::SetMode(ToolType tool, bool editing)
 	m_curTool = tool;
 	m_bEditing = editing;
 
+	BaseShapeTool* pActiveBase = dynamic_cast<BaseShapeTool*>(GetApp()->GetToolManager().GetActiveTool());
+	if (pActiveBase)
+	{
+		ToolCreationSetting s = pActiveBase->GetSetting();
+		s.bDrawFromCenter = m_bDrawFromCenter;
+		pActiveBase->SetSetting(s);
+	}
+
 	m_bUpdating = true;
 	RemoveAllButtons();
 
@@ -360,7 +461,7 @@ void CToolOptionBar::SetMode(ToolType tool, bool editing)
 		AddEdit(ID_OPT_H, L"H");
 		AddEdit(ID_OPT_RX, L"Rx", 64);
 		AddEdit(ID_OPT_RY, L"Ry", 64);
-		AddButton(ID_OPT_LINK_RATIO, m_bLinkRxRy ? L"[Rx=Ry 🔗]" : L"[Separate Rx,Ry]");
+		AddButton(ID_OPT_LINK_RATIO, m_bLinkRxRy ? L"[Rx=Ry 🔗]" : L"[Free Rx,Ry]");
 		AddButton(ID_OPT_RESET_CORNER, L"[⏢Sharp]");
 		break;
 
@@ -381,23 +482,73 @@ void CToolOptionBar::SetMode(ToolType tool, bool editing)
 		break;
 
 	case ToolType::Polygon:
+		AddEdit(ID_OPT_X, L"Cx");
+		AddEdit(ID_OPT_Y, L"Cy");
+		AddEdit(ID_OPT_RADIUS, L"Radius");
+		AddEdit(ID_OPT_SIDES, L"Sides", 64);
+		AddEdit(ID_OPT_ROT, L"Angle°", 64);
+		break;
+
 	case ToolType::Star:
+		AddEdit(ID_OPT_X, L"Cx");
+		AddEdit(ID_OPT_Y, L"Cy");
+		AddEdit(ID_OPT_RADIUS, L"Radius");
+		AddEdit(ID_OPT_POINTS, L"Points", 60);
+		AddEdit(ID_OPT_INNER_RATIO, L"Inner %", 60);
+		AddEdit(ID_OPT_ROT, L"Angle°", 60);
+		break;
+
 	case ToolType::Gear:
+		AddEdit(ID_OPT_X, L"Cx");
+		AddEdit(ID_OPT_Y, L"Cy");
+		AddEdit(ID_OPT_RADIUS, L"Radius");
+		AddEdit(ID_OPT_TEETH, L"Teeth", 60);
+		AddEdit(ID_OPT_DEPTH_RATIO, L"Depth %", 60);
+		AddEdit(ID_OPT_ROT, L"Angle°", 60);
+		break;
+
 	case ToolType::Spiral:
+		AddEdit(ID_OPT_X, L"Cx");
+		AddEdit(ID_OPT_Y, L"Cy");
+		AddEdit(ID_OPT_RADIUS, L"Radius");
+		AddEdit(ID_OPT_TURNS, L"Turns", 60);
+		AddEdit(ID_OPT_ROT, L"Angle°", 60);
+		break;
+
 	case ToolType::Heart:
 		AddEdit(ID_OPT_X, L"X");
 		AddEdit(ID_OPT_Y, L"Y");
 		AddEdit(ID_OPT_W, L"W");
 		AddEdit(ID_OPT_H, L"H");
+		AddEdit(ID_OPT_ROT, L"Angle°", 60);
 		break;
 
 	default:
 		break;
 	}
 
+	// 완성 도형 도구일 때: 생성(Create) 및 수정(Edit) 상태 모두에서 중심/모서리 작성 토글 버튼 항상 제공!
+	if (m_curTool == ToolType::Rect ||
+	    m_curTool == ToolType::Triangle ||
+	    m_curTool == ToolType::Ellipse ||
+	    m_curTool == ToolType::Polygon ||
+	    m_curTool == ToolType::Star ||
+	    m_curTool == ToolType::Gear ||
+	    m_curTool == ToolType::Spiral ||
+	    m_curTool == ToolType::Heart ||
+	    m_curTool == ToolType::Line)
+	{
+		AddButton(ID_OPT_DRAW_CENTER, m_bDrawFromCenter ? L"[From Center✓]" : L"[From Corner]");
+	}
+
 	AdjustLayout();
 	RecalcLayout();
 	Invalidate();
+	CFrameWnd* pFrame = GetParentFrame();
+	if (pFrame)
+	{
+		pFrame->RecalcLayout();
+	}
 	m_bUpdating = false;
 
 	if (m_pDoc && m_selectedIndex >= 0)
@@ -483,6 +634,11 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 		case ::ShapeKind::Rect:     shapeTool = ToolType::Rect;     break;
 		case ::ShapeKind::Ellipse:  shapeTool = ToolType::Ellipse;  break;
 		case ::ShapeKind::Triangle: shapeTool = ToolType::Triangle; break;
+		case ::ShapeKind::Polygon:  shapeTool = ToolType::Polygon;  break;
+		case ::ShapeKind::Star:     shapeTool = ToolType::Star;     break;
+		case ::ShapeKind::Gear:     shapeTool = ToolType::Gear;     break;
+		case ::ShapeKind::Spiral:   shapeTool = ToolType::Spiral;   break;
+		case ::ShapeKind::Heart:    shapeTool = ToolType::Heart;    break;
 		default:                    shapeTool = ToolType::Pen;      break;
 		}
 	}
@@ -543,6 +699,71 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 			strVal.Format(_T("%.1f"), rx / pxPerUnit); SetFieldText(ID_OPT_RX, strVal);
 			strVal.Format(_T("%.1f"), ry / pxPerUnit); SetFieldText(ID_OPT_RY, strVal);
 		}
+		else if (shapeTool == ToolType::Polygon)
+		{
+			// 정다각형은 Cx, Cy, Radius, Sides, Angle°
+			float cx = origin.x + curW * 0.5f;
+			float cy = origin.y + curH * 0.5f;
+			float radius = (std::min)(curW, curH) * 0.5f;
+
+			const PolygonParams* pp = pPathShape ? pPathShape->GetParam<PolygonParams>() : nullptr;
+			int sides = pp ? pp->sides : 5;
+
+			strVal.Format(_T("%.1f"), cx / pxPerUnit);     SetFieldText(ID_OPT_X, strVal);
+			strVal.Format(_T("%.1f"), cy / pxPerUnit);     SetFieldText(ID_OPT_Y, strVal);
+			strVal.Format(_T("%.1f"), radius / pxPerUnit); SetFieldText(ID_OPT_RADIUS, strVal);
+			strVal.Format(_T("%d"), sides);                SetFieldText(ID_OPT_SIDES, strVal);
+			strVal.Format(_T("%.1f"), rotDeg);             SetFieldText(ID_OPT_ROT, strVal);
+		}
+		else if (shapeTool == ToolType::Star)
+		{
+			float cx = origin.x + curW * 0.5f;
+			float cy = origin.y + curH * 0.5f;
+			float radius = (std::min)(curW, curH) * 0.5f;
+
+			const StarParams* sp = pPathShape ? pPathShape->GetParam<StarParams>() : nullptr;
+			int points = sp ? sp->points : 5;
+			float innerRatio = sp ? (sp->innerRatio * 100.0f) : 50.0f;
+
+			strVal.Format(_T("%.1f"), cx / pxPerUnit);        SetFieldText(ID_OPT_X, strVal);
+			strVal.Format(_T("%.1f"), cy / pxPerUnit);        SetFieldText(ID_OPT_Y, strVal);
+			strVal.Format(_T("%.1f"), radius / pxPerUnit);    SetFieldText(ID_OPT_RADIUS, strVal);
+			strVal.Format(_T("%d"), points);                  SetFieldText(ID_OPT_POINTS, strVal);
+			strVal.Format(_T("%.1f"), innerRatio);            SetFieldText(ID_OPT_INNER_RATIO, strVal);
+			strVal.Format(_T("%.1f"), rotDeg);                SetFieldText(ID_OPT_ROT, strVal);
+		}
+		else if (shapeTool == ToolType::Gear)
+		{
+			float cx = origin.x + curW * 0.5f;
+			float cy = origin.y + curH * 0.5f;
+			float radius = (std::min)(curW, curH) * 0.5f;
+
+			const GearParams* gp = pPathShape ? pPathShape->GetParam<GearParams>() : nullptr;
+			int teeth = gp ? gp->teeth : 12;
+			float depthRatio = gp ? (gp->depthRatio * 100.0f) : 20.0f;
+
+			strVal.Format(_T("%.1f"), cx / pxPerUnit);        SetFieldText(ID_OPT_X, strVal);
+			strVal.Format(_T("%.1f"), cy / pxPerUnit);        SetFieldText(ID_OPT_Y, strVal);
+			strVal.Format(_T("%.1f"), radius / pxPerUnit);    SetFieldText(ID_OPT_RADIUS, strVal);
+			strVal.Format(_T("%d"), teeth);                   SetFieldText(ID_OPT_TEETH, strVal);
+			strVal.Format(_T("%.1f"), depthRatio);            SetFieldText(ID_OPT_DEPTH_RATIO, strVal);
+			strVal.Format(_T("%.1f"), rotDeg);                SetFieldText(ID_OPT_ROT, strVal);
+		}
+		else if (shapeTool == ToolType::Spiral)
+		{
+			float cx = origin.x + curW * 0.5f;
+			float cy = origin.y + curH * 0.5f;
+			float radius = (std::min)(curW, curH) * 0.5f;
+
+			const SpiralParams* sp = pPathShape ? pPathShape->GetParam<SpiralParams>() : nullptr;
+			float turns = sp ? sp->turns : 3.0f;
+
+			strVal.Format(_T("%.1f"), cx / pxPerUnit);        SetFieldText(ID_OPT_X, strVal);
+			strVal.Format(_T("%.1f"), cy / pxPerUnit);        SetFieldText(ID_OPT_Y, strVal);
+			strVal.Format(_T("%.1f"), radius / pxPerUnit);    SetFieldText(ID_OPT_RADIUS, strVal);
+			strVal.Format(_T("%.1f"), turns);                 SetFieldText(ID_OPT_TURNS, strVal);
+			strVal.Format(_T("%.1f"), rotDeg);                SetFieldText(ID_OPT_ROT, strVal);
+		}
 		else
 		{
 			strVal.Format(_T("%.1f"), origin.x / pxPerUnit); SetFieldText(ID_OPT_X, strVal);
@@ -587,20 +808,87 @@ void CToolOptionBar::SyncCreationCoordinates(float x, float y, float w, float h,
 			SetFieldText(ID_OPT_RX, _T("0.0"));
 			SetFieldText(ID_OPT_RY, _T("0.0"));
 		}
+		else if (m_curTool == ToolType::Polygon || m_curTool == ToolType::Star || m_curTool == ToolType::Gear || m_curTool == ToolType::Spiral)
+		{
+			SetFieldText(ID_OPT_RADIUS, _T("0.0"));
+			SetFieldText(ID_OPT_ROT, _T("0.0"));
+			BaseShapeTool* pBox = dynamic_cast<BaseShapeTool*>(GetApp()->GetToolManager().GetActiveTool());
+			if (m_curTool == ToolType::Polygon)
+			{
+				int sides = pBox ? pBox->GetSetting().polySides : 5;
+				strVal.Format(_T("%d"), sides); SetFieldText(ID_OPT_SIDES, strVal);
+			}
+			else if (m_curTool == ToolType::Star)
+			{
+				int pts = pBox ? pBox->GetSetting().starPoints : 5;
+				float inRatio = pBox ? (pBox->GetSetting().starInnerRatio * 100.0f) : 50.0f;
+				strVal.Format(_T("%d"), pts); SetFieldText(ID_OPT_POINTS, strVal);
+				strVal.Format(_T("%.1f"), inRatio); SetFieldText(ID_OPT_INNER_RATIO, strVal);
+			}
+			else if (m_curTool == ToolType::Gear)
+			{
+				int teeth = pBox ? pBox->GetSetting().gearTeeth : 12;
+				float depth = pBox ? (pBox->GetSetting().gearDepthRatio * 100.0f) : 20.0f;
+				strVal.Format(_T("%d"), teeth); SetFieldText(ID_OPT_TEETH, strVal);
+				strVal.Format(_T("%.1f"), depth); SetFieldText(ID_OPT_DEPTH_RATIO, strVal);
+			}
+			else if (m_curTool == ToolType::Spiral)
+			{
+				float turns = pBox ? pBox->GetSetting().spiralTurns : 3.0f;
+				strVal.Format(_T("%.1f"), turns); SetFieldText(ID_OPT_TURNS, strVal);
+			}
+		}
 	}
 	else
 	{
-		// 첫 포인트 고정 후: X, Y는 고정 시작점, W, H는 실시간 드래그 크기
-		strVal.Format(_T("%.1f"), x / pxPerUnit); SetFieldText(ID_OPT_X, strVal);
-		strVal.Format(_T("%.1f"), y / pxPerUnit); SetFieldText(ID_OPT_Y, strVal);
-
-		if (m_curTool == ToolType::Ellipse)
+		// 첫 포인트 고정 후:
+		if (m_curTool == ToolType::Polygon || m_curTool == ToolType::Star || m_curTool == ToolType::Gear || m_curTool == ToolType::Spiral)
 		{
+			float cx = x + (w * 0.5f);
+			float cy = y + (h * 0.5f);
+			float radius = (std::min)(w, h) * 0.5f;
+			strVal.Format(_T("%.1f"), cx / pxPerUnit);     SetFieldText(ID_OPT_X, strVal);
+			strVal.Format(_T("%.1f"), cy / pxPerUnit);     SetFieldText(ID_OPT_Y, strVal);
+			strVal.Format(_T("%.1f"), radius / pxPerUnit); SetFieldText(ID_OPT_RADIUS, strVal);
+			BaseShapeTool* pBox = dynamic_cast<BaseShapeTool*>(GetApp()->GetToolManager().GetActiveTool());
+			if (m_curTool == ToolType::Polygon)
+			{
+				int sides = pBox ? pBox->GetSetting().polySides : 5;
+				strVal.Format(_T("%d"), sides); SetFieldText(ID_OPT_SIDES, strVal);
+			}
+			else if (m_curTool == ToolType::Star)
+			{
+				int pts = pBox ? pBox->GetSetting().starPoints : 5;
+				float inRatio = pBox ? (pBox->GetSetting().starInnerRatio * 100.0f) : 50.0f;
+				strVal.Format(_T("%d"), pts); SetFieldText(ID_OPT_POINTS, strVal);
+				strVal.Format(_T("%.1f"), inRatio); SetFieldText(ID_OPT_INNER_RATIO, strVal);
+			}
+			else if (m_curTool == ToolType::Gear)
+			{
+				int teeth = pBox ? pBox->GetSetting().gearTeeth : 12;
+				float depth = pBox ? (pBox->GetSetting().gearDepthRatio * 100.0f) : 20.0f;
+				strVal.Format(_T("%d"), teeth); SetFieldText(ID_OPT_TEETH, strVal);
+				strVal.Format(_T("%.1f"), depth); SetFieldText(ID_OPT_DEPTH_RATIO, strVal);
+			}
+			else if (m_curTool == ToolType::Spiral)
+			{
+				float turns = pBox ? pBox->GetSetting().spiralTurns : 3.0f;
+				strVal.Format(_T("%.1f"), turns); SetFieldText(ID_OPT_TURNS, strVal);
+			}
+		}
+		else if (m_curTool == ToolType::Ellipse)
+		{
+			float cx = x + (w * 0.5f);
+			float cy = y + (h * 0.5f);
+			strVal.Format(_T("%.1f"), cx / pxPerUnit); SetFieldText(ID_OPT_X, strVal);
+			strVal.Format(_T("%.1f"), cy / pxPerUnit); SetFieldText(ID_OPT_Y, strVal);
 			strVal.Format(_T("%.1f"), (w * 0.5f) / pxPerUnit); SetFieldText(ID_OPT_RX, strVal);
 			strVal.Format(_T("%.1f"), (h * 0.5f) / pxPerUnit); SetFieldText(ID_OPT_RY, strVal);
 		}
 		else
 		{
+			strVal.Format(_T("%.1f"), x / pxPerUnit); SetFieldText(ID_OPT_X, strVal);
+			strVal.Format(_T("%.1f"), y / pxPerUnit); SetFieldText(ID_OPT_Y, strVal);
 			strVal.Format(_T("%.1f"), w / pxPerUnit); SetFieldText(ID_OPT_W, strVal);
 			strVal.Format(_T("%.1f"), h / pxPerUnit); SetFieldText(ID_OPT_H, strVal);
 		}
@@ -771,6 +1059,22 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		SetFieldText(ID_OPT_Y, _T("0.0"));
 		return;
 	}
+	else if (id == ID_OPT_DRAW_CENTER)
+	{
+		m_bDrawFromCenter = !m_bDrawFromCenter;
+		for (auto& tool : GetApp()->GetToolManager().GetTools())
+		{
+			BaseShapeTool* pBox = dynamic_cast<BaseShapeTool*>(tool.get());
+			if (pBox)
+			{
+				ToolCreationSetting s = pBox->GetSetting();
+				s.bDrawFromCenter = m_bDrawFromCenter;
+				pBox->SetSetting(s);
+			}
+		}
+		SetMode(m_curTool, m_bEditing);
+		return;
+	}
 
 	// 2. 수치 입력 필드 커밋 처리 (단위 변환 및 도형/문서 반영)
 	CString text = GetFieldText(id);
@@ -814,6 +1118,54 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 				s.cornerRy = static_cast<float>(val) * pxPerUnit;
 				if (m_bLinkRxRy) { s.cornerRx = s.cornerRy; SetFieldText(ID_OPT_RX, text); }
 			}
+			else if (id == ID_OPT_SIDES)
+			{
+				s.polySides = (std::max)(3, (std::min)(32, static_cast<int>(val)));
+				CString strSides;
+				strSides.Format(_T("%d"), s.polySides);
+				SetFieldText(ID_OPT_SIDES, strSides);
+			}
+			else if (id == ID_OPT_POINTS)
+			{
+				s.starPoints = (std::max)(3, (std::min)(32, static_cast<int>(val)));
+				CString strPts;
+				strPts.Format(_T("%d"), s.starPoints);
+				SetFieldText(ID_OPT_POINTS, strPts);
+			}
+			else if (id == ID_OPT_INNER_RATIO)
+			{
+				float ratio = static_cast<float>(val);
+				ratio = (std::max)(5.0f, (std::min)(95.0f, ratio));
+				s.starInnerRatio = ratio * 0.01f;
+				CString strRatio;
+				strRatio.Format(_T("%.1f"), ratio);
+				SetFieldText(ID_OPT_INNER_RATIO, strRatio);
+			}
+			else if (id == ID_OPT_TEETH)
+			{
+				s.gearTeeth = (std::max)(4, (std::min)(48, static_cast<int>(val)));
+				CString strTeeth;
+				strTeeth.Format(_T("%d"), s.gearTeeth);
+				SetFieldText(ID_OPT_TEETH, strTeeth);
+			}
+			else if (id == ID_OPT_DEPTH_RATIO)
+			{
+				float depth = static_cast<float>(val);
+				depth = (std::max)(5.0f, (std::min)(50.0f, depth));
+				s.gearDepthRatio = depth * 0.01f;
+				CString strDepth;
+				strDepth.Format(_T("%.1f"), depth);
+				SetFieldText(ID_OPT_DEPTH_RATIO, strDepth);
+			}
+			else if (id == ID_OPT_TURNS)
+			{
+				float turns = static_cast<float>(val);
+				turns = (std::max)(0.5f, (std::min)(10.0f, turns));
+				s.spiralTurns = turns;
+				CString strTurns;
+				strTurns.Format(_T("%.1f"), turns);
+				SetFieldText(ID_OPT_TURNS, strTurns);
+			}
 			pBox->SetSetting(s);
 		}
 		return;
@@ -845,6 +1197,17 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			float curW = origW * curScaleX;
 			targetPixelX -= curW * 0.5f; // Cx 입력이므로 좌측 원점으로 보정
 		}
+		else if (m_curTool == ToolType::Polygon || m_curTool == ToolType::Star || m_curTool == ToolType::Gear || m_curTool == ToolType::Spiral)
+		{
+			D2D1_POINT_2F centerLocal = D2D1::Point2F((lb.left + lb.right) * 0.5f, (lb.top + lb.bottom) * 0.5f);
+			D2D1_POINT_2F curCenter = pShape->xf.TransformPoint(centerLocal);
+			float dx = targetPixelX - curCenter.x;
+			pShape->xf = pShape->xf * D2D1::Matrix3x2F::Translation(dx, 0.0f);
+			pShape->Invalidate();
+			m_pDoc->UpdateAllViews(nullptr);
+			SyncSelection(m_pDoc, m_selectedIndex);
+			return;
+		}
 		float dx = targetPixelX - curOrigin.x;
 		pShape->xf = pShape->xf * D2D1::Matrix3x2F::Translation(dx, 0.0f);
 	}
@@ -855,6 +1218,17 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		{
 			float curH = origH * curScaleY;
 			targetPixelY -= curH * 0.5f; // Cy 입력이므로 상단 원점으로 보정
+		}
+		else if (m_curTool == ToolType::Polygon || m_curTool == ToolType::Star || m_curTool == ToolType::Gear || m_curTool == ToolType::Spiral)
+		{
+			D2D1_POINT_2F centerLocal = D2D1::Point2F((lb.left + lb.right) * 0.5f, (lb.top + lb.bottom) * 0.5f);
+			D2D1_POINT_2F curCenter = pShape->xf.TransformPoint(centerLocal);
+			float dy = targetPixelY - curCenter.y;
+			pShape->xf = pShape->xf * D2D1::Matrix3x2F::Translation(0.0f, dy);
+			pShape->Invalidate();
+			m_pDoc->UpdateAllViews(nullptr);
+			SyncSelection(m_pDoc, m_selectedIndex);
+			return;
 		}
 		float dy = targetPixelY - curOrigin.y;
 		pShape->xf = pShape->xf * D2D1::Matrix3x2F::Translation(0.0f, dy);
@@ -994,6 +1368,175 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 				sp.nodes[3].anchor = D2D1::Point2F(lb.left, lb.bottom);
 			}
 			pPathShape->paths.push_back(sp);
+		}
+	}
+	else if (id == ID_OPT_RADIUS && (m_curTool == ToolType::Polygon || m_curTool == ToolType::Star || m_curTool == ToolType::Gear || m_curTool == ToolType::Spiral))
+	{
+		float targetR = static_cast<float>(val) * pxPerUnit;
+		targetR = (std::max)(1.0f, targetR);
+		float curR = (std::min)(origW * curScaleX, origH * curScaleY) * 0.5f;
+		if (curR > 0.001f)
+		{
+			float factor = targetR / curR;
+			D2D1_POINT_2F centerLocal = D2D1::Point2F((lb.left + lb.right) * 0.5f, (lb.top + lb.bottom) * 0.5f);
+			D2D1_POINT_2F centerWorld = pShape->xf.TransformPoint(centerLocal);
+			pShape->xf = pShape->xf * D2D1::Matrix3x2F::Scale(factor, factor, centerWorld);
+		}
+	}
+	else if (id == ID_OPT_SIDES && pPathShape && pPathShape->GetKind() == ::ShapeKind::Polygon)
+	{
+		PolygonParams* pp = pPathShape->GetParamRef<PolygonParams>();
+		if (pp)
+		{
+			pp->sides = (std::max)(3, (std::min)(32, static_cast<int>(val)));
+			CString strSides;
+			strSides.Format(_T("%d"), pp->sides);
+			SetFieldText(ID_OPT_SIDES, strSides);
+
+			int n = pp->sides;
+			pPathShape->paths.clear();
+			SubPath sp;
+			sp.closed = true;
+			for (int i = 0; i < n; ++i) sp.nodes.emplace_back();
+
+			float cx = (lb.left + lb.right) * 0.5f;
+			float cy = (lb.top + lb.bottom) * 0.5f;
+			float rx = (lb.right - lb.left) * 0.5f;
+			float ry = (lb.bottom - lb.top) * 0.5f;
+			const float PI = 3.14159265358979323846f;
+			for (int i = 0; i < n; ++i) {
+				float angle = -PI * 0.5f + (i * 2.0f * PI / n);
+				sp.nodes[i].anchor = D2D1::Point2F(cx + rx * std::cos(angle), cy + ry * std::sin(angle));
+				sp.nodes[i].hIn = sp.nodes[i].hOut = { 0, 0 };
+			}
+			pPathShape->paths.push_back(sp);
+		}
+	}
+	else if ((id == ID_OPT_POINTS || id == ID_OPT_INNER_RATIO) && pPathShape && pPathShape->GetKind() == ::ShapeKind::Star)
+	{
+		StarParams* sp = pPathShape->GetParamRef<StarParams>();
+		if (sp)
+		{
+			if (id == ID_OPT_POINTS)
+			{
+				sp->points = (std::max)(3, (std::min)(32, static_cast<int>(val)));
+				CString strPts;
+				strPts.Format(_T("%d"), sp->points);
+				SetFieldText(ID_OPT_POINTS, strPts);
+			}
+			else
+			{
+				float ratio = static_cast<float>(val);
+				ratio = (std::max)(5.0f, (std::min)(95.0f, ratio));
+				sp->innerRatio = ratio * 0.01f;
+				CString strRatio;
+				strRatio.Format(_T("%.1f"), ratio);
+				SetFieldText(ID_OPT_INNER_RATIO, strRatio);
+			}
+
+			int n = sp->points;
+			pPathShape->paths.clear();
+			SubPath sub;
+			sub.closed = true;
+			for (int i = 0; i < n * 2; ++i) sub.nodes.emplace_back();
+
+			float cx = (lb.left + lb.right) * 0.5f;
+			float cy = (lb.top + lb.bottom) * 0.5f;
+			float rx = (lb.right - lb.left) * 0.5f;
+			float ry = (lb.bottom - lb.top) * 0.5f;
+			const float PI = 3.14159265358979323846f;
+			for (int i = 0; i < n * 2; ++i) {
+				float angle = -PI * 0.5f + (i * PI / n);
+				float curR = (i % 2 == 0) ? 1.0f : sp->innerRatio;
+				sub.nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
+				sub.nodes[i].hIn = sub.nodes[i].hOut = { 0, 0 };
+			}
+			pPathShape->paths.push_back(sub);
+		}
+	}
+	else if ((id == ID_OPT_TEETH || id == ID_OPT_DEPTH_RATIO) && pPathShape && pPathShape->GetKind() == ::ShapeKind::Gear)
+	{
+		GearParams* gp = pPathShape->GetParamRef<GearParams>();
+		if (gp)
+		{
+			if (id == ID_OPT_TEETH)
+			{
+				gp->teeth = (std::max)(4, (std::min)(48, static_cast<int>(val)));
+				CString strTeeth;
+				strTeeth.Format(_T("%d"), gp->teeth);
+				SetFieldText(ID_OPT_TEETH, strTeeth);
+			}
+			else
+			{
+				float depth = static_cast<float>(val);
+				depth = (std::max)(5.0f, (std::min)(50.0f, depth));
+				gp->depthRatio = depth * 0.01f;
+				CString strDepth;
+				strDepth.Format(_T("%.1f"), depth);
+				SetFieldText(ID_OPT_DEPTH_RATIO, strDepth);
+			}
+
+			int n = gp->teeth;
+			pPathShape->paths.clear();
+			SubPath sub;
+			sub.closed = true;
+			for (int i = 0; i < n * 4; ++i) sub.nodes.emplace_back();
+
+			float cx = (lb.left + lb.right) * 0.5f;
+			float cy = (lb.top + lb.bottom) * 0.5f;
+			float rx = (lb.right - lb.left) * 0.5f;
+			float ry = (lb.bottom - lb.top) * 0.5f;
+			const float PI = 3.14159265358979323846f;
+			float rInner = 1.0f - gp->depthRatio;
+
+			for (int i = 0; i < n * 4; ++i) {
+				float angle = -PI * 0.5f + (i * 2.0f * PI / (n * 4));
+				int mod = i % 4;
+				float curR = (mod == 1 || mod == 2) ? 1.0f : rInner;
+				sub.nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
+				sub.nodes[i].hIn = sub.nodes[i].hOut = { 0, 0 };
+			}
+			pPathShape->paths.push_back(sub);
+		}
+	}
+	else if (id == ID_OPT_TURNS && pPathShape && pPathShape->GetKind() == ::ShapeKind::Spiral)
+	{
+		SpiralParams* sp = pPathShape->GetParamRef<SpiralParams>();
+		if (sp)
+		{
+			float turns = static_cast<float>(val);
+			turns = (std::max)(0.5f, (std::min)(10.0f, turns));
+			sp->turns = turns;
+			CString strTurns;
+			strTurns.Format(_T("%.1f"), turns);
+			SetFieldText(ID_OPT_TURNS, strTurns);
+
+			int segs = static_cast<int>(turns * 4.0f);
+			if (segs < 4) segs = 4;
+			pPathShape->paths.clear();
+			SubPath sub;
+			sub.closed = false;
+			for (int i = 0; i <= segs; ++i) {
+				BezierNode bn; bn.type = BezierNode::Type::Smooth;
+				sub.nodes.push_back(bn);
+			}
+
+			float cx = (lb.left + lb.right) * 0.5f;
+			float cy = (lb.top + lb.bottom) * 0.5f;
+			float rx = (lb.right - lb.left) * 0.5f;
+			float ry = (lb.bottom - lb.top) * 0.5f;
+			const float PI = 3.14159265358979323846f;
+			for (int i = 0; i <= segs; ++i) {
+				float t = static_cast<float>(i) / segs;
+				float angle = t * turns * 2.0f * PI;
+				float curR = t;
+				sub.nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
+				float tanX = -std::sin(angle) * rx * curR * (PI * 0.5f / segs);
+				float tanY = std::cos(angle) * ry * curR * (PI * 0.5f / segs);
+				sub.nodes[i].hIn = D2D1::Point2F(-tanX, -tanY);
+				sub.nodes[i].hOut = D2D1::Point2F(tanX, tanY);
+			}
+			pPathShape->paths.push_back(sub);
 		}
 	}
 

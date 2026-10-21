@@ -773,6 +773,77 @@ void BaseShapeTool::DrawCommittedShapeAnchors(ID2D1RenderTarget* rt, ID2D1SolidC
 // BoxShapeTool 구현 (단일 클래스로 사각/원/직선 등 모든 2포인트 도형 처리)
 // ============================================================================
 
+void BoxShapeTool::CalculateExtents(D2D1_POINT_2F curPt, bool shiftDown, bool altDown, D2D1_POINT_2F& outP0, D2D1_POINT_2F& outP1) const
+{
+	bool fromCenter = m_setting.bDrawFromCenter || altDown;
+
+	if (m_kind == ShapeKind::Line)
+	{
+		if (fromCenter)
+		{
+			float dx = curPt.x - m_startPt.x;
+			float dy = curPt.y - m_startPt.y;
+			if (shiftDown)
+			{
+				float len = std::sqrt(dx * dx + dy * dy);
+				float angle = std::atan2(dy, dx);
+				const float snap = 3.14159265f / 4.0f;
+				angle = std::round(angle / snap) * snap;
+				dx = len * std::cos(angle);
+				dy = len * std::sin(angle);
+			}
+			outP0 = D2D1::Point2F(m_startPt.x - dx, m_startPt.y - dy);
+			outP1 = D2D1::Point2F(m_startPt.x + dx, m_startPt.y + dy);
+		}
+		else
+		{
+			outP0 = m_startPt;
+			float dx = curPt.x - m_startPt.x;
+			float dy = curPt.y - m_startPt.y;
+			if (shiftDown)
+			{
+				float len = std::sqrt(dx * dx + dy * dy);
+				float angle = std::atan2(dy, dx);
+				const float snap = 3.14159265f / 4.0f;
+				angle = std::round(angle / snap) * snap;
+				dx = len * std::cos(angle);
+				dy = len * std::sin(angle);
+			}
+			outP1 = D2D1::Point2F(m_startPt.x + dx, m_startPt.y + dy);
+		}
+		return;
+	}
+
+	float dx = std::abs(curPt.x - m_startPt.x);
+	float dy = std::abs(curPt.y - m_startPt.y);
+
+	bool forceSquare = shiftDown || 
+	                   (m_kind == ShapeKind::RegularPoly ||
+	                    m_kind == ShapeKind::Star ||
+	                    m_kind == ShapeKind::Gear ||
+	                    m_kind == ShapeKind::Spiral);
+
+	if (forceSquare)
+	{
+		float maxD = (std::max)(dx, dy);
+		dx = maxD;
+		dy = maxD;
+	}
+
+	if (fromCenter)
+	{
+		outP0 = D2D1::Point2F(m_startPt.x - dx, m_startPt.y - dy);
+		outP1 = D2D1::Point2F(m_startPt.x + dx, m_startPt.y + dy);
+	}
+	else
+	{
+		float signX = (curPt.x >= m_startPt.x) ? 1.0f : -1.0f;
+		float signY = (curPt.y >= m_startPt.y) ? 1.0f : -1.0f;
+		outP0 = m_startPt;
+		outP1 = D2D1::Point2F(m_startPt.x + signX * dx, m_startPt.y + signY * dy);
+	}
+}
+
 void BoxShapeTool::OnDown(const ToolEvent& e)
 {
 	if (!e.pDoc) return;
@@ -788,7 +859,9 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 		{
 			if (m_previewShape)
 			{
-				UpdateGeometry(m_previewShape.get(), m_startPt, e.worldPt);
+				D2D1_POINT_2F p0, p1;
+				CalculateExtents(e.worldPt, e.shiftDown, e.altDown, p0, p1);
+				UpdateGeometry(m_previewShape.get(), p0, p1);
 			}
 			CommitShape(e.pDoc);
 		}
@@ -831,22 +904,25 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 
 void BoxShapeTool::OnMove(const ToolEvent& e)
 {
-	BaseShapeTool::OnMove(e);
+	m_hoverPt = e.worldPt;
+	m_hasHover = true;
 
 	if (m_isDragging || m_waitingSecondClick)
 	{
-		// 첫 포인트 고정 후: 마우스 움직임에 따라 W, H 실시간 변동
-		float w = std::abs(e.worldPt.x - m_startPt.x);
-		float h = std::abs(e.worldPt.y - m_startPt.y);
+		D2D1_POINT_2F p0, p1;
+		CalculateExtents(e.worldPt, e.shiftDown, e.altDown, p0, p1);
 
-		// 정방형/정비율 제약 (Shift 누름 시)
-		if (e.shiftDown)
+		if (m_previewShape)
 		{
-			w = (std::max)(w, h);
-			h = w;
+			UpdateGeometry(m_previewShape.get(), p0, p1);
 		}
 
-		UpdateOptionBarCreationCoords(m_startPt.x, m_startPt.y, w, h, true);
+		float left = (std::min)(p0.x, p1.x);
+		float top = (std::min)(p0.y, p1.y);
+		float w = std::abs(p1.x - p0.x);
+		float h = std::abs(p1.y - p0.y);
+
+		UpdateOptionBarCreationCoords(left, top, w, h, true);
 	}
 	else
 	{
@@ -868,7 +944,9 @@ void BoxShapeTool::OnUp(const ToolEvent& e)
 	{
 		if (m_previewShape)
 		{
-			UpdateGeometry(m_previewShape.get(), m_startPt, e.worldPt);
+			D2D1_POINT_2F p0, p1;
+			CalculateExtents(e.worldPt, e.shiftDown, e.altDown, p0, p1);
+			UpdateGeometry(m_previewShape.get(), p0, p1);
 		}
 
 		CommitShape(e.pDoc);
@@ -920,6 +998,14 @@ void BoxShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brus
 		brush->SetColor(D2D1::ColorF(D2D1::ColorF::OrangeRed));
 		rt->DrawRectangle(hr0, brush, 2.0f);
 
+		// 중심 그리기 모드일 때: 중심점(m_startPt)에 십자선 가이드 표시
+		if (m_setting.bDrawFromCenter)
+		{
+			brush->SetColor(D2D1::ColorF(D2D1::ColorF::OrangeRed, 0.85f));
+			rt->DrawLine(D2D1::Point2F(p0Screen.x - 7.0f, p0Screen.y), D2D1::Point2F(p0Screen.x + 7.0f, p0Screen.y), brush, 1.2f);
+			rt->DrawLine(D2D1::Point2F(p0Screen.x, p0Screen.y - 7.0f), D2D1::Point2F(p0Screen.x, p0Screen.y + 7.0f), brush, 1.2f);
+		}
+
 		// (3) 현재 마우스 위치(두 번째 앵커 포인트 미리보기)
 		if (m_hasHover)
 		{
@@ -958,7 +1044,9 @@ void BoxShapeTool::UpdatePreviewGeometry(D2D1_POINT_2F curPt)
 {
 	if (m_previewShape)
 	{
-		UpdateGeometry(m_previewShape.get(), m_startPt, curPt);
+		D2D1_POINT_2F p0, p1;
+		CalculateExtents(curPt, false, false, p0, p1);
+		UpdateGeometry(m_previewShape.get(), p0, p1);
 	}
 }
 
@@ -1019,40 +1107,63 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	else if (m_kind == ShapeKind::Star)
 	{
 		shape->name = _T("별");
-		int n = (std::max)(3, m_setting.starPoints);
+		shape->SetKind(::ShapeKind::Star);
+		StarParams sp;
+		sp.points = (std::max)(3, (std::min)(32, m_setting.starPoints));
+		sp.innerRatio = (std::max)(0.05f, (std::min)(0.95f, m_setting.starInnerRatio));
+		shape->SetParams(sp);
+		int n = sp.points;
 		for (int i = 0; i < n * 2; ++i) shape->AddAnchor(p0);
 		shape->paths.back().closed = true;
 	}
 	else if (m_kind == ShapeKind::RegularPoly)
 	{
 		shape->name = _T("정다각형");
-		int n = (std::max)(3, m_setting.polySides);
+		shape->SetKind(::ShapeKind::Polygon);
+		PolygonParams pp;
+		pp.sides = (std::max)(3, (std::min)(32, m_setting.polySides));
+		shape->SetParams(pp);
+		int n = pp.sides;
 		for (int i = 0; i < n; ++i) shape->AddAnchor(p0);
 		shape->paths.back().closed = true;
 	}
 	else if (m_kind == ShapeKind::Gear)
 	{
 		shape->name = _T("기어");
-		int n = (std::max)(4, m_setting.gearTeeth);
+		shape->SetKind(::ShapeKind::Gear);
+		GearParams gp;
+		gp.teeth = (std::max)(4, (std::min)(48, m_setting.gearTeeth));
+		gp.depthRatio = (std::max)(0.05f, (std::min)(0.50f, m_setting.gearDepthRatio));
+		gp.boreRatio = (std::max)(0.05f, (std::min)(0.80f, m_setting.gearHoleRatio));
+		shape->SetParams(gp);
+		int n = gp.teeth;
 		for (int i = 0; i < n * 4; ++i) shape->AddAnchor(p0);
 		shape->paths.back().closed = true;
 	}
 	else if (m_kind == ShapeKind::Spiral)
 	{
 		shape->name = _T("스파이럴");
-		int segs = static_cast<int>(m_setting.spiralTurns * 4.0f);
+		shape->SetKind(::ShapeKind::Spiral);
+		SpiralParams sp;
+		sp.turns = (std::max)(0.5f, (std::min)(10.0f, m_setting.spiralTurns));
+		sp.innerRatio = 0.1f;
+		shape->SetParams(sp);
+		int segs = static_cast<int>(sp.turns * 4.0f);
 		if (segs < 4) segs = 4;
-		SubPath sp;
+		SubPath sub;
 		for (int i = 0; i <= segs; ++i) {
 			BezierNode n; n.type = BezierNode::Type::Smooth;
-			sp.nodes.push_back(n);
+			sub.nodes.push_back(n);
 		}
-		sp.closed = false;
-		shape->paths.push_back(sp);
+		sub.closed = false;
+		shape->paths.push_back(sub);
 	}
 	else if (m_kind == ShapeKind::Heart)
 	{
 		shape->name = _T("하트");
+		shape->SetKind(::ShapeKind::Heart);
+		HeartParams hp;
+		shape->SetParams(hp);
 		SubPath sp;
 		for (int i = 0; i < 4; ++i) {
 			BezierNode n; n.type = BezierNode::Type::Smooth;
@@ -1187,14 +1298,15 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	else if (m_kind == ShapeKind::Star)
 	{
 		// 다각 별: 외경(R), 내경(r) 삼각함수 교차점
-		int n = (std::max)(3, m_setting.starPoints);
+		const StarParams* sp = pShape->GetParam<StarParams>();
+		int n = sp ? sp->points : (std::max)(3, (std::min)(32, m_setting.starPoints));
 		auto& nodes = pShape->paths[0].nodes;
 		if (static_cast<int>(nodes.size()) != n * 2) {
 			nodes.clear();
 			for (int i = 0; i < n * 2; ++i) nodes.emplace_back();
 		}
 		const float PI = 3.14159265358979323846f;
-		float innerRatio = (std::max)(0.1f, (std::min)(0.9f, m_setting.starInnerRatio));
+		float innerRatio = sp ? sp->innerRatio : (std::max)(0.05f, (std::min)(0.95f, m_setting.starInnerRatio));
 		for (int i = 0; i < n * 2; ++i) {
 			float angle = -PI * 0.5f + (i * PI / n);
 			float curR = (i % 2 == 0) ? 1.0f : innerRatio;
@@ -1205,7 +1317,8 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	else if (m_kind == ShapeKind::RegularPoly)
 	{
 		// 정다각형: 원주 상의 N개 정점
-		int n = (std::max)(3, m_setting.polySides);
+		const PolygonParams* pp = pShape->GetParam<PolygonParams>();
+		int n = pp ? pp->sides : (std::max)(3, (std::min)(32, m_setting.polySides));
 		auto& nodes = pShape->paths[0].nodes;
 		if (static_cast<int>(nodes.size()) != n) {
 			nodes.clear();
@@ -1221,14 +1334,15 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	else if (m_kind == ShapeKind::Gear)
 	{
 		// 기어: N개 톱니 (외경 톱니 상단 2점, 내경 홈 2점)
-		int n = (std::max)(4, m_setting.gearTeeth);
+		const GearParams* gp = pShape->GetParam<GearParams>();
+		int n = gp ? gp->teeth : (std::max)(4, (std::min)(48, m_setting.gearTeeth));
 		auto& nodes = pShape->paths[0].nodes;
 		if (static_cast<int>(nodes.size()) != n * 4) {
 			nodes.clear();
 			for (int i = 0; i < n * 4; ++i) nodes.emplace_back();
 		}
 		const float PI = 3.14159265358979323846f;
-		float depth = (std::max)(0.05f, (std::min)(0.5f, m_setting.gearDepthRatio));
+		float depth = gp ? gp->depthRatio : (std::max)(0.05f, (std::min)(0.5f, m_setting.gearDepthRatio));
 		float rInner = 1.0f - depth;
 
 		for (int i = 0; i < n * 4; ++i) {
@@ -1242,7 +1356,9 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	else if (m_kind == ShapeKind::Spiral)
 	{
 		// 아르키메데스 나선 (Open Path)
-		int segs = static_cast<int>(m_setting.spiralTurns * 4.0f);
+		const SpiralParams* sp = pShape->GetParam<SpiralParams>();
+		float turns = sp ? sp->turns : m_setting.spiralTurns;
+		int segs = static_cast<int>(turns * 4.0f);
 		if (segs < 4) segs = 4;
 		auto& nodes = pShape->paths[0].nodes;
 		if (static_cast<int>(nodes.size()) != segs + 1) {
@@ -1256,7 +1372,7 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 		const float kappa = 0.55228475f;
 		for (int i = 0; i <= segs; ++i) {
 			float t = static_cast<float>(i) / segs;
-			float angle = t * m_setting.spiralTurns * 2.0f * PI;
+			float angle = t * turns * 2.0f * PI;
 			float curR = t; // 중심에서 바깥으로 팽창
 			nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
 			// 접선 방향 베이지어 핸들

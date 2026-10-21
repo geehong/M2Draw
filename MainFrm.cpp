@@ -98,7 +98,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	InitUserToolbars(nullptr, uiFirstUserToolBarId, uiLastUserToolBarId);
 
 	// 상단 도구 옵션바 (MFC 기본 컨트롤 기반)
-	if (!m_wndOptionBar.CreateEx(this, TBSTYLE_FLAT, WS_CHILD | WS_VISIBLE | CBRS_TOP | CBRS_TOOLTIPS | CBRS_FLYBY, CRect(1, 1, 1, 1), AFX_IDW_CONTROLBAR_FIRST + 60))
+	if (!m_wndOptionBar.CreateEx(this, TBSTYLE_FLAT, WS_CHILD | WS_VISIBLE | CBRS_TOP | CBRS_TOOLTIPS | CBRS_FLYBY | CBRS_SIZE_DYNAMIC, CRect(1, 1, 1, 1), AFX_IDW_CONTROLBAR_FIRST + 60))
 	{
 		TRACE0("도구 옵션바를 만들지 못했습니다.\n");
 		return -1;

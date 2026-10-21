@@ -17,8 +17,16 @@
 #define ID_OPT_PATH_CLOSED     41011  // 닫힌 패스 토글 [닫힌패스✓] / [열린패스]
 #define ID_OPT_PATH_COMPLETE   41012  // 패스 완료 [완료✓]
 #define ID_OPT_PATH_CANCEL     41013  // 패스 취소 [취소✕]
+#define ID_OPT_SIDES           41014  // 정다각형 변의 개수 N (3~32)
+#define ID_OPT_RADIUS          41015  // 외접 반경 R
+#define ID_OPT_POINTS          41016  // 별 꼭짓점 수 N (3~32)
+#define ID_OPT_INNER_RATIO     41017  // 별 내경 비율 % (5~95)
+#define ID_OPT_TEETH           41018  // 기어 톱니 수 (4~48)
+#define ID_OPT_DEPTH_RATIO     41019  // 기어 톱니 깊이 % (5~50)
+#define ID_OPT_TURNS           41020  // 나선 회전 수 (0.5~10.0)
+#define ID_OPT_DRAW_CENTER     41021  // 중심 => 바깥쪽 그리기 토글 [From Center✓] / [From Corner]
 #define ID_OPT_FIRST           ID_OPT_X
-#define ID_OPT_LAST            ID_OPT_PATH_CANCEL
+#define ID_OPT_LAST            ID_OPT_DRAW_CENTER
 
 // ----------------------------------------------------------------------------
 // 진하고 선명한 텍스트 라벨 버튼
@@ -37,6 +45,7 @@ public:
 
 	virtual BOOL CanBeStored() const override { return FALSE; }
 	virtual BOOL HaveHotBorder() const override { return FALSE; }
+	virtual SIZE OnCalculateSize(CDC* pDC, const CSize& sizeDefault, BOOL bHorz) override;
 
 	virtual void OnDraw(CDC* pDC, const CRect& rect, CMFCToolBarImages* pImages,
 		BOOL bHorz = TRUE, BOOL bCustomizeMode = FALSE,
@@ -124,6 +133,7 @@ public:
 	// 고정 높이 바: 세로 도킹 금지
 	virtual BOOL CanBeRestored() const override { return FALSE; }
 	virtual BOOL OnBeforeRemoveButton(CMFCToolBarButton*, DROPEFFECT) override { return FALSE; }
+	virtual CSize CalcFixedLayout(BOOL bStretch, BOOL bHorz) override;
 
 	// 도구에 따라 버튼 구성이 동적으로 바뀌므로 레지스트리 저장/복원은 하지 않습니다.
 	virtual BOOL LoadState(LPCTSTR = nullptr, int = -1, UINT = (UINT)-1) override { return TRUE; }
@@ -152,4 +162,5 @@ private:
 	bool        m_bLinkRxRy = true;
 	bool        m_bEquilateral = false;
 	bool        m_bPathClosed = false;
+	bool        m_bDrawFromCenter = false;
 };

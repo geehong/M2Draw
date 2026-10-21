@@ -83,6 +83,7 @@ struct ToolCreationSetting
 	float gearHoleRatio = 0.3f;  // 기어 중앙 구멍 비율
 	float spiralTurns = 3.0f;    // 나선 회전 바퀴 수
 	float heartRound = 1.0f;     // 하트 곡률 계수
+	bool  bDrawFromCenter = false; // 중심 => 바깥쪽 그리기 모드
 };
 
 // ============================================================================
@@ -300,6 +301,9 @@ public:
 
 protected:
 	void UpdatePreviewGeometry(D2D1_POINT_2F curPt) override;
+
+	// 중심/모서리 시작 및 Shift/Alt에 따른 외곽 정점(p0, p1) 계산
+	void CalculateExtents(D2D1_POINT_2F curPt, bool shiftDown, bool altDown, D2D1_POINT_2F& outP0, D2D1_POINT_2F& outP1) const;
 
 	// 엔진 기하학 팩토리/업데이터 (정점 계산)
 	std::unique_ptr<PathShape> CreateShapeInstance(D2D1_POINT_2F p0, D2D1_POINT_2F p1);

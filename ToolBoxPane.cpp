@@ -60,6 +60,20 @@ CToolBoxPane::CToolBoxPane() noexcept
 			if (saved == static_cast<int>(ToolType::Triangle))
 				btn.type = ToolType::Triangle;
 		}
+		else if (btn.type == ToolType::Polygon)
+		{
+			// 다각형 & 특수 도형 그룹: 정다각형, 별, 기어, 스파이럴, 하트
+			btn.subTools = { ToolType::Polygon, ToolType::Star, ToolType::Gear, ToolType::Spiral, ToolType::Heart };
+			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("PolygonGroupTool"), static_cast<int>(ToolType::Polygon));
+			for (ToolType st : btn.subTools)
+			{
+				if (saved == static_cast<int>(st))
+				{
+					btn.type = st;
+					break;
+				}
+			}
+		}
 	}
 }
 
@@ -246,8 +260,13 @@ HRESULT CToolBoxPane::CreateDeviceResources()
 				{ ToolType::Pen,         L"spline-pointer.png",  L"spline-pointer_active.png" },
 				{ ToolType::Line,        L"slash.png",           L"slash_active.png" },
 				{ ToolType::Rect,        L"square-line.png",     L"square-line_active.png" },
+				{ ToolType::Triangle,    L"triangle-line.png",   L"triangle-line_active.png" },
 				{ ToolType::Ellipse,     L"circle-line.png",     L"circle-line_active.png" },
 				{ ToolType::Polygon,     L"hexagon-line.png",    L"hexagon-line_active.png" },
+				{ ToolType::Star,        L"star-line.png",       L"star-line_active.png" },
+				{ ToolType::Gear,        L"gear-line.png",       L"gear-line_active.png" },
+				{ ToolType::Spiral,      L"spiral-line.png",     L"spiral-line_active.png" },
+				{ ToolType::Heart,       L"heart-line.png",      L"heart-line_active.png" },
 				{ ToolType::Text,        L"type.png",            L"type_active.png" },
 				{ ToolType::PaintBucket, L"paint-bucket.png",    L"paint-bucket_active.png" },
 				{ ToolType::ZoomIn,      L"zoom-in-line.png",    L"zoom-in-line_active.png" },
@@ -576,6 +595,128 @@ void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 		}
 		break;
 	}
+	case ToolType::Star: // 5각 별
+	{
+		ID2D1PathGeometry* pGeo = nullptr;
+		m_pD2DFactory->CreatePathGeometry(&pGeo);
+		if (pGeo)
+		{
+			ID2D1GeometrySink* pSink = nullptr;
+			pGeo->Open(&pSink);
+			if (pSink)
+			{
+				const float PI = 3.141592653589793f;
+				const float rOut = 8.0f;
+				const float rIn = 3.8f;
+				for (int i = 0; i < 10; ++i)
+				{
+					float a = -PI * 0.5f + (i * PI / 5.0f);
+					float r = (i % 2 == 0) ? rOut : rIn;
+					D2D1_POINT_2F pt = D2D1::Point2F(cx + r * cosf(a), cy + r * sinf(a));
+					if (i == 0) pSink->BeginFigure(pt, D2D1_FIGURE_BEGIN_HOLLOW);
+					else pSink->AddLine(pt);
+				}
+				pSink->EndFigure(D2D1_FIGURE_END_CLOSED);
+				pSink->Close();
+				pSink->Release();
+			}
+			rt->DrawGeometry(pGeo, brush, 1.6f);
+			pGeo->Release();
+		}
+		break;
+	}
+	case ToolType::Gear: // 8개 톱니 기어
+	{
+		ID2D1PathGeometry* pGeo = nullptr;
+		m_pD2DFactory->CreatePathGeometry(&pGeo);
+		if (pGeo)
+		{
+			ID2D1GeometrySink* pSink = nullptr;
+			pGeo->Open(&pSink);
+			if (pSink)
+			{
+				const float PI = 3.141592653589793f;
+				const float rOut = 8.0f;
+				const float rIn = 5.8f;
+				for (int i = 0; i < 16; ++i)
+				{
+					float a = -PI * 0.5f + (i * PI / 8.0f);
+					int mod = i % 4;
+					float r = (mod == 1 || mod == 2) ? rOut : rIn;
+					D2D1_POINT_2F pt = D2D1::Point2F(cx + r * cosf(a), cy + r * sinf(a));
+					if (i == 0) pSink->BeginFigure(pt, D2D1_FIGURE_BEGIN_HOLLOW);
+					else pSink->AddLine(pt);
+				}
+				pSink->EndFigure(D2D1_FIGURE_END_CLOSED);
+				pSink->Close();
+				pSink->Release();
+			}
+			rt->DrawGeometry(pGeo, brush, 1.5f);
+			rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 2.5f, 2.5f), brush, 1.2f);
+			pGeo->Release();
+		}
+		break;
+	}
+	case ToolType::Spiral: // 아르키메데스 나선
+	{
+		ID2D1PathGeometry* pGeo = nullptr;
+		m_pD2DFactory->CreatePathGeometry(&pGeo);
+		if (pGeo)
+		{
+			ID2D1GeometrySink* pSink = nullptr;
+			pGeo->Open(&pSink);
+			if (pSink)
+			{
+				const float PI = 3.141592653589793f;
+				const int segs = 24;
+				for (int i = 0; i <= segs; ++i)
+				{
+					float t = static_cast<float>(i) / segs;
+					float a = t * 2.5f * 2.0f * PI;
+					float r = 1.0f + t * 7.0f;
+					D2D1_POINT_2F pt = D2D1::Point2F(cx + r * cosf(a), cy + r * sinf(a));
+					if (i == 0) pSink->BeginFigure(pt, D2D1_FIGURE_BEGIN_HOLLOW);
+					else pSink->AddLine(pt);
+				}
+				pSink->EndFigure(D2D1_FIGURE_END_OPEN);
+				pSink->Close();
+				pSink->Release();
+			}
+			rt->DrawGeometry(pGeo, brush, 1.6f);
+			pGeo->Release();
+		}
+		break;
+	}
+	case ToolType::Heart: // 하트
+	{
+		ID2D1PathGeometry* pGeo = nullptr;
+		m_pD2DFactory->CreatePathGeometry(&pGeo);
+		if (pGeo)
+		{
+			ID2D1GeometrySink* pSink = nullptr;
+			pGeo->Open(&pSink);
+			if (pSink)
+			{
+				pSink->BeginFigure(D2D1::Point2F(cx, cy - 2.5f), D2D1_FIGURE_BEGIN_HOLLOW);
+				pSink->AddBezier(D2D1::BezierSegment(
+					D2D1::Point2F(cx + 4.0f, cy - 8.0f),
+					D2D1::Point2F(cx + 8.5f, cy - 3.0f),
+					D2D1::Point2F(cx + 6.0f, cy + 2.0f)));
+				pSink->AddLine(D2D1::Point2F(cx, cy + 7.5f));
+				pSink->AddLine(D2D1::Point2F(cx - 6.0f, cy + 2.0f));
+				pSink->AddBezier(D2D1::BezierSegment(
+					D2D1::Point2F(cx - 8.5f, cy - 3.0f),
+					D2D1::Point2F(cx - 4.0f, cy - 8.0f),
+					D2D1::Point2F(cx, cy - 2.5f)));
+				pSink->EndFigure(D2D1_FIGURE_END_CLOSED);
+				pSink->Close();
+				pSink->Release();
+			}
+			rt->DrawGeometry(pGeo, brush, 1.6f);
+			pGeo->Release();
+		}
+		break;
+	}
 	default:
 		break;
 	}
@@ -703,6 +844,8 @@ void CToolBoxPane::OnLButtonUp(UINT nFlags, CPoint point)
 		m_buttons[idx].type = chosen;
 		if (m_buttons[idx].subTools.size() > 1 && m_buttons[idx].subTools[0] == ToolType::Rect)
 			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("RectGroupTool"), static_cast<int>(chosen));
+		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::Polygon)
+			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("PolygonGroupTool"), static_cast<int>(chosen));
 		GetApp()->GetToolManager().SetActiveTool(chosen);
 	}
 	Invalidate(FALSE);
@@ -743,7 +886,7 @@ void CToolBoxPane::OpenFlyout(int buttonIndex)
 	CPoint pt(btn.rect.right + 4, btn.rect.top);
 	ClientToScreen(&pt);
 
-	if (m_flyout.Open(this, pt, btn.subTools, btn.type))
+	if (m_flyout.Open(this, pt, btn.subTools, btn.type, m_pWICFactory))
 		m_flyoutOpen = true;
 }
 
@@ -764,13 +907,133 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	{
 	case ToolType::Rect:     return L"사각형 (M)";
 	case ToolType::Triangle: return L"삼각형";
+	case ToolType::Polygon:  return L"정다각형 (G)";
+	case ToolType::Star:     return L"별 (Star)";
+	case ToolType::Gear:     return L"기어 (Gear)";
+	case ToolType::Spiral:   return L"스파이럴 (Spiral)";
+	case ToolType::Heart:    return L"하트 (Heart)";
 	default:                 return L"";
 	}
 }
 
-static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color)
+static HBITMAP LoadFlyoutPng(const wchar_t* filename, IWICImagingFactory* pWic)
 {
-	CPen pen(PS_SOLID, 2, color);
+	IWICImagingFactory* pFactory = pWic;
+	bool bReleaseFactory = false;
+	if (!pFactory)
+	{
+		CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFactory));
+		bReleaseFactory = (pFactory != nullptr);
+	}
+	if (!pFactory) return nullptr;
+
+	CString fullPath = _T("c:\\www\\project\\desktop\\ApiDDraw\\M2Draw\\res\\icon\\png\\");
+	fullPath += filename;
+
+	IWICBitmapDecoder* pDec = nullptr;
+	HRESULT hr = pFactory->CreateDecoderFromFilename(fullPath, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, &pDec);
+	if (FAILED(hr) || !pDec)
+	{
+		if (bReleaseFactory) pFactory->Release();
+		return nullptr;
+	}
+
+	IWICBitmapFrameDecode* pFrame = nullptr;
+	pDec->GetFrame(0, &pFrame);
+
+	IWICFormatConverter* pConv = nullptr;
+	if (pFrame && SUCCEEDED(pFactory->CreateFormatConverter(&pConv)))
+	{
+		pConv->Initialize(pFrame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0f, WICBitmapPaletteTypeCustom);
+	}
+
+	HBITMAP hBmp = nullptr;
+	if (pConv)
+	{
+		UINT w = 0, h = 0;
+		pConv->GetSize(&w, &h);
+
+		BITMAPINFO bi = { 0 };
+		bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+		bi.bmiHeader.biWidth = w;
+		bi.bmiHeader.biHeight = -(LONG)h; // top-down
+		bi.bmiHeader.biPlanes = 1;
+		bi.bmiHeader.biBitCount = 32;
+		bi.bmiHeader.biCompression = BI_RGB;
+
+		void* pBits = nullptr;
+		hBmp = CreateDIBSection(nullptr, &bi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+		if (hBmp && pBits)
+		{
+			pConv->CopyPixels(nullptr, w * 4, w * h * 4, reinterpret_cast<BYTE*>(pBits));
+		}
+		pConv->Release();
+	}
+
+	if (pFrame) pFrame->Release();
+	if (pDec) pDec->Release();
+	if (bReleaseFactory) pFactory->Release();
+
+	return hBmp;
+}
+
+static bool DrawFlyoutPng(CDC& dc, ToolType t, bool active, CRect box, IWICImagingFactory* pWic)
+{
+	static std::map<std::pair<ToolType, bool>, HBITMAP> s_pngCache;
+
+	auto key = std::make_pair(t, active);
+	auto it = s_pngCache.find(key);
+	if (it == s_pngCache.end())
+	{
+		const wchar_t* fname = nullptr;
+		switch (t)
+		{
+		case ToolType::Rect:     fname = active ? L"square-line_active.png" : L"square-line.png"; break;
+		case ToolType::Triangle: fname = active ? L"triangle-line_active.png" : L"triangle-line.png"; break;
+		case ToolType::Polygon:  fname = active ? L"hexagon-line_active.png" : L"hexagon-line.png"; break;
+		case ToolType::Star:     fname = active ? L"star-line_active.png" : L"star-line.png"; break;
+		case ToolType::Gear:     fname = active ? L"gear-line_active.png" : L"gear-line.png"; break;
+		case ToolType::Spiral:   fname = active ? L"spiral-line_active.png" : L"spiral-line.png"; break;
+		case ToolType::Heart:    fname = active ? L"heart-line_active.png" : L"heart-line.png"; break;
+		default: break;
+		}
+
+		HBITMAP hBmp = fname ? LoadFlyoutPng(fname, pWic) : nullptr;
+		s_pngCache[key] = hBmp;
+		it = s_pngCache.find(key);
+	}
+
+	if (!it->second)
+		return false;
+
+	HBITMAP hBmp = it->second;
+	BITMAP bm;
+	GetObject(hBmp, sizeof(bm), &bm);
+
+	CDC memDC;
+	memDC.CreateCompatibleDC(&dc);
+	HGDIOBJ old = memDC.SelectObject(hBmp);
+
+	const int iconSize = 20;
+	const CPoint c = box.CenterPoint();
+	int dstX = c.x - iconSize / 2;
+	int dstY = c.y - iconSize / 2;
+
+	BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+	::AlphaBlend(dc.GetSafeHdc(), dstX, dstY, iconSize, iconSize, memDC.GetSafeHdc(), 0, 0, bm.bmWidth, bm.bmHeight, bf);
+
+	memDC.SelectObject(old);
+	return true;
+}
+
+static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color, bool active, IWICImagingFactory* pWic)
+{
+	// 1. 고해상도 투명 PNG 비트맵 우선 렌더링
+	if (DrawFlyoutPng(dc, t, active, box, pWic))
+		return;
+
+	// 2. 비트맵 누락 시 깔끔한 벡터 지오메트리 폴백
+	CPen pen(PS_SOLID, 1, color);
 	CPen* pOldPen = dc.SelectObject(&pen);
 	CBrush* pOldBrush = static_cast<CBrush*>(dc.SelectStockObject(NULL_BRUSH));
 
@@ -778,12 +1041,87 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color)
 	switch (t)
 	{
 	case ToolType::Rect:
-		dc.Rectangle(c.x - 8, c.y - 6, c.x + 8, c.y + 6);
+		dc.Rectangle(c.x - 7, c.y - 6, c.x + 8, c.y + 7);
 		break;
 	case ToolType::Triangle:
 	{
-		CPoint pts[3] = { CPoint(c.x, c.y - 7), CPoint(c.x + 9, c.y + 6), CPoint(c.x - 9, c.y + 6) };
+		CPoint pts[3] = { CPoint(c.x, c.y - 7), CPoint(c.x + 8, c.y + 6), CPoint(c.x - 8, c.y + 6) };
 		dc.Polygon(pts, 3);
+		break;
+	}
+	case ToolType::Polygon:
+	{
+		const int r = 8;
+		CPoint pts[6];
+		for (int i = 0; i < 6; ++i)
+		{
+			double a = -3.141592653589793 / 2.0 + (i * 3.141592653589793 / 3.0);
+			pts[i] = CPoint(c.x + static_cast<int>(std::round(r * cos(a))), c.y + static_cast<int>(std::round(r * sin(a))));
+		}
+		dc.Polygon(pts, 6);
+		break;
+	}
+	case ToolType::Star:
+	{
+		const double rOut = 8.0;
+		const double rIn = 3.8;
+		CPoint pts[10];
+		for (int i = 0; i < 10; ++i)
+		{
+			double a = -3.141592653589793 / 2.0 + (i * 3.141592653589793 / 5.0);
+			double r = (i % 2 == 0) ? rOut : rIn;
+			pts[i] = CPoint(c.x + static_cast<int>(std::round(r * cos(a))), c.y + static_cast<int>(std::round(r * sin(a))));
+		}
+		dc.Polygon(pts, 10);
+		break;
+	}
+	case ToolType::Gear:
+	{
+		const double rOut = 8.0;
+		const double rIn = 5.8;
+		CPoint pts[16];
+		for (int i = 0; i < 16; ++i)
+		{
+			double a = -3.141592653589793 / 2.0 + (i * 3.141592653589793 / 8.0);
+			int mod = i % 4;
+			double r = (mod == 1 || mod == 2) ? rOut : rIn;
+			pts[i] = CPoint(c.x + static_cast<int>(std::round(r * cos(a))), c.y + static_cast<int>(std::round(r * sin(a))));
+		}
+		dc.Polygon(pts, 16);
+		dc.Ellipse(c.x - 2, c.y - 2, c.x + 3, c.y + 3);
+		break;
+	}
+	case ToolType::Spiral:
+	{
+		const int ptsCount = 24;
+		CPoint pts[ptsCount];
+		for (int i = 0; i < ptsCount; ++i)
+		{
+			double tVal = static_cast<double>(i) / (ptsCount - 1);
+			double a = tVal * 2.5 * 3.141592653589793 * 2.0;
+			double r = 1.0 + tVal * 7.0;
+			pts[i] = CPoint(c.x + static_cast<int>(std::round(r * cos(a))), c.y + static_cast<int>(std::round(r * sin(a))));
+		}
+		dc.Polyline(pts, ptsCount);
+		break;
+	}
+	case ToolType::Heart:
+	{
+		CPoint pts[12] = {
+			CPoint(c.x, c.y - 2),
+			CPoint(c.x + 3, c.y - 7),
+			CPoint(c.x + 7, c.y - 6),
+			CPoint(c.x + 8, c.y - 2),
+			CPoint(c.x + 6, c.y + 2),
+			CPoint(c.x, c.y + 8),
+			CPoint(c.x - 6, c.y + 2),
+			CPoint(c.x - 8, c.y - 2),
+			CPoint(c.x - 7, c.y - 6),
+			CPoint(c.x - 3, c.y - 7),
+			CPoint(c.x, c.y - 2),
+			CPoint(c.x, c.y - 2)
+		};
+		dc.Polyline(pts, 11);
 		break;
 	}
 	default:
@@ -794,7 +1132,7 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color)
 	dc.SelectObject(pOldPen);
 }
 
-BOOL CToolFlyoutWnd::Open(CWnd* pOwner, CPoint screenTopLeft, const std::vector<ToolType>& items, ToolType current)
+BOOL CToolFlyoutWnd::Open(CWnd* pOwner, CPoint screenTopLeft, const std::vector<ToolType>& items, ToolType current, IWICImagingFactory* pWic)
 {
 	if (GetSafeHwnd())
 		DestroyWindow();
@@ -802,6 +1140,7 @@ BOOL CToolFlyoutWnd::Open(CWnd* pOwner, CPoint screenTopLeft, const std::vector<
 	m_items = items;
 	m_current = current;
 	m_hot = -1;
+	m_pWic = pWic;
 
 	const int w = kItemW + 4;
 	const int h = kItemH * static_cast<int>(m_items.size()) + 4;
@@ -856,7 +1195,9 @@ void CToolFlyoutWnd::OnPaint()
 	dc.FillSolidRect(rc, RGB(250, 250, 252));
 	dc.Draw3dRect(rc, RGB(170, 175, 190), RGB(170, 175, 190));
 
-	CFont* pOldFont = static_cast<CFont*>(dc.SelectStockObject(DEFAULT_GUI_FONT));
+	CFont font;
+	font.CreatePointFont(90, _T("Malgun Gothic"));
+	CFont* pOldFont = dc.SelectObject(&font);
 	dc.SetBkMode(TRANSPARENT);
 
 	for (int i = 0; i < static_cast<int>(m_items.size()); ++i)
@@ -864,15 +1205,18 @@ void CToolFlyoutWnd::OnPaint()
 		CRect item(2, 2 + i * kItemH, 2 + kItemW, 2 + (i + 1) * kItemH);
 
 		const bool hot = (i == m_hot);
+		const bool isCur = (m_items[i] == m_current);
 		if (hot)
-			dc.FillSolidRect(item, RGB(208, 224, 250));
+			dc.FillSolidRect(item, RGB(225, 236, 252));
+		else if (isCur)
+			dc.FillSolidRect(item, RGB(242, 245, 252));
 
-		const COLORREF color = hot ? RGB(30, 90, 200) : RGB(60, 66, 80);
+		const COLORREF color = hot ? RGB(25, 80, 195) : (isCur ? RGB(30, 85, 205) : RGB(60, 66, 80));
 		CRect glyph(item.left, item.top, item.left + kItemH, item.bottom);
-		DrawFlyoutGlyph(dc, m_items[i], glyph, color);
+		DrawFlyoutGlyph(dc, m_items[i], glyph, color, hot || isCur, m_pWic);
 
-		// 현재 대표 도구 표시
-		if (m_items[i] == m_current)
+		// 현재 대표 도구 표시 (좌측 파란색 인디케이터 바)
+		if (isCur)
 			dc.FillSolidRect(item.left, item.top + 6, 3, item.Height() - 12, RGB(51, 115, 217));
 
 		CRect text(item.left + kItemH, item.top, item.right - 4, item.bottom);

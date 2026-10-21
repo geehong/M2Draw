@@ -350,8 +350,8 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Gear, ToolType::Gear, L"기어 도구 (Gear)", 0));
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Spiral, ToolType::Spiral, L"스파이럴 도구 (Spiral)", 0));
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Heart, ToolType::Heart, L"하트 도구 (Heart)", 0));
-	// MultiPointShapeTool 단일 클래스 인스턴스 주입: 다각형 (N-Point 클릭)
-	m_tools.push_back(std::make_unique<MultiPointShapeTool>(ToolType::Polygon, L"다각형 도구 (Polygon)", L'G'));
+	// BoxShapeTool 정다각형 (Regular Polygon) 도구 주입
+	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::RegularPoly, ToolType::Polygon, L"정다각형 도구 (Polygon)", L'G'));
 	m_tools.push_back(std::make_unique<TextTool>());
 	m_tools.push_back(std::make_unique<PaintBucketTool>());
 	m_tools.push_back(std::make_unique<ZoomInTool>());
