@@ -106,3 +106,112 @@
   - 상단 정렬 / 수직 가운데 정렬 / 하단 정렬
 - **균등 분할 (Distribute Spacing)**:
   - 3개 이상의 오브젝트 선택 시, 양 끝 오브젝트 사이의 간격을 계산하여 중간 오브젝트들의 위치를 일정하게 재배치.
+현재 구축된 신형 씬 그래프 기반 엔진(`D2DGraphicEngine.cpp`)과 프로젝트의 도구 체계(`ITool`, `ToolBoxPane`, `ToolOptionBar`)를 종합적으로 고려했을 때, 실무 수준의 벡터 드로잉 에디터로 완성도를 끌어올리기 위해 우선적으로 추가해야 할 핵심 기능들입니다.
+
+---
+
+### 1. 렌더링 및 스타일링 고도화 (스타일 시스템 확장)
+
+* **그라데이션 및 패턴 브러시 (`GradientBrush`)**
+* 현재 스타일 구조는 단색(`FillType::Solid`) 위주로 지원하고 있습니다.
+
+
+* 선형 그라데이션(`ID2D1LinearGradientBrush`)과 방사형 그라데이션(`ID2D1RadialGradientBrush`)을 지원하도록 `Style` 구조체와 렌더러를 확장할 필요가 있습니다.
+
+
+* 시작점/끝점, 컬러 스톱(Color Stop) 편집 핸들을 캔버스 상에서 직접 조작하는 도구가 추가되면 완성도가 크게 올라갑니다.
+
+
+* **선 팁/조인(Line Cap & Line Join) 스타일 제어**
+* 베지에 곡선과 꺾인 선의 표현력을 위해 끝점 모양(Round, Square, Flat) 및 코너 조인(Miter, Round, Bevel)을 `D2D1_STROKE_STYLE_PROPERTIES`에 바인딩할 수 있어야 합니다.
+
+
+
+
+* **클리핑 마스크 (Clipping Mask)**
+* 한 도형(또는 텍스트)을 상위 마스크로 지정하여 하위 도형들이 그 영역 안에서만 렌더링되도록 하는 기능(`ID2D1RenderTarget::PushLayer` / `PopLayer` 또는 `ID2D1Layer` 활용)입니다.
+
+
+
+---
+
+### 2. 패스 및 지오메트리 고급 연산
+
+* **불리언 연산 완성 (`PathOp::Combine`)**
+* 현재 뼈대(Stub) 상태인 불리언 연산을 `ID2D1Geometry::CombineWithGeometry`와 연동하여 합집합, 차집합, 교집합, 배타적 논리합 결과를 실제 `BezierNode` 목록으로 환원하는 작업이 필요합니다.
+
+
+
+
+* **패스 단순화 (Simplify Path)**
+* 자유 곡선(Pencil/Freehand)으로 그렸을 때 지나치게 많이 생성되는 앵커 포인트를 Ramer-Douglas-Peucker 알고리즘 등을 통해 곡률 손실 없이 최소한의 베지에 노드로 줄여주는 최적화 기능입니다.
+
+
+* **오프셋 패스 / 외곽선 확장 (Outline Stroke / Offset Path)**
+* 획(Stroke) 두께를 가진 열린/닫힌 패스를 면(Fill) 형태의 폐곡선 패스로 변환(`ID2D1Geometry::Widen`)하는 기능으로, 로고 및 타이포그래피 작업에 필수적입니다.
+
+
+* **패스 결합 및 분리 (Join & Split Path)**
+* 떨어져 있는 두 앵커 노드를 하나로 이어붙이거나, 단일 서브패스의 특정 세그먼트를 잘라 두 개의 독립된 패스로 나누는 연산입니다.
+
+
+
+
+
+---
+
+### 3. 상호작용 및 편집 생산성 향상
+
+* **텍스트 노드 (`TextNode`) 구현**
+* `NodeKind`에 `Text`를 추가하고 DirectWrite(`IDWriteFactory`, `IDWriteTextFormat`, `IDWriteTextLayout`)를 연동하여 글꼴, 자간, 행간, 정렬을 지원하는 벡터 텍스트 객체를 지원해야 합니다.
+* 추후 필요 시 텍스트를 일반 패스(`PathNode`)로 깨뜨리는(Convert to Curves / Outlines) 기능으로 확장 가능합니다.
+
+
+* **스마트 가이드 (Smart Guides) & 오브젝트 스냅**
+* 현재 `SnapManager`와 `GridRenderer`가 있으나, 그리드 격자 외에 다른 도형의 경계선(Center, Edge, Anchor)에 실시간으로 자석처럼 달라붙고 보조선(가이드 라인)을 띄워주는 기능이 필요합니다.
+
+
+
+
+* **고급 다중 선택 변환 (Bounding Box Transform)**
+* 여러 개 오브젝트를 선택했을 때 공통 바운딩 박스를 계산하여 일괄 크기 조절, 일괄 회전, 기울이기(Shear/Skew)가 가능한 조작 기즈모를 제공해야 합니다.
+
+
+
+
+* **그룹 내부 직접 진입 (Isolation / Direct Selection Mode)**
+* 그룹화된 상태에서 그룹을 해제(Ungroup)하지 않고도, 특정 자식 패스만 더블 클릭하여 격리 편집하거나 노드 툴로 내부 정점을 즉시 수정할 수 있는 진입 모드입니다.
+
+
+
+---
+
+### 4. 문서 관리, 직렬화 및 입출력 (I/O)
+
+* **파일 저장 및 불러오기 (Serialization)**
+* 현재 인메모리 `Document` 트리 구조를 디스크에 영속화할 수 있는 포맷이 필요합니다.
+
+
+* JSON 또는 바이너리 포맷으로 씬 그래프(`LayerNode` ➔ `GroupNode` ➔ `PathNode`)와 스타일 속성을 저장/복원하는 직렬화 모듈이 필수적입니다.
+
+
+
+
+* **SVG 가져오기 / 내보내기 (SVG Import & Export)**
+* 벡터 툴의 범용성을 위해 XML 파서를 활용한 SVG 내보내기(`Path`의 `M`, `C`, `L`, `Z` 명령어 생성) 및 외부 SVG 파일 로딩 기능이 추가되면 상용 툴과의 연계가 비약적으로 쉬워집니다.
+
+
+* **고해상도 비트맵 익스포트 (PNG / JPG / PDF)**
+* 캔버스 뷰포트 배율과 무관하게 지정한 해상도(DPI)로 Direct2D 렌더 타깃을 오프스크린 비트맵(`ID2D1BitmapRenderTarget` / WIC)에 렌더링하여 이미지 파일로 내보내는 기능입니다.
+
+
+
+---
+
+### 추천 구현 로드맵
+
+1. **1단계 (기본기 완성)**: 파일 저장/불러오기(Serialization) + 불리언 연산 완성(`PathOp::Combine`)
+
+
+2. **2단계 (표현력 확장)**: 그라데이션 브러시 + 텍스트 노드(`TextNode`, DirectWrite)
+3. **3단계 (작업 편의성)**: 스마트 가이드(도형 간 스냅) + 패스 외곽선 확장(Outline Stroke) 및 SVG Export

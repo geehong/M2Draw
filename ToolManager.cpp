@@ -113,6 +113,39 @@ void PenTool::OnUp(const ToolEvent& e)
 	}
 }
 
+static void SyncPenPathToGeDoc(CM2DrawDoc* pDoc, const std::unique_ptr<PathShape>& path)
+{
+	if (!pDoc || !path) return;
+	auto node = std::make_unique<ge::PathNode>();
+	node->SetName(L"펜 곡선");
+	node->SetKind(ge::ShapeKind::Path);
+	std::vector<ge::SubPath> gePaths;
+	for (const auto& sp : path->paths) {
+		ge::SubPath gsp;
+		gsp.closed = sp.closed;
+		for (const auto& bn : sp.nodes) {
+			ge::BezierNode gbn;
+			gbn.anchor = { bn.anchor.x, bn.anchor.y };
+			gbn.hIn = { bn.hIn.x, bn.hIn.y };
+			gbn.hOut = { bn.hOut.x, bn.hOut.y };
+			gbn.type = static_cast<ge::BezierNode::Type>(bn.type);
+			gsp.nodes.push_back(gbn);
+		}
+		gePaths.push_back(std::move(gsp));
+	}
+	node->SetPaths(gePaths);
+	const auto& mx = path->xf;
+	node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
+	ge::Style st;
+	st.fillType = static_cast<ge::FillType>(path->style.fillType);
+	st.fill = ge::Color::FromD2D(path->style.fill);
+	st.stroke = ge::Color::FromD2D(path->style.stroke);
+	st.strokeWidth = path->style.strokeWidth;
+	st.dashStyle = static_cast<ge::DashStyle>(path->style.dashStyle);
+	node->SetStyle(st);
+	pDoc->GetDoc().AddShape(std::move(node));
+}
+
 void PenTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
 {
 	if (!pDoc) return;
@@ -124,6 +157,7 @@ void PenTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
 		{
 			m_state = State::Idle;
 			m_needNewSubPath = true;
+			SyncPenPathToGeDoc(pDoc, pDoc->GetCurrentPath());
 			pDoc->GetShapes().push_back(std::move(pDoc->GetCurrentPath()));
 			pDoc->GetCurrentPath() = nullptr;
 			LogAppEvent(_T("[펜 도구] 패스 작성 완료 (Enter)"));
@@ -170,6 +204,7 @@ bool PenTool::OnDoubleClicked(CM2DrawDoc* pDoc)
 			m_state = State::Idle;
 			m_needNewSubPath = true;
 			pDoc->GetCurrentPath()->Invalidate();
+			SyncPenPathToGeDoc(pDoc, pDoc->GetCurrentPath());
 			pDoc->GetShapes().push_back(std::move(pDoc->GetCurrentPath()));
 			pDoc->GetCurrentPath() = nullptr;
 			LogAppEvent(_T("[펜 도구] 패스 작성 완료 (더블클릭 -> 선택 도구 전환)"));
@@ -197,6 +232,7 @@ bool PenTool::OnRightClicked(CM2DrawDoc* pDoc)
 			m_state = State::Idle;
 			m_needNewSubPath = true;
 			pDoc->GetCurrentPath()->Invalidate();
+			SyncPenPathToGeDoc(pDoc, pDoc->GetCurrentPath());
 			pDoc->GetShapes().push_back(std::move(pDoc->GetCurrentPath()));
 			pDoc->GetCurrentPath() = nullptr;
 			LogAppEvent(_T("[펜 도구] 패스 작성 완료 (우클릭 -> 선택 도구 전환)"));

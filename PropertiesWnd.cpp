@@ -7,7 +7,6 @@
 #include "MainFrm.h"
 #include "M2Draw.h"
 #include "M2DrawDoc.h"
-#include "D2DVectorEngine.h"
 
 #ifdef _DEBUG
 #undef THIS_FILE

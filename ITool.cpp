@@ -9,6 +9,63 @@
 // SelectTool 구현 (도형 선택, 이동, 스케일, 회전, 에디트 포인트 편집)
 // ============================================================================
 
+static void SyncShapeToGeDoc(CM2DrawDoc* pDoc, int index)
+{
+	if (!pDoc || index < 0 || index >= static_cast<int>(pDoc->GetShapes().size())) return;
+	auto* shape = pDoc->GetShapes()[index].get();
+	auto* ps = dynamic_cast<PathShape*>(shape);
+	if (!ps) return;
+
+	// ge::Document 에서 활성 레이어 내 대응 노드 찾기
+	auto* layer = pDoc->GetDoc().GetActiveLayer();
+	if (!layer) return;
+	const auto& children = layer->GetChildren();
+	if (index < static_cast<int>(children.size())) {
+		auto* node = dynamic_cast<ge::PathNode*>(children[index].get());
+		if (node) {
+			const auto& mx = ps->xf;
+			node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
+			std::vector<ge::SubPath> gePaths;
+			for (const auto& sp : ps->paths) {
+				ge::SubPath gsp;
+				gsp.closed = sp.closed;
+				for (const auto& bn : sp.nodes) {
+					ge::BezierNode gbn;
+					gbn.anchor = { bn.anchor.x, bn.anchor.y };
+					gbn.hIn = { bn.hIn.x, bn.hIn.y };
+					gbn.hOut = { bn.hOut.x, bn.hOut.y };
+					gbn.type = static_cast<ge::BezierNode::Type>(bn.type);
+					gsp.nodes.push_back(gbn);
+				}
+				gePaths.push_back(std::move(gsp));
+			}
+			node->SetPaths(gePaths);
+			ge::Style st;
+			st.fillType = static_cast<ge::FillType>(ps->style.fillType);
+			st.fill = ge::Color::FromD2D(ps->style.fill);
+			st.stroke = ge::Color::FromD2D(ps->style.stroke);
+			st.strokeWidth = ps->style.strokeWidth;
+			st.dashStyle = static_cast<ge::DashStyle>(ps->style.dashStyle);
+			node->SetStyle(st);
+		}
+	}
+}
+
+static void SyncDocSelection(CM2DrawDoc* pDoc, const std::set<int>& indices)
+{
+	if (!pDoc) return;
+	auto* layer = pDoc->GetDoc().GetActiveLayer();
+	if (!layer) return;
+	const auto& children = layer->GetChildren();
+	std::vector<ge::Node*> selNodes;
+	for (int idx : indices) {
+		if (idx >= 0 && idx < static_cast<int>(children.size())) {
+			selNodes.push_back(children[idx].get());
+		}
+	}
+	pDoc->GetDoc().SetSelection(selNodes);
+}
+
 bool SelectTool::IsOpenPath(Shape* shape)
 {
 	PathShape* ps = dynamic_cast<PathShape*>(shape);
@@ -115,7 +172,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 					CString partName = (hr.part == HitResult::Part::Anchor) ? _T("정점(Anchor)") :
 					                   (hr.part == HitResult::Part::HandleIn) ? _T("핸들In") : _T("핸들Out");
 					CString str;
-					str.Format(_T("[선택 도구] %s 조절점 드래그 시작 (도형 #%d, 노드 #%d)"), (LPCTSTR)partName, idx + 1, hr.node + 1);
+					str.Format(_T("[선택 도구] %s 조절점 드래그 시작 (도형 #%d, 노드 #%d)"), (LPCTSTR)partName, idx + 1, hr.nodeIdx + 1);
 					LogAppEvent(str);
 					return;
 				}
@@ -234,6 +291,7 @@ void SelectTool::SetSelectedIndex(int index, CM2DrawDoc* pDoc)
 	m_selectedIndices.clear();
 	if (index >= 0)
 		m_selectedIndices.insert(index);
+	SyncDocSelection(pDoc, m_selectedIndices);
 	UpdateShapePropertiesSelection(index, pDoc);
 }
 
@@ -352,7 +410,7 @@ void SelectTool::ApplyNodeEdit(PathShape* shape, const ToolEvent& e)
 {
 	if (!shape) return;
 	// Alt 키가 눌려있으면 대칭/스무스 구속을 깨고 한쪽 핸들만 독립적으로 꺾음 (일러스트레이터 방식)
-	shape->MoveNodeOrHandle(m_editHit.part, m_editHit.subPath, m_editHit.node, e.worldPt, e.altDown);
+	shape->MoveNodeOrHandle(m_editHit.part, m_editHit.subPath, m_editHit.nodeIdx, e.worldPt, e.altDown);
 }
 
 // 엔진에 평행 이동 위임! (선택된 모든 도형 일괄 이동)
@@ -468,6 +526,7 @@ void SelectTool::OnUp(const ToolEvent& e)
 			}
 
 			UpdateShapePropertiesSelection(GetSelectedIndex(), e.pDoc);
+			SyncDocSelection(e.pDoc, m_selectedIndices);
 			CString str;
 			str.Format(_T("[선택 도구] 마키 영역 선택 완료 (선택된 도형: %d개)"), static_cast<int>(m_selectedIndices.size()));
 			LogAppEvent(str);
@@ -475,7 +534,21 @@ void SelectTool::OnUp(const ToolEvent& e)
 	}
 	else if (m_mode != Mode::None)
 	{
+		// 변형/편집된 도형들을 ge::Document 로 동기화
+		if (m_mode == Mode::EditNode && m_editShapeIdx >= 0)
+		{
+			SyncShapeToGeDoc(e.pDoc, m_editShapeIdx);
+		}
+		else
+		{
+			for (int idx : m_selectedIndices)
+			{
+				SyncShapeToGeDoc(e.pDoc, idx);
+			}
+		}
+
 		UpdateShapePropertiesSelection(GetSelectedIndex(), e.pDoc);
+		SyncDocSelection(e.pDoc, m_selectedIndices);
 		CString str;
 		str.Format(_T("[선택 도구] 변형 완료 (모드: %d)"), static_cast<int>(m_mode));
 		LogAppEvent(str);
@@ -668,16 +741,124 @@ void BaseShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* bru
 
 bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 {
-	if (!pDoc || !m_previewShape) return false;
+	if (!pDoc) return false;
 
-	// 스타일 동기화
-	m_previewShape->style.stroke = m_setting.strokeColor;
-	m_previewShape->style.strokeWidth = m_setting.strokeWidth;
-	m_previewShape->style.dashStyle = m_setting.dashStyle;
-	m_previewShape->style.fillType = m_setting.fillType;
-	m_previewShape->style.fill = m_setting.fillColor;
+	// (A) 신형 엔진 단독 미리보기 노드가 있는 경우 (사각 도구 신엔진 테스트)
+	if (m_previewNode)
+	{
+		m_previewNode->SetStyle(m_setting.ToGeStyle());
+		m_previewNode->Invalidate();
 
-	m_previewShape->Invalidate();
+		// 신형 엔진에 직접 추가
+		ge::Node* added = pDoc->GetDoc().AddShape(std::move(m_previewNode));
+		m_previewNode = nullptr;
+
+		// 구형 브릿지 shape도 목록에 함께 등록 (속성창/도구 옵션바가 구형 인덱스를 참조하므로 연동 보장)
+		if (m_previewShape)
+		{
+			m_previewShape->style.stroke = m_setting.strokeColor;
+			m_previewShape->style.strokeWidth = m_setting.strokeWidth;
+			m_previewShape->style.dashStyle = m_setting.dashStyle;
+			m_previewShape->style.fillType = m_setting.fillType;
+			m_previewShape->style.fill = m_setting.fillColor;
+			m_previewShape->Invalidate();
+			pDoc->GetShapes().push_back(std::move(m_previewShape));
+			m_lastCommittedIndex = static_cast<int>(pDoc->GetShapes().size()) - 1;
+			m_previewShape = nullptr;
+		}
+
+		if (added)
+		{
+			pDoc->GetDoc().SetSelection({ added });
+		}
+
+		UpdateShapePropertiesSelection(m_lastCommittedIndex, pDoc);
+		SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
+		if (pSelect)
+		{
+			pSelect->SetSelectedIndex(m_lastCommittedIndex, pDoc);
+		}
+
+		CString strEngineLog;
+		strEngineLog.Format(_T("★ [신형 그래픽 엔진 (ge::Document)] 사각형 노드 생성 성공! (NodeId: %llu, 활성레이어: %s)"),
+			added ? added->GetId() : 0,
+			pDoc->GetDoc().GetActiveLayer() ? pDoc->GetDoc().GetActiveLayer()->GetName().c_str() : L"None");
+		LogAppEvent(strEngineLog);
+		SetAppStatusText(strEngineLog);
+
+		pDoc->UpdateAllViews(nullptr);
+		return true;
+	}
+
+	if (!m_previewShape) return false;
+
+	// 1. 신형 그래픽 엔진(ge::Document) 노드 생성 및 파라미터 복사
+	auto node = std::make_unique<ge::PathNode>();
+	node->SetName(std::wstring((LPCTSTR)m_previewShape->name));
+	node->SetKind(static_cast<ge::ShapeKind>(m_previewShape->GetKind()));
+	std::visit([&node](auto&& arg) {
+		using T = std::decay_t<decltype(arg)>;
+		if constexpr (std::is_same_v<T, RectParams>) {
+			ge::RectParams p; p.rx = arg.rx; p.ry = arg.ry; p.linkRxRy = arg.linkRxRy;
+			node->SetParams(p);
+		} else if constexpr (std::is_same_v<T, TriangleParams>) {
+			ge::TriangleParams p; p.equilateral = arg.equilateral;
+			node->SetParams(p);
+		} else if constexpr (std::is_same_v<T, EllipseParams>) {
+			ge::EllipseParams p; p.linkRxRy = arg.linkRxRy;
+			node->SetParams(p);
+		} else if constexpr (std::is_same_v<T, PolygonParams>) {
+			ge::PolygonParams p; p.sides = arg.sides; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
+			node->SetParams(p);
+		} else if constexpr (std::is_same_v<T, StarParams>) {
+			ge::StarParams p; p.points = arg.points; p.innerRatio = arg.innerRatio; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
+			node->SetParams(p);
+		} else if constexpr (std::is_same_v<T, GearParams>) {
+			ge::GearParams p; p.teeth = arg.teeth; p.depthRatio = arg.depthRatio; p.boreRatio = arg.boreRatio;
+			p.toothWidthRatio = arg.toothWidthRatio; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
+			node->SetParams(p);
+		} else if constexpr (std::is_same_v<T, SpiralParams>) {
+			ge::SpiralParams p; p.turns = arg.turns; p.innerRatio = arg.innerRatio; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
+			node->SetParams(p);
+		} else if constexpr (std::is_same_v<T, HeartParams>) {
+			node->SetParams(ge::HeartParams{});
+		}
+	}, m_previewShape->GetParams());
+
+	std::vector<ge::SubPath> gePaths;
+	for (const auto& sp : m_previewShape->paths) {
+		ge::SubPath gsp;
+		gsp.closed = sp.closed;
+		for (const auto& bn : sp.nodes) {
+			ge::BezierNode gbn;
+			gbn.anchor = { bn.anchor.x, bn.anchor.y };
+			gbn.hIn = { bn.hIn.x, bn.hIn.y };
+			gbn.hOut = { bn.hOut.x, bn.hOut.y };
+			gbn.type = static_cast<ge::BezierNode::Type>(bn.type);
+			gsp.nodes.push_back(gbn);
+		}
+		gePaths.push_back(std::move(gsp));
+	}
+	node->SetPaths(gePaths);
+
+	const auto& mx = m_previewShape->xf;
+	node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
+	node->SetStyle(m_setting.ToGeStyle());
+
+	ge::Node* pAdded = pDoc->GetDoc().AddShape(std::move(node));
+	if (pAdded)
+	{
+		pDoc->GetDoc().SetSelection({ pAdded });
+	}
+
+	CString strEngineLog;
+	strEngineLog.Format(_T("★ [신형 그래픽 엔진 (ge::Document)] %s 노드 생성 성공! (NodeId: %llu, 활성레이어: %s)"),
+		(LPCTSTR)m_previewShape->name,
+		pAdded ? pAdded->GetId() : 0,
+		pDoc->GetDoc().GetActiveLayer() ? pDoc->GetDoc().GetActiveLayer()->GetName().c_str() : L"None");
+	LogAppEvent(strEngineLog);
+	SetAppStatusText(strEngineLog);
+
 	pDoc->GetShapes().push_back(std::move(m_previewShape));
 	m_lastCommittedIndex = static_cast<int>(pDoc->GetShapes().size()) - 1;
 	m_previewShape = nullptr;
@@ -690,12 +871,14 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 		pSelect->SetSelectedIndex(m_lastCommittedIndex, pDoc);
 	}
 
+	pDoc->UpdateAllViews(nullptr);
 	return true;
 }
 
 void BaseShapeTool::CancelShape()
 {
 	m_previewShape = nullptr;
+	m_previewNode = nullptr;
 }
 
 bool BaseShapeTool::OnDoubleClicked(CM2DrawDoc* pDoc)
@@ -900,6 +1083,21 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 		m_previewShape->style.fill = m_setting.fillColor;
 		m_previewShape->Invalidate();
 	}
+
+	// [신형 엔진 테스트] 사각형(Rect) 도구인 경우 신형 ge::PathNode 인스턴스도 직접 동시 생성
+	if (m_kind == ShapeKind::Rect)
+	{
+		m_previewNode = std::make_unique<ge::PathNode>();
+		m_previewNode->SetName(L"사각형");
+		m_previewNode->SetKind(ge::ShapeKind::Rect);
+		ge::RectParams rp;
+		rp.rx = m_setting.cornerRx;
+		rp.ry = m_setting.cornerRy;
+		rp.linkRxRy = m_setting.bLinkRxRy;
+		m_previewNode->SetParams(rp);
+		m_previewNode->SetStyle(m_setting.ToGeStyle());
+		m_previewNode->Invalidate();
+	}
 }
 
 void BoxShapeTool::OnMove(const ToolEvent& e)
@@ -915,6 +1113,48 @@ void BoxShapeTool::OnMove(const ToolEvent& e)
 		if (m_previewShape)
 		{
 			UpdateGeometry(m_previewShape.get(), p0, p1);
+		}
+
+		// [신형 엔진 테스트] 사각형(Rect) 신엔진 노드 기하학 직접 갱신
+		if (m_previewNode && m_kind == ShapeKind::Rect)
+		{
+			float left = min(p0.x, p1.x);
+			float top = min(p0.y, p1.y);
+			float right = max(p0.x, p1.x);
+			float bottom = max(p0.y, p1.y);
+			float rx = (right - left) * 0.5f;
+			float ry = (bottom - top) * 0.5f;
+			float crx = (std::min)(rx, (std::max)(0.0f, m_setting.cornerRx));
+			float cry = (std::min)(ry, (std::max)(0.0f, m_setting.cornerRy));
+
+			ge::SubPath sp;
+			sp.closed = true;
+			if (crx > 0.001f || cry > 0.001f)
+			{
+				const float kx = crx * 0.55228475f;
+				const float ky = cry * 0.55228475f;
+				ge::BezierNode n[8];
+				n[0].anchor = { left + crx, top };      n[0].hIn = { -kx, 0.0f }; n[0].hOut = { 0, 0 };
+				n[1].anchor = { right - crx, top };     n[1].hIn = { 0, 0 };      n[1].hOut = { kx, 0.0f };
+				n[2].anchor = { right, top + cry };     n[2].hIn = { 0.0f, -ky }; n[2].hOut = { 0, 0 };
+				n[3].anchor = { right, bottom - cry };  n[3].hIn = { 0, 0 };      n[3].hOut = { 0.0f, ky };
+				n[4].anchor = { right - crx, bottom };  n[4].hIn = { kx, 0.0f };  n[4].hOut = { 0, 0 };
+				n[5].anchor = { left + crx, bottom };   n[5].hIn = { 0, 0 };      n[5].hOut = { -kx, 0.0f };
+				n[6].anchor = { left, bottom - cry };   n[6].hIn = { 0.0f, ky };  n[6].hOut = { 0, 0 };
+				n[7].anchor = { left, top + cry };      n[7].hIn = { 0, 0 };      n[7].hOut = { 0.0f, -ky };
+				for (int i = 0; i < 8; ++i) sp.nodes.push_back(n[i]);
+			}
+			else
+			{
+				ge::BezierNode n[4];
+				n[0].anchor = { left, top };
+				n[1].anchor = { right, top };
+				n[2].anchor = { right, bottom };
+				n[3].anchor = { left, bottom };
+				for (int i = 0; i < 4; ++i) sp.nodes.push_back(n[i]);
+			}
+			m_previewNode->SetPaths({ sp });
+			m_previewNode->Invalidate();
 		}
 
 		float left = (std::min)(p0.x, p1.x);
@@ -979,13 +1219,26 @@ void BoxShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brus
 	ViewportTransform view = { zoom, pan };
 
 	// 1. 첫 번째 포인트가 찍혀서 미리보기가 생성된 상태 (드래그 중이거나 클릭-이동 대기 중)
-	if (m_previewShape && (m_isDragging || m_waitingSecondClick))
+	if ((m_previewShape || m_previewNode) && (m_isDragging || m_waitingSecondClick))
 	{
 		ID2D1Factory* pFactory = nullptr;
 		rt->GetFactory(&pFactory);
 
-		// (1) 도형 본체 미리보기 렌더링 (엔진 기하학)
-		m_previewShape->Draw(rt, brush, pFactory, view);
+		// [신형 엔진 테스트] 사각형인 경우 신형 D2DRenderer로 직접 렌더링 검증!
+		if (m_previewNode && m_kind == ShapeKind::Rect)
+		{
+			ge::D2DRenderer renderer;
+			if (renderer.Initialize(rt, pFactory))
+			{
+				ge::Viewport geView = { zoom, { pan.x, pan.y } };
+				renderer.DrawNode(*m_previewNode, ge::Matrix2D::Identity(), geView);
+			}
+		}
+		else if (m_previewShape)
+		{
+			// (1) 도형 본체 미리보기 렌더링 (엔진 기하학)
+			m_previewShape->Draw(rt, brush, pFactory, view);
+		}
 
 		if (pFactory) pFactory->Release();
 

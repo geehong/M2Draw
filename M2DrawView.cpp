@@ -102,6 +102,11 @@ HRESULT CM2DrawView::CreateDeviceResources()
 				&m_pSolidBrush
 			);
 		}
+
+		if (SUCCEEDED(hr))
+		{
+			m_renderer.Initialize(m_pRenderTarget, m_pD2DFactory);
+		}
 	}
 
 	return hr;
@@ -109,6 +114,8 @@ HRESULT CM2DrawView::CreateDeviceResources()
 
 void CM2DrawView::DiscardDeviceResources()
 {
+	m_renderer.Shutdown();
+
 	if (m_pSolidBrush)
 	{
 		m_pSolidBrush->Release();
@@ -257,8 +264,8 @@ void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 	D2D1_POINT_2F rawWorld = D2D1::Point2F(worldX, worldY);
 
 	CM2DrawDoc* pDoc = GetDocument();
-	const auto* pShapes = pDoc ? &pDoc->GetShapes() : nullptr;
-	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pShapes);
+	const ge::Document* pGeDoc = pDoc ? &pDoc->GetDoc() : nullptr;
+	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc);
 	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
 
 	float unitScale = GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit);
@@ -295,8 +302,8 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 	D2D1_POINT_2F rawWorld = D2D1::Point2F(worldX, worldY);
 
 	CM2DrawDoc* pDoc = GetDocument();
-	const auto* pShapes = pDoc ? &pDoc->GetShapes() : nullptr;
-	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pShapes);
+	const ge::Document* pGeDoc = pDoc ? &pDoc->GetDoc() : nullptr;
+	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc);
 	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
 
 	float unitScale = GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit);
@@ -397,8 +404,8 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	D2D1_POINT_2F rawWorld = D2D1::Point2F(worldX, worldY);
 
 	CM2DrawDoc* pDoc = GetDocument();
-	const auto* pShapes = pDoc ? &pDoc->GetShapes() : nullptr;
-	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pShapes);
+	const ge::Document* pGeDoc = pDoc ? &pDoc->GetDoc() : nullptr;
+	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc);
 	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
 
 	float unitScale = GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit);
@@ -559,7 +566,11 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 		m_ptPan
 	);
 
-	// 1. 문서에 저장된 모든 도형 렌더링
+	// 1. 신형 엔진 Document 씬 그래프 렌더링
+	ge::Viewport view = { m_fZoom, { m_ptPan.x, m_ptPan.y } };
+	m_renderer.DrawDocument(pDoc->GetDoc(), view);
+
+	// 1-1. 기존 엔진 저장 도형 렌더링 (도구 마이그레이션 완료 전까지 병행 렌더링)
 	ViewportTransform vt = { m_fZoom, m_ptPan };
 	for (const auto& sp : pDoc->GetShapes())
 	{

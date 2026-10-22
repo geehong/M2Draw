@@ -4,8 +4,13 @@
 #include <memory>
 #include <cmath>
 #include <cstdint>
-#include "D2DVectorEngine.h"
+#include "D2DGraphicEngine.h"
 #include "GridRenderer.h"
+
+namespace ge {
+	class Document;
+	class Node;
+}
 
 // 활성화할 스냅 타깃 플래그 (비트마스크)
 enum class SnapTargets : uint32_t
@@ -79,8 +84,8 @@ public:
 		D2D1_POINT_2F mouseWorld,
 		float zoom,
 		const GridRenderer& grid,
-		const std::vector<std::unique_ptr<Shape>>* pShapes = nullptr,
-		const Shape* excludeShape = nullptr
+		const ge::Document* pDoc = nullptr,
+		const ge::Node* excludeNode = nullptr
 	) const;
 
 	// 스냅이 걸렸을 때 시각적 피드백(자석 원형 링, 자석 다이아몬드, 스냅 가이드) 렌더링

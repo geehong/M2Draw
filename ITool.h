@@ -5,10 +5,30 @@
 #include <set>
 #include <map>
 #include <memory>
-#include "D2DVectorEngine.h"
+#include "D2DGraphicEngine.h"
 
 class CM2DrawDoc;
 class CM2DrawView;
+
+using ViewportTransform = ge::Viewport;
+using CoordinateSpace = ge::CoordinateSpace;
+using FillType = ge::FillType;
+using Shape = ge::Node;
+using PathShape = ge::PathNode;
+using HitResult = ge::HitResult;
+
+using ShapeKind = ge::ShapeKind;
+using RectParams = ge::RectParams;
+using TriangleParams = ge::TriangleParams;
+using EllipseParams = ge::EllipseParams;
+using PolygonParams = ge::PolygonParams;
+using StarParams = ge::StarParams;
+using GearParams = ge::GearParams;
+using SpiralParams = ge::SpiralParams;
+using HeartParams = ge::HeartParams;
+using ShapeParams = ge::ShapeParams;
+using BezierNode = ge::BezierNode;
+using SubPath = ge::SubPath;
 
 // 도구 이벤트 데이터 구조체
 struct ToolEvent
@@ -20,7 +40,7 @@ struct ToolEvent
 	bool               altDown;
 	bool               shiftDown;
 	bool               ctrlDown;
-	ViewportTransform  view;       // 현재 뷰포트 상태
+	ge::Viewport       view;       // 현재 뷰포트 상태
 	CM2DrawDoc*        pDoc;       // 현재 활성 문서 포인터
 	CM2DrawView*       pView;      // 현재 활성 뷰 포인터 (줌/팬 제어용)
 	ID2D1Factory*      pD2DFactory;// Direct2D 팩토리
@@ -84,6 +104,27 @@ struct ToolCreationSetting
 	float spiralTurns = 3.0f;    // 나선 회전 바퀴 수
 	float heartRound = 1.0f;     // 하트 곡률 계수
 	bool  bDrawFromCenter = false; // 중심 => 바깥쪽 그리기 모드
+
+	ge::Style ToGeStyle() const
+	{
+		ge::Style st;
+		st.fillType = static_cast<ge::FillType>(fillType);
+		st.fill = ge::Color::FromD2D(fillColor);
+		st.stroke = ge::Color::FromD2D(strokeColor);
+		st.strokeWidth = strokeWidth;
+		st.dashStyle = static_cast<ge::DashStyle>(dashStyle);
+		st.fillMode = ge::FillMode::Alternate;
+		return st;
+	}
+
+	void FromGeStyle(const ge::Style& st)
+	{
+		fillType = static_cast<FillType>(st.fillType);
+		fillColor = st.fill.ToD2D();
+		strokeColor = st.stroke.ToD2D();
+		strokeWidth = st.strokeWidth;
+		dashStyle = static_cast<D2D1_DASH_STYLE>(st.dashStyle);
+	}
 };
 
 // ============================================================================
@@ -180,11 +221,12 @@ private:
 class BaseShapeTool : public ITool
 {
 protected:
-	ToolCreationSetting         m_setting;
-	D2D1_POINT_2F               m_hoverPt{ 0.0f, 0.0f };
-	bool                        m_hasHover = false;
-	std::unique_ptr<PathShape>  m_previewShape; // 엔진이 계산하고 렌더링할 미리보기 도형
-	int                         m_lastCommittedIndex = -1; // 방금 완료된 도형 인덱스 (대기 상태에서 앵커 표시)
+	ToolCreationSetting            m_setting;
+	D2D1_POINT_2F                  m_hoverPt{ 0.0f, 0.0f };
+	bool                           m_hasHover = false;
+	std::unique_ptr<PathShape>     m_previewShape; // 구형 미리보기 도형
+	std::unique_ptr<ge::PathNode>  m_previewNode;  // 신엔진 미리보기 노드
+	int                            m_lastCommittedIndex = -1; // 방금 완료된 도형 인덱스 (대기 상태에서 앵커 표시)
 
 public:
 	void SetSetting(const ToolCreationSetting& s) { m_setting = s; }
@@ -195,7 +237,7 @@ public:
 	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
 
 	// 현재 도형 작성 중인지 여부 (미리보기 도형 또는 점 목록 존재 여부)
-	virtual bool HasActiveShape() const { return m_previewShape != nullptr; }
+	virtual bool HasActiveShape() const { return m_previewShape != nullptr || m_previewNode != nullptr; }
 
 	// 도형 확정 및 문서 등록
 	bool CommitShape(CM2DrawDoc* pDoc);

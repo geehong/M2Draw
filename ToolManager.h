@@ -3,8 +3,10 @@
 #include <vector>
 #include <memory>
 #include <set>
-#include "D2DVectorEngine.h"
+#include <wrl/client.h>
 #include "ITool.h"
+
+using Microsoft::WRL::ComPtr;
 
 class CM2DrawDoc;
 

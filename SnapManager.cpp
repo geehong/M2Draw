@@ -6,8 +6,8 @@ SnapResult SnapManager::FindSnapPoint(
 	D2D1_POINT_2F mouseWorld,
 	float zoom,
 	const GridRenderer& grid,
-	const std::vector<std::unique_ptr<Shape>>* pShapes,
-	const Shape* excludeShape) const
+	const ge::Document* pDoc,
+	const ge::Node* excludeNode) const
 {
 	SnapResult result;
 	result.snapped = false;
@@ -36,28 +36,39 @@ SnapResult SnapManager::FindSnapPoint(
 		}
 	};
 
-	// 1. 오브젝트 스냅 (Anchor, Midpoint, Center) - 우선순위 최고
-	if (pShapes)
+	// 1. 오브젝트 스냅 (Anchor, Midpoint, Center) - ge::Document 노드 순회
+	if (pDoc)
 	{
-		for (const auto& spPtr : *pShapes)
-		{
-			Shape* shape = spPtr.get();
-			if (!shape || shape == excludeShape) continue;
+		std::function<void(const ge::Node*)> checkNode = [&](const ge::Node* node) {
+			if (!node || !node->IsVisible() || node == excludeNode) return;
 
-			PathShape* ps = dynamic_cast<PathShape*>(shape);
-			if (ps)
+			if (node->Kind() == ge::NodeKind::Group || node->Kind() == ge::NodeKind::Layer)
 			{
-				for (const auto& sp : ps->paths)
+				const auto* g = static_cast<const ge::GroupNode*>(node);
+				for (const auto& child : g->GetChildren())
+				{
+					checkNode(child.get());
+				}
+				return;
+			}
+
+			if (node->Kind() == ge::NodeKind::Path)
+			{
+				const auto* pn = static_cast<const ge::PathNode*>(node);
+				ge::Matrix2D worldXf = pn->GetWorldTransform();
+
+				for (const auto& sp : pn->GetPaths())
 				{
 					for (size_t i = 0; i < sp.nodes.size(); ++i)
 					{
-						const auto& node = sp.nodes[i];
-						D2D1_POINT_2F aWorld = ps->xf.TransformPoint(node.anchor);
+						const auto& bn = sp.nodes[i];
+						ge::Vec2 aWorld = worldXf.TransformPoint(bn.anchor);
+						D2D1_POINT_2F aPt = aWorld.ToD2D();
 
 						// (1) 앵커/정점 스냅
 						if (HasSnapTarget(m_targets, SnapTargets::Anchor))
 						{
-							tryCandidate(aWorld, SnapTargets::Anchor, L"정점 (Anchor)");
+							tryCandidate(aPt, SnapTargets::Anchor, L"정점 (Anchor)");
 						}
 
 						// (2) 선분 중간점 (Midpoint) 스냅
@@ -69,47 +80,35 @@ SnapResult SnapManager::FindSnapPoint(
 
 							if (nextIdx < sp.nodes.size())
 							{
-								const auto& nextNode = sp.nodes[nextIdx];
-								D2D1_POINT_2F midLocal = D2D1::Point2F(
-									(node.anchor.x + nextNode.anchor.x) * 0.5f,
-									(node.anchor.y + nextNode.anchor.y) * 0.5f
-								);
-								D2D1_POINT_2F midWorld = ps->xf.TransformPoint(midLocal);
-								tryCandidate(midWorld, SnapTargets::Midpoint, L"중간점 (Midpoint)");
+								const auto& nextBn = sp.nodes[nextIdx];
+								ge::Vec2 midLocal = {
+									(bn.anchor.x + nextBn.anchor.x) * 0.5f,
+									(bn.anchor.y + nextBn.anchor.y) * 0.5f
+								};
+								ge::Vec2 midWorld = worldXf.TransformPoint(midLocal);
+								tryCandidate(midWorld.ToD2D(), SnapTargets::Midpoint, L"중간점 (Midpoint)");
 							}
 						}
 					}
 				}
-			}
 
-			// (3) 도형 중심점 (Center) 스냅
-			if (HasSnapTarget(m_targets, SnapTargets::Center))
-			{
-				ID2D1Factory* pFactory = nullptr;
-				// 도형 로컬 바운딩의 중심점 산출
-				D2D1_RECT_F b;
-				// 간단한 정점 평균 중심
-				if (ps && !ps->paths.empty())
+				// (3) 도형 중심점 (Center) 스냅
+				if (HasSnapTarget(m_targets, SnapTargets::Center))
 				{
-					float sumX = 0.0f, sumY = 0.0f;
-					int count = 0;
-					for (const auto& path : ps->paths)
+					ge::Rect2 lb;
+					if (const_cast<ge::PathNode*>(pn)->GetLocalBounds(lb))
 					{
-						for (const auto& n : path.nodes)
-						{
-							sumX += n.anchor.x;
-							sumY += n.anchor.y;
-							count++;
-						}
-					}
-					if (count > 0)
-					{
-						D2D1_POINT_2F centerLocal = D2D1::Point2F(sumX / count, sumY / count);
-						D2D1_POINT_2F centerWorld = ps->xf.TransformPoint(centerLocal);
-						tryCandidate(centerWorld, SnapTargets::Center, L"중심 (Center)");
+						ge::Vec2 centerLocal = { lb.MidX(), lb.MidY() };
+						ge::Vec2 centerWorld = worldXf.TransformPoint(centerLocal);
+						tryCandidate(centerWorld.ToD2D(), SnapTargets::Center, L"중심 (Center)");
 					}
 				}
 			}
+		};
+
+		for (const auto& layer : pDoc->GetLayers())
+		{
+			checkNode(layer.get());
 		}
 	}
 

@@ -186,6 +186,27 @@ void CD2DPropertyView::ApplyToShape()
 	}
 
 	shape->Invalidate();
+
+	// 신엔진 ge::Document 에도 스타일 동기화
+	if (m_pActiveDoc && m_selectedShapeIndex >= 0)
+	{
+		auto* layer = m_pActiveDoc->GetDoc().GetActiveLayer();
+		if (layer && m_selectedShapeIndex < static_cast<int>(layer->GetChildren().size()))
+		{
+			auto* node = layer->GetChildren()[m_selectedShapeIndex].get();
+			if (node)
+			{
+				ge::Style st;
+				st.fillType = static_cast<ge::FillType>(shape->style.fillType);
+				st.fill = ge::Color::FromD2D(shape->style.fill);
+				st.stroke = ge::Color::FromD2D(shape->style.stroke);
+				st.strokeWidth = shape->style.strokeWidth;
+				st.dashStyle = static_cast<ge::DashStyle>(shape->style.dashStyle);
+				node->SetStyle(st);
+			}
+		}
+	}
+
 	m_pActiveDoc->UpdateAllViews(nullptr);
 }
 

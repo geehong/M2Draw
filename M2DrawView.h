@@ -1,5 +1,6 @@
 #pragma once
 #include "SnapManager.h"
+#include "D2DGraphicEngine.h"
 
 class CM2DrawView : public CView
 {
@@ -57,7 +58,12 @@ protected:
 	ID2D1Factory*          m_pD2DFactory;
 	ID2D1HwndRenderTarget* m_pRenderTarget;
 	ID2D1SolidColorBrush*  m_pSolidBrush;
+	ge::D2DRenderer        m_renderer;      // 신엔진 일원화 렌더러
 
+public:
+	ge::D2DRenderer&       GetRenderer() { return m_renderer; }
+
+protected:
 	HRESULT CreateDeviceResources();
 	void DiscardDeviceResources();
 

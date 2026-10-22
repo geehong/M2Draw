@@ -1,4 +1,4 @@
-﻿
+
 // M2DrawDoc.cpp: CM2DrawDoc 클래스의 구현
 //
 
@@ -43,8 +43,10 @@ BOOL CM2DrawDoc::OnNewDocument()
 	if (!CDocument::OnNewDocument())
 		return FALSE;
 
-	// TODO: 여기에 재초기화 코드를 추가합니다.
-	// SDI 문서는 이 문서를 다시 사용합니다.
+	m_shapes.clear();
+	m_currentPath.reset();
+	m_doc = ge::Document();
+	m_currentPathNode.reset();
 
 	return TRUE;
 }

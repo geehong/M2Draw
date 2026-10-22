@@ -1613,6 +1613,70 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 	}
 
 	pShape->Invalidate();
+
+	// 신엔진 ge::Document 에도 변형/파라미터/정점 동기화
+	if (m_pDoc && m_selectedIndex >= 0)
+	{
+		auto* layer = m_pDoc->GetDoc().GetActiveLayer();
+		if (layer && m_selectedIndex < static_cast<int>(layer->GetChildren().size()))
+		{
+			auto* node = dynamic_cast<ge::PathNode*>(layer->GetChildren()[m_selectedIndex].get());
+			if (node && pPathShape)
+			{
+				const auto& mx = pPathShape->xf;
+				node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
+				node->SetKind(static_cast<ge::ShapeKind>(pPathShape->GetKind()));
+
+				// 파라미터 복사
+				std::visit([&node](auto&& arg) {
+					using T = std::decay_t<decltype(arg)>;
+					if constexpr (std::is_same_v<T, RectParams>) {
+						ge::RectParams p; p.rx = arg.rx; p.ry = arg.ry; p.linkRxRy = arg.linkRxRy;
+						node->SetParams(p);
+					} else if constexpr (std::is_same_v<T, TriangleParams>) {
+						ge::TriangleParams p; p.equilateral = arg.equilateral;
+						node->SetParams(p);
+					} else if constexpr (std::is_same_v<T, EllipseParams>) {
+						ge::EllipseParams p; p.linkRxRy = arg.linkRxRy;
+						node->SetParams(p);
+					} else if constexpr (std::is_same_v<T, PolygonParams>) {
+						ge::PolygonParams p; p.sides = arg.sides; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
+						node->SetParams(p);
+					} else if constexpr (std::is_same_v<T, StarParams>) {
+						ge::StarParams p; p.points = arg.points; p.innerRatio = arg.innerRatio; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
+						node->SetParams(p);
+					} else if constexpr (std::is_same_v<T, GearParams>) {
+						ge::GearParams p; p.teeth = arg.teeth; p.depthRatio = arg.depthRatio; p.boreRatio = arg.boreRatio;
+						p.toothWidthRatio = arg.toothWidthRatio; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
+						node->SetParams(p);
+					} else if constexpr (std::is_same_v<T, SpiralParams>) {
+						ge::SpiralParams p; p.turns = arg.turns; p.innerRatio = arg.innerRatio; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
+						node->SetParams(p);
+					} else if constexpr (std::is_same_v<T, HeartParams>) {
+						node->SetParams(ge::HeartParams{});
+					}
+				}, pPathShape->GetParams());
+
+				// 서브패스 동기화
+				std::vector<ge::SubPath> gePaths;
+				for (const auto& sp : pPathShape->paths) {
+					ge::SubPath gsp;
+					gsp.closed = sp.closed;
+					for (const auto& bn : sp.nodes) {
+						ge::BezierNode gbn;
+						gbn.anchor = { bn.anchor.x, bn.anchor.y };
+						gbn.hIn = { bn.hIn.x, bn.hIn.y };
+						gbn.hOut = { bn.hOut.x, bn.hOut.y };
+						gbn.type = static_cast<ge::BezierNode::Type>(bn.type);
+						gsp.nodes.push_back(gbn);
+					}
+					gePaths.push_back(std::move(gsp));
+				}
+				node->SetPaths(gePaths);
+			}
+		}
+	}
+
 	m_pDoc->UpdateAllViews(nullptr);
 	SyncSelection(m_pDoc, m_selectedIndex);
 }

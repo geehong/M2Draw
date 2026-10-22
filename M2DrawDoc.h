@@ -1,5 +1,20 @@
 #pragma once
-#include "D2DVectorEngine.h"
+#include "D2DGraphicEngine.h"
+
+using Shape = ge::Node;
+using PathShape = ge::PathNode;
+using ShapeKind = ge::ShapeKind;
+using RectParams = ge::RectParams;
+using TriangleParams = ge::TriangleParams;
+using EllipseParams = ge::EllipseParams;
+using PolygonParams = ge::PolygonParams;
+using StarParams = ge::StarParams;
+using GearParams = ge::GearParams;
+using SpiralParams = ge::SpiralParams;
+using HeartParams = ge::HeartParams;
+using ShapeParams = ge::ShapeParams;
+using BezierNode = ge::BezierNode;
+using SubPath = ge::SubPath;
 
 class CM2DrawDoc : public CDocument
 {
@@ -9,9 +24,18 @@ protected:
 
 // 특성입니다.
 public:
+	// --- 신형 그래픽 엔진 (D2DGraphicEngine) Scene 루트 ---
+	ge::Document                    m_doc;
+	std::unique_ptr<ge::PathNode>   m_currentPathNode;
+
+	ge::Document&                   GetDoc()             { return m_doc; }
+	const ge::Document&             GetDoc() const       { return m_doc; }
+	std::unique_ptr<ge::PathNode>&  GetCurrentPathNode() { return m_currentPathNode; }
+
+	// --- 구형 엔진 호환 필드 (단계적 이관 진행 중 유지) ---
 	std::vector<std::unique_ptr<Shape>> m_shapes;
 	std::unique_ptr<PathShape>          m_currentPath;
-	std::vector<std::unique_ptr<Shape>>& GetShapes() { return m_shapes; }
+	std::vector<std::unique_ptr<Shape>>& GetShapes()      { return m_shapes; }
 	std::unique_ptr<PathShape>&          GetCurrentPath() { return m_currentPath; }
 
 // 재정의입니다.
