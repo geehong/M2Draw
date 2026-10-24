@@ -376,6 +376,7 @@ public:
 	bool OnLButtonUp(D2D1_POINT_2F pt) override;
 	bool OnKeyDown(UINT nChar) override;
 	bool OnChar(UINT nChar) override;
+	void ResetState() override;
 
 private:
 	std::vector<std::shared_ptr<M2DrawControl>> m_children;
@@ -415,6 +416,7 @@ public:
 	bool OnLButtonUp(D2D1_POINT_2F pt) override;
 	bool OnKeyDown(UINT nChar) override;
 	bool OnChar(UINT nChar) override;
+	void ResetState() override;
 
 private:
 	std::wstring                                m_headerText;

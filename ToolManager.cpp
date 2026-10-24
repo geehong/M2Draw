@@ -117,7 +117,8 @@ static void SyncPenPathToGeDoc(CM2DrawDoc* pDoc, const std::unique_ptr<PathShape
 {
 	if (!pDoc || !path) return;
 	auto node = std::make_unique<ge::PathNode>();
-	node->SetName(L"펜 곡선");
+	node->SetName(pDoc->GetDoc().GenerateNodeName(ge::ShapeKind::Path));
+	if (path) path->name = node->GetName().c_str();
 	node->SetKind(ge::ShapeKind::Path);
 	std::vector<ge::SubPath> gePaths;
 	for (const auto& sp : path->paths) {

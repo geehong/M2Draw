@@ -179,6 +179,9 @@ public:
     const CString& GetName() const { return m_name; }
     void SetName(const CString& val) { m_name = val; }
 
+    bool IsVisible() const { return m_visible; }
+    void SetVisible(bool v) { m_visible = v; }
+
     const D2D1::Matrix3x2F& GetTransform() const { return m_xf; }
     void SetTransform(const D2D1::Matrix3x2F& val) { m_xf = val; Invalidate(); }
 
@@ -193,13 +196,14 @@ public:
 
 protected:
     CString m_name; // 개별 쉐이프 이름 (예: "직선 1", "사각형 2")
+    bool m_visible = true;
     D2D1::Matrix3x2F m_xf = D2D1::Matrix3x2F::Identity();
     ShapeStyle m_style;
 
 public:
 
     void Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, ID2D1Factory* f, const ViewportTransform& view) {
-        if (!rt || !brush) return;
+        if (!m_visible || !rt || !brush) return;
         // 팩토리가 nullptr이면 렌더 타깃의 팩토리를 사용 (nullptr 시 Rebuild 실패 → 아무것도 안 그려지는 버그 방지)
         ComPtr<ID2D1Factory> rtFactory;
         if (!f) { rt->GetFactory(&rtFactory); f = rtFactory.Get(); }

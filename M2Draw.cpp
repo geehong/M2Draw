@@ -261,6 +261,7 @@ void UpdateShapePropertiesSelection(int shapeIndex, CM2DrawDoc* pDoc)
 		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
 		pMainFrame->GetPropertiesWnd().SetSelectedShape(shapeIndex, pDoc);
 		pMainFrame->GetOptionBar().SyncSelection(pDoc, shapeIndex);
+		pMainFrame->GetLayerWnd().SetDocument(pDoc);
 	}
 }
 

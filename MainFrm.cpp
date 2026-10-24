@@ -7,6 +7,7 @@
 #include "M2Draw.h"
 
 #include "MainFrm.h"
+#include "M2DrawDoc.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -138,20 +139,33 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		return -1;
 	}
 
+	theApp.CleanState();
+
 	m_wndToolBox.EnableDocking(CBRS_ALIGN_LEFT);
 	DockPane(&m_wndToolBox);
+
 	m_wndOutput.EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndOutput);
+
 	m_wndProperties.EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndProperties);
+
 	m_wndGridProp.EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndGridProp);
+
 	m_wndCanvasProp.EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndCanvasProp);
 
-	// Grid Settings를 Object Settings 아래로 도킹, Canvas Settings를 탭 형태로 함께 그룹핑
+	m_wndLayers.EnableDocking(CBRS_ALIGN_ANY);
+	DockPane(&m_wndLayers);
+
+	// Grid Settings를 Object Settings 아래로 도킹, Canvas Settings를 Grid Settings와 탭으로 그룹핑
 	m_wndGridProp.DockToWindow(&m_wndProperties, CBRS_ALIGN_BOTTOM);
 	m_wndCanvasProp.DockToWindow(&m_wndGridProp, CBRS_ALIGN_BOTTOM);
+
+	// Layers and Objects를 Object Settings의 탭으로 안전하게 병합
+	m_wndLayers.DockToWindow(&m_wndProperties, CBRS_ALIGN_BOTTOM);
+	m_wndLayers.AttachToTabWnd(&m_wndProperties, DM_SHOW, FALSE);
 
 
 	// 모든 사용자 인터페이스 요소를 그리는 데 사용하는 비주얼 관리자를 설정합니다.
@@ -259,6 +273,14 @@ BOOL CMainFrame::CreateDockingWindows()
 		return FALSE;
 	}
 
+	// Layers and Objects 창을 만듭니다. (너비 260px)
+	CString strLayersWnd = _T("Layers and Objects");
+	if (!m_wndLayers.Create(strLayersWnd, this, CRect(0, 0, 260, 300), TRUE, ID_VIEW_PROPERTIESWND + 3, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
+	{
+		TRACE0("Layers and Objects 창을 만들지 못했습니다.\n");
+		return FALSE;
+	}
+
 	SetDockingWindowIcons(theApp.m_bHiColorIcons);
 	return TRUE;
 }
@@ -272,6 +294,7 @@ void CMainFrame::SetDockingWindowIcons(BOOL bHiColorIcons)
 	m_wndProperties.SetIcon(hPropertiesBarIcon, FALSE);
 	m_wndGridProp.SetIcon(hPropertiesBarIcon, FALSE);
 	m_wndCanvasProp.SetIcon(hPropertiesBarIcon, FALSE);
+	m_wndLayers.SetIcon(hPropertiesBarIcon, FALSE);
 
 	UpdateMDITabbedBarsIcons();
 }
@@ -370,3 +393,14 @@ void CMainFrame::OnUpdateOptionBar(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(TRUE);
 }
+
+CM2DrawDoc* CMainFrame::GetActiveM2DrawDoc()
+{
+	CMDIChildWndEx* pChild = DYNAMIC_DOWNCAST(CMDIChildWndEx, MDIGetActive());
+	if (pChild)
+	{
+		return DYNAMIC_DOWNCAST(CM2DrawDoc, pChild->GetActiveDocument());
+	}
+	return nullptr;
+}
+

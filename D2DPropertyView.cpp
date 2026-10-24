@@ -246,7 +246,7 @@ void CD2DPropertyView::ApplyCanvasSettings()
 	if (pMain)
 	{
 		CD2DPropertyView& objPropView = pMain->GetPropertiesWnd().GetD2DPropView();
-		if (objPropView.GetSafeHwnd())
+		if (&objPropView != this && objPropView.GetSafeHwnd())
 		{
 			objPropView.SyncControlsFromData();
 			objPropView.SafeInvalidate(FALSE);
@@ -1569,7 +1569,15 @@ void CD2DPropertyView::OnChar(UINT nChar, UINT nRepCnt, UINT nFlags)
 
 void CD2DPropertyView::OnKillFocus(CWnd* pNewWnd)
 {
-	CWnd::OnKillFocus(pNewWnd);
+	if (pNewWnd && ::IsWindow(pNewWnd->GetSafeHwnd()))
+	{
+		CWnd::OnKillFocus(pNewWnd);
+	}
+	else
+	{
+		Default();
+	}
+
 	if (m_pCurrentPanel)
 	{
 		m_pCurrentPanel->ResetState();

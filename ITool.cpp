@@ -79,6 +79,11 @@ bool SelectTool::IsOpenPath(Shape* shape)
 
 HCURSOR SelectTool::GetCursor() const
 {
+	if (m_mode == Mode::Moving || (m_mode == Mode::None && m_hoverShapeIdx != -1))
+	{
+		return ::LoadCursor(nullptr, IDC_SIZEALL);
+	}
+
 	if (m_hoverIsNode || m_mode == Mode::EditNode)
 	{
 		return ::LoadCursor(nullptr, IDC_CROSS);
@@ -222,9 +227,9 @@ void SelectTool::OnDown(const ToolEvent& e)
 	for (int i = static_cast<int>(shapes.size()) - 1; i >= 0; --i)
 	{
 		PathShape* ps = dynamic_cast<PathShape*>(shapes[i].get());
-		if (ps)
+		if (ps && ps->IsVisible())
 		{
-			HitResult hr = ps->HitTestScreenSpace(screenPt, 6.0f, e.view, e.pD2DFactory);
+			HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
 			if (hr.part != HitResult::Part::None)
 			{
 				clickedIndex = i;
@@ -307,7 +312,9 @@ void SelectTool::OnMove(const ToolEvent& e)
 	{
 		m_hoverIsNode = false;
 		m_hoverHandle = Handle::None;
+		m_hoverShapeIdx = -1;
 
+		// 1) 선택된 도형의 노드(앵커/핸들) 및 바운딩 박스 핸들 호버 검사
 		for (int idx : m_selectedIndices)
 		{
 			if (idx >= 0 && idx < static_cast<int>(shapes.size()))
@@ -338,6 +345,22 @@ void SelectTool::OnMove(const ToolEvent& e)
 				}
 			}
 		}
+
+		// 2) 도형 스트로크 또는 면(채우기 내부) 호버 검사 -> 4방향 이동 커서(IDC_SIZEALL) 활성화
+		for (int i = static_cast<int>(shapes.size()) - 1; i >= 0; --i)
+		{
+			PathShape* ps = dynamic_cast<PathShape*>(shapes[i].get());
+			if (ps && ps->IsVisible())
+			{
+				HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
+				if (hr.part != HitResult::Part::None)
+				{
+					m_hoverShapeIdx = i;
+					break;
+				}
+			}
+		}
+
 		return;
 	}
 
@@ -594,6 +617,7 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 		if (idx < 0 || idx >= static_cast<int>(pDoc->GetShapes().size())) continue;
 
 		Shape* shape = pDoc->GetShapes()[idx].get();
+		if (!shape || !shape->IsVisible()) continue;
 		D2D1_POINT_2F handles[9];
 		D2D1_RECT_F localBounds;
 		if (!GetHandleScreenPositions(shape, view, f, handles, &localBounds))
@@ -1073,7 +1097,7 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 	UpdateOptionBarCreationCoords(m_startPt.x, m_startPt.y, 0.0f, 0.0f, true);
 
 	// 엔진 팩토리를 통해 도형 인스턴스 생성
-	m_previewShape = CreateShapeInstance(m_startPt, m_startPt);
+	m_previewShape = CreateShapeInstance(m_startPt, m_startPt, e.pDoc);
 	if (m_previewShape)
 	{
 		m_previewShape->style.stroke = m_setting.strokeColor;
@@ -1088,7 +1112,12 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 	if (m_kind == ShapeKind::Rect)
 	{
 		m_previewNode = std::make_unique<ge::PathNode>();
-		m_previewNode->SetName(L"사각형");
+		if (m_previewShape)
+			m_previewNode->SetName(std::wstring((LPCTSTR)m_previewShape->name));
+		else if (e.pDoc)
+			m_previewNode->SetName(e.pDoc->GetDoc().GenerateNodeName(ge::ShapeKind::Rect));
+		else
+			m_previewNode->SetName(L"rect1");
 		m_previewNode->SetKind(ge::ShapeKind::Rect);
 		ge::RectParams rp;
 		rp.rx = m_setting.cornerRx;
@@ -1303,19 +1332,27 @@ void BoxShapeTool::UpdatePreviewGeometry(D2D1_POINT_2F curPt)
 	}
 }
 
-std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D2D1_POINT_2F p1)
+std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D2D1_POINT_2F p1, CM2DrawDoc* pDoc)
 {
 	auto shape = std::make_unique<PathShape>();
 
+	// Inkscape 스타일 자동 명명 (rect1, ellipse1, star1 등)
+	auto getAutoName = [&](ge::ShapeKind geKind, const wchar_t* fallback) -> CString {
+		if (pDoc) {
+			return pDoc->GetDoc().GenerateNodeName(geKind).c_str();
+		}
+		return fallback;
+	};
+
 	if (m_kind == ShapeKind::Line)
 	{
-		shape->name = _T("직선");
+		shape->name = getAutoName(ge::ShapeKind::Path, _T("line1"));
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p1);
 	}
 	else if (m_kind == ShapeKind::Rect)
 	{
-		shape->name = _T("사각형");
+		shape->name = getAutoName(ge::ShapeKind::Rect, _T("rect1"));
 		shape->SetKind(::ShapeKind::Rect);
 		RectParams rp;
 		rp.rx = m_setting.cornerRx;
@@ -1330,7 +1367,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	}
 	else if (m_kind == ShapeKind::Ellipse)
 	{
-		shape->name = _T("타원");
+		shape->name = getAutoName(ge::ShapeKind::Ellipse, _T("ellipse1"));
 		shape->SetKind(::ShapeKind::Ellipse);
 		EllipseParams ep;
 		ep.linkRxRy = m_setting.bLinkRxRy;
@@ -1347,7 +1384,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	}
 	else if (m_kind == ShapeKind::Triangle)
 	{
-		shape->name = _T("삼각형");
+		shape->name = getAutoName(ge::ShapeKind::Triangle, _T("triangle1"));
 		shape->SetKind(::ShapeKind::Triangle);
 		TriangleParams tp;
 		tp.equilateral = false;
@@ -1359,7 +1396,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	}
 	else if (m_kind == ShapeKind::Star)
 	{
-		shape->name = _T("별");
+		shape->name = getAutoName(ge::ShapeKind::Star, _T("star1"));
 		shape->SetKind(::ShapeKind::Star);
 		StarParams sp;
 		sp.points = (std::max)(3, (std::min)(32, m_setting.starPoints));
@@ -1371,7 +1408,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	}
 	else if (m_kind == ShapeKind::RegularPoly)
 	{
-		shape->name = _T("정다각형");
+		shape->name = getAutoName(ge::ShapeKind::Polygon, _T("polygon1"));
 		shape->SetKind(::ShapeKind::Polygon);
 		PolygonParams pp;
 		pp.sides = (std::max)(3, (std::min)(32, m_setting.polySides));
@@ -1382,7 +1419,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	}
 	else if (m_kind == ShapeKind::Gear)
 	{
-		shape->name = _T("기어");
+		shape->name = getAutoName(ge::ShapeKind::Gear, _T("gear1"));
 		shape->SetKind(::ShapeKind::Gear);
 		GearParams gp;
 		gp.teeth = (std::max)(4, (std::min)(48, m_setting.gearTeeth));
@@ -1403,7 +1440,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	}
 	else if (m_kind == ShapeKind::Spiral)
 	{
-		shape->name = _T("스파이럴");
+		shape->name = getAutoName(ge::ShapeKind::Spiral, _T("spiral1"));
 		shape->SetKind(::ShapeKind::Spiral);
 		SpiralParams sp;
 		sp.turns = (std::max)(0.5f, (std::min)(10.0f, m_setting.spiralTurns));
@@ -1421,7 +1458,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	}
 	else if (m_kind == ShapeKind::Heart)
 	{
-		shape->name = _T("하트");
+		shape->name = getAutoName(ge::ShapeKind::Heart, _T("heart1"));
 		shape->SetKind(::ShapeKind::Heart);
 		HeartParams hp;
 		shape->SetParams(hp);

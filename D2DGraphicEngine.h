@@ -563,12 +563,11 @@ protected:
 	std::vector<std::unique_ptr<Node>> m_children;   // 0 = 최하단
 };
 
-// ---- 레이어 (최상위 그룹 + 속성) --------------------------------------------
-class LayerNode : public GroupNode {
-public:
-	NodeKind Kind() const override { return NodeKind::Layer; }
-	std::unique_ptr<Node> Clone() const override;
-};
+} // namespace ge
+
+#include "D2DLayer.h"
+
+namespace ge {
 
 // ---- 문서 (Scene 루트) ------------------------------------------------------
 class Document {
@@ -599,6 +598,10 @@ public:
 		// 노드 제거 (소유권 반환, 선택에서도 제외)
 		std::unique_ptr<Node> RemoveNode(Node* node);
 		Node* FindById(NodeId id) const;
+
+		// 자동 명명 (Inkscape 스타일: rect1, ellipse1, path1 등)
+		std::wstring GenerateNodeName(ShapeKind kind) const;
+		std::wstring GenerateLayerName() const;
 
 		// 선택 항목 Z-Order 변경 (각자의 부모 안에서)
 		enum class ZOrder { Front, Back, Forward, Backward };

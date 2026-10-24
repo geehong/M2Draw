@@ -204,6 +204,7 @@ private:
 	int            m_editShapeIdx = -1;
 	HitResult      m_editHit;
 	bool           m_hoverIsNode = false;
+	int            m_hoverShapeIdx = -1; // 스트로크/면 위에 마우스가 올라간 도형 인덱스
 
 	static bool IsOpenPath(Shape* shape);
 	void ApplyNodeEdit(PathShape* shape, const ToolEvent& e);
@@ -348,7 +349,7 @@ protected:
 	void CalculateExtents(D2D1_POINT_2F curPt, bool shiftDown, bool altDown, D2D1_POINT_2F& outP0, D2D1_POINT_2F& outP1) const;
 
 	// 엔진 기하학 팩토리/업데이터 (정점 계산)
-	std::unique_ptr<PathShape> CreateShapeInstance(D2D1_POINT_2F p0, D2D1_POINT_2F p1);
+	std::unique_ptr<PathShape> CreateShapeInstance(D2D1_POINT_2F p0, D2D1_POINT_2F p1, CM2DrawDoc* pDoc = nullptr);
 	void UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POINT_2F p1);
 };
 

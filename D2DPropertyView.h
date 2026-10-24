@@ -145,9 +145,10 @@ protected:
 
 	void SafeInvalidate(BOOL bErase = FALSE)
 	{
-		if (GetSafeHwnd())
+		HWND hWnd = GetSafeHwnd();
+		if (hWnd && ::IsWindow(hWnd))
 		{
-			Invalidate(bErase);
+			::InvalidateRect(hWnd, nullptr, bErase);
 		}
 	}
 

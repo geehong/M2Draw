@@ -353,16 +353,6 @@ void GroupNode::SendBackward(Node* child)
 	std::swap(m_children[i], m_children[i - 1]);
 }
 
-// ---- LayerNode --------------------------------------------------------------
-std::unique_ptr<Node> LayerNode::Clone() const
-{
-	auto copy = std::make_unique<LayerNode>();
-	copy->m_name = m_name; copy->m_xf = m_xf; copy->m_style = m_style;
-	copy->m_visible = m_visible; copy->m_locked = m_locked; copy->m_opacity = m_opacity;
-	for (const auto& c : m_children) copy->AddChild(c->Clone());
-	return copy;
-}
-
 // ---- Document ---------------------------------------------------------------
 Document::Document()
 {
@@ -427,6 +417,87 @@ Node* Document::AddShape(std::unique_ptr<Node> node)
 	AssignIds(*node);
 	return layer->AddChild(std::move(node));
 }
+
+std::wstring Document::GenerateNodeName(ShapeKind kind) const
+{
+	std::wstring prefix = L"path";
+	switch (kind)
+	{
+	case ShapeKind::Rect:     prefix = L"rect"; break;
+	case ShapeKind::Ellipse:  prefix = L"ellipse"; break;
+	case ShapeKind::Triangle: prefix = L"triangle"; break;
+	case ShapeKind::Polygon:  prefix = L"polygon"; break;
+	case ShapeKind::Star:     prefix = L"star"; break;
+	case ShapeKind::Gear:     prefix = L"gear"; break;
+	case ShapeKind::Spiral:   prefix = L"spiral"; break;
+	case ShapeKind::Heart:    prefix = L"heart"; break;
+	case ShapeKind::Path:
+	default:
+		prefix = L"path";
+		break;
+	}
+
+	// 문서 내 모든 레이어의 자식 노드들을 검색하여 기존 번호 최대값 + 1 결정
+	int maxIdx = 0;
+	std::function<void(const Node*)> scanNode = [&](const Node* n) {
+		if (!n) return;
+		const std::wstring& name = n->GetName();
+		if (name.rfind(prefix, 0) == 0) // prefix로 시작
+		{
+			std::wstring numPart = name.substr(prefix.length());
+			if (!numPart.empty())
+			{
+				wchar_t* endPtr = nullptr;
+				long val = std::wcstol(numPart.c_str(), &endPtr, 10);
+				if (endPtr && *endPtr == L'\0' && val > maxIdx)
+				{
+					maxIdx = static_cast<int>(val);
+				}
+			}
+		}
+
+		if (n->Kind() == NodeKind::Group || n->Kind() == NodeKind::Layer)
+		{
+			const auto* g = static_cast<const GroupNode*>(n);
+			for (const auto& child : g->GetChildren())
+			{
+				scanNode(child.get());
+			}
+		}
+	};
+
+	for (const auto& layer : m_layers)
+	{
+		scanNode(layer.get());
+	}
+
+	return prefix + std::to_wstring(maxIdx + 1);
+}
+
+std::wstring Document::GenerateLayerName() const
+{
+	const std::wstring prefix = L"Layer ";
+	int maxIdx = 0;
+	for (const auto& layer : m_layers)
+	{
+		const std::wstring& name = layer->GetName();
+		if (name.rfind(prefix, 0) == 0)
+		{
+			std::wstring numPart = name.substr(prefix.length());
+			if (!numPart.empty())
+			{
+				wchar_t* endPtr = nullptr;
+				long val = std::wcstol(numPart.c_str(), &endPtr, 10);
+				if (endPtr && *endPtr == L'\0' && val > maxIdx)
+				{
+					maxIdx = static_cast<int>(val);
+				}
+			}
+		}
+	}
+	return prefix + std::to_wstring(maxIdx + 1);
+}
+
 
 void Document::AssignIds(Node& node)
 {
@@ -698,7 +769,18 @@ void D2DRenderer::DrawDocument(Document& doc, const Viewport& view)
 	// 레이어 0 -> N-1 (Painter's Algorithm)
 	for (auto& layer : doc.GetLayers()) {
 		if (!layer->IsVisible()) continue;
+
+		const bool needLayer = (layer->GetOpacity() < 0.999f) || layer->IsClippingMask();
+		if (needLayer && m_rt) {
+			D2D1_LAYER_PARAMETERS params = layer->GetD2DLayerParameters();
+			m_rt->PushLayer(params, nullptr);
+		}
+
 		DrawNode(*layer, Matrix2D::Identity(), view);
+
+		if (needLayer && m_rt) {
+			m_rt->PopLayer();
+		}
 	}
 }
 
@@ -927,24 +1009,49 @@ HitResult PathNode::HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, cons
 	}
 
 	// 2순위: 스트로크 및 채우기
-	auto localPtOpt = CoordinateSpace::ScreenToLocal(screenPt, m_xf, view);
-	if (!localPtOpt.has_value()) return {};
-
+	// D2D 변환 행렬(월드 Transform * 뷰포트 행렬)을 StrokeContainsPoint / FillContainsPoint에 직접 전달하여 정확한 화면 판정 수행
 	D2DRenderer renderer;
 	if (renderer.Initialize(nullptr, f)) {
 		auto* g = renderer.GetGeometry(*this);
 		if (g) {
+			const D2D1_MATRIX_3X2_F m = ToD2D(GetWorldTransform() * view.ToMatrix());
+			const float w = (std::max)(m_style.strokeWidth * view.zoom, 1.0f) + tolPx * 2.0f;
+			const float lw = w / (std::max)(view.zoom, 0.0001f);
+
 			BOOL hit = FALSE;
-			float hitWidth = m_style.strokeWidth + 2.0f * (tolPx / view.zoom);
-			if (m_style.stroke.a > 0.0f && hitWidth > 0.0f) {
-				HRESULT hr = g->StrokeContainsPoint(*localPtOpt, hitWidth, nullptr, nullptr, 0.25f / view.zoom, &hit);
-				if (SUCCEEDED(hr) && hit) return { HitPart::Stroke, -1, -1, this };
+			if (SUCCEEDED(g->StrokeContainsPoint(screenPt, lw, nullptr, &m, 0.25f, &hit)) && hit) {
+				return { HitPart::Stroke, -1, -1, this };
 			}
 
-			if (m_style.fill.a > 0.0f) {
+			// 닫힌 도형이거나 채우기 스타일이 지정된 경우 내부 클릭 히트 허용
+			bool isClosed = false;
+			for (const auto& sp : m_paths) {
+				if (sp.closed) { isClosed = true; break; }
+			}
+			const bool checkFill = (m_style.fillType != FillType::None) || (m_style.fill.a > 0.0f) || isClosed;
+			if (checkFill) {
 				hit = FALSE;
-				HRESULT hr = g->FillContainsPoint(*localPtOpt, nullptr, 0.25f / view.zoom, &hit);
-				if (SUCCEEDED(hr) && hit) return { HitPart::Fill, -1, -1, this };
+				if (SUCCEEDED(g->FillContainsPoint(screenPt, &m, 0.25f, &hit)) && hit) {
+					return { HitPart::Fill, -1, -1, this };
+				}
+			}
+		}
+	}
+
+	// 3순위: Direct2D 기하 판정 실패 시 수학적 선분/곡선 거리 계산 (100% 신뢰성 보장)
+	// 화면상의 점을 월드 및 로컬 좌표계로 역변환하여 패스의 모든 베이지어/직선 선분과의 최근접 거리를 직접 검사
+	Matrix2D invWorld = GetWorldTransform();
+	if (invWorld.Invert()) {
+		Vec2 worldPt = view.ScreenToWorld(Vec2{ screenPt.x, screenPt.y });
+		Vec2 localPt = invWorld.TransformPoint(worldPt);
+		int spIdx = -1, segIdx = -1;
+		float tVal = 0.0f, distSq = 1e30f;
+		if (FindClosestSegment(localPt, spIdx, segIdx, tVal, distSq)) {
+			// 로컬 거리를 화면 픽셀 거리로 환산
+			float distScreen = std::sqrt(distSq) * view.zoom;
+			float halfStrokePx = (m_style.strokeWidth * 0.5f) * view.zoom;
+			if (distScreen <= (halfStrokePx + tolPx)) {
+				return { HitPart::Stroke, -1, -1, this };
 			}
 		}
 	}

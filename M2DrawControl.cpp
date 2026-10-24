@@ -1247,14 +1247,16 @@ bool M2DrawPanel::OnLButtonDown(D2D1_POINT_2F pt)
 		}
 	}
 
-	// 2. 최상위(나중에 추가된) 컨트롤부터 역순 히트 테스트
-	for (auto it = m_children.rbegin(); it != m_children.rend(); ++it)
+	// 2. 최상위(나중에 추가된) 컨트롤부터 역순 히트 테스트 (콜백 내부에서 m_children이 변경될 수 있으므로 인덱스 기반으로 순회)
+	for (int i = static_cast<int>(m_children.size()) - 1; i >= 0; --i)
 	{
-		if ((*it)->IsVisible() && (*it)->HitTest(pt))
+		if (i >= static_cast<int>(m_children.size())) continue;
+		auto child = m_children[i];
+		if (child && child->IsVisible() && child->HitTest(pt))
 		{
-			if ((*it)->OnLButtonDown(pt))
+			if (child->OnLButtonDown(pt))
 			{
-				m_capturedChild = *it;
+				m_capturedChild = child;
 				return true;
 			}
 		}
@@ -1349,6 +1351,20 @@ bool M2DrawPanel::OnChar(UINT nChar)
 	return false;
 }
 
+
+void M2DrawPanel::ResetState()
+{
+	M2DrawControl::ResetState();
+	m_capturedChild.reset();
+	for (auto& child : m_children)
+	{
+		if (child)
+		{
+			child->ResetState();
+		}
+	}
+}
+
 // ============================================================================
 // 8. M2DrawExpander (접기/펴기 그룹 컨테이너) 구현
 // ============================================================================
@@ -1436,13 +1452,15 @@ bool M2DrawExpander::OnLButtonDown(D2D1_POINT_2F pt)
 
 	if (m_bExpanded)
 	{
-		for (auto it = m_children.rbegin(); it != m_children.rend(); ++it)
+		for (int i = static_cast<int>(m_children.size()) - 1; i >= 0; --i)
 		{
-			if ((*it)->IsVisible() && (*it)->HitTest(pt))
+			if (i >= static_cast<int>(m_children.size())) continue;
+			auto child = m_children[i];
+			if (child && child->IsVisible() && child->HitTest(pt))
 			{
-				if ((*it)->OnLButtonDown(pt))
+				if (child->OnLButtonDown(pt))
 				{
-					m_capturedChild = *it;
+					m_capturedChild = child;
 					return true;
 				}
 			}
@@ -1538,6 +1556,19 @@ bool M2DrawExpander::OnChar(UINT nChar)
 		}
 	}
 	return false;
+}
+
+void M2DrawExpander::ResetState()
+{
+	M2DrawControl::ResetState();
+	m_capturedChild.reset();
+	for (auto& child : m_children)
+	{
+		if (child)
+		{
+			child->ResetState();
+		}
+	}
 }
 
 // ============================================================================

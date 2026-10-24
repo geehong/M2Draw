@@ -3,6 +3,7 @@
 #include "PropertiesWnd.h"
 #include "ToolBoxPane.h"
 #include "ToolOptionBar.h"
+#include "LayerWnd.h"
 
 class CMainFrame : public CMDIFrameWndEx
 {
@@ -32,6 +33,7 @@ protected:  // 컨트롤 모음이 포함된 멤버입니다.
 	CPropertiesWnd    m_wndProperties;
 	CPropertiesWnd    m_wndGridProp;
 	CPropertiesWnd    m_wndCanvasProp;
+	CLayerWnd         m_wndLayers;
 
 public:
 	COutputWnd& GetOutputWnd() { return m_wndOutput; }
@@ -41,6 +43,8 @@ public:
 	CPropertiesWnd& GetPropertiesWnd() { return m_wndProperties; }
 	CPropertiesWnd& GetGridPropertiesWnd() { return m_wndGridProp; }
 	CPropertiesWnd& GetCanvasPropertiesWnd() { return m_wndCanvasProp; }
+	CLayerWnd& GetLayerWnd() { return m_wndLayers; }
+	CM2DrawDoc* GetActiveM2DrawDoc();
 	void SetStatusMessage(const CString& strMsg)
 	{
 		CString cur;

@@ -9,6 +9,7 @@
 
 #include "M2DrawDoc.h"
 #include "M2DrawView.h"
+#include "MainFrm.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -135,6 +136,13 @@ void CM2DrawView::OnInitialUpdate()
 	// 생성 직후에는 아직 MDI 탭 및 독 패인 배치가 완료되지 않았으므로
 	// 메시지 큐를 통해 배치가 끝난 직후 1회 중앙 정렬하도록 비동기 호출
 	PostMessage(WM_COMMAND, 0x9999, 0);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+	{
+		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
+		pMainFrame->GetLayerWnd().SetDocument(GetDocument());
+	}
 }
 
 void CM2DrawView::CenterOrigin()
