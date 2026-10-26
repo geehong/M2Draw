@@ -465,6 +465,13 @@ public:
 	void Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, ID2D1Factory* f, const Viewport& view);
 
 protected:
+	// Clone 규약: 복제본은 문서 식별 정보(id/parent/version)를 갖지 않음 -> 문서 삽입 시 AssignIds 로 새 ID 발급
+	void CopyNodePropsFrom(const Node& o) {
+		m_name = o.m_name; m_xf = o.m_xf; m_style = o.m_style;
+		m_visible = o.m_visible; m_locked = o.m_locked; m_opacity = o.m_opacity;
+	}
+	void ResetIdentity() { m_id = 0; m_parent = nullptr; m_version = 1; m_dirty = true; }
+
 	uint32_t     m_version = 1;
 	friend class GroupNode;
 	friend class Document;
@@ -586,6 +593,9 @@ public:
 	// 그룹화
 	GroupNode* GroupSelection();
 	void       UngroupSelection();
+
+	// 복제 (Ctrl+D): 선택 항목을 같은 부모의 원본 바로 위에 복제, 새 ID/이름 발급 후 복제본을 선택
+	std::vector<Node*> DuplicateSelection();
 
 		// 노드 제거 (소유권 반환, 선택에서도 제외)
 		std::unique_ptr<Node> RemoveNode(Node* node);

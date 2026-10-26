@@ -488,6 +488,15 @@ void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		}
 	}
 
+	// 0-1. Ctrl+D: 선택 오브젝트 복제 (도구 단축키보다 먼저 처리)
+	if (nChar == 'D' && (::GetKeyState(VK_CONTROL) & 0x8000))
+	{
+		CM2DrawDoc* pDoc = GetDocument();
+		if (pDoc && pDoc->DuplicateSelectedObjects())
+			Invalidate(FALSE);
+		return;
+	}
+
 	// 1. Space 키 누르고 있는 동안 임시 패닝(Pan) 모드 활성화
 	if (nChar == VK_SPACE && (nRepCnt == 1))
 	{

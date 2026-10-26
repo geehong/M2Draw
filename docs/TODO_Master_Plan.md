@@ -18,12 +18,28 @@
 - [x] 0.1.3 참조 멤버 선언 삭제, 이름 필드를 `std::wstring m_name` 하나로 통일
   - `SetTransform()`이 지오메트리 캐시를 무효화하지 않도록 변경 (변환은 로컬 지오메트리와 무관)
 - [x] 0.1.4 빌드 성공 (Debug x64, 신규 경고 0) / 회귀 확인 완료: 도형 생성, 이름 표시, 속성창, 레이어 패널
-- 메모: `PropertiesWnd`의 도형 속성 편집은 `GetShapes()`(구형 `m_shapes`, 항상 비어 있음)를 참조 → 사실상 동작하지 않는 코드. Step 0.4/0.5에서 정리
+- ~~메모: `m_shapes`는 항상 비어 있음~~ → **정정**: `m_shapes`는 실사용 중인 이중 모델 (Master Plan D6 참고)
 
-### Step 0.2 Clone 규약 통일 (D2)
-- [ ] 0.2.1 모든 `Clone()`이 `m_id = 0`, `m_parent = nullptr`, 버전을 새로 시작하도록 수정
-- [ ] 0.2.2 문서에 삽입할 때 `AssignIds`가 새 ID를 발급하는지 확인
-- [ ] 0.2.3 빌드 + 복제한 도형을 편집해도 원본이 변하지 않는지 확인
+### Step 0.2 Clone 규약 통일 (D2)  — ✅ 완료 (사용자 확인 2026-10-27)
+- [x] 1차 시도 버그 (사용자 보고): Ctrl+D가 `ge::Document`에만 복제 → `m_shapes[i]` ↔ `children[i]` 대응이 깨져
+  복제본 선택 불가, 다른 도형 데이터가 엉뚱한 노드에 덮어써짐(원 → 사각형), 레이어 패널 선택 실패
+  - 수정: 복제 시 `m_shapes`에도 같은 위치에 복제 삽입, 대응이 이미 깨졌거나 활성 레이어 밖이면 복제 거부
+- [x] 0.2.1 모든 `Clone()`이 `m_id = 0`, `m_parent = nullptr`, 버전을 새로 시작하도록 수정
+  - `Node::ResetIdentity()` / `Node::CopyNodePropsFrom()` 헬퍼 추가, Path/Group/Layer Clone 공통 사용
+- [x] 0.2.2 문서에 삽입할 때 `AssignIds`가 새 ID를 발급하는지 확인
+  - `Document::DuplicateSelection()` 추가: 원본 바로 위에 복제, `AssignIds` + 자동 이름(rect2 …), 복제본을 선택
+  - `CM2DrawDoc::DuplicateSelectedObjects()` + **Ctrl+D** 단축키 연결 (검증 수단)
+- [x] 0.2.3 빌드 성공 / 확인 완료: 복제한 도형을 편집해도 원본이 변하지 않는지
+
+### Step 0.2b 단일 모델 전환 (D5 + D6) — ⚠️ 우선순위 상향 제안 (0.3보다 먼저)
+> 이중 모델(`m_shapes` + `ge::Document`)이 확인됨. 이후 모든 기능(그룹, Z-Order, 레이어, 저장, Undo)이
+> 인덱스 대응을 깨뜨리므로, 기존 0.4(선택 단일화)와 0.5.1(`m_shapes` 제거)을 합쳐 먼저 진행한다.
+- [ ] 0.2b.1 생성 도구(BoxShapeTool, MultiPointShapeTool, PenTool)가 `ge::Document`에만 추가하도록 변경
+- [ ] 0.2b.2 SelectTool: `m_selectedIndices`(int) → `Document` 선택(`Node*`), 히트테스트·이동·스케일·회전·노드편집을 `ge` 노드로
+- [ ] 0.2b.3 PropertyView / ToolOptionBar / PropertiesWnd / LayerWnd 의 인덱스 기반 접근을 `Node*`로
+- [ ] 0.2b.4 `SyncShapeToGeDoc`, `SyncDocSelection`, `SyncPenPathToGeDoc`, 이중 렌더링 루프, 이름 기반 삭제 제거
+- [ ] 0.2b.5 `m_shapes`, `m_currentPath`, `GetShapes()` 삭제
+- [ ] 0.2b.6 빌드 + 전체 회귀 확인 (생성/선택/변형/노드편집/복제/삭제/레이어 패널/다중 레이어)
 
 ### Step 0.3 LayerNode 필드 가림 제거 + 조상 체인 판정 (D3)
 - [ ] 0.3.1 LayerNode의 `m_bVisible`/`m_bLocked`/`m_opacity` 및 이름을 가리는 메서드 삭제
@@ -32,13 +48,13 @@
 - [ ] 0.3.4 `LayerWnd`의 자식 visible 우회 코드 정리
 - [ ] 0.3.5 빌드 + 숨김/잠금 레이어 도형이 클릭되지 않는지 확인
 
-### Step 0.4 선택 상태 단일화 (D5)
+### Step 0.4 선택 상태 단일화 (D5)  — → Step 0.2b 로 통합
 - [ ] 0.4.1 `SelectTool::m_selectedIndices` → `Document` 선택(`Node*`)으로 바꿈
 - [ ] 0.4.2 `SyncDocSelection` 및 인덱스 기반 사용처(PropertyView, ToolOptionBar, LayerWnd, Doc 삭제) 정리
 - [ ] 0.4.3 빌드 + 다중 선택/마키 선택/레이어 패널 선택 동기화 확인
 
 ### Step 0.5 구형 잔재 제거 (D6, D15)
-- [ ] 0.5.1 `m_shapes`, `m_currentPath`, 이름 기반 삭제 로직 제거
+- [ ] 0.5.1 ~~`m_shapes`, `m_currentPath`, 이름 기반 삭제 로직 제거~~ → Step 0.2b 로 통합
 - [ ] 0.5.2 `Shape`/`PathShape` using 별칭 정리
 - [ ] 0.5.3 `D2DVectorEngine_old.h`, `backup_toolbar_20261021/` 삭제 (vcxproj 참조 포함)
 - [ ] 0.5.4 빌드 + 삭제 기능(Del, 레이어 휴지통) 확인

@@ -71,7 +71,7 @@ D2DRenderer : m_geoCache[NodeId] = { version, ID2D1PathGeometry }
 | D3 | 🔴 | `D2DLayer.h` | LayerNode가 `m_bVisible`/`m_bLocked`/`m_opacity`를 **중복 선언**하고 비가상 `IsVisible()` 등을 숨김(hiding). `Node&`로 호출하는 `HitNode`, `GetEffectiveOpacity`, SnapManager는 Node 쪽 값을 읽음 → 숨김/잠금 레이어 도형이 클릭됨, 레이어 불투명도 누락. |
 | D4 | 🔴 | `CM2DrawDoc::Serialize` | 저장/불러오기 미구현. |
 | D5 | 🟠 | `SelectTool::m_selectedIndices` vs `Document::m_selection` | 선택 상태 이중화. 인덱스 기반이라 그룹 내부·타 레이어 선택 불가, Z-Order 변경 시 어긋남. |
-| D6 | 🟠 | `CM2DrawDoc::m_shapes`, 삭제 로직 | 사용되지 않는 구형 벡터. **이름이 같은 도형을 함께 삭제**하는 로직 존재. |
+| D6 | 🔴 | `CM2DrawDoc::m_shapes` (이중 모델) | **[정정 2026-10-27]** 미사용이 아니라 **실사용 중**. 생성 도구가 `m_shapes`와 활성 레이어에 같은 도형을 각각 넣고, SelectTool·핸들·속성창은 `m_shapes`를, 레이어 패널은 `ge::Document`를 사용. 캔버스에는 두 목록이 **겹쳐서 이중 렌더링**됨. `m_shapes[i]` ↔ 활성 레이어 `children[i]` 인덱스 대응에 의존하므로, 한쪽만 바꾸는 모든 작업(복제, 그룹, Z-Order, 레이어 이동, 다중 레이어)이 데이터를 오염시킴. 이름 기반 삭제 로직도 존재. |
 | D7 | 🟠 | `CommandStack` | 미사용 → Undo/Redo 없음. |
 | D8 | 🟠 | Node / LayerNode | 모델이 `CString`(MFC), `D2D1_*`, `Node::Draw(ID2D1RenderTarget*)`, `GetD2DLayerParameters()` 에 의존. `Node::Draw`는 매 호출 렌더러를 새로 생성해 캐시 무의미. |
 | D9 | 🟡 | `Matrix2D::operator D2D1::Matrix3x2F` | 임시 객체 주소 `reinterpret_cast` (MSVC 확장 의존 UB). |

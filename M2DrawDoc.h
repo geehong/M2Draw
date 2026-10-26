@@ -44,6 +44,9 @@ public:
 	bool DeleteActiveLayer();
 	bool PerformSmartDelete();
 
+	// --- 복제 (Ctrl+D) ---
+	bool DuplicateSelectedObjects();
+
 // 재정의입니다.
 public:
 	virtual BOOL OnNewDocument();

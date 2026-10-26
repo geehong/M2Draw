@@ -27,8 +27,7 @@ LayerNode::LayerNode(const std::wstring& name)
 std::unique_ptr<Node> LayerNode::Clone() const
 {
 	auto copy = std::make_unique<LayerNode>(m_name);
-	copy->m_xf            = m_xf;
-	copy->m_style         = m_style;
+	copy->CopyNodePropsFrom(*this);
 	copy->m_bVisible      = m_bVisible;
 	copy->m_bLocked       = m_bLocked;
 	copy->m_opacity       = m_opacity;

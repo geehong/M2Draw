@@ -369,3 +369,65 @@ bool CM2DrawDoc::PerformSmartDelete()
 	// 2. 오브젝트 선택이 없다면 선택된(활성) 레이어 삭제 시도
 	return DeleteActiveLayer();
 }
+
+bool CM2DrawDoc::DuplicateSelectedObjects()
+{
+	CM2DrawApp* pApp = dynamic_cast<CM2DrawApp*>(AfxGetApp());
+	SelectTool* pSelect = pApp ? pApp->GetToolManager().GetSelectTool() : nullptr;
+
+	// [임시] 구형 m_shapes[i] <-> 활성 레이어 children[i] 인덱스 대응을 유지해야 함
+	// (SelectTool / LayerWnd / SyncShapeToGeDoc 가 이 대응에 의존. 단일 모델 전환 시 제거)
+	auto* pActiveLayer = m_doc.GetActiveLayer();
+	if (!pActiveLayer || pActiveLayer->GetChildren().size() != m_shapes.size())
+	{
+		SetAppStatusText(_T("[도형 복제] 활성 레이어와 도형 목록이 일치하지 않아 복제할 수 없습니다."));
+		return false;
+	}
+	for (ge::Node* n : m_doc.GetSelection())
+	{
+		if (!n || n->GetParent() != pActiveLayer)
+		{
+			SetAppStatusText(_T("[도형 복제] 활성 레이어의 최상위 도형만 복제할 수 있습니다."));
+			return false;
+		}
+	}
+
+	std::vector<ge::Node*> clones = m_doc.DuplicateSelection();
+	if (clones.empty())
+		return false;
+
+	// 복제본은 항상 원본 바로 위(index+1)에 있으므로, 인덱스 오름차순으로 m_shapes 에도 같은 위치에 삽입
+	std::vector<int> cloneIdx;
+	for (ge::Node* n : clones)
+		cloneIdx.push_back(pActiveLayer->IndexOf(n));
+	std::sort(cloneIdx.begin(), cloneIdx.end());
+	for (int k : cloneIdx)
+	{
+		auto legacy = m_shapes[k - 1]->Clone();
+		legacy->SetName(pActiveLayer->GetChildren()[k]->GetName());
+		m_shapes.insert(m_shapes.begin() + k, std::move(legacy));
+	}
+
+	if (pSelect)
+	{
+		auto& indices = pSelect->GetSelectedIndices();
+		indices.clear();
+		indices.insert(cloneIdx.begin(), cloneIdx.end());
+		UpdateShapePropertiesSelection(pSelect->GetSelectedIndex(), this);
+	}
+
+	CString strLog;
+	strLog.Format(_T("[도형 복제] %d개 오브젝트 복제 완료"), static_cast<int>(clones.size()));
+	LogAppEvent(strLog);
+	SetAppStatusText(strLog);
+
+	SetModifiedFlag();
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+	{
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	}
+	return true;
+}

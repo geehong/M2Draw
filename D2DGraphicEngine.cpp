@@ -131,8 +131,7 @@ void Node::Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, ID2D1Factory
 std::unique_ptr<Node> PathNode::Clone() const
 {
 	auto copy = std::make_unique<PathNode>(*this);
-	copy->m_parent = nullptr;
-	copy->m_dirty = true;
+	copy->ResetIdentity();
 	return copy;
 }
 
@@ -276,8 +275,7 @@ float Node::GetEffectiveOpacity() const
 std::unique_ptr<Node> GroupNode::Clone() const
 {
 	auto copy = std::make_unique<GroupNode>();
-	copy->m_name = m_name; copy->m_xf = m_xf; copy->m_style = m_style;
-	copy->m_visible = m_visible; copy->m_locked = m_locked; copy->m_opacity = m_opacity;
+	copy->CopyNodePropsFrom(*this);
 	for (const auto& c : m_children) copy->AddChild(c->Clone());
 	return copy;
 }
@@ -601,6 +599,31 @@ void Document::UngroupSelection()
 		}
 	}
 	m_selection = result;
+}
+
+std::vector<Node*> Document::DuplicateSelection()
+{
+	auto isSelected = [&](const Node* n) {
+		return std::find(m_selection.begin(), m_selection.end(), n) != m_selection.end();
+	};
+	std::vector<Node*> result;
+	for (Node* n : m_selection) {
+		GroupNode* parent = n ? n->GetParent() : nullptr;
+		if (!parent) continue;
+		// 조상이 함께 선택된 경우 조상 복제에 포함되므로 건너뜀
+		bool ancestorSelected = false;
+		for (const GroupNode* p = parent; p; p = p->GetParent())
+			if (isSelected(p)) { ancestorSelected = true; break; }
+		if (ancestorSelected) continue;
+
+		auto copy = n->Clone();
+		AssignIds(*copy);
+		if (copy->Kind() == NodeKind::Path)
+			copy->SetName(GenerateNodeName(static_cast<PathNode&>(*copy).GetKind()));
+		result.push_back(parent->AddChild(std::move(copy), parent->IndexOf(n) + 1));
+	}
+	if (!result.empty()) m_selection = result;
+	return result;
 }
 
 void Document::AlignSelection(AlignMode mode, bool toCanvas)
