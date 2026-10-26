@@ -331,7 +331,8 @@ public:
 	void SetName(const std::wstring& v)      { m_name = v; }
 
 	const Matrix2D& GetTransform() const     { return m_xf; }
-	void SetTransform(const Matrix2D& v)     { m_xf = v; Invalidate(); }
+	// 변환은 로컬 지오메트리와 무관하므로 지오메트리 캐시를 무효화하지 않음
+	void SetTransform(const Matrix2D& v)     { m_xf = v; }
 
 	const Style& GetStyle() const            { return m_style; }
 	Style&       GetStyleRef()               { return m_style; }
@@ -355,12 +356,6 @@ public:
 
 	// 변경 횟수 (렌더러 지오메트리 캐시 무효화 판단용)
 	uint32_t GetVersion() const { return m_version; }
-
-	// 기존 코드 호환용 브릿지 (D2DVectorEngine 하위 호환)
-	CString   m_nameStr;
-	CString&  name = m_nameStr;
-	Matrix2D& xf = m_xf;
-	Style&    style = m_style;
 
 	virtual const wchar_t* GetShapeTypeName() const { return L"쉐이프"; }
 
@@ -499,9 +494,6 @@ public:
 	void AddAnchor(D2D1_POINT_2F localPt, bool forceNewSubPath = false) {
 		AddAnchor(Vec2{ localPt.x, localPt.y }, forceNewSubPath);
 	}
-
-	// 기존 코드 호환용 레퍼런스
-	std::vector<SubPath>& paths = m_paths;
 
 	// 파라메트릭 도형 종류 및 설정
 	ShapeKind GetKind() const { return m_kind; }

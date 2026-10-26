@@ -39,6 +39,8 @@ BEGIN_MESSAGE_MAP(CM2DrawView, CView)
 	ON_WM_SETCURSOR()
 	ON_COMMAND(ID_VIEW_GRID, &CM2DrawView::OnViewGrid)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_GRID, &CM2DrawView::OnUpdateViewGrid)
+	ON_COMMAND(ID_EDIT_CLEAR, &CM2DrawView::OnEditClear)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_CLEAR, &CM2DrawView::OnUpdateEditClear)
 	ON_COMMAND(0x9999, &CM2DrawView::CenterOrigin)
 END_MESSAGE_MAP()
 
@@ -458,8 +460,34 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	CView::OnMouseMove(nFlags, point);
 }
 
+BOOL CM2DrawView::PreTranslateMessage(MSG* pMsg)
+{
+	if (pMsg->message == WM_KEYDOWN && (pMsg->wParam == VK_DELETE || pMsg->wParam == VK_BACK))
+	{
+		CM2DrawDoc* pDoc = GetDocument();
+		if (pDoc && pDoc->HasSelectedObjects())
+		{
+			pDoc->DeleteSelectedObjects();
+			Invalidate(FALSE);
+			return TRUE;
+		}
+	}
+	return CView::PreTranslateMessage(pMsg);
+}
+
 void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
+	// 0. Delete / Backspace 키: 선택된 오브젝트 삭제
+	if (nChar == VK_DELETE || nChar == VK_BACK)
+	{
+		CM2DrawDoc* pDoc = GetDocument();
+		if (pDoc && pDoc->DeleteSelectedObjects())
+		{
+			Invalidate(FALSE);
+			return;
+		}
+	}
+
 	// 1. Space 키 누르고 있는 동안 임시 패닝(Pan) 모드 활성화
 	if (nChar == VK_SPACE && (nRepCnt == 1))
 	{
@@ -486,6 +514,22 @@ void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	LogAppEvent(strLog);
 
 	CView::OnKeyDown(nChar, nRepCnt, nFlags);
+}
+
+void CM2DrawView::OnEditClear()
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	if (pDoc)
+	{
+		pDoc->PerformSmartDelete();
+		Invalidate(FALSE);
+	}
+}
+
+void CM2DrawView::OnUpdateEditClear(CCmdUI* pCmdUI)
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	pCmdUI->Enable(pDoc && (pDoc->HasSelectedObjects() || pDoc->GetDoc().GetLayers().size() > 1));
 }
 
 void CM2DrawView::OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)

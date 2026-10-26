@@ -120,22 +120,22 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex)
 	{
 		Shape* shape = pDoc->GetShapes()[shapeIndex].get();
 		m_strShapeType = shape->GetShapeTypeName();
-		m_strShapeName = shape->name.IsEmpty() ? m_strShapeType : shape->name;
+		m_strShapeName = shape->GetName().empty() ? m_strShapeType : CString(shape->GetName().c_str());
 
-		m_bFillEnabled = (shape->style.fillType != FillType::None);
-		m_fillColor = shape->style.fill;
+		m_bFillEnabled = (shape->GetStyleRef().fillType != FillType::None);
+		m_fillColor = shape->GetStyleRef().fill;
 		RGBtoHSL(m_fillColor, m_fFillHue, m_fFillSat, m_fFillLight);
 
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
 		if (pxPerUnit <= 0.0f) pxPerUnit = 1.0f;
-		m_fStrokeWidth = shape->style.strokeWidth / pxPerUnit;
-		m_strokeColor = shape->style.stroke;
+		m_fStrokeWidth = shape->GetStyleRef().strokeWidth / pxPerUnit;
+		m_strokeColor = shape->GetStyleRef().stroke;
 		RGBtoHSL(m_strokeColor, m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
 
 		m_fOpacity = (m_colorTarget == 0 ? m_fillColor.a : m_strokeColor.a) * 100.0f;
 
-		switch (shape->style.dashStyle)
+		switch (shape->GetStyleRef().dashStyle)
 		{
 		case D2D1_DASH_STYLE_DASH:      m_selectedDash = 1; break;
 		case D2D1_DASH_STYLE_DOT:       m_selectedDash = 2; break;
@@ -163,26 +163,26 @@ void CD2DPropertyView::ApplyToShape()
 
 	if (m_bFillEnabled)
 	{
-		shape->style.fillType = FillType::Solid;
-		shape->style.fill = m_fillColor;
+		shape->GetStyleRef().fillType = FillType::Solid;
+		shape->GetStyleRef().fill = m_fillColor;
 	}
 	else
 	{
-		shape->style.fillType = FillType::None;
+		shape->GetStyleRef().fillType = FillType::None;
 	}
 
-	shape->style.stroke = m_strokeColor;
+	shape->GetStyleRef().stroke = m_strokeColor;
 
 	CanvasUnit curUnit = GetApp()->GetGrid().unit;
 	float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
-	shape->style.strokeWidth = max(0.1f, m_fStrokeWidth * pxPerUnit);
+	shape->GetStyleRef().strokeWidth = max(0.1f, m_fStrokeWidth * pxPerUnit);
 
 	switch (m_selectedDash)
 	{
-	case 1: shape->style.dashStyle = D2D1_DASH_STYLE_DASH; break;
-	case 2: shape->style.dashStyle = D2D1_DASH_STYLE_DOT; break;
-	case 3: shape->style.dashStyle = D2D1_DASH_STYLE_DASH_DOT; break;
-	default: shape->style.dashStyle = D2D1_DASH_STYLE_SOLID; break;
+	case 1: shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH; break;
+	case 2: shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DOT; break;
+	case 3: shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH_DOT; break;
+	default: shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_SOLID; break;
 	}
 
 	shape->Invalidate();
@@ -197,11 +197,11 @@ void CD2DPropertyView::ApplyToShape()
 			if (node)
 			{
 				ge::Style st;
-				st.fillType = static_cast<ge::FillType>(shape->style.fillType);
-				st.fill = ge::Color::FromD2D(shape->style.fill);
-				st.stroke = ge::Color::FromD2D(shape->style.stroke);
-				st.strokeWidth = shape->style.strokeWidth;
-				st.dashStyle = static_cast<ge::DashStyle>(shape->style.dashStyle);
+				st.fillType = static_cast<ge::FillType>(shape->GetStyleRef().fillType);
+				st.fill = ge::Color::FromD2D(shape->GetStyleRef().fill);
+				st.stroke = ge::Color::FromD2D(shape->GetStyleRef().stroke);
+				st.strokeWidth = shape->GetStyleRef().strokeWidth;
+				st.dashStyle = static_cast<ge::DashStyle>(shape->GetStyleRef().dashStyle);
 				node->SetStyle(st);
 			}
 		}
@@ -279,9 +279,9 @@ void CD2DPropertyView::InitControls()
 			float targetPixelX = static_cast<float>(val) * pxPerUnit;
 			D2D1_RECT_F localBounds;
 			if (shape->GetLocalBounds(nullptr, localBounds)) {
-				D2D1_POINT_2F curOrigin = shape->xf.TransformPoint(D2D1::Point2F(localBounds.left, localBounds.top));
+				D2D1_POINT_2F curOrigin = shape->GetTransform().TransformPoint(D2D1::Point2F(localBounds.left, localBounds.top));
 				float dx = targetPixelX - curOrigin.x;
-				shape->xf = shape->xf * D2D1::Matrix3x2F::Translation(dx, 0.0f);
+				shape->SetTransform(shape->GetTransform() * D2D1::Matrix3x2F::Translation(dx, 0.0f));
 				shape->Invalidate();
 				m_pActiveDoc->UpdateAllViews(nullptr);
 			}
@@ -299,9 +299,9 @@ void CD2DPropertyView::InitControls()
 			float targetPixelY = static_cast<float>(val) * pxPerUnit;
 			D2D1_RECT_F localBounds;
 			if (shape->GetLocalBounds(nullptr, localBounds)) {
-				D2D1_POINT_2F curOrigin = shape->xf.TransformPoint(D2D1::Point2F(localBounds.left, localBounds.top));
+				D2D1_POINT_2F curOrigin = shape->GetTransform().TransformPoint(D2D1::Point2F(localBounds.left, localBounds.top));
 				float dy = targetPixelY - curOrigin.y;
-				shape->xf = shape->xf * D2D1::Matrix3x2F::Translation(0.0f, dy);
+				shape->SetTransform(shape->GetTransform() * D2D1::Matrix3x2F::Translation(0.0f, dy));
 				shape->Invalidate();
 				m_pActiveDoc->UpdateAllViews(nullptr);
 			}
@@ -321,15 +321,15 @@ void CD2DPropertyView::InitControls()
 			if (shape->GetLocalBounds(nullptr, lb)) {
 				float origW = lb.right - lb.left;
 				if (origW > 0.001f) {
-					float curScaleX = std::sqrt(shape->xf._11 * shape->xf._11 + shape->xf._12 * shape->xf._12);
+					float curScaleX = std::sqrt(shape->GetTransform()._11 * shape->GetTransform()._11 + shape->GetTransform()._12 * shape->GetTransform()._12);
 					if (curScaleX > 0.0001f) {
 						float factor = (targetPixelW / (origW * curScaleX));
-						D2D1_POINT_2F origin = shape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
+						D2D1_POINT_2F origin = shape->GetTransform().TransformPoint(D2D1::Point2F(lb.left, lb.top));
 						if (m_chkAspectLink && m_chkAspectLink->IsChecked()) {
-							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(factor, factor, origin);
+							shape->SetTransform(shape->GetTransform() * D2D1::Matrix3x2F::Scale(factor, factor, origin));
 							if (m_spinTransH) m_spinTransH->SetValue(m_spinTransH->GetValue() * factor, false);
 						} else {
-							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(factor, 1.0f, origin);
+							shape->SetTransform(shape->GetTransform() * D2D1::Matrix3x2F::Scale(factor, 1.0f, origin));
 						}
 						shape->Invalidate();
 						m_pActiveDoc->UpdateAllViews(nullptr);
@@ -352,15 +352,15 @@ void CD2DPropertyView::InitControls()
 			if (shape->GetLocalBounds(nullptr, lb)) {
 				float origH = lb.bottom - lb.top;
 				if (origH > 0.001f) {
-					float curScaleY = std::sqrt(shape->xf._21 * shape->xf._21 + shape->xf._22 * shape->xf._22);
+					float curScaleY = std::sqrt(shape->GetTransform()._21 * shape->GetTransform()._21 + shape->GetTransform()._22 * shape->GetTransform()._22);
 					if (curScaleY > 0.0001f) {
 						float factor = (targetPixelH / (origH * curScaleY));
-						D2D1_POINT_2F origin = shape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
+						D2D1_POINT_2F origin = shape->GetTransform().TransformPoint(D2D1::Point2F(lb.left, lb.top));
 						if (m_chkAspectLink && m_chkAspectLink->IsChecked()) {
-							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(factor, factor, origin);
+							shape->SetTransform(shape->GetTransform() * D2D1::Matrix3x2F::Scale(factor, factor, origin));
 							if (m_spinTransW) m_spinTransW->SetValue(m_spinTransW->GetValue() * factor);
 						} else {
-							shape->xf = shape->xf * D2D1::Matrix3x2F::Scale(1.0f, factor, origin);
+							shape->SetTransform(shape->GetTransform() * D2D1::Matrix3x2F::Scale(1.0f, factor, origin));
 						}
 						shape->Invalidate();
 						m_pActiveDoc->UpdateAllViews(nullptr);
@@ -856,9 +856,9 @@ void CD2DPropertyView::SyncControlsFromData()
 				D2D1_RECT_F lb;
 				if (shape->GetLocalBounds(nullptr, lb))
 				{
-					D2D1_POINT_2F origin = shape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
-					float curW = (lb.right - lb.left) * std::sqrt(shape->xf._11 * shape->xf._11 + shape->xf._12 * shape->xf._12);
-					float curH = (lb.bottom - lb.top) * std::sqrt(shape->xf._21 * shape->xf._21 + shape->xf._22 * shape->xf._22);
+					D2D1_POINT_2F origin = shape->GetTransform().TransformPoint(D2D1::Point2F(lb.left, lb.top));
+					float curW = (lb.right - lb.left) * std::sqrt(shape->GetTransform()._11 * shape->GetTransform()._11 + shape->GetTransform()._12 * shape->GetTransform()._12);
+					float curH = (lb.bottom - lb.top) * std::sqrt(shape->GetTransform()._21 * shape->GetTransform()._21 + shape->GetTransform()._22 * shape->GetTransform()._22);
 
 					const bool prev = m_bUpdating;
 					m_bUpdating = true;
@@ -897,7 +897,7 @@ void CD2DPropertyView::SyncControlsFromData()
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			if (shape)
 			{
-				m_fStrokeWidth = shape->style.strokeWidth / pxPerUnit;
+				m_fStrokeWidth = shape->GetStyleRef().strokeWidth / pxPerUnit;
 			}
 		}
 
@@ -1007,9 +1007,9 @@ void CD2DPropertyView::SyncTransformOnly()
 	D2D1_RECT_F lb{};
 	if (shape->GetLocalBounds(nullptr, lb))
 	{
-		D2D1_POINT_2F origin = shape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
-		float curW = (lb.right - lb.left) * std::sqrt(shape->xf._11 * shape->xf._11 + shape->xf._12 * shape->xf._12);
-		float curH = (lb.bottom - lb.top) * std::sqrt(shape->xf._21 * shape->xf._21 + shape->xf._22 * shape->xf._22);
+		D2D1_POINT_2F origin = shape->GetTransform().TransformPoint(D2D1::Point2F(lb.left, lb.top));
+		float curW = (lb.right - lb.left) * std::sqrt(shape->GetTransform()._11 * shape->GetTransform()._11 + shape->GetTransform()._12 * shape->GetTransform()._12);
+		float curH = (lb.bottom - lb.top) * std::sqrt(shape->GetTransform()._21 * shape->GetTransform()._21 + shape->GetTransform()._22 * shape->GetTransform()._22);
 
 		const bool prev = m_bUpdating;
 		m_bUpdating = true;

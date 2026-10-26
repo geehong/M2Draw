@@ -16,7 +16,7 @@ void PenTool::OnDown(const ToolEvent& e)
 	D2D1_POINT_2F screenD2D = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
 	D2D1_POINT_2F snappedWorld = e.worldPt;
 
-	D2D1::Matrix3x2F invShape = currentPath->xf;
+	D2D1::Matrix3x2F invShape = currentPath->GetTransform();
 	if (!invShape.Invert()) return;
 	D2D1_POINT_2F localPt = invShape.TransformPoint(snappedWorld);
 
@@ -24,10 +24,10 @@ void PenTool::OnDown(const ToolEvent& e)
 	m_state = State::Pressed;
 
 	// 패스 폐합 검사 (첫 앵커와 8px 이내인지 비교)
-	if (!m_needNewSubPath && !currentPath->paths.empty() && !currentPath->paths.back().closed && currentPath->paths.back().nodes.size() >= 3)
+	if (!m_needNewSubPath && !currentPath->GetPathsRef().empty() && !currentPath->GetPathsRef().back().closed && currentPath->GetPathsRef().back().nodes.size() >= 3)
 	{
-		auto& sp = currentPath->paths.back();
-		D2D1_POINT_2F firstScreenPt = CoordinateSpace::LocalToScreen(sp.nodes[0].anchor, currentPath->xf, e.view);
+		auto& sp = currentPath->GetPathsRef().back();
+		D2D1_POINT_2F firstScreenPt = CoordinateSpace::LocalToScreen(sp.nodes[0].anchor, currentPath->GetTransform(), e.view);
 		float dx = firstScreenPt.x - screenD2D.x;
 		float dy = firstScreenPt.y - screenD2D.y;
 
@@ -62,8 +62,8 @@ void PenTool::OnMove(const ToolEvent& e)
 	if (!e.pDoc) return;
 
 	auto& currentPath = e.pDoc->GetCurrentPath();
-	if (!currentPath || currentPath->paths.empty()) return;
-	auto& sp = currentPath->paths.back();
+	if (!currentPath || currentPath->GetPathsRef().empty()) return;
+	auto& sp = currentPath->GetPathsRef().back();
 	if (sp.nodes.empty()) return;
 
 	D2D1_POINT_2F screenD2D = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
@@ -82,7 +82,7 @@ void PenTool::OnMove(const ToolEvent& e)
 	if (m_state == State::DraggingHandle)
 	{
 		D2D1_POINT_2F snappedWorld = e.worldPt;
-		D2D1::Matrix3x2F invShape = currentPath->xf;
+		D2D1::Matrix3x2F invShape = currentPath->GetTransform();
 		if (!invShape.Invert()) return;
 		D2D1_POINT_2F localPt = invShape.TransformPoint(snappedWorld);
 
@@ -118,10 +118,10 @@ static void SyncPenPathToGeDoc(CM2DrawDoc* pDoc, const std::unique_ptr<PathShape
 	if (!pDoc || !path) return;
 	auto node = std::make_unique<ge::PathNode>();
 	node->SetName(pDoc->GetDoc().GenerateNodeName(ge::ShapeKind::Path));
-	if (path) path->name = node->GetName().c_str();
+	if (path) path->SetName(node->GetName());
 	node->SetKind(ge::ShapeKind::Path);
 	std::vector<ge::SubPath> gePaths;
-	for (const auto& sp : path->paths) {
+	for (const auto& sp : path->GetPathsRef()) {
 		ge::SubPath gsp;
 		gsp.closed = sp.closed;
 		for (const auto& bn : sp.nodes) {
@@ -135,14 +135,14 @@ static void SyncPenPathToGeDoc(CM2DrawDoc* pDoc, const std::unique_ptr<PathShape
 		gePaths.push_back(std::move(gsp));
 	}
 	node->SetPaths(gePaths);
-	const auto& mx = path->xf;
+	const auto& mx = path->GetTransform();
 	node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
 	ge::Style st;
-	st.fillType = static_cast<ge::FillType>(path->style.fillType);
-	st.fill = ge::Color::FromD2D(path->style.fill);
-	st.stroke = ge::Color::FromD2D(path->style.stroke);
-	st.strokeWidth = path->style.strokeWidth;
-	st.dashStyle = static_cast<ge::DashStyle>(path->style.dashStyle);
+	st.fillType = static_cast<ge::FillType>(path->GetStyleRef().fillType);
+	st.fill = ge::Color::FromD2D(path->GetStyleRef().fill);
+	st.stroke = ge::Color::FromD2D(path->GetStyleRef().stroke);
+	st.strokeWidth = path->GetStyleRef().strokeWidth;
+	st.dashStyle = static_cast<ge::DashStyle>(path->GetStyleRef().dashStyle);
 	node->SetStyle(st);
 	pDoc->GetDoc().AddShape(std::move(node));
 }
@@ -154,7 +154,7 @@ void PenTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
 	if (nChar == VK_RETURN)
 	{
 		// Enter 키: 현재 열린 패스 완료 후 문서 도형 목록에 보관
-		if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->paths.empty())
+		if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPathsRef().empty())
 		{
 			m_state = State::Idle;
 			m_needNewSubPath = true;
@@ -183,9 +183,9 @@ bool PenTool::OnDoubleClicked(CM2DrawDoc* pDoc)
 {
 	if (!pDoc) return true;
 
-	if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->paths.empty())
+	if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPathsRef().empty())
 	{
-		auto& nodes = pDoc->GetCurrentPath()->paths.back().nodes;
+		auto& nodes = pDoc->GetCurrentPath()->GetPathsRef().back().nodes;
 
 		// 더블클릭 시 방금 클릭된 직전 점과 좌표가 겹치면 중복점 1개 제거
 		if (nodes.size() >= 2)
@@ -225,9 +225,9 @@ bool PenTool::OnRightClicked(CM2DrawDoc* pDoc)
 {
 	if (!pDoc) return true;
 
-	if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->paths.empty())
+	if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPathsRef().empty())
 	{
-		auto& nodes = pDoc->GetCurrentPath()->paths.back().nodes;
+		auto& nodes = pDoc->GetCurrentPath()->GetPathsRef().back().nodes;
 		if (nodes.size() >= 2)
 		{
 			m_state = State::Idle;
@@ -255,7 +255,7 @@ void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, fl
 	ViewportTransform view = { zoom, pan };
 
 	// 1. 패스가 이미 시작된 상태인 경우
-	if (pDoc && pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->paths.empty())
+	if (pDoc && pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPathsRef().empty())
 	{
 		const auto& path = pDoc->GetCurrentPath();
 
@@ -268,16 +268,16 @@ void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, fl
 		bool hasLastOut = false;
 		bool hasNodes = false;
 
-		for (const auto& sp : path->paths)
+		for (const auto& sp : path->GetPathsRef())
 		{
 			for (const auto& node : sp.nodes)
 			{
-				D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, path->xf, view);
+				D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, path->GetTransform(), view);
 
 				// 핸들 In 선 및 조절점
 				if (node.HasIn())
 				{
-					D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), path->xf, view);
+					D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), path->GetTransform(), view);
 					brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
 					rt->DrawLine(aScreen, inScreen, brush, 1.0f);
 					brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
@@ -287,7 +287,7 @@ void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, fl
 				// 핸들 Out 선 및 조절점
 				if (node.HasOut())
 				{
-					D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), path->xf, view);
+					D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), path->GetTransform(), view);
 					brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
 					rt->DrawLine(aScreen, outScreen, brush, 1.0f);
 					brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
@@ -310,13 +310,13 @@ void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, fl
 		// 마지막 노드에서 다음 마우스(호버/스냅) 위치까지 베이지어/직선 실시간 연결선 및 포인트 미리보기
 		if (m_hasHover && hasNodes)
 		{
-			D2D1_POINT_2F pLastScreen = CoordinateSpace::LocalToScreen(lastAnchorLocal, path->xf, view);
+			D2D1_POINT_2F pLastScreen = CoordinateSpace::LocalToScreen(lastAnchorLocal, path->GetTransform(), view);
 			D2D1_POINT_2F pNextScreen = view.WorldToScreen(m_hoverWorld);
 
 			brush->SetColor(D2D1::ColorF(D2D1::ColorF::CornflowerBlue));
 			if (hasLastOut)
 			{
-				D2D1_POINT_2F pOutScreen = CoordinateSpace::LocalToScreen(lastOutLocal, path->xf, view);
+				D2D1_POINT_2F pOutScreen = CoordinateSpace::LocalToScreen(lastOutLocal, path->GetTransform(), view);
 				// 마지막 핸들 Out이 있을 경우 3차 베지에 곡선으로 다음 지점 미리보기
 				ID2D1Factory* pFactory = nullptr;
 				rt->GetFactory(&pFactory);

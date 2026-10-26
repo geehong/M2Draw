@@ -644,9 +644,9 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 		}
 	}
 
-	if (shapeTool == ToolType::Pen && pPathShape && !pPathShape->paths.empty())
+	if (shapeTool == ToolType::Pen && pPathShape && !pPathShape->GetPathsRef().empty())
 	{
-		m_bPathClosed = pPathShape->paths[0].closed;
+		m_bPathClosed = pPathShape->GetPathsRef()[0].closed;
 	}
 
 	if (m_curTool != shapeTool || !m_bEditing)
@@ -678,14 +678,14 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 	D2D1_RECT_F lb{};
 	if (pBaseShape->GetLocalBounds(nullptr, lb))
 	{
-		D2D1_POINT_2F origin = pBaseShape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
-		float curScaleX = std::sqrt(pBaseShape->xf._11 * pBaseShape->xf._11 + pBaseShape->xf._12 * pBaseShape->xf._12);
-		float curScaleY = std::sqrt(pBaseShape->xf._21 * pBaseShape->xf._21 + pBaseShape->xf._22 * pBaseShape->xf._22);
+		D2D1_POINT_2F origin = pBaseShape->GetTransform().TransformPoint(D2D1::Point2F(lb.left, lb.top));
+		float curScaleX = std::sqrt(pBaseShape->GetTransform()._11 * pBaseShape->GetTransform()._11 + pBaseShape->GetTransform()._12 * pBaseShape->GetTransform()._12);
+		float curScaleY = std::sqrt(pBaseShape->GetTransform()._21 * pBaseShape->GetTransform()._21 + pBaseShape->GetTransform()._22 * pBaseShape->GetTransform()._22);
 		float curW = (lb.right - lb.left) * curScaleX;
 		float curH = (lb.bottom - lb.top) * curScaleY;
 
 		// 회전 각도 계산 (-180 ~ +180)
-		float rotDeg = std::atan2(pBaseShape->xf._12, pBaseShape->xf._11) * (180.0f / 3.14159265f);
+		float rotDeg = std::atan2(pBaseShape->GetTransform()._12, pBaseShape->GetTransform()._11) * (180.0f / 3.14159265f);
 
 		CString strVal;
 
@@ -707,8 +707,8 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 			// 정다각형은 Cx, Cy, Radius, Sides, Angle°
 			const PolygonParams* pp = pPathShape ? pPathShape->GetParam<PolygonParams>() : nullptr;
 			float radius = (pp && pp->radius > 1.0f) ? (pp->radius * curScaleX) : ((std::min)(curW, curH) * 0.5f);
-			float cx = (pp && pp->radius > 1.0f) ? (pBaseShape->xf.TransformPoint(D2D1::Point2F(pp->cx, pp->cy)).x) : (origin.x + curW * 0.5f);
-			float cy = (pp && pp->radius > 1.0f) ? (pBaseShape->xf.TransformPoint(D2D1::Point2F(pp->cx, pp->cy)).y) : (origin.y + curH * 0.5f);
+			float cx = (pp && pp->radius > 1.0f) ? (pBaseShape->GetTransform().TransformPoint(D2D1::Point2F(pp->cx, pp->cy)).x) : (origin.x + curW * 0.5f);
+			float cy = (pp && pp->radius > 1.0f) ? (pBaseShape->GetTransform().TransformPoint(D2D1::Point2F(pp->cx, pp->cy)).y) : (origin.y + curH * 0.5f);
 			int sides = pp ? pp->sides : 5;
 
 			strVal.Format(_T("%.1f"), cx / pxPerUnit);     SetFieldText(ID_OPT_X, strVal);
@@ -721,8 +721,8 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 		{
 			const StarParams* sp = pPathShape ? pPathShape->GetParam<StarParams>() : nullptr;
 			float radius = (sp && sp->radius > 1.0f) ? (sp->radius * curScaleX) : ((std::min)(curW, curH) * 0.5f);
-			float cx = (sp && sp->radius > 1.0f) ? (pBaseShape->xf.TransformPoint(D2D1::Point2F(sp->cx, sp->cy)).x) : (origin.x + curW * 0.5f);
-			float cy = (sp && sp->radius > 1.0f) ? (pBaseShape->xf.TransformPoint(D2D1::Point2F(sp->cx, sp->cy)).y) : (origin.y + curH * 0.5f);
+			float cx = (sp && sp->radius > 1.0f) ? (pBaseShape->GetTransform().TransformPoint(D2D1::Point2F(sp->cx, sp->cy)).x) : (origin.x + curW * 0.5f);
+			float cy = (sp && sp->radius > 1.0f) ? (pBaseShape->GetTransform().TransformPoint(D2D1::Point2F(sp->cx, sp->cy)).y) : (origin.y + curH * 0.5f);
 			int points = sp ? sp->points : 5;
 			float innerRatio = sp ? (sp->innerRatio * 100.0f) : 50.0f;
 
@@ -737,8 +737,8 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 		{
 			const GearParams* gp = pPathShape ? pPathShape->GetParam<GearParams>() : nullptr;
 			float radius = (gp && gp->radius > 1.0f) ? (gp->radius * curScaleX) : ((std::min)(curW, curH) * 0.5f);
-			float cx = (gp && gp->radius > 1.0f) ? (pBaseShape->xf.TransformPoint(D2D1::Point2F(gp->cx, gp->cy)).x) : (origin.x + curW * 0.5f);
-			float cy = (gp && gp->radius > 1.0f) ? (pBaseShape->xf.TransformPoint(D2D1::Point2F(gp->cx, gp->cy)).y) : (origin.y + curH * 0.5f);
+			float cx = (gp && gp->radius > 1.0f) ? (pBaseShape->GetTransform().TransformPoint(D2D1::Point2F(gp->cx, gp->cy)).x) : (origin.x + curW * 0.5f);
+			float cy = (gp && gp->radius > 1.0f) ? (pBaseShape->GetTransform().TransformPoint(D2D1::Point2F(gp->cx, gp->cy)).y) : (origin.y + curH * 0.5f);
 			int teeth = gp ? gp->teeth : 12;
 			float depthRatio = gp ? (gp->depthRatio * 100.0f) : 20.0f;
 			float boreRatio = gp ? (gp->boreRatio * 100.0f) : 30.0f;
@@ -755,8 +755,8 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 		{
 			const SpiralParams* sp = pPathShape ? pPathShape->GetParam<SpiralParams>() : nullptr;
 			float radius = (sp && sp->radius > 1.0f) ? (sp->radius * curScaleX) : ((std::min)(curW, curH) * 0.5f);
-			float cx = (sp && sp->radius > 1.0f) ? (pBaseShape->xf.TransformPoint(D2D1::Point2F(sp->cx, sp->cy)).x) : (origin.x + curW * 0.5f);
-			float cy = (sp && sp->radius > 1.0f) ? (pBaseShape->xf.TransformPoint(D2D1::Point2F(sp->cx, sp->cy)).y) : (origin.y + curH * 0.5f);
+			float cx = (sp && sp->radius > 1.0f) ? (pBaseShape->GetTransform().TransformPoint(D2D1::Point2F(sp->cx, sp->cy)).x) : (origin.x + curW * 0.5f);
+			float cy = (sp && sp->radius > 1.0f) ? (pBaseShape->GetTransform().TransformPoint(D2D1::Point2F(sp->cx, sp->cy)).y) : (origin.y + curH * 0.5f);
 			float turns = sp ? sp->turns : 3.0f;
 
 			strVal.Format(_T("%.1f"), cx / pxPerUnit);        SetFieldText(ID_OPT_X, strVal);
@@ -953,7 +953,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 				if (pShape->GetLocalBounds(nullptr, lb))
 				{
 					// 일반 4정점 직각 사각형으로 복원
-					pShape->paths.clear();
+					pShape->GetPathsRef().clear();
 					SubPath sp;
 					sp.closed = true;
 					for (int i = 0; i < 4; ++i) sp.nodes.emplace_back();
@@ -961,7 +961,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 					sp.nodes[1].anchor = D2D1::Point2F(lb.right, lb.top);
 					sp.nodes[2].anchor = D2D1::Point2F(lb.right, lb.bottom);
 					sp.nodes[3].anchor = D2D1::Point2F(lb.left, lb.bottom);
-					pShape->paths.push_back(sp);
+					pShape->GetPathsRef().push_back(sp);
 					pShape->Invalidate();
 					m_pDoc->UpdateAllViews(nullptr);
 				}
@@ -997,9 +997,9 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		if (m_bEditing && m_pDoc && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_pDoc->GetShapes().size()))
 		{
 			PathShape* pShape = dynamic_cast<PathShape*>(m_pDoc->GetShapes()[m_selectedIndex].get());
-			if (pShape && !pShape->paths.empty())
+			if (pShape && !pShape->GetPathsRef().empty())
 			{
-				for (auto& sp : pShape->paths)
+				for (auto& sp : pShape->GetPathsRef())
 				{
 					sp.closed = m_bPathClosed;
 				}
@@ -1013,7 +1013,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		}
 		else if (m_pDoc && m_pDoc->GetCurrentPath())
 		{
-			auto& spList = m_pDoc->GetCurrentPath()->paths;
+			auto& spList = m_pDoc->GetCurrentPath()->GetPathsRef();
 			if (!spList.empty())
 			{
 				spList.back().closed = m_bPathClosed;
@@ -1092,7 +1092,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 	// 패스 도구 작성 중 X, Y 변경 시 마지막 앵커 위치 이동
 	if (m_curTool == ToolType::Pen && m_pDoc && m_pDoc->GetCurrentPath())
 	{
-		auto& spList = m_pDoc->GetCurrentPath()->paths;
+		auto& spList = m_pDoc->GetCurrentPath()->GetPathsRef();
 		if (!spList.empty() && !spList.back().nodes.empty())
 		{
 			auto& node = spList.back().nodes.back();
@@ -1197,11 +1197,11 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 	D2D1_RECT_F lb{};
 	if (!pShape->GetLocalBounds(nullptr, lb)) return;
 
-	D2D1_POINT_2F curOrigin = pShape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
+	D2D1_POINT_2F curOrigin = pShape->GetTransform().TransformPoint(D2D1::Point2F(lb.left, lb.top));
 	float origW = lb.right - lb.left;
 	float origH = lb.bottom - lb.top;
-	float curScaleX = std::sqrt(pShape->xf._11 * pShape->xf._11 + pShape->xf._12 * pShape->xf._12);
-	float curScaleY = std::sqrt(pShape->xf._21 * pShape->xf._21 + pShape->xf._22 * pShape->xf._22);
+	float curScaleX = std::sqrt(pShape->GetTransform()._11 * pShape->GetTransform()._11 + pShape->GetTransform()._12 * pShape->GetTransform()._12);
+	float curScaleY = std::sqrt(pShape->GetTransform()._21 * pShape->GetTransform()._21 + pShape->GetTransform()._22 * pShape->GetTransform()._22);
 
 	if (id == ID_OPT_X)
 	{
@@ -1214,16 +1214,16 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		else if (m_curTool == ToolType::Polygon || m_curTool == ToolType::Star || m_curTool == ToolType::Gear || m_curTool == ToolType::Spiral)
 		{
 			D2D1_POINT_2F centerLocal = D2D1::Point2F((lb.left + lb.right) * 0.5f, (lb.top + lb.bottom) * 0.5f);
-			D2D1_POINT_2F curCenter = pShape->xf.TransformPoint(centerLocal);
+			D2D1_POINT_2F curCenter = pShape->GetTransform().TransformPoint(centerLocal);
 			float dx = targetPixelX - curCenter.x;
-			pShape->xf = pShape->xf * D2D1::Matrix3x2F::Translation(dx, 0.0f);
+			pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Translation(dx, 0.0f));
 			pShape->Invalidate();
 			m_pDoc->UpdateAllViews(nullptr);
 			SyncSelection(m_pDoc, m_selectedIndex);
 			return;
 		}
 		float dx = targetPixelX - curOrigin.x;
-		pShape->xf = pShape->xf * D2D1::Matrix3x2F::Translation(dx, 0.0f);
+		pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Translation(dx, 0.0f));
 	}
 	else if (id == ID_OPT_Y)
 	{
@@ -1236,16 +1236,16 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		else if (m_curTool == ToolType::Polygon || m_curTool == ToolType::Star || m_curTool == ToolType::Gear || m_curTool == ToolType::Spiral)
 		{
 			D2D1_POINT_2F centerLocal = D2D1::Point2F((lb.left + lb.right) * 0.5f, (lb.top + lb.bottom) * 0.5f);
-			D2D1_POINT_2F curCenter = pShape->xf.TransformPoint(centerLocal);
+			D2D1_POINT_2F curCenter = pShape->GetTransform().TransformPoint(centerLocal);
 			float dy = targetPixelY - curCenter.y;
-			pShape->xf = pShape->xf * D2D1::Matrix3x2F::Translation(0.0f, dy);
+			pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Translation(0.0f, dy));
 			pShape->Invalidate();
 			m_pDoc->UpdateAllViews(nullptr);
 			SyncSelection(m_pDoc, m_selectedIndex);
 			return;
 		}
 		float dy = targetPixelY - curOrigin.y;
-		pShape->xf = pShape->xf * D2D1::Matrix3x2F::Translation(0.0f, dy);
+		pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Translation(0.0f, dy));
 	}
 	else if (id == ID_OPT_W || (m_curTool == ToolType::Ellipse && id == ID_OPT_RX))
 	{
@@ -1257,22 +1257,22 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		if (origW > 0.001f && curScaleX > 0.0001f)
 		{
 			float factor = (targetPixelW / (origW * curScaleX));
-			D2D1_POINT_2F origin = pShape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
+			D2D1_POINT_2F origin = pShape->GetTransform().TransformPoint(D2D1::Point2F(lb.left, lb.top));
 
 			if (((m_curTool == ToolType::Select || m_curTool == ToolType::Pen) && m_bLinkRatio) ||
 				(m_curTool == ToolType::Ellipse && m_bLinkRxRy))
 			{
-				pShape->xf = pShape->xf * D2D1::Matrix3x2F::Scale(factor, factor, origin);
+				pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Scale(factor, factor, origin));
 			}
 			else if (m_curTool == ToolType::Triangle && m_bEquilateral)
 			{
 				float targetH = targetPixelW * 0.86602540378f;
 				float factorY = (origH * curScaleY > 0.0001f) ? (targetH / (origH * curScaleY)) : factor;
-				pShape->xf = pShape->xf * D2D1::Matrix3x2F::Scale(factor, factorY, origin);
+				pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Scale(factor, factorY, origin));
 			}
 			else
 			{
-				pShape->xf = pShape->xf * D2D1::Matrix3x2F::Scale(factor, 1.0f, origin);
+				pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Scale(factor, 1.0f, origin));
 			}
 		}
 	}
@@ -1286,16 +1286,16 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		if (origH > 0.001f && curScaleY > 0.0001f)
 		{
 			float factor = (targetPixelH / (origH * curScaleY));
-			D2D1_POINT_2F origin = pShape->xf.TransformPoint(D2D1::Point2F(lb.left, lb.top));
+			D2D1_POINT_2F origin = pShape->GetTransform().TransformPoint(D2D1::Point2F(lb.left, lb.top));
 
 			if (((m_curTool == ToolType::Select || m_curTool == ToolType::Pen) && m_bLinkRatio) ||
 				(m_curTool == ToolType::Ellipse && m_bLinkRxRy))
 			{
-				pShape->xf = pShape->xf * D2D1::Matrix3x2F::Scale(factor, factor, origin);
+				pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Scale(factor, factor, origin));
 			}
 			else
 			{
-				pShape->xf = pShape->xf * D2D1::Matrix3x2F::Scale(1.0f, factor, origin);
+				pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Scale(1.0f, factor, origin));
 			}
 		}
 	}
@@ -1303,13 +1303,13 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 	{
 		// 중심 기준 절대 회전각 설정
 		D2D1_POINT_2F centerLocal = D2D1::Point2F((lb.left + lb.right) * 0.5f, (lb.top + lb.bottom) * 0.5f);
-		D2D1_POINT_2F centerWorld = pShape->xf.TransformPoint(centerLocal);
+		D2D1_POINT_2F centerWorld = pShape->GetTransform().TransformPoint(centerLocal);
 
-		float curAngleDeg = std::atan2(pShape->xf._12, pShape->xf._11) * (180.0f / 3.14159265f);
+		float curAngleDeg = std::atan2(pShape->GetTransform()._12, pShape->GetTransform()._11) * (180.0f / 3.14159265f);
 		float targetDeg = static_cast<float>(val);
 		float deltaDeg = targetDeg - curAngleDeg;
 
-		pShape->xf = pShape->xf * D2D1::Matrix3x2F::Rotation(deltaDeg, centerWorld);
+		pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Rotation(deltaDeg, centerWorld));
 	}
 	else if ((id == ID_OPT_RX || id == ID_OPT_RY) && pPathShape && pPathShape->GetKind() == ::ShapeKind::Rect)
 	{
@@ -1335,7 +1335,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			rp->ry = (std::min)(maxR, (std::max)(0.0f, rp->ry));
 
 			// 둥근 사각형 베이지어 노드 재생성
-			pPathShape->paths.clear();
+			pPathShape->GetPathsRef().clear();
 			SubPath sp;
 			sp.closed = true;
 
@@ -1381,7 +1381,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 				sp.nodes[2].anchor = D2D1::Point2F(lb.right, lb.bottom);
 				sp.nodes[3].anchor = D2D1::Point2F(lb.left, lb.bottom);
 			}
-			pPathShape->paths.push_back(sp);
+			pPathShape->GetPathsRef().push_back(sp);
 		}
 	}
 	else if (id == ID_OPT_RADIUS && (m_curTool == ToolType::Polygon || m_curTool == ToolType::Star || m_curTool == ToolType::Gear || m_curTool == ToolType::Spiral))
@@ -1393,8 +1393,8 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		{
 			float factor = targetR / curR;
 			D2D1_POINT_2F centerLocal = D2D1::Point2F((lb.left + lb.right) * 0.5f, (lb.top + lb.bottom) * 0.5f);
-			D2D1_POINT_2F centerWorld = pShape->xf.TransformPoint(centerLocal);
-			pShape->xf = pShape->xf * D2D1::Matrix3x2F::Scale(factor, factor, centerWorld);
+			D2D1_POINT_2F centerWorld = pShape->GetTransform().TransformPoint(centerLocal);
+			pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Scale(factor, factor, centerWorld));
 		}
 	}
 	else if (id == ID_OPT_SIDES && pPathShape && pPathShape->GetKind() == ::ShapeKind::Polygon)
@@ -1408,7 +1408,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			SetFieldText(ID_OPT_SIDES, strSides);
 
 			int n = pp->sides;
-			pPathShape->paths.clear();
+			pPathShape->GetPathsRef().clear();
 			SubPath sp;
 			sp.closed = true;
 			for (int i = 0; i < n; ++i) sp.nodes.emplace_back();
@@ -1425,7 +1425,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 				sp.nodes[i].anchor = D2D1::Point2F(cx + rx * std::cos(angle), cy + ry * std::sin(angle));
 				sp.nodes[i].hIn = sp.nodes[i].hOut = { 0, 0 };
 			}
-			pPathShape->paths.push_back(sp);
+			pPathShape->GetPathsRef().push_back(sp);
 		}
 	}
 	else if ((id == ID_OPT_POINTS || id == ID_OPT_INNER_RATIO) && pPathShape && pPathShape->GetKind() == ::ShapeKind::Star)
@@ -1458,7 +1458,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			float cy = (sp->radius > 1.0f) ? sp->cy : (lb.top + lb.bottom) * 0.5f;
 			sp->radius = rx; sp->cx = cx; sp->cy = cy;
 
-			pPathShape->paths.clear();
+			pPathShape->GetPathsRef().clear();
 			SubPath sub;
 			sub.closed = true;
 			for (int i = 0; i < n * 2; ++i) sub.nodes.emplace_back();
@@ -1470,7 +1470,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 				sub.nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
 				sub.nodes[i].hIn = sub.nodes[i].hOut = { 0, 0 };
 			}
-			pPathShape->paths.push_back(sub);
+			pPathShape->GetPathsRef().push_back(sub);
 		}
 	}
 	else if ((id == ID_OPT_TEETH || id == ID_OPT_DEPTH_RATIO || id == ID_OPT_BORE_RATIO) && pPathShape && pPathShape->GetKind() == ::ShapeKind::Gear)
@@ -1514,7 +1514,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			float cy = (gp->radius > 1.0f) ? gp->cy : (lb.top + lb.bottom) * 0.5f;
 			gp->radius = rx; gp->cx = cx; gp->cy = cy;
 
-			pPathShape->paths.clear();
+			pPathShape->GetPathsRef().clear();
 
 			// 1. 외곽 톱니 서브패스
 			SubPath outerSub;
@@ -1533,7 +1533,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 				outerSub.nodes[i].anchor = D2D1::Point2F(cx + rx * curR * std::cos(angle), cy + ry * curR * std::sin(angle));
 				outerSub.nodes[i].hIn = outerSub.nodes[i].hOut = { 0, 0 };
 			}
-			pPathShape->paths.push_back(outerSub);
+			pPathShape->GetPathsRef().push_back(outerSub);
 
 			// 2. 중앙 축 구멍(Bore Hole) 서브패스: 4-노드 3차 베지어 원
 			SubPath holeSub;
@@ -1566,7 +1566,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			holeSub.nodes[3].hIn    = D2D1::Point2F(0.0f, ky);
 			holeSub.nodes[3].hOut   = D2D1::Point2F(0.0f, -ky);
 
-			pPathShape->paths.push_back(holeSub);
+			pPathShape->GetPathsRef().push_back(holeSub);
 		}
 	}
 	else if (id == ID_OPT_TURNS && pPathShape && pPathShape->GetKind() == ::ShapeKind::Spiral)
@@ -1583,7 +1583,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 
 			int segs = static_cast<int>(turns * 4.0f);
 			if (segs < 4) segs = 4;
-			pPathShape->paths.clear();
+			pPathShape->GetPathsRef().clear();
 			SubPath sub;
 			sub.closed = false;
 			for (int i = 0; i <= segs; ++i) {
@@ -1608,7 +1608,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 				sub.nodes[i].hIn = D2D1::Point2F(-tanX, -tanY);
 				sub.nodes[i].hOut = D2D1::Point2F(tanX, tanY);
 			}
-			pPathShape->paths.push_back(sub);
+			pPathShape->GetPathsRef().push_back(sub);
 		}
 	}
 
@@ -1623,7 +1623,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			auto* node = dynamic_cast<ge::PathNode*>(layer->GetChildren()[m_selectedIndex].get());
 			if (node && pPathShape)
 			{
-				const auto& mx = pPathShape->xf;
+				const auto& mx = pPathShape->GetTransform();
 				node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
 				node->SetKind(static_cast<ge::ShapeKind>(pPathShape->GetKind()));
 
@@ -1659,7 +1659,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 
 				// 서브패스 동기화
 				std::vector<ge::SubPath> gePaths;
-				for (const auto& sp : pPathShape->paths) {
+				for (const auto& sp : pPathShape->GetPathsRef()) {
 					ge::SubPath gsp;
 					gsp.closed = sp.closed;
 					for (const auto& bn : sp.nodes) {

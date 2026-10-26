@@ -1,0 +1,102 @@
+# TODO: M2Draw 마스터 계획 실행 목록
+
+이 문서는 [Master_Plan_SVG_HTML.md](Master_Plan_SVG_HTML.md)의 실행 단계와 진행 상태를 관리합니다.
+
+**진행 규칙**
+- 한 번에 한 단계(Step)씩 진행합니다. 각 단계가 끝나면 빌드하고 결과를 보고한 뒤, **사용자 확인을 받고 나서** 다음 단계로 넘어갑니다.
+- 상태 표기: `[ ]` 대기 · `[~]` 진행 중 · `[x]` 완료(사용자 확인됨) · `[!]` 보류/이슈
+- 단계마다 따로 커밋할 수 있도록 변경 범위를 작게 유지합니다. 커밋은 사용자가 요청할 때만 합니다.
+
+---
+
+## Phase 0 — 기반 정리 (결함 제거)
+
+### Step 0.1 참조 멤버 제거 (D1)  — ✅ 완료 (사용자 확인 2026-10-27)
+- [x] 0.1.1 `Node`의 `name`/`m_nameStr`(CString), `xf`, `style` 참조 멤버 사용처를 getter/setter로 바꿈
+  - `xf` 읽기 → `GetTransform()`, `xf = …` → `SetTransform(…)`, `style` → `GetStyleRef()`
+- [x] 0.1.2 `PathNode`의 `paths` 참조 멤버 사용처를 `GetPathsRef()`로 바꿈
+- [x] 0.1.3 참조 멤버 선언 삭제, 이름 필드를 `std::wstring m_name` 하나로 통일
+  - `SetTransform()`이 지오메트리 캐시를 무효화하지 않도록 변경 (변환은 로컬 지오메트리와 무관)
+- [x] 0.1.4 빌드 성공 (Debug x64, 신규 경고 0) / 회귀 확인 완료: 도형 생성, 이름 표시, 속성창, 레이어 패널
+- 메모: `PropertiesWnd`의 도형 속성 편집은 `GetShapes()`(구형 `m_shapes`, 항상 비어 있음)를 참조 → 사실상 동작하지 않는 코드. Step 0.4/0.5에서 정리
+
+### Step 0.2 Clone 규약 통일 (D2)
+- [ ] 0.2.1 모든 `Clone()`이 `m_id = 0`, `m_parent = nullptr`, 버전을 새로 시작하도록 수정
+- [ ] 0.2.2 문서에 삽입할 때 `AssignIds`가 새 ID를 발급하는지 확인
+- [ ] 0.2.3 빌드 + 복제한 도형을 편집해도 원본이 변하지 않는지 확인
+
+### Step 0.3 LayerNode 필드 가림 제거 + 조상 체인 판정 (D3)
+- [ ] 0.3.1 LayerNode의 `m_bVisible`/`m_bLocked`/`m_opacity` 및 이름을 가리는 메서드 삭제
+- [ ] 0.3.2 `blendMode`를 Node로 올림
+- [ ] 0.3.3 `Node::IsEffectivelyVisible()` / `IsEffectivelyLocked()` 추가 → HitTester, SnapManager, 렌더러에 적용
+- [ ] 0.3.4 `LayerWnd`의 자식 visible 우회 코드 정리
+- [ ] 0.3.5 빌드 + 숨김/잠금 레이어 도형이 클릭되지 않는지 확인
+
+### Step 0.4 선택 상태 단일화 (D5)
+- [ ] 0.4.1 `SelectTool::m_selectedIndices` → `Document` 선택(`Node*`)으로 바꿈
+- [ ] 0.4.2 `SyncDocSelection` 및 인덱스 기반 사용처(PropertyView, ToolOptionBar, LayerWnd, Doc 삭제) 정리
+- [ ] 0.4.3 빌드 + 다중 선택/마키 선택/레이어 패널 선택 동기화 확인
+
+### Step 0.5 구형 잔재 제거 (D6, D15)
+- [ ] 0.5.1 `m_shapes`, `m_currentPath`, 이름 기반 삭제 로직 제거
+- [ ] 0.5.2 `Shape`/`PathShape` using 별칭 정리
+- [ ] 0.5.3 `D2DVectorEngine_old.h`, `backup_toolbar_20261021/` 삭제 (vcxproj 참조 포함)
+- [ ] 0.5.4 빌드 + 삭제 기능(Del, 레이어 휴지통) 확인
+
+### Step 0.6 모델에서 D2D/MFC 의존 분리 (D8, D9, D12)
+- [ ] 0.6.1 `Node::Draw` 삭제 → 렌더러를 거쳐 그리도록 함
+- [ ] 0.6.2 `GetD2DLayerParameters`를 렌더러로 옮김
+- [ ] 0.6.3 D2D 변환 연산자를 `GeD2DInterop.h`의 자유 함수로 옮김 (`Matrix2D` reinterpret_cast 제거)
+- [ ] 0.6.4 `Node::ScaleByHandle`/`RotateAboutCenter`/`GetLocalHandlePoints` 중복 제거 → `Transformer`만 사용
+- [ ] 0.6.5 빌드 + 모델 헤더를 D2D 없이 컴파일하는 확인용 TU 추가
+
+### Step 0.7 소소한 결함 (D10, D11, D13, D14)
+- [ ] 0.7.1 `PathNode::GetKind()` → `GetShapeKind()` 개명
+- [ ] 0.7.2 노드를 직접 편집하면 `shapeKind = Path`, `params = monostate`로 전환
+- [ ] 0.7.3 `ArrangeSelection`의 Forward/Backward에서 인접한 선택 항목끼리 서로 바뀌는 문제 수정
+- [ ] 0.7.4 `UngroupSelection`에서 그룹 opacity를 자식에 보존
+- [ ] 0.7.5 빌드 + Phase 0 완료 기준(DoD) 전체 점검
+
+---
+
+## Phase 1 — 영속성 + Undo/Redo
+- [ ] Step 1.1 `INodeVisitor` 도입
+- [ ] Step 1.2 `SvgWriter` (확장 SVG 저장)
+- [ ] Step 1.3 `SvgReader` (XmlLite, 자체 출력물 왕복)
+- [ ] Step 1.4 `OnSaveDocument`/`OnOpenDocument` 연동 + `SetModifiedFlag`
+- [ ] Step 1.5 스냅샷 방식 Undo/Redo + Ctrl+Z/Y
+
+## Phase 2 — SVG 완성도
+- [ ] Step 2.1 Style 모델 마이그레이션 (Paint/Gradient/Stroke)
+- [ ] Step 2.2 렌더러를 SVG 규칙에 맞춤 (열린 패스 채우기, 그룹 opacity, 블렌드)
+- [ ] Step 2.3 그라디언트 렌더링 + 편집 핸들
+- [ ] Step 2.4 클리핑 마스크
+- [ ] Step 2.5 불리언 연산 완성
+- [ ] Step 2.6 패스 연산 (Simplify, Outline, Offset, Join/Split, Reverse)
+- [ ] Step 2.7 엔진 기능 UI 연결 (그룹, Z-Order, 정렬/분배, 노드 추가/삭제 도구)
+- [ ] Step 2.8 SVG 출력 다듬기 (네이티브 요소, defs, 순수 SVG 옵션)
+- [ ] Step 2.9 외부 SVG 가져오기
+
+## Phase 3 — 텍스트 & 이미지
+- [ ] Step 3.1 TextNode 모델 + DirectWrite 렌더
+- [ ] Step 3.2 TextTool (인라인 편집, IME)
+- [ ] Step 3.3 텍스트 → 윤곽선 변환
+- [ ] Step 3.4 ImageNode + 리소스 테이블
+- [ ] Step 3.5 텍스트/이미지 SVG 출력
+
+## Phase 4 — HTML 페이지 디자인
+- [ ] Step 4.1 Page(Artboard) 개념
+- [ ] Step 4.2 FrameNode + Frame 도구
+- [ ] Step 4.3 LayoutEngine (flexbox 부분 구현)
+- [ ] Step 4.4 Frame 안의 텍스트 동작
+- [ ] Step 4.5 HtmlExporter
+- [ ] Step 4.6 WebView2 미리보기
+- [ ] Step 4.7 반응형 브레이크포인트
+
+## Phase 5 — 생산성 & 부가 출력
+- [ ] Step 5.1 스마트 가이드 & 오브젝트 스냅
+- [ ] Step 5.2 다중 선택 공통 변환
+- [ ] Step 5.3 그룹 격리 편집
+- [ ] Step 5.4 클립보드 (SVG)
+- [ ] Step 5.5 PNG/JPG 출력
+- [ ] Step 5.6 PaintBucketTool

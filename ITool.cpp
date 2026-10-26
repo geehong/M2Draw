@@ -23,10 +23,10 @@ static void SyncShapeToGeDoc(CM2DrawDoc* pDoc, int index)
 	if (index < static_cast<int>(children.size())) {
 		auto* node = dynamic_cast<ge::PathNode*>(children[index].get());
 		if (node) {
-			const auto& mx = ps->xf;
+			const auto& mx = ps->GetTransform();
 			node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
 			std::vector<ge::SubPath> gePaths;
-			for (const auto& sp : ps->paths) {
+			for (const auto& sp : ps->GetPathsRef()) {
 				ge::SubPath gsp;
 				gsp.closed = sp.closed;
 				for (const auto& bn : sp.nodes) {
@@ -41,11 +41,11 @@ static void SyncShapeToGeDoc(CM2DrawDoc* pDoc, int index)
 			}
 			node->SetPaths(gePaths);
 			ge::Style st;
-			st.fillType = static_cast<ge::FillType>(ps->style.fillType);
-			st.fill = ge::Color::FromD2D(ps->style.fill);
-			st.stroke = ge::Color::FromD2D(ps->style.stroke);
-			st.strokeWidth = ps->style.strokeWidth;
-			st.dashStyle = static_cast<ge::DashStyle>(ps->style.dashStyle);
+			st.fillType = static_cast<ge::FillType>(ps->GetStyleRef().fillType);
+			st.fill = ge::Color::FromD2D(ps->GetStyleRef().fill);
+			st.stroke = ge::Color::FromD2D(ps->GetStyleRef().stroke);
+			st.strokeWidth = ps->GetStyleRef().strokeWidth;
+			st.dashStyle = static_cast<ge::DashStyle>(ps->GetStyleRef().dashStyle);
 			node->SetStyle(st);
 		}
 	}
@@ -69,8 +69,8 @@ static void SyncDocSelection(CM2DrawDoc* pDoc, const std::set<int>& indices)
 bool SelectTool::IsOpenPath(Shape* shape)
 {
 	PathShape* ps = dynamic_cast<PathShape*>(shape);
-	if (!ps || ps->paths.empty()) return false;
-	for (const auto& sp : ps->paths)
+	if (!ps || ps->GetPathsRef().empty()) return false;
+	for (const auto& sp : ps->GetPathsRef())
 	{
 		if (sp.closed) return false;
 	}
@@ -143,7 +143,7 @@ bool SelectTool::GetHandleScreenPositions(Shape* shape, const ViewportTransform&
 
 	for (int i = 0; i < 9; ++i)
 	{
-		outHandles[i] = CoordinateSpace::LocalToScreen(localHandles[i], shape->xf, view);
+		outHandles[i] = CoordinateSpace::LocalToScreen(localHandles[i], shape->GetTransform(), view);
 	}
 	return true;
 }
@@ -172,7 +172,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 					m_editShapeIdx = idx;
 					m_editHit = hr;
 					m_handle = Handle::None;
-					m_initialXf = ps->xf;
+					m_initialXf = ps->GetTransform();
 
 					CString partName = (hr.part == HitResult::Part::Anchor) ? _T("정점(Anchor)") :
 					                   (hr.part == HitResult::Part::HandleIn) ? _T("핸들In") : _T("핸들Out");
@@ -202,7 +202,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 					if (hitH != Handle::None)
 					{
 						m_handle = hitH;
-						m_initialXf = selectedShape->xf;
+						m_initialXf = selectedShape->GetTransform();
 						m_initialLocalBounds = localBounds;
 
 						if (hitH == Handle::Rotate)
@@ -259,7 +259,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 		m_mode = Mode::Moving;
 		m_handle = Handle::None;
 		Shape* selectedShape = shapes[clickedIndex].get();
-		m_initialXf = selectedShape->xf;
+		m_initialXf = selectedShape->GetTransform();
 		selectedShape->GetLocalBounds(e.pD2DFactory, m_initialLocalBounds);
 
 		// 다중 선택된 모든 도형의 시작 Transform 캐싱
@@ -268,7 +268,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 		{
 			if (idx >= 0 && idx < static_cast<int>(shapes.size()))
 			{
-				m_initialXfs[idx] = shapes[idx]->xf;
+				m_initialXfs[idx] = shapes[idx]->GetTransform();
 			}
 		}
 
@@ -451,9 +451,9 @@ void SelectTool::ApplyMove(const std::vector<std::unique_ptr<Shape>>& shapes)
 		if (primaryIdx >= 0 && primaryIdx < static_cast<int>(shapes.size()))
 		{
 			PathShape* ps = dynamic_cast<PathShape*>(shapes[primaryIdx].get());
-			if (ps && !ps->paths.empty() && !ps->paths[0].nodes.empty())
+			if (ps && !ps->GetPathsRef().empty() && !ps->GetPathsRef()[0].nodes.empty())
 			{
-				D2D1_POINT_2F p0 = m_initialXf.TransformPoint(ps->paths[0].nodes[0].anchor);
+				D2D1_POINT_2F p0 = m_initialXf.TransformPoint(ps->GetPathsRef()[0].nodes[0].anchor);
 				D2D1_POINT_2F targetP0 = grid.SnapPoint(D2D1::Point2F(p0.x + dx, p0.y + dy));
 				dx = targetP0.x - p0.x;
 				dy = targetP0.y - p0.y;
@@ -476,7 +476,7 @@ void SelectTool::ApplyMove(const std::vector<std::unique_ptr<Shape>>& shapes)
 		if (idx >= 0 && idx < static_cast<int>(shapes.size()))
 		{
 			auto it = m_initialXfs.find(idx);
-			D2D1::Matrix3x2F baseInitXf = (it != m_initialXfs.end()) ? it->second : shapes[idx]->xf;
+			D2D1::Matrix3x2F baseInitXf = (it != m_initialXfs.end()) ? it->second : shapes[idx]->GetTransform();
 			shapes[idx]->ApplyTranslation(D2D1::Point2F(dx, dy), baseInitXf);
 		}
 	}
@@ -523,10 +523,10 @@ void SelectTool::OnUp(const ToolEvent& e)
 				{
 					// 도형의 4개 코너를 월드 변환하여 AABB 산출
 					D2D1_POINT_2F pts[4] = {
-						shapes[i]->xf.TransformPoint(D2D1::Point2F(localB.left, localB.top)),
-						shapes[i]->xf.TransformPoint(D2D1::Point2F(localB.right, localB.top)),
-						shapes[i]->xf.TransformPoint(D2D1::Point2F(localB.right, localB.bottom)),
-						shapes[i]->xf.TransformPoint(D2D1::Point2F(localB.left, localB.bottom))
+						shapes[i]->GetTransform().TransformPoint(D2D1::Point2F(localB.left, localB.top)),
+						shapes[i]->GetTransform().TransformPoint(D2D1::Point2F(localB.right, localB.top)),
+						shapes[i]->GetTransform().TransformPoint(D2D1::Point2F(localB.right, localB.bottom)),
+						shapes[i]->GetTransform().TransformPoint(D2D1::Point2F(localB.left, localB.bottom))
 					};
 
 					float sMinX = pts[0].x, sMaxX = pts[0].x;
@@ -683,15 +683,15 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 		PathShape* pathShape = dynamic_cast<PathShape*>(shape);
 		if (pathShape)
 		{
-			for (const auto& sp : pathShape->paths)
+			for (const auto& sp : pathShape->GetPathsRef())
 			{
 				for (const auto& node : sp.nodes)
 				{
-					D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, pathShape->xf, view);
+					D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, pathShape->GetTransform(), view);
 
 					if (node.HasIn())
 					{
-						D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), pathShape->xf, view);
+						D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), pathShape->GetTransform(), view);
 						brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
 						rt->DrawLine(aScreen, inScreen, brush, 1.0f);
 						brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
@@ -700,7 +700,7 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 
 					if (node.HasOut())
 					{
-						D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), pathShape->xf, view);
+						D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), pathShape->GetTransform(), view);
 						brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
 						rt->DrawLine(aScreen, outScreen, brush, 1.0f);
 						brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
@@ -780,11 +780,11 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 		// 구형 브릿지 shape도 목록에 함께 등록 (속성창/도구 옵션바가 구형 인덱스를 참조하므로 연동 보장)
 		if (m_previewShape)
 		{
-			m_previewShape->style.stroke = m_setting.strokeColor;
-			m_previewShape->style.strokeWidth = m_setting.strokeWidth;
-			m_previewShape->style.dashStyle = m_setting.dashStyle;
-			m_previewShape->style.fillType = m_setting.fillType;
-			m_previewShape->style.fill = m_setting.fillColor;
+			m_previewShape->GetStyleRef().stroke = m_setting.strokeColor;
+			m_previewShape->GetStyleRef().strokeWidth = m_setting.strokeWidth;
+			m_previewShape->GetStyleRef().dashStyle = m_setting.dashStyle;
+			m_previewShape->GetStyleRef().fillType = m_setting.fillType;
+			m_previewShape->GetStyleRef().fill = m_setting.fillColor;
 			m_previewShape->Invalidate();
 			pDoc->GetShapes().push_back(std::move(m_previewShape));
 			m_lastCommittedIndex = static_cast<int>(pDoc->GetShapes().size()) - 1;
@@ -818,7 +818,7 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 
 	// 1. 신형 그래픽 엔진(ge::Document) 노드 생성 및 파라미터 복사
 	auto node = std::make_unique<ge::PathNode>();
-	node->SetName(std::wstring((LPCTSTR)m_previewShape->name));
+	node->SetName(m_previewShape->GetName());
 	node->SetKind(static_cast<ge::ShapeKind>(m_previewShape->GetKind()));
 	std::visit([&node](auto&& arg) {
 		using T = std::decay_t<decltype(arg)>;
@@ -850,7 +850,7 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 	}, m_previewShape->GetParams());
 
 	std::vector<ge::SubPath> gePaths;
-	for (const auto& sp : m_previewShape->paths) {
+	for (const auto& sp : m_previewShape->GetPathsRef()) {
 		ge::SubPath gsp;
 		gsp.closed = sp.closed;
 		for (const auto& bn : sp.nodes) {
@@ -865,7 +865,7 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 	}
 	node->SetPaths(gePaths);
 
-	const auto& mx = m_previewShape->xf;
+	const auto& mx = m_previewShape->GetTransform();
 	node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
 	node->SetStyle(m_setting.ToGeStyle());
 
@@ -877,7 +877,7 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 
 	CString strEngineLog;
 	strEngineLog.Format(_T("★ [신형 그래픽 엔진 (ge::Document)] %s 노드 생성 성공! (NodeId: %llu, 활성레이어: %s)"),
-		(LPCTSTR)m_previewShape->name,
+		m_previewShape->GetName().c_str(),
 		pAdded ? pAdded->GetId() : 0,
 		pDoc->GetDoc().GetActiveLayer() ? pDoc->GetDoc().GetActiveLayer()->GetName().c_str() : L"None");
 	LogAppEvent(strEngineLog);
@@ -942,15 +942,15 @@ void BaseShapeTool::DrawCommittedShapeAnchors(ID2D1RenderTarget* rt, ID2D1SolidC
 	PathShape* ps = dynamic_cast<PathShape*>(shapes[m_lastCommittedIndex].get());
 	if (!ps) return;
 
-	for (const auto& sp : ps->paths)
+	for (const auto& sp : ps->GetPathsRef())
 	{
 		for (const auto& node : sp.nodes)
 		{
-			D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, ps->xf, view);
+			D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, ps->GetTransform(), view);
 
 			if (node.HasIn())
 			{
-				D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), ps->xf, view);
+				D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), ps->GetTransform(), view);
 				brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.6f));
 				rt->DrawLine(aScreen, inScreen, brush, 1.0f);
 				brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.8f));
@@ -959,7 +959,7 @@ void BaseShapeTool::DrawCommittedShapeAnchors(ID2D1RenderTarget* rt, ID2D1SolidC
 
 			if (node.HasOut())
 			{
-				D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), ps->xf, view);
+				D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), ps->GetTransform(), view);
 				brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.6f));
 				rt->DrawLine(aScreen, outScreen, brush, 1.0f);
 				brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.8f));
@@ -1100,11 +1100,11 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 	m_previewShape = CreateShapeInstance(m_startPt, m_startPt, e.pDoc);
 	if (m_previewShape)
 	{
-		m_previewShape->style.stroke = m_setting.strokeColor;
-		m_previewShape->style.strokeWidth = m_setting.strokeWidth;
-		m_previewShape->style.dashStyle = m_setting.dashStyle;
-		m_previewShape->style.fillType = m_setting.fillType;
-		m_previewShape->style.fill = m_setting.fillColor;
+		m_previewShape->GetStyleRef().stroke = m_setting.strokeColor;
+		m_previewShape->GetStyleRef().strokeWidth = m_setting.strokeWidth;
+		m_previewShape->GetStyleRef().dashStyle = m_setting.dashStyle;
+		m_previewShape->GetStyleRef().fillType = m_setting.fillType;
+		m_previewShape->GetStyleRef().fill = m_setting.fillColor;
 		m_previewShape->Invalidate();
 	}
 
@@ -1113,7 +1113,7 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 	{
 		m_previewNode = std::make_unique<ge::PathNode>();
 		if (m_previewShape)
-			m_previewNode->SetName(std::wstring((LPCTSTR)m_previewShape->name));
+			m_previewNode->SetName(m_previewShape->GetName());
 		else if (e.pDoc)
 			m_previewNode->SetName(e.pDoc->GetDoc().GenerateNodeName(ge::ShapeKind::Rect));
 		else
@@ -1337,22 +1337,22 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	auto shape = std::make_unique<PathShape>();
 
 	// Inkscape 스타일 자동 명명 (rect1, ellipse1, star1 등)
-	auto getAutoName = [&](ge::ShapeKind geKind, const wchar_t* fallback) -> CString {
+	auto getAutoName = [&](ge::ShapeKind geKind, const wchar_t* fallback) -> std::wstring {
 		if (pDoc) {
-			return pDoc->GetDoc().GenerateNodeName(geKind).c_str();
+			return pDoc->GetDoc().GenerateNodeName(geKind);
 		}
 		return fallback;
 	};
 
 	if (m_kind == ShapeKind::Line)
 	{
-		shape->name = getAutoName(ge::ShapeKind::Path, _T("line1"));
+		shape->SetName(getAutoName(ge::ShapeKind::Path, _T("line1")));
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p1);
 	}
 	else if (m_kind == ShapeKind::Rect)
 	{
-		shape->name = getAutoName(ge::ShapeKind::Rect, _T("rect1"));
+		shape->SetName(getAutoName(ge::ShapeKind::Rect, _T("rect1")));
 		shape->SetKind(::ShapeKind::Rect);
 		RectParams rp;
 		rp.rx = m_setting.cornerRx;
@@ -1363,11 +1363,11 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p0);
-		shape->paths.back().closed = true;
+		shape->GetPathsRef().back().closed = true;
 	}
 	else if (m_kind == ShapeKind::Ellipse)
 	{
-		shape->name = getAutoName(ge::ShapeKind::Ellipse, _T("ellipse1"));
+		shape->SetName(getAutoName(ge::ShapeKind::Ellipse, _T("ellipse1")));
 		shape->SetKind(::ShapeKind::Ellipse);
 		EllipseParams ep;
 		ep.linkRxRy = m_setting.bLinkRxRy;
@@ -1380,11 +1380,11 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 			sp.nodes.push_back(n);
 		}
 		sp.closed = true;
-		shape->paths.push_back(sp);
+		shape->GetPathsRef().push_back(sp);
 	}
 	else if (m_kind == ShapeKind::Triangle)
 	{
-		shape->name = getAutoName(ge::ShapeKind::Triangle, _T("triangle1"));
+		shape->SetName(getAutoName(ge::ShapeKind::Triangle, _T("triangle1")));
 		shape->SetKind(::ShapeKind::Triangle);
 		TriangleParams tp;
 		tp.equilateral = false;
@@ -1392,11 +1392,11 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p0);
 		shape->AddAnchor(p0);
-		shape->paths.back().closed = true;
+		shape->GetPathsRef().back().closed = true;
 	}
 	else if (m_kind == ShapeKind::Star)
 	{
-		shape->name = getAutoName(ge::ShapeKind::Star, _T("star1"));
+		shape->SetName(getAutoName(ge::ShapeKind::Star, _T("star1")));
 		shape->SetKind(::ShapeKind::Star);
 		StarParams sp;
 		sp.points = (std::max)(3, (std::min)(32, m_setting.starPoints));
@@ -1404,22 +1404,22 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 		shape->SetParams(sp);
 		int n = sp.points;
 		for (int i = 0; i < n * 2; ++i) shape->AddAnchor(p0);
-		shape->paths.back().closed = true;
+		shape->GetPathsRef().back().closed = true;
 	}
 	else if (m_kind == ShapeKind::RegularPoly)
 	{
-		shape->name = getAutoName(ge::ShapeKind::Polygon, _T("polygon1"));
+		shape->SetName(getAutoName(ge::ShapeKind::Polygon, _T("polygon1")));
 		shape->SetKind(::ShapeKind::Polygon);
 		PolygonParams pp;
 		pp.sides = (std::max)(3, (std::min)(32, m_setting.polySides));
 		shape->SetParams(pp);
 		int n = pp.sides;
 		for (int i = 0; i < n; ++i) shape->AddAnchor(p0);
-		shape->paths.back().closed = true;
+		shape->GetPathsRef().back().closed = true;
 	}
 	else if (m_kind == ShapeKind::Gear)
 	{
-		shape->name = getAutoName(ge::ShapeKind::Gear, _T("gear1"));
+		shape->SetName(getAutoName(ge::ShapeKind::Gear, _T("gear1")));
 		shape->SetKind(::ShapeKind::Gear);
 		GearParams gp;
 		gp.teeth = (std::max)(4, (std::min)(48, m_setting.gearTeeth));
@@ -1428,19 +1428,19 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 		shape->SetParams(gp);
 		int n = gp.teeth;
 		for (int i = 0; i < n * 4; ++i) shape->AddAnchor(p0);
-		shape->paths.back().closed = true;
+		shape->GetPathsRef().back().closed = true;
 
 		// 2번째 서브패스: 축 구멍 4개 노드
-		shape->paths.emplace_back();
+		shape->GetPathsRef().emplace_back();
 		for (int i = 0; i < 4; ++i) {
 			BezierNode bn; bn.type = BezierNode::Type::Smooth;
-			shape->paths.back().nodes.push_back(bn);
+			shape->GetPathsRef().back().nodes.push_back(bn);
 		}
-		shape->paths.back().closed = true;
+		shape->GetPathsRef().back().closed = true;
 	}
 	else if (m_kind == ShapeKind::Spiral)
 	{
-		shape->name = getAutoName(ge::ShapeKind::Spiral, _T("spiral1"));
+		shape->SetName(getAutoName(ge::ShapeKind::Spiral, _T("spiral1")));
 		shape->SetKind(::ShapeKind::Spiral);
 		SpiralParams sp;
 		sp.turns = (std::max)(0.5f, (std::min)(10.0f, m_setting.spiralTurns));
@@ -1454,11 +1454,11 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 			sub.nodes.push_back(n);
 		}
 		sub.closed = false;
-		shape->paths.push_back(sub);
+		shape->GetPathsRef().push_back(sub);
 	}
 	else if (m_kind == ShapeKind::Heart)
 	{
-		shape->name = getAutoName(ge::ShapeKind::Heart, _T("heart1"));
+		shape->SetName(getAutoName(ge::ShapeKind::Heart, _T("heart1")));
 		shape->SetKind(::ShapeKind::Heart);
 		HeartParams hp;
 		shape->SetParams(hp);
@@ -1468,7 +1468,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 			sp.nodes.push_back(n);
 		}
 		sp.closed = true;
-		shape->paths.push_back(sp);
+		shape->GetPathsRef().push_back(sp);
 	}
 
 	UpdateGeometry(shape.get(), p0, p1);
@@ -1477,7 +1477,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 
 void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POINT_2F p1)
 {
-	if (!pShape || pShape->paths.empty()) return;
+	if (!pShape || pShape->GetPathsRef().empty()) return;
 
 	float left = min(p0.x, p1.x);
 	float top = min(p0.y, p1.y);
@@ -1492,9 +1492,9 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 
 	if (m_kind == ShapeKind::Line)
 	{
-		if (pShape->paths[0].nodes.size() < 2) return;
-		pShape->paths[0].nodes[0].anchor = p0;
-		pShape->paths[0].nodes[1].anchor = p1;
+		if (pShape->GetPathsRef()[0].nodes.size() < 2) return;
+		pShape->GetPathsRef()[0].nodes[0].anchor = p0;
+		pShape->GetPathsRef()[0].nodes[1].anchor = p1;
 	}
 	else if (m_kind == ShapeKind::Rect)
 	{
@@ -1504,7 +1504,7 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 		if (crx > 0.001f || cry > 0.001f)
 		{
 			// 둥근 사각형 (8개 앵커 + 베이지어 4분원)
-			auto& nodes = pShape->paths[0].nodes;
+			auto& nodes = pShape->GetPathsRef()[0].nodes;
 			if (nodes.size() < 8) {
 				nodes.clear();
 				for (int i = 0; i < 8; ++i) {
@@ -1546,7 +1546,7 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 		else
 		{
 			// 일반 직각 사각형 (4개 정점)
-			auto& nodes = pShape->paths[0].nodes;
+			auto& nodes = pShape->GetPathsRef()[0].nodes;
 			if (nodes.size() != 4) {
 				nodes.clear();
 				for (int i = 0; i < 4; ++i) nodes.emplace_back();
@@ -1563,12 +1563,12 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	}
 	else if (m_kind == ShapeKind::Ellipse)
 	{
-		if (pShape->paths[0].nodes.size() < 4) return;
+		if (pShape->GetPathsRef()[0].nodes.size() < 4) return;
 		const float kappa = 0.55228475f;
 		float kx = rx * kappa;
 		float ky = ry * kappa;
 
-		auto& nodes = pShape->paths[0].nodes;
+		auto& nodes = pShape->GetPathsRef()[0].nodes;
 		nodes[0].anchor = D2D1::Point2F(cx, cy - ry);
 		nodes[0].hIn = D2D1::Point2F(-kx, 0.0f); nodes[0].hOut = D2D1::Point2F(kx, 0.0f);
 
@@ -1584,7 +1584,7 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	else if (m_kind == ShapeKind::Triangle)
 	{
 		// 이등변 삼각형: (상단 중앙, 우하단, 좌하단)
-		auto& nodes = pShape->paths[0].nodes;
+		auto& nodes = pShape->GetPathsRef()[0].nodes;
 		if (nodes.size() < 3) return;
 		nodes[0].anchor = D2D1::Point2F(cx, top);
 		nodes[0].hIn = nodes[0].hOut = { 0, 0 };
@@ -1599,7 +1599,7 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 		StarParams* sp = pShape->GetParamRef<StarParams>();
 		int n = sp ? sp->points : (std::max)(3, (std::min)(32, m_setting.starPoints));
 		if (sp) { sp->radius = rx; sp->cx = cx; sp->cy = cy; }
-		auto& nodes = pShape->paths[0].nodes;
+		auto& nodes = pShape->GetPathsRef()[0].nodes;
 		if (static_cast<int>(nodes.size()) != n * 2) {
 			nodes.clear();
 			for (int i = 0; i < n * 2; ++i) nodes.emplace_back();
@@ -1619,7 +1619,7 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 		PolygonParams* pp = pShape->GetParamRef<PolygonParams>();
 		int n = pp ? pp->sides : (std::max)(3, (std::min)(32, m_setting.polySides));
 		if (pp) { pp->radius = rx; pp->cx = cx; pp->cy = cy; }
-		auto& nodes = pShape->paths[0].nodes;
+		auto& nodes = pShape->GetPathsRef()[0].nodes;
 		if (static_cast<int>(nodes.size()) != n) {
 			nodes.clear();
 			for (int i = 0; i < n; ++i) nodes.emplace_back();
@@ -1637,15 +1637,15 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 		GearParams* gp = pShape->GetParamRef<GearParams>();
 		int n = gp ? gp->teeth : (std::max)(4, (std::min)(48, m_setting.gearTeeth));
 		if (gp) { gp->radius = rx; gp->cx = cx; gp->cy = cy; }
-		if (pShape->paths.empty()) {
-			pShape->paths.emplace_back();
+		if (pShape->GetPathsRef().empty()) {
+			pShape->GetPathsRef().emplace_back();
 		}
-		auto& outerNodes = pShape->paths[0].nodes;
+		auto& outerNodes = pShape->GetPathsRef()[0].nodes;
 		if (static_cast<int>(outerNodes.size()) != n * 4) {
 			outerNodes.clear();
 			for (int i = 0; i < n * 4; ++i) outerNodes.emplace_back();
 		}
-		pShape->paths[0].closed = true;
+		pShape->GetPathsRef()[0].closed = true;
 
 		const float PI = 3.14159265358979323846f;
 		float depth = gp ? gp->depthRatio : (std::max)(0.05f, (std::min)(0.5f, m_setting.gearDepthRatio));
@@ -1664,10 +1664,10 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 		}
 
 		// 중앙 축 구멍(Bore Hole) 서브패스: 4-노드 3차 베지어 원 (κ = 0.55228475f)
-		if (pShape->paths.size() < 2) {
-			pShape->paths.emplace_back();
+		if (pShape->GetPathsRef().size() < 2) {
+			pShape->GetPathsRef().emplace_back();
 		}
-		auto& holeNodes = pShape->paths[1].nodes;
+		auto& holeNodes = pShape->GetPathsRef()[1].nodes;
 		if (holeNodes.size() != 4) {
 			holeNodes.clear();
 			for (int i = 0; i < 4; ++i) {
@@ -1676,7 +1676,7 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 				holeNodes.push_back(bn);
 			}
 		}
-		pShape->paths[1].closed = true;
+		pShape->GetPathsRef()[1].closed = true;
 
 		const float KAPPA = 0.5522847498f;
 		float hx = rx * boreRatio;
@@ -1709,7 +1709,7 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 		if (sp) { sp->radius = rx; sp->cx = cx; sp->cy = cy; }
 		int segs = static_cast<int>(turns * 4.0f);
 		if (segs < 4) segs = 4;
-		auto& nodes = pShape->paths[0].nodes;
+		auto& nodes = pShape->GetPathsRef()[0].nodes;
 		if (static_cast<int>(nodes.size()) != segs + 1) {
 			nodes.clear();
 			for (int i = 0; i <= segs; ++i) {
@@ -1734,7 +1734,7 @@ void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POIN
 	else if (m_kind == ShapeKind::Heart)
 	{
 		// 하트 (상단 골짜기, 우측 볼륨, 하단 뾰족점, 좌측 볼륨)
-		auto& nodes = pShape->paths[0].nodes;
+		auto& nodes = pShape->GetPathsRef()[0].nodes;
 		if (nodes.size() < 4) {
 			nodes.clear();
 			for (int i = 0; i < 4; ++i) {
@@ -1781,26 +1781,26 @@ void MultiPointShapeTool::OnDown(const ToolEvent& e)
 	if (!m_previewShape)
 	{
 		m_previewShape = std::make_unique<PathShape>();
-		m_previewShape->name = m_pName;
-		m_previewShape->style.stroke = m_setting.strokeColor;
-		m_previewShape->style.strokeWidth = m_setting.strokeWidth;
-		m_previewShape->style.dashStyle = m_setting.dashStyle;
-		m_previewShape->style.fillType = m_setting.fillType;
-		m_previewShape->style.fill = m_setting.fillColor;
+		m_previewShape->SetName(m_pName ? m_pName : L"");
+		m_previewShape->GetStyleRef().stroke = m_setting.strokeColor;
+		m_previewShape->GetStyleRef().strokeWidth = m_setting.strokeWidth;
+		m_previewShape->GetStyleRef().dashStyle = m_setting.dashStyle;
+		m_previewShape->GetStyleRef().fillType = m_setting.fillType;
+		m_previewShape->GetStyleRef().fill = m_setting.fillColor;
 	}
 
 	// 3개 이상 정점이 있을 때 첫 정점(8px 이내) 스냅 클릭 시 폐합 완료
-	if (!m_previewShape->paths.empty() && !m_previewShape->paths.back().nodes.empty())
+	if (!m_previewShape->GetPathsRef().empty() && !m_previewShape->GetPathsRef().back().nodes.empty())
 	{
-		const auto& firstNode = m_previewShape->paths.back().nodes[0];
-		D2D1_POINT_2F firstScreen = CoordinateSpace::LocalToScreen(firstNode.anchor, m_previewShape->xf, e.view);
+		const auto& firstNode = m_previewShape->GetPathsRef().back().nodes[0];
+		D2D1_POINT_2F firstScreen = CoordinateSpace::LocalToScreen(firstNode.anchor, m_previewShape->GetTransform(), e.view);
 		float dx = firstScreen.x - static_cast<float>(e.screenPt.x);
 		float dy = firstScreen.y - static_cast<float>(e.screenPt.y);
 
-		if (m_previewShape->paths.back().nodes.size() >= 3 && (dx * dx + dy * dy) <= 64.0f)
+		if (m_previewShape->GetPathsRef().back().nodes.size() >= 3 && (dx * dx + dy * dy) <= 64.0f)
 		{
 			// 첫 점 스냅 클릭: 폐합 완료하고 문서에 확정 (도구는 유지!)
-			m_previewShape->paths.back().closed = true;
+			m_previewShape->GetPathsRef().back().closed = true;
 			CommitShape(e.pDoc);
 			LogAppEvent(_T("[다각형 폐합 완료] 첫 정점 스냅"));
 			return;
@@ -1808,9 +1808,9 @@ void MultiPointShapeTool::OnDown(const ToolEvent& e)
 	}
 
 	// 직전에 찍은 정점과 동일하거나 매우 가까우면(더블클릭의 두 번째 클릭 등) 중복 추가 방지
-	if (!m_previewShape->paths.empty() && !m_previewShape->paths.back().nodes.empty())
+	if (!m_previewShape->GetPathsRef().empty() && !m_previewShape->GetPathsRef().back().nodes.empty())
 	{
-		const auto& lastNode = m_previewShape->paths.back().nodes.back();
+		const auto& lastNode = m_previewShape->GetPathsRef().back().nodes.back();
 		float ddx = lastNode.anchor.x - e.worldPt.x;
 		float ddy = lastNode.anchor.y - e.worldPt.y;
 		if ((ddx * ddx + ddy * ddy) < 1.0f)
@@ -1829,9 +1829,9 @@ void MultiPointShapeTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
 	if (nChar == VK_RETURN)
 	{
 		// Enter 키로 완료 (설정에 따라 열림/닫힘 반영, 도구는 유지)
-		if (!m_previewShape->paths.empty() && m_previewShape->paths.back().nodes.size() >= 2)
+		if (!m_previewShape->GetPathsRef().empty() && m_previewShape->GetPathsRef().back().nodes.size() >= 2)
 		{
-			m_previewShape->paths.back().closed = m_setting.bClosed;
+			m_previewShape->GetPathsRef().back().closed = m_setting.bClosed;
 			CommitShape(pDoc);
 			LogAppEvent(_T("[다각형 생성 완료] (Enter)"));
 		}
@@ -1851,9 +1851,9 @@ bool MultiPointShapeTool::OnDoubleClicked(CM2DrawDoc* pDoc)
 {
 	if (!pDoc) return true;
 
-	if (m_previewShape && !m_previewShape->paths.empty())
+	if (m_previewShape && !m_previewShape->GetPathsRef().empty())
 	{
-		auto& nodes = m_previewShape->paths.back().nodes;
+		auto& nodes = m_previewShape->GetPathsRef().back().nodes;
 
 		// 1. 더블클릭 시 바로 직전 점과 동일한 좌표가 연속으로 들어갔다면 마지막 중복점 1개 제거
 		if (nodes.size() >= 2)
@@ -1871,7 +1871,7 @@ bool MultiPointShapeTool::OnDoubleClicked(CM2DrawDoc* pDoc)
 		// 2. 최소 2개 이상(폐곡선이면 3개 이상 권장) 점이 있으면 확정 등록
 		if (nodes.size() >= 2)
 		{
-			m_previewShape->paths.back().closed = m_setting.bClosed;
+			m_previewShape->GetPathsRef().back().closed = m_setting.bClosed;
 			CommitShape(pDoc);
 			LogAppEvent(_T("[다각형 생성 완료] (더블클릭 -> 선택 도구 전환)"));
 		}
@@ -1892,9 +1892,9 @@ bool MultiPointShapeTool::OnRightClicked(CM2DrawDoc* pDoc)
 	if (!pDoc) return true;
 
 	// 우클릭 시: 작성 중인 정점들이 있으면 도형을 확정하고, 없으면 취소 후 선택 도구 전환
-	if (m_previewShape && !m_previewShape->paths.empty() && m_previewShape->paths.back().nodes.size() >= 2)
+	if (m_previewShape && !m_previewShape->GetPathsRef().empty() && m_previewShape->GetPathsRef().back().nodes.size() >= 2)
 	{
-		m_previewShape->paths.back().closed = m_setting.bClosed;
+		m_previewShape->GetPathsRef().back().closed = m_setting.bClosed;
 		CommitShape(pDoc);
 		LogAppEvent(_T("[다각형 생성 완료] (우클릭 -> 선택 도구 전환)"));
 	}
@@ -1911,29 +1911,29 @@ void MultiPointShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrus
 	if (!rt || !brush) return;
 	ViewportTransform view = { zoom, pan };
 
-	if (m_previewShape && !m_previewShape->paths.empty())
+	if (m_previewShape && !m_previewShape->GetPathsRef().empty())
 	{
 		ID2D1Factory* pFactory = nullptr;
 		rt->GetFactory(&pFactory);
 		m_previewShape->Draw(rt, brush, pFactory, view);
 		if (pFactory) pFactory->Release();
 
-		const auto& nodes = m_previewShape->paths.back().nodes;
+		const auto& nodes = m_previewShape->GetPathsRef().back().nodes;
 		if (!nodes.empty())
 		{
 			// 1. 확정 정점 선 연결
 			brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
 			for (size_t i = 1; i < nodes.size(); ++i)
 			{
-				D2D1_POINT_2F pA = CoordinateSpace::LocalToScreen(nodes[i - 1].anchor, m_previewShape->xf, view);
-				D2D1_POINT_2F pB = CoordinateSpace::LocalToScreen(nodes[i].anchor, m_previewShape->xf, view);
+				D2D1_POINT_2F pA = CoordinateSpace::LocalToScreen(nodes[i - 1].anchor, m_previewShape->GetTransform(), view);
+				D2D1_POINT_2F pB = CoordinateSpace::LocalToScreen(nodes[i].anchor, m_previewShape->GetTransform(), view);
 				rt->DrawLine(pA, pB, brush, 1.5f);
 			}
 
 			// 2. 마지막 점에서 현재 마우스 호버 위치로 실시간 연결선
 			if (m_hasHover)
 			{
-				D2D1_POINT_2F pLast = CoordinateSpace::LocalToScreen(nodes.back().anchor, m_previewShape->xf, view);
+				D2D1_POINT_2F pLast = CoordinateSpace::LocalToScreen(nodes.back().anchor, m_previewShape->GetTransform(), view);
 				D2D1_POINT_2F pNext = view.WorldToScreen(m_hoverPt);
 				brush->SetColor(D2D1::ColorF(D2D1::ColorF::CornflowerBlue));
 				rt->DrawLine(pLast, pNext, brush, 1.5f);
@@ -1941,7 +1941,7 @@ void MultiPointShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrus
 				// 2개 이상이면 첫 정점으로의 은은한 가상 폐합 가이드선
 				if (nodes.size() >= 2)
 				{
-					D2D1_POINT_2F pFirst = CoordinateSpace::LocalToScreen(nodes.front().anchor, m_previewShape->xf, view);
+					D2D1_POINT_2F pFirst = CoordinateSpace::LocalToScreen(nodes.front().anchor, m_previewShape->GetTransform(), view);
 					brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.45f));
 					rt->DrawLine(pNext, pFirst, brush, 1.0f);
 				}
@@ -1950,7 +1950,7 @@ void MultiPointShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrus
 			// 3. 앵커 점들 표시 (첫 정점 강조)
 			for (size_t i = 0; i < nodes.size(); ++i)
 			{
-				D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(nodes[i].anchor, m_previewShape->xf, view);
+				D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(nodes[i].anchor, m_previewShape->GetTransform(), view);
 				float sz = (i == 0) ? 4.5f : 3.5f;
 				D2D1_RECT_F hr = D2D1::RectF(aScreen.x - sz, aScreen.y - sz, aScreen.x + sz, aScreen.y + sz);
 				brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));

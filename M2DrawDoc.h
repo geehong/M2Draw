@@ -38,6 +38,12 @@ public:
 	std::vector<std::unique_ptr<Shape>>& GetShapes()      { return m_shapes; }
 	std::unique_ptr<PathShape>&          GetCurrentPath() { return m_currentPath; }
 
+	// --- 스마트 삭제 연동 기능 (키보드 Del 키 & 레이어 패널 휴지통 공용) ---
+	bool HasSelectedObjects() const;
+	bool DeleteSelectedObjects();
+	bool DeleteActiveLayer();
+	bool PerformSmartDelete();
+
 // 재정의입니다.
 public:
 	virtual BOOL OnNewDocument();

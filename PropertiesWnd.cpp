@@ -310,8 +310,8 @@ void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
 	{
 		Shape* shape = pDoc->GetShapes()[shapeIndex].get();
 		CString strTitle;
-		if (!shape->name.IsEmpty())
-			strTitle.Format(_T("{%s} 오브젝트 설정"), (LPCTSTR)shape->name);
+		if (!shape->GetName().empty())
+			strTitle.Format(_T("{%s} 오브젝트 설정"), shape->GetName().c_str());
 		else
 			strTitle.Format(_T("{%s #%d} 오브젝트 설정"), shape->GetShapeTypeName(), shapeIndex + 1);
 
@@ -508,15 +508,15 @@ void CPropertiesWnd::InitShapePropList()
 
 	// 타이틀: {쉐이프 이름} 설정
 	CString strGroupTitle;
-	if (!shape->name.IsEmpty())
-		strGroupTitle.Format(_T("{%s} 설정"), (LPCTSTR)shape->name);
+	if (!shape->GetName().empty())
+		strGroupTitle.Format(_T("{%s} 설정"), shape->GetName().c_str());
 	else
 		strGroupTitle.Format(_T("{%s #%d} 설정"), shape->GetShapeTypeName(), m_selectedShapeIndex + 1);
 
 	CMFCPropertyGridProperty* pGroupShape = new CMFCPropertyGridProperty(strGroupTitle);
 
 	// 1. 쉐이프 이름 편집
-	CString strNameVal = shape->name.IsEmpty() ? CString(shape->GetShapeTypeName()) : shape->name;
+	CString strNameVal = shape->GetName().empty() ? CString(shape->GetShapeTypeName()) : CString(shape->GetName().c_str());
 	CMFCPropertyGridProperty* pPropName = new CMFCPropertyGridProperty(
 		_T("쉐이프 이름"),
 		(_variant_t)(LPCTSTR)strNameVal,
@@ -528,7 +528,7 @@ void CPropertiesWnd::InitShapePropList()
 	// 2. 라인 굵기 (D2D 실시간 지원, 1 ~ 50 px)
 	CMFCPropertyGridProperty* pPropWidth = new CMFCPropertyGridProperty(
 		_T("라인 굵기 (px)"),
-		(_variant_t)(long)shape->style.strokeWidth,
+		(_variant_t)(long)shape->GetStyleRef().strokeWidth,
 		_T("선(외곽선)의 굵기를 설정합니다.")
 	);
 	pPropWidth->EnableSpinControl(TRUE, 1, 50);
@@ -537,9 +537,9 @@ void CPropertiesWnd::InitShapePropList()
 
 	// 3. 라인 색상 (COLORREF 변환 및 알파 반영)
 	COLORREF clrStroke = RGB(
-		(BYTE)(shape->style.stroke.r * 255.0f),
-		(BYTE)(shape->style.stroke.g * 255.0f),
-		(BYTE)(shape->style.stroke.b * 255.0f)
+		(BYTE)(shape->GetStyleRef().stroke.r * 255.0f),
+		(BYTE)(shape->GetStyleRef().stroke.g * 255.0f),
+		(BYTE)(shape->GetStyleRef().stroke.b * 255.0f)
 	);
 	CMFCPropertyGridColorProperty* pPropClrStroke = new CMFCPropertyGridColorProperty(
 		_T("라인 색상"),
@@ -563,7 +563,7 @@ void CPropertiesWnd::InitShapePropList()
 	pPropDash->AddOption(_T("대시-점선 (DashDot)"));
 	pPropDash->AllowEdit(FALSE);
 
-	switch (shape->style.dashStyle)
+	switch (shape->GetStyleRef().dashStyle)
 	{
 	case D2D1_DASH_STYLE_DASH:      pPropDash->SetValue(_T("대시선 (Dash)")); break;
 	case D2D1_DASH_STYLE_DOT:       pPropDash->SetValue(_T("점선 (Dot)")); break;
@@ -589,7 +589,7 @@ void CPropertiesWnd::InitShapePropList()
 	pPropFillType->AddOption(_T("무늬 / 패턴 (Pattern)"));
 	pPropFillType->AllowEdit(FALSE);
 
-	switch (shape->style.fillType)
+	switch (shape->GetStyleRef().fillType)
 	{
 	case FillType::Solid:   pPropFillType->SetValue(_T("단색 채움 (Solid)")); break;
 	case FillType::Pattern: pPropFillType->SetValue(_T("무늬 / 패턴 (Pattern)")); break;
@@ -600,9 +600,9 @@ void CPropertiesWnd::InitShapePropList()
 
 	// 채움 색상
 	COLORREF clrFill = RGB(
-		(BYTE)(shape->style.fill.r * 255.0f),
-		(BYTE)(shape->style.fill.g * 255.0f),
-		(BYTE)(shape->style.fill.b * 255.0f)
+		(BYTE)(shape->GetStyleRef().fill.r * 255.0f),
+		(BYTE)(shape->GetStyleRef().fill.g * 255.0f),
+		(BYTE)(shape->GetStyleRef().fill.b * 255.0f)
 	);
 	CMFCPropertyGridColorProperty* pPropClrFill = new CMFCPropertyGridColorProperty(
 		_T("채움 색상"),
@@ -864,16 +864,16 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
 		{
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
-			shape->name = val.bstrVal;
+			shape->SetName(val.bstrVal ? val.bstrVal : L"");
 			CString strTitle;
-			strTitle.Format(_T("{%s} 설정"), (LPCTSTR)shape->name);
+			strTitle.Format(_T("{%s} 설정"), shape->GetName().c_str());
 			if (m_wndObjectCombo.GetCount() > 1)
 			{
 				m_wndObjectCombo.DeleteString(1);
 				m_wndObjectCombo.InsertString(1, strTitle);
 				m_wndObjectCombo.SetCurSel(1);
 			}
-			strLogMsg.Format(_T("[쉐이프 속성] 이름 변경: %s"), (LPCTSTR)shape->name);
+			strLogMsg.Format(_T("[쉐이프 속성] 이름 변경: %s"), shape->GetName().c_str());
 			LogAppEvent(strLogMsg);
 		}
 		break;
@@ -884,9 +884,9 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
 		{
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
-			shape->style.strokeWidth = static_cast<float>(val.dblVal);
+			shape->GetStyleRef().strokeWidth = static_cast<float>(val.dblVal);
 			shape->Invalidate();
-			strLogMsg.Format(_T("[쉐이프 속성] 라인 굵기: %.1f px"), shape->style.strokeWidth);
+			strLogMsg.Format(_T("[쉐이프 속성] 라인 굵기: %.1f px"), shape->GetStyleRef().strokeWidth);
 			LogAppEvent(strLogMsg);
 		}
 		break;
@@ -898,7 +898,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		{
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			COLORREF c = pColor->GetColor();
-			shape->style.stroke = D2D1::ColorF(
+			shape->GetStyleRef().stroke = D2D1::ColorF(
 				GetRValue(c) / 255.0f,
 				GetGValue(c) / 255.0f,
 				GetBValue(c) / 255.0f,
@@ -917,13 +917,13 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			CString strDash = val.bstrVal;
 			if (strDash.Find(_T("대시-점선")) >= 0)
-				shape->style.dashStyle = D2D1_DASH_STYLE_DASH_DOT;
+				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH_DOT;
 			else if (strDash.Find(_T("대시선")) >= 0)
-				shape->style.dashStyle = D2D1_DASH_STYLE_DASH;
+				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH;
 			else if (strDash.Find(_T("점선")) >= 0)
-				shape->style.dashStyle = D2D1_DASH_STYLE_DOT;
+				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DOT;
 			else
-				shape->style.dashStyle = D2D1_DASH_STYLE_SOLID;
+				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_SOLID;
 
 			shape->Invalidate();
 			strLogMsg.Format(_T("[쉐이프 속성] 라인 스타일: %s"), (LPCTSTR)strDash);
@@ -938,11 +938,11 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			CString strFillType = val.bstrVal;
 			if (strFillType.Find(_T("단색")) >= 0)
-				shape->style.fillType = FillType::Solid;
+				shape->GetStyleRef().fillType = FillType::Solid;
 			else if (strFillType.Find(_T("무늬")) >= 0 || strFillType.Find(_T("패턴")) >= 0)
-				shape->style.fillType = FillType::Pattern;
+				shape->GetStyleRef().fillType = FillType::Pattern;
 			else
-				shape->style.fillType = FillType::None;
+				shape->GetStyleRef().fillType = FillType::None;
 
 			shape->Invalidate();
 			strLogMsg.Format(_T("[쉐이프 속성] 채움 유형: %s"), (LPCTSTR)strFillType);
@@ -957,16 +957,16 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		{
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			COLORREF c = pColor->GetColor();
-			shape->style.fill = D2D1::ColorF(
+			shape->GetStyleRef().fill = D2D1::ColorF(
 				GetRValue(c) / 255.0f,
 				GetGValue(c) / 255.0f,
 				GetBValue(c) / 255.0f,
 				1.0f
 			);
 			// 사용자가 채움 색을 선택했는데 채움 유형이 '투명'이었다면 자동으로 '단색 채움'으로 활성화
-			if (shape->style.fillType == FillType::None)
+			if (shape->GetStyleRef().fillType == FillType::None)
 			{
-				shape->style.fillType = FillType::Solid;
+				shape->GetStyleRef().fillType = FillType::Solid;
 			}
 			shape->Invalidate();
 			strLogMsg.Format(_T("[쉐이프 속성] 채움 색상: RGB(%d, %d, %d)"), GetRValue(c), GetGValue(c), GetBValue(c));

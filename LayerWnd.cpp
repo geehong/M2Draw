@@ -395,6 +395,7 @@ BEGIN_MESSAGE_MAP(CLayerView, CWnd)
 	ON_WM_LBUTTONDBLCLK()
 	ON_WM_MOUSEWHEEL()
 	ON_WM_KILLFOCUS()
+	ON_WM_KEYDOWN()
 	ON_EN_KILLFOCUS(IDC_LAYER_EDIT_NAME, &CLayerView::OnEditKillFocus)
 END_MESSAGE_MAP()
 
@@ -603,19 +604,9 @@ int CLayerView::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	m_btnDelete->SetOnClick([this](M2DrawButton*) {
 		CM2DrawDoc* pDoc = GetDocSafe();
 		if (!pDoc) return;
-		auto* pActive = pDoc->GetDoc().GetActiveLayer();
-		if (pActive)
-		{
-			CString name = pActive->GetName().c_str();
-			pDoc->GetDoc().RemoveLayer(pActive);
-			CString strLog;
-			strLog.Format(_T("[레이어 패널] 레이어 삭제됨: '%s'"), (LPCTSTR)name);
-			LogAppEvent(strLog);
-
-			pDoc->UpdateAllViews(nullptr);
-			RefreshLayers();
-			SafeInvalidate(FALSE);
-		}
+		pDoc->PerformSmartDelete();
+		RefreshLayers();
+		SafeInvalidate(FALSE);
 	});
 
 	// 2. 인라인 이름 편집 에디트 컨트롤 생성
@@ -825,7 +816,7 @@ void CLayerView::RefreshLayers()
 					{
 						for (auto& sp : pActiveDoc->GetShapes())
 						{
-							if (sp && sp->name == child->GetName().c_str())
+							if (sp && sp->GetName() == child->GetName())
 							{
 								sp->SetVisible(bChecked && child->IsVisible());
 							}
@@ -889,7 +880,7 @@ void CLayerView::RefreshLayers()
 					// 대응하는 구형 Shape 도 동기화하여 뷰포트에서 완전히 숨겨지도록 처리
 					for (auto& sp : pActiveDoc->GetShapes())
 					{
-						if (sp && sp->name == child->GetName().c_str())
+						if (sp && sp->GetName() == child->GetName())
 						{
 							sp->SetVisible(bChecked && layer->IsVisible());
 						}
@@ -1462,6 +1453,49 @@ void CLayerView::OnKillFocus(CWnd* pNewWnd)
 		m_capturedControl.reset();
 	}
 	SafeInvalidate(FALSE);
+}
+
+BOOL CLayerView::PreTranslateMessage(MSG* pMsg)
+{
+	if (pMsg->message == WM_KEYDOWN && (pMsg->wParam == VK_DELETE || pMsg->wParam == VK_BACK))
+	{
+		if (m_wndEditName.GetSafeHwnd() && m_wndEditName.IsWindowVisible())
+		{
+			return CWnd::PreTranslateMessage(pMsg);
+		}
+
+		CM2DrawDoc* pDoc = GetDocSafe();
+		if (pDoc)
+		{
+			pDoc->PerformSmartDelete();
+			RefreshLayers();
+			SafeInvalidate(FALSE);
+			return TRUE;
+		}
+	}
+	return CWnd::PreTranslateMessage(pMsg);
+}
+
+void CLayerView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+	if (nChar == VK_DELETE || nChar == VK_BACK)
+	{
+		if (m_wndEditName.GetSafeHwnd() && m_wndEditName.IsWindowVisible())
+		{
+			CWnd::OnKeyDown(nChar, nRepCnt, nFlags);
+			return;
+		}
+
+		CM2DrawDoc* pDoc = GetDocSafe();
+		if (pDoc)
+		{
+			pDoc->PerformSmartDelete();
+			RefreshLayers();
+			SafeInvalidate(FALSE);
+			return;
+		}
+	}
+	CWnd::OnKeyDown(nChar, nRepCnt, nFlags);
 }
 
 // ============================================================================
