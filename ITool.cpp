@@ -178,7 +178,7 @@ bool SelectTool::GetHandleScreenPositions(ge::Node* shape, const ViewportTransfo
 
 	for (int i = 0; i < 9; ++i)
 	{
-		outHandles[i] = CoordinateSpace::LocalToScreen(localHandles[i], shape->GetTransform(), view);
+		outHandles[i] = CoordinateSpace::LocalToScreen(localHandles[i], shape->GetWorldTransform(), view);
 	}
 	return true;
 }

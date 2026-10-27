@@ -5,6 +5,7 @@
 #include <dwrite.h>
 #include <vector>
 #include <memory>
+#include <unordered_set>
 #include "D2DGraphicEngine.h"
 #include "D2DLayer.h"
 #include "D2DColorWheel.h"
@@ -76,7 +77,8 @@ protected:
 	{
 		ge::Node*                           pNode = nullptr;
 		bool                                isLayer = false;
-		int                                 depth = 0;           // 0: 레이어, 1: 자식 도형
+		int                                 depth = 0;           // 0: 레이어, 1+: 그룹/도형 (임의 깊이)
+		bool                                hasChildren = false; // 접기/펼치기 화살표 표시 여부
 		bool                                isExpanded = true;
 		D2D1_RECT_F                         rowRect = { 0, 0, 0, 0 };
 		D2D1_RECT_F                         expandRect = { 0, 0, 0, 0 };
@@ -97,8 +99,12 @@ protected:
 	// 편집 상자 숨김 (편집 상자가 포커스를 가지고 있으면 레이어 뷰로 포커스 반환)
 	void HideEditBox();
 
+	// 노드와 (펼쳐진) 후손의 행을 m_rowItems 에 재귀 추가
+	void AppendNodeRows(ge::Node* node, int depth);
+
 	CM2DrawDoc*                        m_pDoc = nullptr;
 	std::vector<LayerRowItem>          m_rowItems;
+	std::unordered_set<ge::NodeId>     m_collapsedIds;   // 접힌 레이어/그룹 (RefreshLayers 사이에 유지)
 	std::shared_ptr<M2DrawControl>     m_capturedControl;
 
 	// 상단 툴바 D2D 커스텀 버튼 (M2DrawButton)

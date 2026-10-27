@@ -677,18 +677,18 @@ void CLayerView::UpdateLayout(float width, float height)
 	{
 		row.rowRect = D2D1::RectF(0.0f, curY, width, curY + rowH);
 
-		float indent = (row.depth == 0) ? 6.0f : 24.0f;
+		float indent = 6.0f + 14.0f * row.depth;
 
-		// 1. 접기/펼치기 화살표 (레이어만 해당)
-		if (row.isLayer)
+		// 1. 접기/펼치기 화살표 (자식이 있는 레이어/그룹). 없는 행도 아이콘 정렬을 위해 자리는 확보
+		if (row.hasChildren)
 		{
 			row.expandRect = D2D1::RectF(indent, curY + 6.0f, indent + 12.0f, curY + rowH - 6.0f);
-			indent += 15.0f;
 		}
 		else
 		{
 			row.expandRect = D2D1::RectF(0, 0, 0, 0);
 		}
+		indent += 15.0f;
 
 		// 3. 아이콘 영역 (14x14 크기)
 		row.iconRect = D2D1::RectF(indent, curY + 7.0f, indent + 14.0f, curY + 21.0f);
@@ -743,33 +743,26 @@ static void PruneSelectionAfterToggle(CM2DrawDoc* pDoc)
 	}
 }
 
-void CLayerView::RefreshLayers()
+// 노드 하나(와 펼쳐진 후손)의 행을 재귀적으로 추가: 레이어 -> 그룹 -> 도형 임의 깊이
+void CLayerView::AppendNodeRows(ge::Node* node, int depth)
 {
-	CM2DrawDoc* pDoc = GetDocSafe();
-	m_rowItems.clear();
-	if (!pDoc)
+	if (!node) return;
+
+	auto* group = dynamic_cast<ge::GroupNode*>(node);   // 레이어도 GroupNode
+	const bool isLayer = (node->Kind() == ge::NodeKind::Layer);
+
+	LayerRowItem row;
+	row.pNode = node;
+	row.isLayer = isLayer;
+	row.depth = depth;
+	row.hasChildren = group && !group->GetChildren().empty();
+	row.isExpanded = (m_collapsedIds.find(node->GetId()) == m_collapsedIds.end());
+
+	if (isLayer)
 	{
-		SafeInvalidate(FALSE);
-		return;
-	}
-
-	auto& doc = pDoc->GetDoc();
-	const auto& layers = doc.GetLayers();
-
-	for (int li = static_cast<int>(layers.size()) - 1; li >= 0; --li)
-	{
-		auto* layer = layers[li].get();
-		if (!layer) continue;
-
-		LayerRowItem rowLayer;
-		rowLayer.pNode = layer;
-		rowLayer.isLayer = true;
-		rowLayer.depth = 0;
-		rowLayer.isExpanded = true;
-
 		// M2DrawControl: [3. 혼합 모드 아이콘 버튼] (blending-mode.svg 드롭다운 메뉴 트리거)
-		rowLayer.btnBlendMode = std::make_shared<M2DrawButton>(L"");
-		rowLayer.btnBlendMode->SetOnClick([this, layer](M2DrawButton* pBtn) {
+		row.btnBlendMode = std::make_shared<M2DrawButton>(L"");
+		row.btnBlendMode->SetOnClick([this, node](M2DrawButton* pBtn) {
 			D2D1_RECT_F b = pBtn->GetBounds();
 			CPoint pt(static_cast<int>(b.left), static_cast<int>(b.bottom));
 			ClientToScreen(&pt);
@@ -780,7 +773,7 @@ void CLayerView::RefreshLayers()
 				for (int i = 0; i < 16; ++i)
 				{
 					UINT flags = MF_STRING;
-					if (layer->GetBlendMode() == s_blendModes[i].mode)
+					if (node->GetBlendMode() == s_blendModes[i].mode)
 					{
 						flags |= MF_CHECKED;
 					}
@@ -791,118 +784,86 @@ void CLayerView::RefreshLayers()
 				if (cmd >= 50000 && cmd < 50016)
 				{
 					int selIdx = cmd - 50000;
-					layer->SetBlendMode(s_blendModes[selIdx].mode);
+					node->SetBlendMode(s_blendModes[selIdx].mode);
 					CM2DrawDoc* pActiveDoc = GetDocSafe();
 					if (pActiveDoc) pActiveDoc->UpdateAllViews(nullptr);
 					CString strLog;
 					strLog.Format(_T("[레이어 패널] 레이어 '%s' 혼합 모드 변경: '%s'"),
-						layer->GetName().c_str(), s_blendModes[selIdx].name);
+						node->GetName().c_str(), s_blendModes[selIdx].name);
 					LogAppEvent(strLog);
 					SafeInvalidate(FALSE);
 				}
 			}
 		});
-
-		// M2DrawControl: [투명도] 버튼 생성
-		rowLayer.btnOpacity = std::make_shared<M2DrawButton>(L"");
-		ge::Node* pTarget = layer;
-		rowLayer.btnOpacity->SetOnClick([this, pTarget](M2DrawButton* pBtn) {
-			CM2DrawDoc* pActiveDoc = GetDocSafe();
-			if (!pActiveDoc || !pTarget) return;
-
-			D2D1_RECT_F b = pBtn->GetBounds();
-			CPoint pt(static_cast<int>(b.left), static_cast<int>(b.bottom));
-			ClientToScreen(&pt);
-			m_wndOpacityPopup.ShowPopup(pt, pTarget, pActiveDoc, this);
-		});
-
-		// M2DrawControl: [👁] 보기 체크박스 생성
-		rowLayer.chkVisible = std::make_shared<M2DrawCheckBox>(L"", layer->IsVisible());
-		rowLayer.chkVisible->SetOnChanged([this, layer](M2DrawCheckBox*, bool bChecked) {
-			layer->SetVisible(bChecked);
-			CM2DrawDoc* pActiveDoc = GetDocSafe();
-			if (pActiveDoc)
-			{
-				PruneSelectionAfterToggle(pActiveDoc);
-				pActiveDoc->UpdateAllViews(nullptr);
-			}
-			CString strLog;
-			strLog.Format(_T("[레이어 패널] [보기 👁] 토글: '%s' (가시성: %s)"),
-				layer->GetName().c_str(), bChecked ? _T("표시") : _T("숨김"));
-			LogAppEvent(strLog);
-			SafeInvalidate(FALSE);
-		});
-
-		// M2DrawControl: [🔒] 잠금 체크박스 생성
-		rowLayer.chkLocked = std::make_shared<M2DrawCheckBox>(L"", layer->IsLocked());
-		rowLayer.chkLocked->SetOnChanged([this, layer](M2DrawCheckBox*, bool bChecked) {
-			layer->SetLocked(bChecked);
-			CM2DrawDoc* pActiveDoc = GetDocSafe();
-			if (pActiveDoc) { PruneSelectionAfterToggle(pActiveDoc); pActiveDoc->UpdateAllViews(nullptr); }
-			CString strLog;
-			strLog.Format(_T("[레이어 패널] [잠금 🔒] 토글: '%s' (상태: %s)"),
-				layer->GetName().c_str(), bChecked ? _T("잠김") : _T("해제"));
-			LogAppEvent(strLog);
-			SafeInvalidate(FALSE);
-		});
-
-		m_rowItems.push_back(rowLayer);
-
-		// 자식 도형 노드들 추가
-		for (int ci = static_cast<int>(layer->GetChildren().size()) - 1; ci >= 0; --ci)
-		{
-			auto* child = layer->GetChildren()[ci].get();
-			if (!child) continue;
-
-			LayerRowItem rowChild;
-			rowChild.pNode = child;
-			rowChild.isLayer = false;
-			rowChild.depth = 1;
-			rowChild.isExpanded = false;
-
-			rowChild.btnOpacity = std::make_shared<M2DrawButton>(L"");
-			ge::Node* pChildTarget = child;
-			rowChild.btnOpacity->SetOnClick([this, pChildTarget](M2DrawButton* pBtn) {
-				CM2DrawDoc* pActiveDoc = GetDocSafe();
-				if (!pActiveDoc || !pChildTarget) return;
-
-				D2D1_RECT_F b = pBtn->GetBounds();
-				CPoint pt(static_cast<int>(b.left), static_cast<int>(b.bottom));
-				ClientToScreen(&pt);
-				m_wndOpacityPopup.ShowPopup(pt, pChildTarget, pActiveDoc, this);
-			});
-
-			rowChild.chkVisible = std::make_shared<M2DrawCheckBox>(L"", child->IsVisible());
-			rowChild.chkVisible->SetOnChanged([this, child](M2DrawCheckBox*, bool bChecked) {
-				child->SetVisible(bChecked);
-				CM2DrawDoc* pActiveDoc = GetDocSafe();
-				if (pActiveDoc)
-				{
-					PruneSelectionAfterToggle(pActiveDoc);
-					pActiveDoc->UpdateAllViews(nullptr);
-				}
-				CString strLog;
-				strLog.Format(_T("[레이어 패널] [보기 👁] 토글: '%s' (가시성: %s)"),
-					child->GetName().c_str(), bChecked ? _T("표시") : _T("숨김"));
-				LogAppEvent(strLog);
-				SafeInvalidate(FALSE);
-			});
-
-			rowChild.chkLocked = std::make_shared<M2DrawCheckBox>(L"", child->IsLocked());
-			rowChild.chkLocked->SetOnChanged([this, child](M2DrawCheckBox*, bool bChecked) {
-				child->SetLocked(bChecked);
-				CM2DrawDoc* pActiveDoc = GetDocSafe();
-				if (pActiveDoc) { PruneSelectionAfterToggle(pActiveDoc); pActiveDoc->UpdateAllViews(nullptr); }
-				CString strLog;
-				strLog.Format(_T("[레이어 패널] [잠금 🔒] 토글: '%s' (상태: %s)"),
-					child->GetName().c_str(), bChecked ? _T("잠김") : _T("해제"));
-				LogAppEvent(strLog);
-				SafeInvalidate(FALSE);
-			});
-
-			m_rowItems.push_back(rowChild);
-		}
 	}
+
+	// M2DrawControl: [투명도] 버튼 생성
+	row.btnOpacity = std::make_shared<M2DrawButton>(L"");
+	row.btnOpacity->SetOnClick([this, node](M2DrawButton* pBtn) {
+		CM2DrawDoc* pActiveDoc = GetDocSafe();
+		if (!pActiveDoc || !node) return;
+
+		D2D1_RECT_F b = pBtn->GetBounds();
+		CPoint pt(static_cast<int>(b.left), static_cast<int>(b.bottom));
+		ClientToScreen(&pt);
+		m_wndOpacityPopup.ShowPopup(pt, node, pActiveDoc, this);
+	});
+
+	// M2DrawControl: [👁] 보기 체크박스 생성
+	row.chkVisible = std::make_shared<M2DrawCheckBox>(L"", node->IsVisible());
+	row.chkVisible->SetOnChanged([this, node](M2DrawCheckBox*, bool bChecked) {
+		node->SetVisible(bChecked);
+		CM2DrawDoc* pActiveDoc = GetDocSafe();
+		if (pActiveDoc)
+		{
+			PruneSelectionAfterToggle(pActiveDoc);
+			pActiveDoc->UpdateAllViews(nullptr);
+		}
+		CString strLog;
+		strLog.Format(_T("[레이어 패널] [보기 👁] 토글: '%s' (가시성: %s)"),
+			node->GetName().c_str(), bChecked ? _T("표시") : _T("숨김"));
+		LogAppEvent(strLog);
+		SafeInvalidate(FALSE);
+	});
+
+	// M2DrawControl: [🔒] 잠금 체크박스 생성
+	row.chkLocked = std::make_shared<M2DrawCheckBox>(L"", node->IsLocked());
+	row.chkLocked->SetOnChanged([this, node](M2DrawCheckBox*, bool bChecked) {
+		node->SetLocked(bChecked);
+		CM2DrawDoc* pActiveDoc = GetDocSafe();
+		if (pActiveDoc) { PruneSelectionAfterToggle(pActiveDoc); pActiveDoc->UpdateAllViews(nullptr); }
+		CString strLog;
+		strLog.Format(_T("[레이어 패널] [잠금 🔒] 토글: '%s' (상태: %s)"),
+			node->GetName().c_str(), bChecked ? _T("잠김") : _T("해제"));
+		LogAppEvent(strLog);
+		SafeInvalidate(FALSE);
+	});
+
+	const bool expanded = row.isExpanded;
+	m_rowItems.push_back(std::move(row));
+
+	// 자식은 위(z-order 최상단) -> 아래 순서로, 펼쳐진 경우에만
+	if (group && expanded)
+	{
+		const auto& children = group->GetChildren();
+		for (int ci = static_cast<int>(children.size()) - 1; ci >= 0; --ci)
+			AppendNodeRows(children[ci].get(), depth + 1);
+	}
+}
+
+void CLayerView::RefreshLayers()
+{
+	CM2DrawDoc* pDoc = GetDocSafe();
+	m_rowItems.clear();
+	if (!pDoc)
+	{
+		SafeInvalidate(FALSE);
+		return;
+	}
+
+	const auto& layers = pDoc->GetDoc().GetLayers();
+	for (int li = static_cast<int>(layers.size()) - 1; li >= 0; --li)
+		AppendNodeRows(layers[li].get(), 0);
 
 	CRect rc;
 	GetClientRect(&rc);
@@ -928,6 +889,17 @@ void CLayerView::DrawNodeIcon(ID2D1RenderTarget* pRT, ID2D1SolidColorBrush* pBru
 		D2D1_RECT_F r2 = D2D1::RectF(iconRect.left + 0.5f, iconRect.top + 6.5f, iconRect.right - 0.5f, iconRect.bottom - 1.5f);
 		pRT->DrawRoundedRectangle(D2D1::RoundedRect(r1, 1.0f, 1.0f), pBrush, 1.1f);
 		pRT->DrawRoundedRectangle(D2D1::RoundedRect(r2, 1.5f, 1.5f), pBrush, 1.1f);
+		return;
+	}
+
+	if (pNode->Kind() == ge::NodeKind::Group)
+	{
+		// 그룹 아이콘: 겹친 두 사각형
+		pBrush->SetColor(D2D1::ColorF(0.55f, 0.80f, 0.55f, 1.0f));
+		D2D1_RECT_F g1 = D2D1::RectF(iconRect.left + 0.5f, iconRect.top + 0.5f, iconRect.right - 4.5f, iconRect.bottom - 4.5f);
+		D2D1_RECT_F g2 = D2D1::RectF(iconRect.left + 4.5f, iconRect.top + 4.5f, iconRect.right - 0.5f, iconRect.bottom - 0.5f);
+		pRT->DrawRectangle(g1, pBrush, 1.1f);
+		pRT->DrawRectangle(g2, pBrush, 1.1f);
 		return;
 	}
 
@@ -1048,15 +1020,25 @@ void CLayerView::OnPaint()
 			m_pRenderTarget->DrawRectangle(row.rowRect, m_pBrush, 1.0f);
 		}
 
-		// 화살표 (레이어 노드만)
-		if (row.isLayer && row.expandRect.right > row.expandRect.left)
+		// 접기/펼치기 화살표 (자식이 있는 레이어/그룹): 펼침 ▽ / 접힘 ▷
+		if (row.hasChildren && row.expandRect.right > row.expandRect.left)
 		{
 			float cx = (row.expandRect.left + row.expandRect.right) * 0.5f;
 			float cy = (row.expandRect.top + row.expandRect.bottom) * 0.5f;
 			m_pBrush->SetColor(D2D1::ColorF(0.70f, 0.70f, 0.75f, 1.0f));
-			D2D1_POINT_2F pA = D2D1::Point2F(cx - 3.5f, cy - 2.0f);
-			D2D1_POINT_2F pB = D2D1::Point2F(cx + 3.5f, cy - 2.0f);
-			D2D1_POINT_2F pC = D2D1::Point2F(cx, cy + 2.5f);
+			D2D1_POINT_2F pA, pB, pC;
+			if (row.isExpanded)
+			{
+				pA = D2D1::Point2F(cx - 3.5f, cy - 2.0f);
+				pB = D2D1::Point2F(cx + 3.5f, cy - 2.0f);
+				pC = D2D1::Point2F(cx, cy + 2.5f);
+			}
+			else
+			{
+				pA = D2D1::Point2F(cx - 2.0f, cy - 3.5f);
+				pB = D2D1::Point2F(cx - 2.0f, cy + 3.5f);
+				pC = D2D1::Point2F(cx + 2.5f, cy);
+			}
 			m_pRenderTarget->DrawLine(pA, pB, m_pBrush, 1.2f);
 			m_pRenderTarget->DrawLine(pB, pC, m_pBrush, 1.2f);
 			m_pRenderTarget->DrawLine(pC, pA, m_pBrush, 1.2f);
@@ -1184,6 +1166,16 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 	{
 		if (ptD2D.y >= row.rowRect.top && ptD2D.y <= row.rowRect.bottom)
 		{
+			// 0. 접기/펼치기 화살표 클릭 -> 상태 토글 후 행 재구성 (row 무효화되므로 즉시 반환)
+			if (row.hasChildren && row.pNode &&
+				ptD2D.x >= row.expandRect.left - 2.0f && ptD2D.x <= row.expandRect.right + 2.0f)
+			{
+				const ge::NodeId id = row.pNode->GetId();
+				if (!m_collapsedIds.erase(id)) m_collapsedIds.insert(id);
+				RefreshLayers();
+				return;
+			}
+
 			// A. [보기 👁] 체크박스 클릭
 			if (row.chkVisible && row.chkVisible->HitTest(ptD2D))
 			{

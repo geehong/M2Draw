@@ -195,7 +195,7 @@
   - 영향 범위(B): `Viewport`, `ScreenToWorld/WorldToScreen`, `RulerRenderer`, `ToolEvent.unitPt`, 속성창 X/Y/W/H, 옵션바 좌표, 도구 오버레이, 캔버스 설정 UI 일관 적용 완료
   - 파일 호환: 파일 형식 버전 속성(`m2:version="2.0"`) 도입. 버전 없는 기존 파일 중 `m2:originMode="bottomLeft"` 인 것은 로드 시 `y' = H - y` 로 변환 처리 완료
 - [x] 2.0.2 **그룹 선택/조작 (완료 — 2026-10-27, 레이어 직속 그룹 단위 선택)**: `HitTestTopShape`/핸들/이동/스케일/회전/마키가 `GroupNode`를 다루도록 (현재 `PathNode`만 처리 → 그룹은 캔버스에서 선택 불가)
-- [ ] 2.0.3 **레이어 패널 계층 트리**: 레이어 → 그룹 → 도형 재귀 표시(접기/펼치기, 들여쓰기), 행 선택/보이기/잠금/이름 변경이 임의 깊이에서 동작 (현재 레이어 아래 1단계만 표시)
+- [x] 2.0.3 **레이어 패널 계층 트리 (완료 — 2026-10-27)**: 레이어 → 그룹 → 도형 재귀 표시(접기/펼치기, 들여쓰기), 행 선택/보이기/잠금/이름 변경이 임의 깊이에서 동작 (현재 레이어 아래 1단계만 표시)
 - [ ] 2.0.4 **`SvgWriteOptions` + 변경 카운터**: 용도별 모드(`Snapshot`: Undo 용·이미지는 참조 ID / `File`: 저장·이미지 임베드 / `Clean`: 순수 SVG 내보내기). `Node` 의 모든 수정 함수가 전역 변경 카운터를 올리고 `UndoManager::CommitChange`는 카운터가 그대로면 직렬화를 건너뜀 (큰 문서·이미지 대비)
 - [ ] 2.0.5 **가져오기/붙여넣기 공용 경로**: Reader 가 NodeId 를 복원하므로(1.5.6) 다른 문서로 옮길 때 ID 가 중복됨 → 임시 `Document`로 읽은 뒤 `Clone()` + `AssignIds`로 옮기는 `Document::ImportNodes()` (2.9, 5.4 가 사용)
 - [ ] 2.0.6 `LayerNode::IsClippingMask` 정리: 현재 마스크 없이 빈 `PushLayer`만 만드는 코드(`D2DRenderer::DrawDocument`) 제거 또는 2.4 의미로 재정의
