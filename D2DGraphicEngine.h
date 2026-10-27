@@ -25,6 +25,10 @@
 #include <memory>
 #include <string>
 #include <cstdint>
+#include <cwchar>
+#include <cwctype>
+#include <cstdlib>
+#include <cstdio>
 #include <cmath>
 #include <algorithm>
 #include <optional>
@@ -177,48 +181,140 @@ struct Color {
 	bool operator!=(const Color& o) const { return !(*this == o); }
 };
 
-enum class FillType : uint8_t { None = 0, Solid = 1, Pattern = 2 };
-enum class DashStyle : uint8_t { Solid = 0, Dash, Dot, DashDot, DashDotDot };   // 값은 D2D1_DASH_STYLE 과 동일
+// ---- 스타일 모델 (Paint / Stroke) -------------------------------------------
+// 채우기 종류. Pattern 은 지원하지 않음 (렌더링된 적 없는 자리표시자였음)
+enum class PaintType : uint8_t { None = 0, Solid = 1, Gradient = 2 };
 enum class FillMode  : uint8_t { Alternate = 0, Winding };
+enum class LineCap   : uint8_t { Butt = 0, Round, Square };
+enum class LineJoin  : uint8_t { Miter = 0, Round, Bevel };
 
-#ifndef GE_NO_D2D
-inline DashStyle FromD2D(D2D1_DASH_STYLE ds) {
-	return static_cast<DashStyle>(ds);
-}
-inline D2D1_DASH_STYLE ToD2D(DashStyle ds) {
-	return static_cast<D2D1_DASH_STYLE>(ds);
-}
-#endif
+// 대시 프리셋: UI 버튼/도구 설정용 "변환 헬퍼의 입력". 모델은 프리셋이 아니라 Stroke::dashArray(절대값)를 저장
+enum class DashStyle : uint8_t { Solid = 0, Dash, Dot, DashDot, DashDotDot, Custom };
 
-struct DashStyleWrapper {
-	DashStyle value = DashStyle::Solid;
+struct GradientStop {
+	float offset = 0.0f;   // 0 ~ 1
+	Color color;
+};
 
-	DashStyleWrapper() = default;
-	DashStyleWrapper(DashStyle s) : value(s) {}
+// 그라디언트 모델 (렌더링/직렬화/편집 UI 는 Step 2.3). 좌표는 도형 바운딩 박스 기준 비율(0~1)
+struct Gradient {
+	enum class Kind : uint8_t { Linear = 0, Radial };
+	Kind kind = Kind::Linear;
+	Vec2 start{ 0.0f, 0.0f };
+	Vec2 end{ 1.0f, 0.0f };
+	float radius = 0.5f;                  // Radial 전용
+	std::vector<GradientStop> stops;
 
-	explicit operator DashStyle() const { return value; }
-	DashStyle ToDashStyle() const { return value; }
-	DashStyleWrapper& operator=(DashStyle s) { value = s; return *this; }
-	bool operator==(DashStyle s) const { return value == s; }
-	bool operator!=(DashStyle s) const { return value != s; }
+	// 그라디언트를 아직 렌더링하지 못하는 동안의 대체 색 (첫 스톱, 없으면 투명)
+	Color FallbackColor() const { return stops.empty() ? Color(0.0f, 0.0f, 0.0f, 0.0f) : stops.front().color; }
+};
 
-#ifndef GE_NO_D2D
-	DashStyleWrapper(D2D1_DASH_STYLE s) : value(static_cast<DashStyle>(s)) {}
-	operator D2D1_DASH_STYLE() const { return static_cast<D2D1_DASH_STYLE>(value); }
-	DashStyleWrapper& operator=(D2D1_DASH_STYLE s) { value = static_cast<DashStyle>(s); return *this; }
-	bool operator==(D2D1_DASH_STYLE s) const { return static_cast<D2D1_DASH_STYLE>(value) == s; }
-	bool operator!=(D2D1_DASH_STYLE s) const { return static_cast<D2D1_DASH_STYLE>(value) != s; }
-#endif
+struct Paint {
+	PaintType type  = PaintType::None;
+	Color     color = { 0.2f, 0.6f, 1.0f, 0.25f };   // Solid
+	Gradient  gradient;                              // Gradient
+};
+
+struct Stroke {
+	Color    color      = { 0.12f, 0.56f, 1.0f, 1.0f };
+	float    width      = 2.0f;
+	LineCap  cap        = LineCap::Butt;
+	LineJoin join       = LineJoin::Miter;
+	float    miterLimit = 4.0f;                      // SVG 기본값
+	// 대시 패턴: 문서 단위(px) 절대값. SVG stroke-dasharray 와 동일 의미이며 화면(D2D)과 출력이 같은 값을 쓴다.
+	// 비어 있으면 실선. (D2D 는 선 두께 배수를 요구하므로 렌더러가 width 로 나눠서 넘김)
+	std::vector<float> dashArray;
+	float    dashOffset = 0.0f;
+
+	bool HasDash() const { return !dashArray.empty(); }
 };
 
 struct Style {
-	FillType         fillType    = FillType::None;
-	Color            fill        = { 0.2f, 0.6f, 1.0f, 0.25f };
-	Color            stroke      = { 0.12f, 0.56f, 1.0f, 1.0f };
-	float            strokeWidth = 2.0f;
-	DashStyleWrapper dashStyle   = DashStyle::Solid;
-	FillMode         fillMode    = FillMode::Alternate;
+	Paint    fill;
+	Stroke   stroke;
+	FillMode fillMode = FillMode::Alternate;
 };
+
+// ---- 대시 변환 헬퍼 (프리셋 <-> dashArray) ------------------------------------
+// 프리셋은 선 두께의 배수. 기본 두께(2px)에서 예전 SVG 출력("8 4", "2 2" 등)과 같은 값이 나오도록 정함
+inline std::vector<float> DashPresetRatios(DashStyle preset) {
+	switch (preset) {
+	case DashStyle::Dash:       return { 4.0f, 2.0f };
+	case DashStyle::Dot:        return { 1.0f, 1.0f };
+	case DashStyle::DashDot:    return { 4.0f, 2.0f, 1.0f, 2.0f };
+	case DashStyle::DashDotDot: return { 4.0f, 2.0f, 1.0f, 2.0f, 1.0f, 2.0f };
+	default:                    return {};
+	}
+}
+
+// 프리셋 -> 절대값 dashArray (Solid/Custom 은 빈 배열)
+inline std::vector<float> MakeDashArray(DashStyle preset, float strokeWidth) {
+	std::vector<float> a = DashPresetRatios(preset);
+	for (float& v : a) v *= (std::max)(strokeWidth, 0.0f);
+	return a;
+}
+
+// dashArray 유효성: 요소 모두 >= 0, 합 > 0, 최대 16개 (D2D/SVG 가 거부하는 값을 모델에 넣지 않기 위함)
+inline bool IsValidDashArray(const std::vector<float>& a) {
+	if (a.empty() || a.size() > 16) return false;
+	float sum = 0.0f;
+	for (float v : a) {
+		if (!(v >= 0.0f) || !std::isfinite(v)) return false;
+		sum += v;
+	}
+	return sum > 0.0f;
+}
+
+// dashArray -> 프리셋 (빈 배열 = Solid, 어떤 프리셋과도 같지 않으면 Custom)
+inline DashStyle ClassifyDashArray(const std::vector<float>& a, float strokeWidth) {
+	if (a.empty()) return DashStyle::Solid;
+	for (DashStyle p : { DashStyle::Dash, DashStyle::Dot, DashStyle::DashDot, DashStyle::DashDotDot }) {
+		const std::vector<float> ref = MakeDashArray(p, strokeWidth);
+		if (ref.size() != a.size()) continue;
+		bool same = true;
+		for (size_t i = 0; i < a.size(); ++i)
+			if (std::abs(ref[i] - a[i]) > 0.001f + 0.001f * std::abs(ref[i])) { same = false; break; }
+		if (same) return p;
+	}
+	return DashStyle::Custom;
+}
+
+// "8 4 2 4" / "8,4" 형태의 문자열 -> dashArray. SVG stroke-dasharray 와 속성창 입력이 같은 규칙을 쓴다.
+// 빈 문자열/"none"/숫자가 아닌 토큰/음수/합이 0/17개 이상이면 실선(빈 배열).
+// SVG 규격: 개수가 홀수이면 목록을 두 번 반복해 짝수로 만듦
+inline std::vector<float> ParseDashArrayText(const std::wstring& text) {
+	std::vector<float> values;
+	const wchar_t* p = text.c_str();
+	const wchar_t* end = p + text.length();
+	auto skipSep = [&] { while (p < end && (std::iswspace(*p) || *p == L',')) ++p; };
+	for (;;) {
+		skipSep();
+		if (p >= end) break;
+		wchar_t* next = nullptr;
+		const float v = std::wcstof(p, &next);
+		if (next == p) return {};   // 숫자가 아닌 토큰 ("none" 포함)
+		p = next;
+		values.push_back(v);
+		if (values.size() > 16) return {};
+	}
+	if (values.size() % 2 == 1) {
+		const std::vector<float> once = values;
+		values.insert(values.end(), once.begin(), once.end());
+	}
+	return IsValidDashArray(values) ? values : std::vector<float>{};
+}
+
+// dashArray -> 표시용 문자열 ("8 4 2 4"), 실선이면 빈 문자열
+inline std::wstring FormatDashArrayText(const std::vector<float>& a) {
+	std::wstring s;
+	for (size_t i = 0; i < a.size(); ++i) {
+		wchar_t buf[32];
+		swprintf_s(buf, L"%g", a[i]);
+		if (i) s += L" ";
+		s += buf;
+	}
+	return s;
+}
 
 struct BezierNode {
 	enum class Type : uint8_t { Corner, Smooth, Symmetric };
@@ -392,7 +488,7 @@ public:
 	void SetTransform(const Matrix2D& v)     { m_xf = v; ChangeTracker::Bump(); }
 
 	const Style& GetStyle() const            { return m_style; }
-	// 수정용 접근자: 호출 시 지오메트리 캐시 무효화 (fillType/fillMode 가 지오메트리에 영향). 읽기는 GetStyle() 사용
+	// 수정용 접근자: 호출 시 지오메트리 캐시 무효화 (fill.type/fillMode 가 지오메트리에 영향). 읽기는 GetStyle() 사용
 	Style&       GetStyleRef()               { Invalidate(); return m_style; }
 	void SetStyle(const Style& v)            { m_style = v; Invalidate(); }
 
@@ -760,20 +856,23 @@ public:
 
 	// 노드 -> D2D 지오메트리 (m_dirty 일 때만 재생성)
 	ID2D1Geometry* GetGeometry(PathNode& node);
-		void ClearCache() { m_geoCache.clear(); }
+		void ClearCache() { m_geoCache.clear(); m_strokeStyleCache.clear(); }
 		ID2D1Factory* GetFactory() const { return m_factory; }
 
 private:
 	void DrawPath(PathNode& node, const Matrix2D& worldXf, const Viewport& view);
 	void DrawGroup(GroupNode& node, const Matrix2D& worldXf, const Viewport& view);
 	ComPtr<ID2D1PathGeometry> BuildGeometry(const PathNode& node);
+	// 기본값(Butt/Miter/실선)이면 nullptr, 아니면 캐시된 스트로크 스타일
+	ID2D1StrokeStyle* GetStrokeStyle(const Stroke& stroke);
 
 	ID2D1RenderTarget*             m_rt      = nullptr;   // 비소유
 	ID2D1Factory*                  m_factory = nullptr;   // 비소유
 	ComPtr<ID2D1SolidColorBrush>   m_brush;
 	// PathNode 별 지오메트리 캐시
 	struct GeoCache { uint32_t version = 0; ComPtr<ID2D1PathGeometry> geo; };
-		ComPtr<ID2D1StrokeStyle> m_strokeStyles[5];   // DashStyle 별 스트로크 스타일
+	// Stroke(cap/join/miter/dash) 조합별 D2D 스트로크 스타일 캐시 (키는 정규화된 값 문자열)
+	std::unordered_map<std::string, ComPtr<ID2D1StrokeStyle>> m_strokeStyleCache;
 	std::unordered_map<NodeId, GeoCache> m_geoCache;
 };
 

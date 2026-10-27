@@ -973,11 +973,7 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 	m_previewShape = CreateShapeInstance(m_startPt, m_startPt, e.pDoc);
 	if (m_previewShape)
 	{
-		m_previewShape->GetStyleRef().stroke = m_setting.strokeColor;
-		m_previewShape->GetStyleRef().strokeWidth = m_setting.strokeWidth;
-		m_previewShape->GetStyleRef().dashStyle = m_setting.dashStyle;
-		m_previewShape->GetStyleRef().fillType = m_setting.fillType;
-		m_previewShape->GetStyleRef().fill = m_setting.fillColor;
+		m_previewShape->SetStyle(m_setting.ToGeStyle());
 		m_previewShape->Invalidate();
 	}
 
@@ -1659,11 +1655,7 @@ void MultiPointShapeTool::OnDown(const ToolEvent& e)
 	{
 		m_previewShape = std::make_unique<ge::PathNode>();
 		m_previewShape->SetName(m_pName ? m_pName : L"");
-		m_previewShape->GetStyleRef().stroke = m_setting.strokeColor;
-		m_previewShape->GetStyleRef().strokeWidth = m_setting.strokeWidth;
-		m_previewShape->GetStyleRef().dashStyle = m_setting.dashStyle;
-		m_previewShape->GetStyleRef().fillType = m_setting.fillType;
-		m_previewShape->GetStyleRef().fill = m_setting.fillColor;
+		m_previewShape->SetStyle(m_setting.ToGeStyle());
 	}
 
 	// 3개 이상 정점이 있을 때 첫 정점(8px 이내) 스냅 클릭 시 폐합 완료

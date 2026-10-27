@@ -2051,3 +2051,131 @@ bool M2DrawComboBox::OnMouseMove(D2D1_POINT_2F pt)
 }
 
 
+// ============================================================================
+// 12. M2DrawTextInput 구현
+// ============================================================================
+void M2DrawTextInput::CommitEdit()
+{
+	if (!m_bEditing) return;
+	m_bEditing = false;
+	m_bSelectAllOnFirstKey = false;
+	m_text = m_editText;
+	m_editText.clear();
+	// 콜백이 SetText 로 정규화된 값을 되돌려 쓸 수 있도록 편집 상태를 먼저 끝낸 뒤 호출
+	if (m_onCommit) m_onCommit(this, m_text);
+}
+
+void M2DrawTextInput::CancelEdit()
+{
+	m_bEditing = false;
+	m_bSelectAllOnFirstKey = false;
+	m_editText.clear();
+}
+
+void M2DrawTextInput::ResetState()
+{
+	if (m_bEditing) CommitEdit();
+	M2DrawControl::ResetState();
+}
+
+void M2DrawTextInput::Draw(
+	ID2D1RenderTarget* pRT,
+	ID2D1SolidColorBrush* pBrush,
+	IDWriteFactory* /*pDWFactory*/,
+	IDWriteTextFormat* pTextFormat)
+{
+	if (!m_bVisible) return;
+
+	if (m_bEditing)
+	{
+		DrawControlFrame(pRT, pBrush, m_bounds, 4.0f, D2D1::ColorF(0.12f, 0.12f, 0.16f, 1.0f));
+		pBrush->SetColor(D2D1::ColorF(0.0f, 0.48f, 0.85f, 1.0f));
+		pRT->DrawRoundedRectangle(D2D1::RoundedRect(m_bounds, 4.0f, 4.0f), pBrush, 1.5f);
+	}
+	else
+	{
+		DrawControlFrame(pRT, pBrush, m_bounds, 4.0f, D2D1::ColorF(0.18f, 0.18f, 0.22f, 1.0f));
+	}
+
+	D2D1_RECT_F textRect = D2D1::RectF(m_bounds.left + 8.0f, m_bounds.top, m_bounds.right - 8.0f, m_bounds.bottom);
+	pRT->PushAxisAlignedClip(textRect, D2D1_ANTIALIAS_MODE_ALIASED);
+
+	if (m_bEditing)
+	{
+		if (m_bSelectAllOnFirstKey && !m_editText.empty())
+		{
+			const float highlightW = min(textRect.right - textRect.left, m_editText.length() * 7.5f + 4.0f);
+			pBrush->SetColor(D2D1::ColorF(0.0f, 0.48f, 0.85f, 0.5f));
+			pRT->FillRectangle(D2D1::RectF(textRect.left, textRect.top + 3.0f, textRect.left + highlightW, textRect.bottom - 3.0f), pBrush);
+		}
+		DrawTextLabel(pRT, pBrush, pTextFormat, m_editText.c_str(), textRect,
+			DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+
+		if (!m_bSelectAllOnFirstKey && ((::GetTickCount64() / 500) % 2 == 0))
+		{
+			const float caretX = min(textRect.right - 2.0f, textRect.left + m_editText.length() * 7.0f);
+			pBrush->SetColor(D2D1::ColorF(0.0f, 0.68f, 1.0f, 1.0f));
+			pRT->DrawLine(D2D1::Point2F(caretX, textRect.top + 5.0f), D2D1::Point2F(caretX, textRect.bottom - 5.0f), pBrush, 1.5f);
+		}
+	}
+	else if (m_text.empty())
+	{
+		DrawTextLabel(pRT, pBrush, pTextFormat, m_placeholder.c_str(), textRect,
+			DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, D2D1::ColorF(0.55f, 0.55f, 0.60f, 1.0f));
+	}
+	else
+	{
+		DrawTextLabel(pRT, pBrush, pTextFormat, m_text.c_str(), textRect,
+			DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, D2D1::ColorF(0.95f, 0.95f, 0.98f, 1.0f));
+	}
+
+	pRT->PopAxisAlignedClip();
+}
+
+bool M2DrawTextInput::OnLButtonDown(D2D1_POINT_2F pt)
+{
+	if (!m_bVisible || !m_bEnabled) return false;
+
+	if (pt.x >= m_bounds.left && pt.x <= m_bounds.right && pt.y >= m_bounds.top && pt.y <= m_bounds.bottom)
+	{
+		if (!m_bEditing)
+		{
+			m_bEditing = true;
+			m_bFocused = true;
+			m_bSelectAllOnFirstKey = true;
+			m_editText = m_text;
+		}
+		return true;
+	}
+
+	if (m_bEditing) CommitEdit();
+	return M2DrawControl::OnLButtonDown(pt);
+}
+
+bool M2DrawTextInput::OnKeyDown(UINT nChar)
+{
+	if (!m_bEditing) return false;
+
+	if (nChar == VK_RETURN) { CommitEdit(); return true; }
+	if (nChar == VK_ESCAPE) { CancelEdit(); return true; }
+	if (nChar == VK_BACK || nChar == VK_DELETE)
+	{
+		if (m_bSelectAllOnFirstKey) { m_bSelectAllOnFirstKey = false; m_editText.clear(); }
+		else if (!m_editText.empty()) m_editText.pop_back();
+		return true;
+	}
+	return false;
+}
+
+bool M2DrawTextInput::OnChar(UINT nChar)
+{
+	if (!m_bEditing) return false;
+	if (nChar < 0x20) return false;   // 제어 문자(Enter/Esc/Backspace 는 OnKeyDown 에서 처리)
+
+	if (!m_allowedChars.empty() && m_allowedChars.find(static_cast<wchar_t>(nChar)) == std::wstring::npos)
+		return true;   // 허용되지 않는 문자는 소비만 하고 무시
+
+	if (m_bSelectAllOnFirstKey) { m_bSelectAllOnFirstKey = false; m_editText.clear(); }
+	if (m_editText.length() < m_maxLength) m_editText.push_back(static_cast<wchar_t>(nChar));
+	return true;
+}

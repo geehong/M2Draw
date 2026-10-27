@@ -400,14 +400,14 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 				Style st = pathNode->GetStyle();
 				if (attrs.count(L"fill")) {
 					if (attrs[L"fill"] == L"none") {
-						st.fillType = FillType::None;
+						st.fill.type = PaintType::None;
 					} else {
-						st.fillType = FillType::Solid;
-						st.fill = ParseColorHex(attrs[L"fill"]);
+						st.fill.type = PaintType::Solid;
+						st.fill.color = ParseColorHex(attrs[L"fill"]);
 					}
 				}
 				if (attrs.count(L"fill-opacity")) {
-					st.fill.a = std::wcstof(attrs[L"fill-opacity"].c_str(), nullptr);
+					st.fill.color.a = std::wcstof(attrs[L"fill-opacity"].c_str(), nullptr);
 				}
 				if (attrs.count(L"fill-rule")) {
 					if (attrs[L"fill-rule"] == L"evenodd") {
@@ -419,23 +419,34 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 
 				if (attrs.count(L"stroke")) {
 					if (attrs[L"stroke"] == L"none") {
-						st.strokeWidth = 0.0f;
+						st.stroke.width = 0.0f;
 					} else {
-						st.stroke = ParseColorHex(attrs[L"stroke"]);
+						st.stroke.color = ParseColorHex(attrs[L"stroke"]);
 					}
 				}
 				if (attrs.count(L"stroke-width")) {
-					st.strokeWidth = std::wcstof(attrs[L"stroke-width"].c_str(), nullptr);
+					st.stroke.width = std::wcstof(attrs[L"stroke-width"].c_str(), nullptr);
 				}
 				if (attrs.count(L"stroke-opacity")) {
-					st.stroke.a = std::wcstof(attrs[L"stroke-opacity"].c_str(), nullptr);
+					st.stroke.color.a = std::wcstof(attrs[L"stroke-opacity"].c_str(), nullptr);
+				}
+				if (attrs.count(L"stroke-linecap")) {
+					const std::wstring& v = attrs[L"stroke-linecap"];
+					st.stroke.cap = (v == L"round") ? LineCap::Round : (v == L"square") ? LineCap::Square : LineCap::Butt;
+				}
+				if (attrs.count(L"stroke-linejoin")) {
+					const std::wstring& v = attrs[L"stroke-linejoin"];
+					st.stroke.join = (v == L"round") ? LineJoin::Round : (v == L"bevel") ? LineJoin::Bevel : LineJoin::Miter;
+				}
+				if (attrs.count(L"stroke-miterlimit")) {
+					const float ml = std::wcstof(attrs[L"stroke-miterlimit"].c_str(), nullptr);
+					st.stroke.miterLimit = (ml >= 1.0f) ? ml : 4.0f;   // SVG: 1 미만은 오류 -> 기본값
 				}
 				if (attrs.count(L"stroke-dasharray")) {
-					const std::wstring& dash = attrs[L"stroke-dasharray"];
-					if (dash.find(L"2 4 2 4") != std::wstring::npos) st.dashStyle = DashStyle::DashDotDot;
-					else if (dash.find(L"4 2 4") != std::wstring::npos) st.dashStyle = DashStyle::DashDot;
-					else if (dash.find(L"2 2") != std::wstring::npos) st.dashStyle = DashStyle::Dot;
-					else if (dash.find(L"8 4") != std::wstring::npos) st.dashStyle = DashStyle::Dash;
+					st.stroke.dashArray = ParseDashArrayText(attrs[L"stroke-dasharray"]);
+				}
+				if (attrs.count(L"stroke-dashoffset")) {
+					st.stroke.dashOffset = std::wcstof(attrs[L"stroke-dashoffset"].c_str(), nullptr);
 				}
 
 				pathNode->SetStyle(st);

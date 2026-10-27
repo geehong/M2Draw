@@ -938,6 +938,7 @@ bool D2DRenderer::Initialize(ID2D1RenderTarget* rt, ID2D1Factory* factory)
 {
 	m_rt = rt;
 	m_factory = factory;
+	m_strokeStyleCache.clear();   // 팩터리가 바뀔 수 있으므로 이전 팩터리의 리소스 폐기
 	m_brush.Reset();
 	if (!m_rt) return false;
 	return SUCCEEDED(m_rt->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1), &m_brush));
@@ -946,6 +947,7 @@ bool D2DRenderer::Initialize(ID2D1RenderTarget* rt, ID2D1Factory* factory)
 void D2DRenderer::Shutdown()
 {
 	m_geoCache.clear();
+	m_strokeStyleCache.clear();
 	m_brush.Reset();
 	m_rt = nullptr;
 	m_factory = nullptr;
@@ -1003,6 +1005,59 @@ static D2D1_MATRIX_3X2_F ToD2D(const Matrix2D& m)
 	return D2D1::Matrix3x2F(m.m11, m.m12, m.m21, m.m22, m.dx, m.dy);
 }
 
+ID2D1StrokeStyle* D2DRenderer::GetStrokeStyle(const Stroke& stroke)
+{
+	const bool hasDash = IsValidDashArray(stroke.dashArray);
+	if (!m_factory || stroke.width <= 0.0f) return nullptr;
+	if (!hasDash && stroke.cap == LineCap::Butt && stroke.join == LineJoin::Miter &&
+	    std::abs(stroke.miterLimit - 4.0f) < 0.0001f)
+		return nullptr;   // 기본 스타일이면 D2D 기본값 사용 (miterLimit 4 는 SVG 기본값과 같음)
+
+	// D2D 사용자 정의 대시는 "선 두께의 배수" -> 절대값(문서 단위) dashArray 를 두께로 나눠 넘김
+	std::vector<float> dashes;
+	float offset = 0.0f;
+	if (hasDash) {
+		dashes.reserve(stroke.dashArray.size());
+		for (float v : stroke.dashArray) dashes.push_back(v / stroke.width);
+		offset = stroke.dashOffset / stroke.width;
+	}
+
+	std::string key = std::to_string(static_cast<int>(stroke.cap)) + "|" +
+	                  std::to_string(static_cast<int>(stroke.join)) + "|" +
+	                  std::to_string(stroke.miterLimit) + "|" + std::to_string(offset);
+	for (float d : dashes) key += "|" + std::to_string(d);
+
+	auto it = m_strokeStyleCache.find(key);
+	if (it != m_strokeStyleCache.end()) return it->second.Get();
+
+	D2D1_CAP_STYLE cap = D2D1_CAP_STYLE_FLAT;
+	switch (stroke.cap) {
+	case LineCap::Round:  cap = D2D1_CAP_STYLE_ROUND;  break;
+	case LineCap::Square: cap = D2D1_CAP_STYLE_SQUARE; break;
+	default: break;
+	}
+	D2D1_LINE_JOIN join = D2D1_LINE_JOIN_MITER_OR_BEVEL;   // SVG: 미터 한계를 넘으면 베벨
+	switch (stroke.join) {
+	case LineJoin::Round: join = D2D1_LINE_JOIN_ROUND; break;
+	case LineJoin::Bevel: join = D2D1_LINE_JOIN_BEVEL; break;
+	default: break;
+	}
+
+	D2D1_STROKE_STYLE_PROPERTIES props = D2D1::StrokeStyleProperties(
+		cap, cap, cap, join, (std::max)(stroke.miterLimit, 1.0f),
+		hasDash ? D2D1_DASH_STYLE_CUSTOM : D2D1_DASH_STYLE_SOLID, offset);
+
+	ComPtr<ID2D1StrokeStyle> style;
+	if (FAILED(m_factory->CreateStrokeStyle(props, hasDash ? dashes.data() : nullptr,
+	                                         static_cast<UINT32>(dashes.size()), &style)))
+		return nullptr;
+
+	if (m_strokeStyleCache.size() > 256) m_strokeStyleCache.clear();   // 사용자 정의 대시가 무한히 쌓이지 않도록
+	ID2D1StrokeStyle* raw = style.Get();
+	m_strokeStyleCache[key] = std::move(style);
+	return raw;
+}
+
 void D2DRenderer::DrawPath(PathNode& node, const Matrix2D& worldXf, const Viewport& view)
 {
 	if (!m_rt || !m_brush) return;
@@ -1016,20 +1071,20 @@ void D2DRenderer::DrawPath(PathNode& node, const Matrix2D& worldXf, const Viewpo
 		op *= p->GetOpacity();
 
 	m_rt->SetTransform(ToD2D(worldXf * view.ToMatrix()));
-	if (st.fillType == FillType::Solid && st.fill.a > 0.0f) {
-		m_brush->SetColor(ToD2D(st.fill, op));
+
+	// 채우기: Solid. Gradient 는 렌더링이 Step 2.3 이므로 그때까지 첫 스톱 색으로 대체
+	Color fillColor;
+	bool doFill = false;
+	if (st.fill.type == PaintType::Solid)         { fillColor = st.fill.color; doFill = true; }
+	else if (st.fill.type == PaintType::Gradient) { fillColor = st.fill.gradient.FallbackColor(); doFill = true; }
+	if (doFill && fillColor.a > 0.0f) {
+		m_brush->SetColor(ToD2D(fillColor, op));
 		m_rt->FillGeometry(geo, m_brush.Get());
 	}
-	if (st.strokeWidth > 0.0f && st.stroke.a > 0.0f) {
-		const int di = static_cast<int>(st.dashStyle);
-		if (di > 0 && di < 5 && !m_strokeStyles[di] && m_factory) {
-			D2D1_STROKE_STYLE_PROPERTIES p = D2D1::StrokeStyleProperties();
-			p.dashStyle = static_cast<D2D1_DASH_STYLE>(di);
-			m_factory->CreateStrokeStyle(p, nullptr, 0, &m_strokeStyles[di]);
-		}
-		m_brush->SetColor(ToD2D(st.stroke, op));
-		m_rt->DrawGeometry(geo, m_brush.Get(), st.strokeWidth,
-			(di > 0 && di < 5) ? m_strokeStyles[di].Get() : nullptr);
+
+	if (st.stroke.width > 0.0f && st.stroke.color.a > 0.0f) {
+		m_brush->SetColor(ToD2D(st.stroke.color, op));
+		m_rt->DrawGeometry(geo, m_brush.Get(), st.stroke.width, GetStrokeStyle(st.stroke));
 	}
 	m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
 }
@@ -1063,7 +1118,7 @@ ComPtr<ID2D1PathGeometry> D2DRenderer::BuildGeometry(const PathNode& node)
 	for (const SubPath& sp : node.GetPaths()) {
 		const auto& n = sp.nodes;
 		if (n.empty()) continue;
-		const bool filled = node.GetStyle().fillType != FillType::None;
+		const bool filled = node.GetStyle().fill.type != PaintType::None;
 		sink->BeginFigure(pt(n[0].anchor), (filled && sp.closed) ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
 		for (size_t i = 1; i < n.size(); ++i) seg(n[i - 1], n[i]);
 		if (sp.closed && n.size() > 1) seg(n.back(), n[0]);
@@ -1092,13 +1147,13 @@ static bool HitNode(Node& n, Vec2 sp, float tol, const Viewport& view, D2DRender
 	const D2D1_POINT_2F pt = D2D1::Point2F(sp.x, sp.y);
 	const Style& st = p.GetStyle();
 	BOOL hit = FALSE;
-	const float w = (std::max)(st.strokeWidth * view.zoom, 1.0f) + tol * 2.0f;
+	const float w = (std::max)(st.stroke.width * view.zoom, 1.0f) + tol * 2.0f;
 	// 스트로크: 화면 좌표에서 검사하도록 변환 적용한 지오메트리 대신 로컈 폭으로 환산
 	const float lw = w / (std::max)(view.zoom, 0.0001f);
 	if (SUCCEEDED(geo->StrokeContainsPoint(pt, lw, nullptr, &m, &hit)) && hit) {
 		out.part = HitPart::Stroke; out.node = &p; return true;
 	}
-	if (st.fillType != FillType::None && SUCCEEDED(geo->FillContainsPoint(pt, &m, &hit)) && hit) {
+	if (st.fill.type != PaintType::None && SUCCEEDED(geo->FillContainsPoint(pt, &m, &hit)) && hit) {
 		out.part = HitPart::Fill; out.node = &p; return true;
 	}
 	return false;
@@ -1212,7 +1267,7 @@ HitResult PathNode::HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, cons
 		auto* g = renderer.GetGeometry(*this);
 		if (g) {
 			const D2D1_MATRIX_3X2_F m = ToD2D(GetWorldTransform() * view.ToMatrix());
-			const float w = (std::max)(m_style.strokeWidth * view.zoom, 1.0f) + tolPx * 2.0f;
+			const float w = (std::max)(m_style.stroke.width * view.zoom, 1.0f) + tolPx * 2.0f;
 			const float lw = w / (std::max)(view.zoom, 0.0001f);
 
 			BOOL hit = FALSE;
@@ -1225,7 +1280,7 @@ HitResult PathNode::HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, cons
 			for (const auto& sp : m_paths) {
 				if (sp.closed) { isClosed = true; break; }
 			}
-			const bool checkFill = (m_style.fillType != FillType::None) || (m_style.fill.a > 0.0f) || isClosed;
+			const bool checkFill = (m_style.fill.type != PaintType::None) || (m_style.fill.color.a > 0.0f) || isClosed;
 			if (checkFill) {
 				hit = FALSE;
 				if (SUCCEEDED(g->FillContainsPoint(screenPt, &m, 0.25f, &hit)) && hit) {
@@ -1246,7 +1301,7 @@ HitResult PathNode::HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, cons
 		if (FindClosestSegment(localPt, spIdx, segIdx, tVal, distSq)) {
 			// 로컬 거리를 화면 픽셀 거리로 환산
 			float distScreen = std::sqrt(distSq) * view.zoom;
-			float halfStrokePx = (m_style.strokeWidth * 0.5f) * view.zoom;
+			float halfStrokePx = (m_style.stroke.width * 0.5f) * view.zoom;
 			if (distScreen <= (halfStrokePx + tolPx)) {
 				return { HitPart::Stroke, -1, -1, this };
 			}

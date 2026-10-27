@@ -12,7 +12,6 @@ class CM2DrawView;
 
 using ViewportTransform = ge::Viewport;
 using CoordinateSpace = ge::CoordinateSpace;
-using FillType = ge::FillType;
 using HitResult = ge::HitResult;
 
 using ShapeKind = ge::ShapeKind;
@@ -83,11 +82,7 @@ enum class ToolType
 struct ToolCreationSetting
 {
 	bool            bClosed = false;          // 폐곡선(닫힘) 여부 (기본: 열림)
-	FillType        fillType = FillType::None;
-	D2D1_COLOR_F    strokeColor = D2D1::ColorF(D2D1::ColorF::DodgerBlue);
-	D2D1_COLOR_F    fillColor   = D2D1::ColorF(0.2f, 0.6f, 1.0f, 0.25f);
-	float           strokeWidth = 2.0f;
-	D2D1_DASH_STYLE dashStyle = D2D1_DASH_STYLE_SOLID;
+	ge::Style       style;                    // 새 도형의 채우기/선 스타일 (기본: 채우기 없음, DodgerBlue 2px 실선)
 
 	// 도형별 파라미터 (상단 ToolOptionBar 연동)
 	float cornerRx = 0.0f;       // 사각형 모서리 Rx
@@ -103,26 +98,8 @@ struct ToolCreationSetting
 	float heartRound = 1.0f;     // 하트 곡률 계수
 	bool  bDrawFromCenter = false; // 중심 => 바깥쪽 그리기 모드
 
-	ge::Style ToGeStyle() const
-	{
-		ge::Style st;
-		st.fillType = static_cast<ge::FillType>(fillType);
-		st.fill = ge::Color::FromD2D(fillColor);
-		st.stroke = ge::Color::FromD2D(strokeColor);
-		st.strokeWidth = strokeWidth;
-		st.dashStyle = static_cast<ge::DashStyle>(dashStyle);
-		st.fillMode = ge::FillMode::Alternate;
-		return st;
-	}
-
-	void FromGeStyle(const ge::Style& st)
-	{
-		fillType = static_cast<FillType>(st.fillType);
-		fillColor = st.fill.ToD2D();
-		strokeColor = st.stroke.ToD2D();
-		strokeWidth = st.strokeWidth;
-		dashStyle = static_cast<D2D1_DASH_STYLE>(st.dashStyle);
-	}
+	ge::Style ToGeStyle() const { return style; }
+	void FromGeStyle(const ge::Style& st) { style = st; }
 };
 
 // ============================================================================

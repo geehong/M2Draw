@@ -533,7 +533,7 @@ void CPropertiesWnd::InitShapePropList()
 	// 2. 라인 굵기 (D2D 실시간 지원, 1 ~ 50 px)
 	CMFCPropertyGridProperty* pPropWidth = new CMFCPropertyGridProperty(
 		_T("라인 굵기 (px)"),
-		(_variant_t)(long)shape->GetStyle().strokeWidth,
+		(_variant_t)(long)shape->GetStyle().stroke.width,
 		_T("선(외곽선)의 굵기를 설정합니다.")
 	);
 	pPropWidth->EnableSpinControl(TRUE, 1, 50);
@@ -542,9 +542,9 @@ void CPropertiesWnd::InitShapePropList()
 
 	// 3. 라인 색상 (COLORREF 변환 및 알파 반영)
 	COLORREF clrStroke = RGB(
-		(BYTE)(shape->GetStyle().stroke.r * 255.0f),
-		(BYTE)(shape->GetStyle().stroke.g * 255.0f),
-		(BYTE)(shape->GetStyle().stroke.b * 255.0f)
+		(BYTE)(shape->GetStyle().stroke.color.r * 255.0f),
+		(BYTE)(shape->GetStyle().stroke.color.g * 255.0f),
+		(BYTE)(shape->GetStyle().stroke.color.b * 255.0f)
 	);
 	CMFCPropertyGridColorProperty* pPropClrStroke = new CMFCPropertyGridColorProperty(
 		_T("라인 색상"),
@@ -568,46 +568,44 @@ void CPropertiesWnd::InitShapePropList()
 	pPropDash->AddOption(_T("대시-점선 (DashDot)"));
 	pPropDash->AllowEdit(FALSE);
 
-	switch (shape->GetStyle().dashStyle)
+	switch (ge::ClassifyDashArray(shape->GetStyle().stroke.dashArray, shape->GetStyle().stroke.width))
 	{
-	case D2D1_DASH_STYLE_DASH:      pPropDash->SetValue(_T("대시선 (Dash)")); break;
-	case D2D1_DASH_STYLE_DOT:       pPropDash->SetValue(_T("점선 (Dot)")); break;
-	case D2D1_DASH_STYLE_DASH_DOT:  pPropDash->SetValue(_T("대시-점선 (DashDot)")); break;
-	default:                        pPropDash->SetValue(_T("실선 (Solid)")); break;
+	case ge::DashStyle::Dash:    pPropDash->SetValue(_T("대시선 (Dash)")); break;
+	case ge::DashStyle::Dot:     pPropDash->SetValue(_T("점선 (Dot)")); break;
+	case ge::DashStyle::DashDot: pPropDash->SetValue(_T("대시-점선 (DashDot)")); break;
+	default:                     pPropDash->SetValue(_T("실선 (Solid)")); break;   // 사용자 정의 대시는 이 목록에 없으므로 속성창(D2D)에서 편집
 	}
 	pPropDash->SetData(PROP_SHAPE_DASH);
 	pGroupShape->AddSubItem(pPropDash);
 
 	m_wndPropList.AddProperty(pGroupShape);
 
-	// 5. 채움(Fill) 설정 그룹 (무늬/패턴 확장 슬롯 구비)
+	// 5. 채움(Fill) 설정 그룹
 	CMFCPropertyGridProperty* pGroupFill = new CMFCPropertyGridProperty(_T("채움(Fill) 설정"));
 
-	// 채움 유형: 채움 없음(투명), 단색 채움, 무늬/패턴 (향후 무늬추가 확장용)
+	// 채움 유형: 채움 없음(투명), 단색 채움 (그라디언트는 Step 2.3)
 	CMFCPropertyGridProperty* pPropFillType = new CMFCPropertyGridProperty(
 		_T("채움 유형"),
 		_T("채움 없음 (투명)"),
-		_T("도형 내부를 채우는 방식(투명, 단색, 무늬/패턴)을 설정합니다.")
+		_T("도형 내부를 채우는 방식(투명, 단색)을 설정합니다.")
 	);
 	pPropFillType->AddOption(_T("채움 없음 (투명)"));
 	pPropFillType->AddOption(_T("단색 채움 (Solid)"));
-	pPropFillType->AddOption(_T("무늬 / 패턴 (Pattern)"));
 	pPropFillType->AllowEdit(FALSE);
 
-	switch (shape->GetStyle().fillType)
+	switch (shape->GetStyle().fill.type)
 	{
-	case FillType::Solid:   pPropFillType->SetValue(_T("단색 채움 (Solid)")); break;
-	case FillType::Pattern: pPropFillType->SetValue(_T("무늬 / 패턴 (Pattern)")); break;
-	default:                pPropFillType->SetValue(_T("채움 없음 (투명)")); break;
+	case ge::PaintType::Solid: pPropFillType->SetValue(_T("단색 채움 (Solid)")); break;
+	default:                   pPropFillType->SetValue(_T("채움 없음 (투명)")); break;
 	}
 	pPropFillType->SetData(PROP_SHAPE_FILL_TYP);
 	pGroupFill->AddSubItem(pPropFillType);
 
 	// 채움 색상
 	COLORREF clrFill = RGB(
-		(BYTE)(shape->GetStyle().fill.r * 255.0f),
-		(BYTE)(shape->GetStyle().fill.g * 255.0f),
-		(BYTE)(shape->GetStyle().fill.b * 255.0f)
+		(BYTE)(shape->GetStyle().fill.color.r * 255.0f),
+		(BYTE)(shape->GetStyle().fill.color.g * 255.0f),
+		(BYTE)(shape->GetStyle().fill.color.b * 255.0f)
 	);
 	CMFCPropertyGridColorProperty* pPropClrFill = new CMFCPropertyGridColorProperty(
 		_T("채움 색상"),
@@ -889,9 +887,9 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		if (GetSelectedShape())
 		{
 			ge::Node* shape = GetSelectedShape();
-			shape->GetStyleRef().strokeWidth = static_cast<float>(val.dblVal);
+			shape->GetStyleRef().stroke.width = static_cast<float>(val.dblVal);
 			shape->Invalidate();
-			strLogMsg.Format(_T("[쉐이프 속성] 라인 굵기: %.1f px"), shape->GetStyle().strokeWidth);
+			strLogMsg.Format(_T("[쉐이프 속성] 라인 굵기: %.1f px"), shape->GetStyle().stroke.width);
 			LogAppEvent(strLogMsg);
 		}
 		break;
@@ -903,7 +901,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		{
 			ge::Node* shape = GetSelectedShape();
 			COLORREF c = pColor->GetColor();
-			shape->GetStyleRef().stroke = D2D1::ColorF(
+			shape->GetStyleRef().stroke.color = D2D1::ColorF(
 				GetRValue(c) / 255.0f,
 				GetGValue(c) / 255.0f,
 				GetBValue(c) / 255.0f,
@@ -921,14 +919,15 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		{
 			ge::Node* shape = GetSelectedShape();
 			CString strDash = val.bstrVal;
+			ge::Stroke& stroke = shape->GetStyleRef().stroke;
 			if (strDash.Find(_T("대시-점선")) >= 0)
-				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH_DOT;
+				stroke.dashArray = ge::MakeDashArray(ge::DashStyle::DashDot, stroke.width);
 			else if (strDash.Find(_T("대시선")) >= 0)
-				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH;
+				stroke.dashArray = ge::MakeDashArray(ge::DashStyle::Dash, stroke.width);
 			else if (strDash.Find(_T("점선")) >= 0)
-				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DOT;
+				stroke.dashArray = ge::MakeDashArray(ge::DashStyle::Dot, stroke.width);
 			else
-				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_SOLID;
+				stroke.dashArray.clear();
 
 			shape->Invalidate();
 			strLogMsg.Format(_T("[쉐이프 속성] 라인 스타일: %s"), (LPCTSTR)strDash);
@@ -943,11 +942,9 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 			ge::Node* shape = GetSelectedShape();
 			CString strFillType = val.bstrVal;
 			if (strFillType.Find(_T("단색")) >= 0)
-				shape->GetStyleRef().fillType = FillType::Solid;
-			else if (strFillType.Find(_T("무늬")) >= 0 || strFillType.Find(_T("패턴")) >= 0)
-				shape->GetStyleRef().fillType = FillType::Pattern;
+				shape->GetStyleRef().fill.type = ge::PaintType::Solid;
 			else
-				shape->GetStyleRef().fillType = FillType::None;
+				shape->GetStyleRef().fill.type = ge::PaintType::None;
 
 			shape->Invalidate();
 			strLogMsg.Format(_T("[쉐이프 속성] 채움 유형: %s"), (LPCTSTR)strFillType);
@@ -962,16 +959,16 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		{
 			ge::Node* shape = GetSelectedShape();
 			COLORREF c = pColor->GetColor();
-			shape->GetStyleRef().fill = D2D1::ColorF(
+			shape->GetStyleRef().fill.color = D2D1::ColorF(
 				GetRValue(c) / 255.0f,
 				GetGValue(c) / 255.0f,
 				GetBValue(c) / 255.0f,
 				1.0f
 			);
 			// 사용자가 채움 색을 선택했는데 채움 유형이 '투명'이었다면 자동으로 '단색 채움'으로 활성화
-			if (shape->GetStyle().fillType == FillType::None)
+			if (shape->GetStyle().fill.type == ge::PaintType::None)
 			{
-				shape->GetStyleRef().fillType = FillType::Solid;
+				shape->GetStyleRef().fill.type = ge::PaintType::Solid;
 			}
 			shape->Invalidate();
 			strLogMsg.Format(_T("[쉐이프 속성] 채움 색상: RGB(%d, %d, %d)"), GetRValue(c), GetGValue(c), GetBValue(c));

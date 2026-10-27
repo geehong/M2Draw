@@ -344,38 +344,47 @@ void SvgWriter::Visit(PathNode& node) {
 
 	// 스타일
 	const Style& st = node.GetStyle();
-	if (st.fillType == FillType::None) {
+
+	// 채우기: Gradient 의 직렬화(<linearGradient>/<radialGradient> + url(#id))는 Step 2.3/2.8.
+	// 그때까지는 렌더러와 같은 대체 색(첫 스톱)으로 출력
+	Color fillColor;
+	bool filled = false;
+	if (st.fill.type == PaintType::Solid)         { fillColor = st.fill.color; filled = true; }
+	else if (st.fill.type == PaintType::Gradient) { fillColor = st.fill.gradient.FallbackColor(); filled = true; }
+	if (!filled) {
 		m_output += " fill=\"none\"";
 	} else {
-		m_output += " fill=\"" + ColorToHex(st.fill) + "\"";
-		if (st.fill.a < 0.999f) {
-			m_output += " fill-opacity=\"" + FormatFloat(st.fill.a) + "\"";
+		m_output += " fill=\"" + ColorToHex(fillColor) + "\"";
+		if (fillColor.a < 0.999f) {
+			m_output += " fill-opacity=\"" + FormatFloat(fillColor.a) + "\"";
 		}
 	}
 
-	// Stroke
-	if (st.strokeWidth > 0.0001f && st.stroke.a > 0.0001f) {
-		m_output += " stroke=\"" + ColorToHex(st.stroke) + "\"";
-		m_output += " stroke-width=\"" + FormatFloat(st.strokeWidth) + "\"";
-		if (st.stroke.a < 0.999f) {
-			m_output += " stroke-opacity=\"" + FormatFloat(st.stroke.a) + "\"";
+	// Stroke (SVG 속성과 1:1: width/linecap/linejoin/miterlimit/dasharray/dashoffset). 기본값은 생략
+	const Stroke& strk = st.stroke;
+	if (strk.width > 0.0001f && strk.color.a > 0.0001f) {
+		m_output += " stroke=\"" + ColorToHex(strk.color) + "\"";
+		m_output += " stroke-width=\"" + FormatFloat(strk.width) + "\"";
+		if (strk.color.a < 0.999f) {
+			m_output += " stroke-opacity=\"" + FormatFloat(strk.color.a) + "\"";
 		}
-
-		switch (st.dashStyle.ToDashStyle()) {
-		case DashStyle::Dash:
-			m_output += " stroke-dasharray=\"8 4\"";
-			break;
-		case DashStyle::Dot:
-			m_output += " stroke-dasharray=\"2 2\"";
-			break;
-		case DashStyle::DashDot:
-			m_output += " stroke-dasharray=\"8 4 2 4\"";
-			break;
-		case DashStyle::DashDotDot:
-			m_output += " stroke-dasharray=\"8 4 2 4 2 4\"";
-			break;
-		default:
-			break;
+		if (strk.cap == LineCap::Round)       m_output += " stroke-linecap=\"round\"";
+		else if (strk.cap == LineCap::Square) m_output += " stroke-linecap=\"square\"";
+		if (strk.join == LineJoin::Round)      m_output += " stroke-linejoin=\"round\"";
+		else if (strk.join == LineJoin::Bevel) m_output += " stroke-linejoin=\"bevel\"";
+		if (std::abs(strk.miterLimit - 4.0f) > 0.0001f) {
+			m_output += " stroke-miterlimit=\"" + FormatFloat(strk.miterLimit) + "\"";
+		}
+		if (IsValidDashArray(strk.dashArray)) {
+			std::string dash;
+			for (size_t i = 0; i < strk.dashArray.size(); ++i) {
+				if (i) dash += " ";
+				dash += FormatFloat(strk.dashArray[i]);
+			}
+			m_output += " stroke-dasharray=\"" + dash + "\"";
+			if (std::abs(strk.dashOffset) > 0.0001f) {
+				m_output += " stroke-dashoffset=\"" + FormatFloat(strk.dashOffset) + "\"";
+			}
 		}
 	} else {
 		m_output += " stroke=\"none\"";

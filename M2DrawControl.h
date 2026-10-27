@@ -549,3 +549,44 @@ private:
 };
 
 
+// ============================================================================
+// 12. M2DrawTextInput: 한 줄 텍스트 직접 입력 컨트롤 (대시 배열 등)
+//  - 클릭하면 인라인 편집 시작, Enter/포커스 이탈로 확정, Esc 로 취소
+//  - 허용 문자 집합을 지정해 숫자 목록 같은 형식 입력만 받을 수 있음
+// ============================================================================
+class M2DrawTextInput : public M2DrawControl
+{
+public:
+	using CommitCallback = std::function<void(M2DrawTextInput* pInput, const std::wstring& text)>;
+
+	M2DrawTextInput() = default;
+
+	void SetText(const std::wstring& text) { if (!m_bEditing) m_text = text; }
+	const std::wstring& GetText() const { return m_text; }
+	void SetPlaceholder(const std::wstring& text) { m_placeholder = text; }
+	void SetAllowedChars(const std::wstring& chars) { m_allowedChars = chars; }   // 비어 있으면 모든 문자 허용
+	void SetMaxLength(size_t n) { m_maxLength = n; }
+	void SetOnCommit(CommitCallback cb) { m_onCommit = cb; }
+
+	void Draw(ID2D1RenderTarget* pRT, ID2D1SolidColorBrush* pBrush,
+		IDWriteFactory* pDWFactory, IDWriteTextFormat* pTextFormat) override;
+
+	bool OnLButtonDown(D2D1_POINT_2F pt) override;
+	bool OnKeyDown(UINT nChar) override;
+	bool OnChar(UINT nChar) override;
+	void ResetState() override;
+
+	bool IsEditing() const { return m_bEditing; }
+	void CommitEdit();
+	void CancelEdit();
+
+private:
+	std::wstring   m_text;
+	std::wstring   m_editText;
+	std::wstring   m_placeholder;
+	std::wstring   m_allowedChars;
+	size_t         m_maxLength = 64;
+	bool           m_bEditing = false;
+	bool           m_bSelectAllOnFirstKey = false;
+	CommitCallback m_onCommit;
+};

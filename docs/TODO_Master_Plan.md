@@ -202,14 +202,14 @@
 - [x] 2.0.7 (완료 — 2026-10-27) 빌드 확인 + `RunPureModelVerification`에 (좌표 변환 왕복 / 그룹 계층 / `ImportNodes` ID 유일성) 검증 추가
 
 ### Step 2.1 Style 모델 마이그레이션 (Paint/Gradient/Stroke)
-- [ ] 2.1.1 신규 `Style` 구조체 도입: `Paint(Solid, Gradient)`, `Stroke(cap, join, miter, dashArray)`
-- [ ] 2.1.2 기존 `FillType`, `DashStyle` enum 마이그레이션 및 변환 헬퍼 작성
+- [x] 2.1.1 (완료 — 2026-10-28) 신규 `Style` 구조체 도입: `Paint(Solid, Gradient)`, `Stroke(cap, join, miter, dashArray)` — `Style{ Paint fill; Stroke stroke; FillMode }`. Gradient 는 모델만(렌더/직렬화/UI 는 2.3, 그 전까지 첫 스톱 색으로 대체)
+- [x] 2.1.2 (완료 — 2026-10-28) 기존 `FillType`, `DashStyle` enum 마이그레이션 및 변환 헬퍼 작성 (`FillType`/`DashStyleWrapper` 제거 -> `PaintType`, 대시는 `Stroke::dashArray` 절대값. 헬퍼: `MakeDashArray`/`ClassifyDashArray`/`ParseDashArrayText`/`FormatDashArrayText`. 미사용 `Pattern` 채우기 옵션 제거)
   - 대시: D2D 프리셋은 **선 두께의 배수**, 현재 SVG 출력은 고정 `8 4` → 두께가 다르면 화면과 출력이 달라짐. 모델을 `dashArray`(선 두께 배수 또는 절대값 중 하나로 통일)로 바꾸고 양쪽이 같은 값을 쓰게 함
   - Reader 의 대시 해석(`find(L"8 4")` 부분 문자열 일치)을 실제 숫자 파싱으로 교체 (사용자 정의 대시 지원)
   - 저장/복원·Undo 왕복 검증 포함 (공통 완료 기준)
-- [ ] 2.1.3 `PropertyView` 스타일 UI 업데이트: Stroke Cap(Butt/Round/Square), Join(Miter/Round/Bevel) 콤보 및 커스텀 DashArray 입력 컨트롤 추가
-- [ ] 2.1.4 `ToolOptionBar`의 스타일 바인딩 UI 업데이트
-- [ ] 2.1.5 빌드 확인 및 도형별 선/면 스타일 정상 반영 확인
+- [x] 2.1.3 (완료 — 2026-10-28, 화면 배치 확인은 사용자) `PropertyView` 스타일 UI 업데이트: Stroke Cap(Butt/Round/Square), Join(Miter/Round/Bevel) 콤보 및 커스텀 DashArray 입력 컨트롤 추가
+- [x] 2.1.4 (완료 — 2026-10-28) `ToolOptionBar`의 스타일 바인딩 UI 업데이트 — 옵션바는 스타일 필드를 직접 쓰지 않고 `ToolCreationSetting` 복사본을 주고받으므로, 흩어져 있던 5개 필드를 `ge::Style style` 하나로 통합해 새 속성(cap/join/dash)이 자동으로 전달됨
+- [ ] 2.1.5 빌드 확인 및 도형별 선/면 스타일 정상 반영 확인 (빌드·자체 검증·렌더링 캡처 확인 완료 — 속성창 UI 직접 조작 확인 대기)
 
 ### Step 2.2 렌더러를 SVG 규칙에 맞춤 (S1~S4 해소)
 - [ ] 2.2.1 S1: 열린 서브패스도 면 채우기가 가능하도록 `D2D1_FIGURE_BEGIN_FILLED` 처리

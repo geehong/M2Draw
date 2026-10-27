@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include "M2DrawControl.h"
+#include "D2DGraphicEngine.h"
 
 class CM2DrawDoc;
 namespace ge { class Node; }
@@ -71,7 +72,12 @@ protected:
 	float        m_fStrokeHue = 210.0f;
 	float        m_fStrokeSat = 0.8f;
 	float        m_fStrokeLight = 0.5f;
-	int          m_selectedDash = 0; // 0: 실선, 1: 대시선, 2: 점선, 3: 대시-점선
+	int          m_selectedDash = 0; // 0: 실선, 1: 대시선, 2: 점선, 3: 대시-점선, 4: 사용자 정의(m_customDash)
+	ge::LineCap  m_lineCap  = ge::LineCap::Butt;
+	ge::LineJoin m_lineJoin = ge::LineJoin::Miter;
+	// 현재 선택(프리셋/사용자 정의)이 가리키는 절대값 dashArray (프리셋은 현재 선 두께의 배수)
+	std::vector<float> EffectiveDashArray() const;
+	std::vector<float> m_customDash;   // 사용자 정의 대시 (문서 단위 절대값, SVG stroke-dasharray 와 동일 의미)
 
 	// 캔버스 설정 상태
 	int          m_canvasColorTarget = 0; // 0: 보조선, 1: 주선
@@ -116,6 +122,11 @@ protected:
 	std::shared_ptr<M2DrawSlider>       m_sliderStrokeWidth;   // Stroke width bar
 	std::shared_ptr<M2DrawNumericInput> m_spinStrokeWidth;     // Stroke width number input
 	std::vector<std::shared_ptr<M2DrawButton>> m_btnDashStyles; // Dash styles 4
+	std::shared_ptr<M2DrawLabel>        m_lblDashArray;        // "Dash Array"
+	std::shared_ptr<M2DrawTextInput>    m_txtDashArray;        // 사용자 정의 대시 입력 ("8 4 2 4")
+	std::shared_ptr<M2DrawLabel>        m_lblCapJoin;          // "Cap / Join"
+	std::shared_ptr<M2DrawComboBox>     m_cboLineCap;          // Butt / Round / Square
+	std::shared_ptr<M2DrawComboBox>     m_cboLineJoin;         // Miter / Round / Bevel
 	std::shared_ptr<M2DrawCheckBox>     m_chkCloseShape;       // Close checkbox (Multi-point / Path)
 
 	// [2. Grid Settings (MODE_GRID)]

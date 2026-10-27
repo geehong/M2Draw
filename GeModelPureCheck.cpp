@@ -213,8 +213,8 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(undoable([&] { b->SetLocked(true); }), L"SetLocked 이 카운터를 올리지 않음");
 		GE_CHECK(undoable([&] { b->SetOpacity(0.5f); }), L"SetOpacity 가 카운터를 올리지 않음");
 		GE_CHECK(undoable([&] { b->SetBlendMode(LayerBlendMode::Screen); }), L"SetBlendMode 가 카운터를 올리지 않음");
-		GE_CHECK(undoable([&] { b->GetStyleRef().strokeWidth = 7.0f; }), L"GetStyleRef 수정이 카운터를 올리지 않음");
-		GE_CHECK(undoable([&] { Style st = b->GetStyle(); st.fillType = FillType::Solid; st.fill = Color(0.1f, 0.2f, 0.3f, 1.0f); b->SetStyle(st); }), L"SetStyle 이 카운터를 올리지 않음");
+		GE_CHECK(undoable([&] { b->GetStyleRef().stroke.width = 7.0f; }), L"GetStyleRef 수정이 카운터를 올리지 않음");
+		GE_CHECK(undoable([&] { Style st = b->GetStyle(); st.fill.type = PaintType::Solid; st.fill.color = Color(0.1f, 0.2f, 0.3f, 1.0f); b->SetStyle(st); }), L"SetStyle 이 카운터를 올리지 않음");
 		GE_CHECK(undoable([&] { b->GetPathsRef()[0].nodes[0].anchor.x += 11.0f; }), L"GetPathsRef 수정이 카운터를 올리지 않음");
 		GE_CHECK(undoable([&] { a->GetParamRef<RectParams>()->rx = 9.0f; }), L"GetParamRef 수정이 카운터를 올리지 않음");
 		GE_CHECK(undoable([&] { a->GetParamsRef() = RectParams{ 4.0f, 4.0f, true }; }), L"GetParamsRef 수정이 카운터를 올리지 않음");
@@ -440,6 +440,124 @@ bool RunPureModelVerification(std::wstring* failure)
 		Node* a2 = d2.FindById(aId);
 		GE_CHECK(a2 != nullptr && a2->GetParent() == d2.GetActiveLayer(), L"그룹 해제 후 자식이 부모 레이어로 올라오지 않음");
 		GE_CHECK(approx(a2->GetWorldTransform().TransformPoint(Vec2{ 0.0f, 0.0f }), aWorld.x, aWorld.y), L"그룹 해제 후 월드 위치가 바뀜");
+	}
+
+	// ---- 11. Style 모델 (Paint/Stroke): 대시 변환 헬퍼, 파서, SVG/Undo 왕복 (2.1) --------------------
+	{
+		auto sameArr = [](const std::vector<float>& a, const std::vector<float>& b) {
+			if (a.size() != b.size()) return false;
+			for (size_t i = 0; i < a.size(); ++i) if (std::abs(a[i] - b[i]) > 0.0005f) return false;
+			return true;
+		};
+
+		// 11-1. 프리셋 -> dashArray: 기본 두께(2px)에서 예전 SVG 출력값과 동일, 두께에 비례
+		GE_CHECK(sameArr(MakeDashArray(DashStyle::Dash, 2.0f), { 8.0f, 4.0f }), L"Dash 프리셋(2px)이 '8 4' 가 아님");
+		GE_CHECK(sameArr(MakeDashArray(DashStyle::Dot, 2.0f), { 2.0f, 2.0f }), L"Dot 프리셋(2px)이 '2 2' 가 아님");
+		GE_CHECK(sameArr(MakeDashArray(DashStyle::DashDot, 2.0f), { 8.0f, 4.0f, 2.0f, 4.0f }), L"DashDot 프리셋(2px)이 '8 4 2 4' 가 아님");
+		GE_CHECK(sameArr(MakeDashArray(DashStyle::DashDotDot, 2.0f), { 8.0f, 4.0f, 2.0f, 4.0f, 2.0f, 4.0f }), L"DashDotDot 프리셋(2px)이 '8 4 2 4 2 4' 가 아님");
+		GE_CHECK(sameArr(MakeDashArray(DashStyle::Dash, 5.0f), { 20.0f, 10.0f }), L"대시가 선 두께에 비례하지 않음");
+		GE_CHECK(MakeDashArray(DashStyle::Solid, 2.0f).empty() && MakeDashArray(DashStyle::Custom, 2.0f).empty(), L"Solid/Custom 프리셋은 빈 배열이어야 함");
+
+		// 11-2. dashArray -> 프리셋 분류 (프리셋 왕복 + 사용자 정의 판별)
+		for (DashStyle p : { DashStyle::Solid, DashStyle::Dash, DashStyle::Dot, DashStyle::DashDot, DashStyle::DashDotDot })
+			for (float w : { 0.5f, 1.0f, 2.0f, 7.5f })
+				GE_CHECK(ClassifyDashArray(MakeDashArray(p, w), w) == p, L"프리셋 -> dashArray -> 프리셋 왕복이 일치하지 않음");
+		GE_CHECK(ClassifyDashArray({ 5.0f, 3.0f, 1.0f, 3.0f }, 2.0f) == DashStyle::Custom, L"사용자 정의 대시가 프리셋으로 오분류됨");
+		GE_CHECK(ClassifyDashArray({ 8.0f, 4.0f }, 5.0f) == DashStyle::Custom, L"두께가 다르면 같은 절대값도 프리셋이 아님");
+
+		// 11-3. 대시 문자열 파서 (SVG 와 속성창 입력이 공유)
+		GE_CHECK(sameArr(ParseDashArrayText(L"8 4"), { 8.0f, 4.0f }), L"'8 4' 파싱 실패");
+		GE_CHECK(sameArr(ParseDashArrayText(L" 8,4 , 2 4 "), { 8.0f, 4.0f, 2.0f, 4.0f }), L"쉼표/공백 혼합 구분 파싱 실패");
+		GE_CHECK(sameArr(ParseDashArrayText(L"5 3 1"), { 5.0f, 3.0f, 1.0f, 5.0f, 3.0f, 1.0f }), L"홀수 개 목록이 반복되어 짝수가 되지 않음 (SVG 규격)");
+		GE_CHECK(sameArr(ParseDashArrayText(L"2.5 1.5"), { 2.5f, 1.5f }), L"소수 파싱 실패");
+		GE_CHECK(ParseDashArrayText(L"none").empty() && ParseDashArrayText(L"").empty(), L"none/빈 문자열은 실선이어야 함");
+		GE_CHECK(ParseDashArrayText(L"-1 2").empty() && ParseDashArrayText(L"0 0").empty() && ParseDashArrayText(L"4 abc").empty(), L"음수/합 0/숫자 아님은 실선으로 거부해야 함");
+		GE_CHECK(ParseDashArrayText(L"1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1").empty(), L"과도하게 긴 대시 목록을 거부하지 않음");
+		GE_CHECK(sameArr(ParseDashArrayText(FormatDashArrayText({ 8.0f, 4.0f, 2.5f, 4.0f })), { 8.0f, 4.0f, 2.5f, 4.0f }), L"대시 문자열 포맷 -> 파싱 왕복 실패");
+
+		// 11-4. SVG 왕복: cap/join/miter/dash/offset + 채우기 보존, 기본값은 출력 생략, 재직렬화 동일
+		Document d;
+		PathNode* a = static_cast<PathNode*>(d.AddShape(MakePath(L"styled", 0.0f, 0.0f)));
+		Style st = a->GetStyle();
+		st.fill.type = PaintType::Solid;
+		st.fill.color = Color(0.2f, 0.4f, 0.6f, 0.5f);
+		st.stroke.width = 3.0f;
+		st.stroke.color = Color(0.9f, 0.1f, 0.1f, 1.0f);
+		st.stroke.cap = LineCap::Round;
+		st.stroke.join = LineJoin::Bevel;
+		st.stroke.miterLimit = 7.0f;
+		st.stroke.dashArray = { 6.0f, 2.0f, 1.0f, 2.0f };
+		st.stroke.dashOffset = 1.5f;
+		a->SetStyle(st);
+		PathNode* plain = static_cast<PathNode*>(d.AddShape(MakePath(L"plain", 50.0f, 0.0f)));
+
+		SvgWriter w;
+		const std::string svg = w.WriteString(d);
+		GE_CHECK(svg.find("stroke-linecap=\"round\"") != std::string::npos && svg.find("stroke-linejoin=\"bevel\"") != std::string::npos
+			&& svg.find("stroke-miterlimit=\"7\"") != std::string::npos && svg.find("stroke-dasharray=\"6 2 1 2\"") != std::string::npos
+			&& svg.find("stroke-dashoffset=\"1.5\"") != std::string::npos, L"stroke 속성(cap/join/miter/dash/offset)이 SVG 에 출력되지 않음");
+		const size_t capCount = [&] { size_t n = 0, pos = 0; while ((pos = svg.find("stroke-linecap", pos)) != std::string::npos) { ++n; ++pos; } return n; }();
+		GE_CHECK(capCount == 1, L"기본값(Butt)인 도형에도 stroke-linecap 이 출력됨");
+
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"스타일 SVG 를 읽지 못함");
+		const PathNode* ra = static_cast<const PathNode*>(back.FindById(a->GetId()));
+		GE_CHECK(ra != nullptr, L"스타일 도형을 ID 로 찾지 못함");
+		const Style& rs = ra->GetStyle();
+		GE_CHECK(rs.fill.type == PaintType::Solid && NearByte(rs.fill.color.r, 0.2f) && NearByte(rs.fill.color.a, 0.5f), L"채우기가 왕복 후 달라짐");
+		GE_CHECK(rs.stroke.cap == LineCap::Round && rs.stroke.join == LineJoin::Bevel && std::abs(rs.stroke.miterLimit - 7.0f) < 0.001f, L"cap/join/miterLimit 이 왕복 후 달라짐");
+		GE_CHECK(sameArr(rs.stroke.dashArray, { 6.0f, 2.0f, 1.0f, 2.0f }) && std::abs(rs.stroke.dashOffset - 1.5f) < 0.001f, L"dashArray/dashOffset 이 왕복 후 달라짐");
+		const PathNode* rplain = static_cast<const PathNode*>(back.FindById(plain->GetId()));
+		GE_CHECK(rplain != nullptr && rplain->GetStyle().stroke.cap == LineCap::Butt && rplain->GetStyle().stroke.dashArray.empty(), L"기본 스타일 도형이 왕복 후 달라짐");
+		GE_CHECK(w.WriteString(back) == svg, L"스타일이 포함된 SVG 가 재직렬화에서 달라짐");
+
+		// Clean(순수 SVG) 에서도 표준 stroke 속성은 유지
+		const std::string clean = w.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("stroke-linecap=\"round\"") != std::string::npos && clean.find("stroke-dasharray=\"6 2 1 2\"") != std::string::npos, L"Clean 출력에서 표준 stroke 속성이 사라짐");
+
+		// 11-5. 구버전(2.0 이전) 파일: 고정 대시 문자열이 숫자로 정확히 읽힘 (예전의 부분 문자열 일치 해석 제거)
+		const std::string oldSvg =
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">\n"
+			"  <g>\n"
+			"    <path id=\"p1\" d=\"M 0 0 L 10 10\" stroke=\"#000000\" stroke-width=\"2\" stroke-dasharray=\"8 4 2 4\" />\n"
+			"    <path id=\"p2\" d=\"M 0 0 L 10 10\" stroke=\"#000000\" stroke-width=\"2\" stroke-dasharray=\"3 5 7\" />\n"
+			"    <path id=\"p3\" d=\"M 0 0 L 10 10\" stroke=\"#000000\" stroke-width=\"2\" stroke-dasharray=\"none\" />\n"
+			"  </g>\n"
+			"</svg>\n";
+		Document oldDoc;
+		GE_CHECK(reader.ReadFromString(oldSvg, oldDoc) && CountPaths(oldDoc) == 3, L"대시가 있는 구버전 SVG 를 읽지 못함");
+		// Reader 는 레이어 밖의 <path> 마다 새 레이어를 만들므로(2.9 에서 개선) <g> 로 묶어 한 곳에서 읽음
+		const auto& kids = static_cast<GroupNode*>(oldDoc.GetLayers()[0]->GetChildren()[0].get())->GetChildren();
+		GE_CHECK(kids.size() == 3, L"구버전 SVG 의 그룹 자식 수가 틀림");
+		GE_CHECK(sameArr(static_cast<PathNode*>(kids[0].get())->GetStyle().stroke.dashArray, { 8.0f, 4.0f, 2.0f, 4.0f }), L"'8 4 2 4' 대시 해석이 틀림");
+		GE_CHECK(sameArr(static_cast<PathNode*>(kids[1].get())->GetStyle().stroke.dashArray, { 3.0f, 5.0f, 7.0f, 3.0f, 5.0f, 7.0f }), L"사용자 정의 대시('3 5 7')가 부분 일치가 아닌 숫자로 해석되어야 함");
+		GE_CHECK(static_cast<PathNode*>(kids[2].get())->GetStyle().stroke.dashArray.empty(), L"stroke-dasharray=none 이 실선이 아님");
+
+		// 11-6. 스타일 변경이 Undo/Redo 로 왕복됨 (cap/join/dash 포함)
+		UndoManager um;
+		um.Reset(d);
+		Style st2 = plain->GetStyle();
+		st2.stroke.cap = LineCap::Square;
+		st2.stroke.dashArray = MakeDashArray(DashStyle::Dash, st2.stroke.width);
+		plain->SetStyle(st2);
+		GE_CHECK(um.CommitChange(L"스타일", d), L"stroke cap/dash 변경이 Undo 로 기록되지 않음");
+		const NodeId plainId = plain->GetId();
+		GE_CHECK(um.Undo(d), L"스타일 Undo 실패");
+		const PathNode* up = static_cast<const PathNode*>(d.FindById(plainId));
+		GE_CHECK(up != nullptr && up->GetStyle().stroke.cap == LineCap::Butt && up->GetStyle().stroke.dashArray.empty(), L"Undo 후 스타일이 복원되지 않음");
+		GE_CHECK(um.Redo(d), L"스타일 Redo 실패");
+		const PathNode* rp2 = static_cast<const PathNode*>(d.FindById(plainId));
+		GE_CHECK(rp2 != nullptr && rp2->GetStyle().stroke.cap == LineCap::Square && ClassifyDashArray(rp2->GetStyle().stroke.dashArray, rp2->GetStyle().stroke.width) == DashStyle::Dash, L"Redo 후 스타일이 복원되지 않음");
+
+		// 11-7. Gradient 는 2.3 전까지 첫 스톱 색으로 출력 (모델만 존재해도 직렬화가 깨지지 않음)
+		// (Undo/Redo 는 문서를 통째로 교체하므로 이전에 얻은 노드 포인터는 무효 -> ID 로 다시 찾음)
+		PathNode* livePlain = static_cast<PathNode*>(d.FindById(plainId));
+		GE_CHECK(livePlain != nullptr, L"Redo 후 도형을 찾지 못함");
+		Style gs = livePlain->GetStyle();
+		gs.fill.type = PaintType::Gradient;
+		gs.fill.gradient.stops = { { 0.0f, Color(1.0f, 0.0f, 0.0f, 1.0f) }, { 1.0f, Color(0.0f, 0.0f, 1.0f, 1.0f) } };
+		livePlain->SetStyle(gs);
+		GE_CHECK(w.WriteString(d).find("fill=\"#ff0000\"") != std::string::npos, L"그라디언트 대체 색(첫 스톱)이 출력되지 않음");
 	}
 
 #undef GE_CHECK

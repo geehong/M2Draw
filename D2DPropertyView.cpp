@@ -179,25 +179,32 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 		m_strShapeType = shape->GetShapeTypeName();
 		m_strShapeName = shape->GetName().empty() ? m_strShapeType : CString(shape->GetName().c_str());
 
-		m_bFillEnabled = (shape->GetStyle().fillType != FillType::None);
-		m_fillColor = shape->GetStyle().fill;
+		const ge::Style& st = shape->GetStyle();
+		m_bFillEnabled = (st.fill.type != ge::PaintType::None);
+		m_fillColor = (st.fill.type == ge::PaintType::Gradient) ? st.fill.gradient.FallbackColor() : st.fill.color;
 		RGBtoHSL(m_fillColor, m_fFillHue, m_fFillSat, m_fFillLight);
 
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
 		if (pxPerUnit <= 0.0f) pxPerUnit = 1.0f;
-		m_fStrokeWidth = shape->GetStyle().strokeWidth / pxPerUnit;
-		m_strokeColor = shape->GetStyle().stroke;
+		m_fStrokeWidth = st.stroke.width / pxPerUnit;
+		m_strokeColor = st.stroke.color;
 		RGBtoHSL(m_strokeColor, m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
 
 		m_fOpacity = (m_colorTarget == 0 ? m_fillColor.a : m_strokeColor.a) * 100.0f;
 
-		switch (shape->GetStyle().dashStyle)
+		m_lineCap = st.stroke.cap;
+		m_lineJoin = st.stroke.join;
+		m_customDash = st.stroke.dashArray;
+
+		// dashArray -> 프리셋 버튼: 4개 버튼에 없는 패턴(대시-점-점 포함)은 "사용자 정의"
+		switch (ge::ClassifyDashArray(st.stroke.dashArray, st.stroke.width))
 		{
-		case D2D1_DASH_STYLE_DASH:      m_selectedDash = 1; break;
-		case D2D1_DASH_STYLE_DOT:       m_selectedDash = 2; break;
-		case D2D1_DASH_STYLE_DASH_DOT:  m_selectedDash = 3; break;
-		default:                        m_selectedDash = 0; break;
+		case ge::DashStyle::Solid:   m_selectedDash = 0; break;
+		case ge::DashStyle::Dash:    m_selectedDash = 1; break;
+		case ge::DashStyle::Dot:     m_selectedDash = 2; break;
+		case ge::DashStyle::DashDot: m_selectedDash = 3; break;
+		default:                     m_selectedDash = 4; break;
 		}
 	}
 	else
@@ -210,6 +217,23 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 	SafeInvalidate(FALSE);
 }
 
+std::vector<float> CD2DPropertyView::EffectiveDashArray() const
+{
+	CanvasUnit curUnit = GetApp()->GetGrid().unit;
+	float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
+	if (pxPerUnit <= 0.0f) pxPerUnit = 1.0f;
+	const float widthPx = max(0.1f, m_fStrokeWidth * pxPerUnit);
+
+	switch (m_selectedDash)
+	{
+	case 1: return ge::MakeDashArray(ge::DashStyle::Dash, widthPx);
+	case 2: return ge::MakeDashArray(ge::DashStyle::Dot, widthPx);
+	case 3: return ge::MakeDashArray(ge::DashStyle::DashDot, widthPx);
+	case 4: return ge::IsValidDashArray(m_customDash) ? m_customDash : std::vector<float>{};
+	default: return {};
+	}
+}
+
 void CD2DPropertyView::ApplyToShape()
 {
 	if (!GetSelectedShape())
@@ -218,29 +242,28 @@ void CD2DPropertyView::ApplyToShape()
 	ge::Node* shape = GetSelectedShape();
 	if (!shape) return;
 
+	ge::Style& style = shape->GetStyleRef();
 	if (m_bFillEnabled)
 	{
-		shape->GetStyleRef().fillType = FillType::Solid;
-		shape->GetStyleRef().fill = m_fillColor;
+		style.fill.type = ge::PaintType::Solid;
+		style.fill.color = m_fillColor;
 	}
 	else
 	{
-		shape->GetStyleRef().fillType = FillType::None;
+		style.fill.type = ge::PaintType::None;
 	}
 
-	shape->GetStyleRef().stroke = m_strokeColor;
+	style.stroke.color = m_strokeColor;
 
 	CanvasUnit curUnit = GetApp()->GetGrid().unit;
 	float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
-	shape->GetStyleRef().strokeWidth = max(0.1f, m_fStrokeWidth * pxPerUnit);
+	style.stroke.width = max(0.1f, m_fStrokeWidth * pxPerUnit);
 
-	switch (m_selectedDash)
-	{
-	case 1: shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH; break;
-	case 2: shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DOT; break;
-	case 3: shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH_DOT; break;
-	default: shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_SOLID; break;
-	}
+	style.stroke.cap = m_lineCap;
+	style.stroke.join = m_lineJoin;
+
+	// 프리셋은 현재 선 두께의 배수로 절대값을 만들어 저장 (두께를 바꾸면 패턴도 같은 비율로 따라감)
+	style.stroke.dashArray = EffectiveDashArray();
 
 	shape->Invalidate();
 	m_pActiveDoc->UpdateAllViews(nullptr);
@@ -746,6 +769,66 @@ void CD2DPropertyView::InitControls()
 			m_pCurrentPanel->AddChild(btn);
 		}
 
+		// 8-1. 사용자 정의 Dash Array 입력 (문서 단위 숫자 목록, SVG stroke-dasharray 와 같은 규칙)
+		m_lblDashArray = std::make_shared<M2DrawLabel>(L"Dash Array (px, 예: 8 4 2 4)");
+		m_pCurrentPanel->AddChild(m_lblDashArray);
+
+		m_txtDashArray = std::make_shared<M2DrawTextInput>();
+		m_txtDashArray->SetAllowedChars(L"0123456789.,- ");
+		m_txtDashArray->SetPlaceholder(L"실선");
+		m_txtDashArray->SetText(ge::FormatDashArrayText(m_customDash));
+		m_txtDashArray->SetOnCommit([this](M2DrawTextInput* pInput, const std::wstring& text) {
+			// 입력 확정: 파싱 결과가 유효하면 사용자 정의 대시로 적용, 비우면 실선. 잘못된 입력은 현재 값으로 되돌림
+			const bool empty = (text.find_first_not_of(L" ,") == std::wstring::npos);
+			std::vector<float> parsed = ge::ParseDashArrayText(text);
+			if (empty)
+			{
+				m_customDash.clear();
+				m_selectedDash = 0;
+			}
+			else if (!parsed.empty())
+			{
+				m_customDash = parsed;
+				m_selectedDash = 4;
+			}
+			pInput->SetText(ge::FormatDashArrayText(EffectiveDashArray()));
+			for (int k = 0; k < static_cast<int>(m_btnDashStyles.size()); ++k)
+				m_btnDashStyles[k]->SetChecked(k == m_selectedDash);
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_txtDashArray);
+
+		// 8-2. 선 끝(Cap) / 접합(Join) 모양
+		m_lblCapJoin = std::make_shared<M2DrawLabel>(L"Cap  /  Join");
+		m_pCurrentPanel->AddChild(m_lblCapJoin);
+
+		m_cboLineCap = std::make_shared<M2DrawComboBox>();
+		m_cboLineCap->SetItemHeight(20.0f);
+		m_cboLineCap->AddItem(L"Butt");
+		m_cboLineCap->AddItem(L"Round");
+		m_cboLineCap->AddItem(L"Square");
+		m_cboLineCap->SetCurSel(static_cast<int>(m_lineCap), false);
+		m_cboLineCap->SetOnSelectionChanged([this](M2DrawComboBox* /*pCombo*/, int sel) {
+			m_lineCap = static_cast<ge::LineCap>(sel);
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_cboLineCap);
+
+		m_cboLineJoin = std::make_shared<M2DrawComboBox>();
+		m_cboLineJoin->SetItemHeight(20.0f);
+		m_cboLineJoin->AddItem(L"Miter");
+		m_cboLineJoin->AddItem(L"Round");
+		m_cboLineJoin->AddItem(L"Bevel");
+		m_cboLineJoin->SetCurSel(static_cast<int>(m_lineJoin), false);
+		m_cboLineJoin->SetOnSelectionChanged([this](M2DrawComboBox* /*pCombo*/, int sel) {
+			m_lineJoin = static_cast<ge::LineJoin>(sel);
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_cboLineJoin);
+
 		// 9. Close Shape Checkbox (For Multi-point / Path Shapes)
 		m_chkCloseShape = std::make_shared<M2DrawCheckBox>(L"Close Path (Connect start/end)", false);
 		m_chkCloseShape->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
@@ -1135,7 +1218,7 @@ void CD2DPropertyView::SyncControlsFromData()
 			ge::Node* shape = GetSelectedShape();
 			if (shape)
 			{
-				m_fStrokeWidth = shape->GetStyle().strokeWidth / pxPerUnit;
+				m_fStrokeWidth = shape->GetStyle().stroke.width / pxPerUnit;
 			}
 		}
 
@@ -1175,6 +1258,9 @@ void CD2DPropertyView::SyncControlsFromData()
 
 		for (int i = 0; i < static_cast<int>(m_btnDashStyles.size()); ++i)
 			m_btnDashStyles[i]->SetChecked(m_selectedDash == i);
+		if (m_txtDashArray) m_txtDashArray->SetText(ge::FormatDashArrayText(EffectiveDashArray()));
+		if (m_cboLineCap)   m_cboLineCap->SetCurSel(static_cast<int>(m_lineCap), false);
+		if (m_cboLineJoin)  m_cboLineJoin->SetCurSel(static_cast<int>(m_lineJoin), false);
 
 		if (m_chkCloseShape)
 		{
@@ -1454,6 +1540,40 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 				m_btnDashStyles[i]->SetBounds(bx1, y, bx1 + dashW, y + 24.0f);
 			}
 			y += 32.0f;
+
+			// 사용자 정의 Dash Array 입력
+			if (m_lblDashArray)
+			{
+				m_lblDashArray->SetVisible(true);
+				m_lblDashArray->SetBounds(left, y, right, y + 18.0f);
+				y += 20.0f;
+			}
+			if (m_txtDashArray)
+			{
+				m_txtDashArray->SetVisible(true);
+				m_txtDashArray->SetBounds(left, y, right, y + 24.0f);
+				y += 32.0f;
+			}
+
+			// Cap / Join 콤보 (좌우 반반)
+			if (m_lblCapJoin)
+			{
+				m_lblCapJoin->SetVisible(true);
+				m_lblCapJoin->SetBounds(left, y, right, y + 18.0f);
+				y += 20.0f;
+			}
+			const float comboW = (contentW - 6.0f) * 0.5f;
+			if (m_cboLineCap)
+			{
+				m_cboLineCap->SetVisible(true);
+				m_cboLineCap->SetBounds(left, y, left + comboW, y + 26.0f);
+			}
+			if (m_cboLineJoin)
+			{
+				m_cboLineJoin->SetVisible(true);
+				m_cboLineJoin->SetBounds(left + comboW + 6.0f, y, right, y + 26.0f);
+			}
+			y += 34.0f;
 		}
 		else
 		{
@@ -1462,6 +1582,11 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			if (m_spinStrokeWidth) m_spinStrokeWidth->SetVisible(false);
 			for (int i = 0; i < 4; ++i)
 				m_btnDashStyles[i]->SetVisible(false);
+			if (m_lblDashArray) m_lblDashArray->SetVisible(false);
+			if (m_txtDashArray) m_txtDashArray->SetVisible(false);
+			if (m_lblCapJoin)   m_lblCapJoin->SetVisible(false);
+			if (m_cboLineCap)   m_cboLineCap->SetVisible(false);
+			if (m_cboLineJoin)  m_cboLineJoin->SetVisible(false);
 		}
 
 		// 8. Close Shape Checkbox (For PathShape)
