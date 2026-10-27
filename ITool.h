@@ -182,6 +182,8 @@ public:
 	void SelectNode(ge::Node* node, CM2DrawDoc* pDoc);
 	// 문서 선택만 해제 (패널 갱신은 호출 측 책임)
 	void ClearSelection(CM2DrawDoc* pDoc);
+	// 진행 중인 드래그/편집 상태 폐기 (문서가 교체되어 노드 포인터가 무효가 된 경우)
+	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; }
 
 	Handle GetActiveHandle() const { return m_handle; }
 	void SetActiveHandle(Handle h) { m_handle = h; }

@@ -520,6 +520,7 @@ void SelectTool::OnUp(const ToolEvent& e)
 	}
 	else if (m_mode != Mode::None && e.pDoc)
 	{
+		e.pDoc->SetModifiedFlag(TRUE);
 		UpdateShapePropertiesSelection(e.pDoc->GetPrimarySelection(), e.pDoc);
 		CString str;
 		str.Format(_T("[선택 도구] 변형 완료 (모드: %d)"), static_cast<int>(m_mode));
@@ -537,7 +538,8 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 {
 	if (!rt || !brush || !pDoc) return;
 
-	ViewportTransform view = { zoom, pan };
+	bool isBottomLeft = (pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
 
 	// 1. 마키(Marquee) 드래그 선택 사각형 렌더링
 	if (m_mode == Mode::Marquee)
@@ -689,7 +691,8 @@ void BaseShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* bru
                                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
 {
 	if (!rt || !brush) return;
-	ViewportTransform view = { zoom, pan };
+	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
 
 	// 1. 도형이 생성되어 드래그 중인 경우: 엔진의 Shape 렌더링 파이프라인 활용
 	if (m_previewShape)
@@ -737,6 +740,8 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 		pLayer ? pLayer->GetName().c_str() : L"None");
 	LogAppEvent(strEngineLog);
 	SetAppStatusText(strEngineLog);
+
+	pDoc->SetModifiedFlag(TRUE);
 
 	// 방금 등록된 도형 선택 + 정보 표시 (속성창 + 상단 옵션바 수정 모드)
 	SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
@@ -1091,7 +1096,8 @@ void BoxShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brus
                                float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
 {
 	if (!rt || !brush) return;
-	ViewportTransform view = { zoom, pan };
+	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
 
 	// 1. 첫 번째 포인트가 찍혀서 미리보기가 생성된 상태 (드래그 중이거나 클릭-이동 대기 중)
 	if ((m_previewShape || m_previewNode) && (m_isDragging || m_waitingSecondClick))
@@ -1759,7 +1765,8 @@ void MultiPointShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrus
                                       float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
 {
 	if (!rt || !brush) return;
-	ViewportTransform view = { zoom, pan };
+	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
 
 	if (m_previewShape && !m_previewShape->GetPaths().empty())
 	{

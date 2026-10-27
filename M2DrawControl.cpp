@@ -468,6 +468,7 @@ bool M2DrawSlider::OnLButtonUp(D2D1_POINT_2F /*pt*/)
 	{
 		m_isDragging = false;
 		m_bPressed = false;
+		if (m_onReleased) m_onReleased(this);
 		return true;
 	}
 	return false;
@@ -520,6 +521,7 @@ void M2DrawNumericInput::CommitEdit()
 {
 	if (!m_bEditing) return;
 	m_bEditing = false;
+	m_bSelectAllOnFirstKey = false;
 	try
 	{
 		if (!m_editText.empty())
@@ -537,6 +539,7 @@ void M2DrawNumericInput::CommitEdit()
 void M2DrawNumericInput::CancelEdit()
 {
 	m_bEditing = false;
+	m_bSelectAllOnFirstKey = false;
 	m_editText.clear();
 }
 
@@ -573,13 +576,22 @@ void M2DrawNumericInput::Draw(
 
 	if (m_bEditing)
 	{
-		// 편집 중: 사용자가 입력 중인 텍스트 표시 + 깜빡이는 캐럿(커서) 표시
+		// 편집 중: 사용자가 입력 중인 텍스트 표시 + 전체 선택 하이라이트 or 깜빡이는 캐럿(커서) 표시
 		std::wstring disp = m_editText;
+		if (m_bSelectAllOnFirstKey && !disp.empty())
+		{
+			float charWidth = 7.5f;
+			float highlightW = min(textRect.right - textRect.left - 4.0f, disp.length() * charWidth + 4.0f);
+			D2D1_RECT_F selRect = D2D1::RectF(textRect.left, textRect.top + 3.0f, textRect.left + highlightW, textRect.bottom - 3.0f);
+			pBrush->SetColor(D2D1::ColorF(0.0f, 0.48f, 0.85f, 0.5f));
+			pRT->FillRectangle(selRect, pBrush);
+		}
+
 		DrawTextLabel(pRT, pBrush, pTextFormat, disp.c_str(), textRect,
 			DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
 
-		// 커서 렌더링 (500ms 깜빡임)
-		if ((::GetTickCount64() / 500) % 2 == 0)
+		// 커서 렌더링 (500ms 깜빡임, 전체 선택 중이 아닐 때만 커서 표시)
+		if (!m_bSelectAllOnFirstKey && ((::GetTickCount64() / 500) % 2 == 0))
 		{
 			float charWidth = 7.0f; // 평균 문자 폭 추정
 			float caretX = min(textRect.right - 4.0f, textRect.left + disp.length() * charWidth);
@@ -666,13 +678,13 @@ bool M2DrawNumericInput::OnLButtonDown(D2D1_POINT_2F pt)
 		}
 	}
 
-	// 텍스트 영역 클릭 시 인라인 직접 입력 모드 활성화
-	D2D1_RECT_F textRect = GetTextRect();
-	if (pt.x >= textRect.left && pt.x <= textRect.right &&
-		pt.y >= textRect.top && pt.y <= textRect.bottom)
+	// 텍스트 영역 클릭 시 인라인 직접 입력 모드 활성화 (좌측 전체 텍스트 영역 클릭 가능하도록 개선)
+	if (pt.x >= m_bounds.left && pt.x < rUp.left &&
+		pt.y >= m_bounds.top && pt.y <= m_bounds.bottom)
 	{
 		m_bEditing = true;
 		m_bFocused = true;
+		m_bSelectAllOnFirstKey = true;
 		// 현재 값을 편집 버퍼로 로드 (소수점 1자리 또는 정수)
 		wchar_t buf[32];
 		if (m_decimals <= 0 || (std::abs(m_val - std::round(m_val)) < 0.0001))
@@ -704,9 +716,14 @@ bool M2DrawNumericInput::OnKeyDown(UINT nChar)
 		CancelEdit();
 		return true;
 	}
-	else if (nChar == VK_BACK)
+	else if (nChar == VK_BACK || nChar == VK_DELETE)
 	{
-		if (!m_editText.empty())
+		if (m_bSelectAllOnFirstKey)
+		{
+			m_bSelectAllOnFirstKey = false;
+			m_editText.clear();
+		}
+		else if (!m_editText.empty())
 		{
 			m_editText.pop_back();
 		}
@@ -722,6 +739,12 @@ bool M2DrawNumericInput::OnChar(UINT nChar)
 	// 숫자(0~9), 마이너스(-), 소수점(.) 허용
 	if ((nChar >= '0' && nChar <= '9') || nChar == '.' || nChar == '-')
 	{
+		if (m_bSelectAllOnFirstKey)
+		{
+			m_bSelectAllOnFirstKey = false;
+			m_editText.clear();
+		}
+
 		if (nChar == '.' && m_editText.find(L'.') != std::wstring::npos)
 		{
 			return true; // 이미 소수점이 있으면 무시
@@ -1247,7 +1270,20 @@ bool M2DrawPanel::OnLButtonDown(D2D1_POINT_2F pt)
 		}
 	}
 
-	// 2. 최상위(나중에 추가된) 컨트롤부터 역순 히트 테스트 (콜백 내부에서 m_children이 변경될 수 있으므로 인덱스 기반으로 순회)
+	// 2. 다른 곳 클릭 시 편집 중이던 NumericInput 커밋
+	for (auto& child : m_children)
+	{
+		if (child && child->IsVisible())
+		{
+			auto numInput = std::dynamic_pointer_cast<M2DrawNumericInput>(child);
+			if (numInput && numInput->IsEditing() && !numInput->HitTest(pt))
+			{
+				numInput->CommitEdit();
+			}
+		}
+	}
+
+	// 3. 최상위(나중에 추가된) 컨트롤부터 역순 히트 테스트 (콜백 내부에서 m_children이 변경될 수 있으므로 인덱스 기반으로 순회)
 	for (int i = static_cast<int>(m_children.size()) - 1; i >= 0; --i)
 	{
 		if (i >= static_cast<int>(m_children.size())) continue;
@@ -1855,12 +1891,13 @@ const std::wstring& M2DrawComboBox::GetItemText(int index) const
 	return emptyStr;
 }
 
-void M2DrawComboBox::SetCurSel(int index)
+void M2DrawComboBox::SetCurSel(int index, bool bTriggerCallback)
 {
-	if (m_curSel != index && index >= 0 && index < static_cast<int>(m_items.size()))
+	if (index >= 0 && index < static_cast<int>(m_items.size()))
 	{
+		bool changed = (m_curSel != index);
 		m_curSel = index;
-		if (m_onSelectionChanged)
+		if (changed && bTriggerCallback && m_onSelectionChanged)
 		{
 			m_onSelectionChanged(this, m_curSel);
 		}

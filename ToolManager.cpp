@@ -124,6 +124,7 @@ static void CommitPenPath(CM2DrawDoc* pDoc)
 	ge::Node* pAdded = pDoc->GetDoc().AddShape(std::move(path));
 	path = nullptr;
 	if (pAdded) pDoc->GetDoc().SetSelection({ pAdded });
+	pDoc->SetModifiedFlag(TRUE);
 }
 void PenTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
 {
@@ -227,7 +228,8 @@ bool PenTool::OnRightClicked(CM2DrawDoc* pDoc)
 void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
 {
 	if (!rt || !brush) return;
-	ViewportTransform view = { zoom, pan };
+	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
 
 	// 1. 패스가 이미 시작된 상태인 경우
 	if (pDoc && pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPaths().empty())

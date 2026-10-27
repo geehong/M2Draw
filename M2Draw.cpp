@@ -12,6 +12,7 @@
 #include "ChildFrm.h"
 #include "M2DrawDoc.h"
 #include "M2DrawView.h"
+#include "GeModelPureCheck.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -24,7 +25,7 @@ BEGIN_MESSAGE_MAP(CM2DrawApp, CWinAppEx)
 	ON_COMMAND(ID_APP_ABOUT, &CM2DrawApp::OnAppAbout)
 	// 표준 파일을 기초로 하는 문서 명령입니다.
 	ON_COMMAND(ID_FILE_NEW, &CWinAppEx::OnFileNew)
-	ON_COMMAND(ID_FILE_OPEN, &CWinAppEx::OnFileOpen)
+	ON_COMMAND(ID_FILE_OPEN, &CM2DrawApp::OnFileOpen)
 	// 표준 인쇄 설정 명령입니다.
 	ON_COMMAND(ID_FILE_PRINT_SETUP, &CWinAppEx::OnFilePrintSetup)
 END_MESSAGE_MAP()
@@ -72,6 +73,19 @@ BOOL CM2DrawApp::InitInstance()
 	// 이 항목을 설정하십시오.
 	InitCtrls.dwICC = ICC_WIN95_CLASSES;
 	InitCommonControlsEx(&InitCtrls);
+
+#ifdef _DEBUG
+	// 순수 모델(SVG 왕복 / NodeId 보존 / Undo / 깨진 파일 거부) 자체 검증: 회귀가 생기면 시작 시 바로 알림
+	{
+		std::wstring failure;
+		if (!ge::test::RunPureModelVerification(&failure))
+		{
+			CString msg;
+			msg.Format(_T("[모델 자체 검증 실패]\n%s"), failure.c_str());
+			AfxMessageBox(msg, MB_ICONWARNING);
+		}
+	}
+#endif
 
 	CWinAppEx::InitInstance();
 
@@ -253,6 +267,14 @@ void SetAppStatusText(const CString& strMsg)
 	}
 }
 
+bool CommitActiveDocUndo(const wchar_t* actionName)
+{
+	CFrameWnd* pMainFrame = DYNAMIC_DOWNCAST(CFrameWnd, AfxGetMainWnd());
+	CFrameWnd* pActiveFrame = pMainFrame ? pMainFrame->GetActiveFrame() : nullptr;
+	CM2DrawDoc* pDoc = pActiveFrame ? DYNAMIC_DOWNCAST(CM2DrawDoc, pActiveFrame->GetActiveDocument()) : nullptr;
+	return pDoc && pDoc->CommitUndoPoint(actionName ? actionName : L"편집");
+}
+
 void UpdateShapePropertiesSelection(ge::Node* pShape, CM2DrawDoc* pDoc)
 {
 	CWnd* pMainWnd = AfxGetMainWnd();
@@ -292,5 +314,16 @@ void UpdateOptionBarCreationCoords(float x, float y, float w, float h, bool hasF
 	{
 		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
 		pMainFrame->GetOptionBar().SyncCreationCoordinates(x, y, w, h, hasFixedStart);
+	}
+}
+
+void CM2DrawApp::OnFileOpen()
+{
+	CString filter = _T("SVG 파일 (*.svg;*.m2svg)|*.svg;*.m2svg|SVG 파일 (*.svg)|*.svg|M2Draw 확장 SVG (*.m2svg)|*.m2svg|모든 파일 (*.*)|*.*||");
+	CFileDialog dlg(TRUE, _T("svg"), nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY, filter);
+	dlg.m_ofn.lpstrTitle = _T("SVG 파일 열기");
+	if (dlg.DoModal() == IDOK)
+	{
+		OpenDocumentFile(dlg.GetPathName());
 	}
 }

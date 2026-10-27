@@ -224,6 +224,11 @@
     <ClInclude Include="ToolBoxPane.h" />
     <ClInclude Include="ToolOptionBar.h" />
     <ClInclude Include="D2DLayer.h" />
+    <ClInclude Include="GeNodeVisitor.h" />
+    <ClInclude Include="GeModelPureCheck.h" />
+    <ClInclude Include="SvgWriter.h" />
+    <ClInclude Include="SvgReader.h" />
+    <ClInclude Include="UndoManager.h" />
     <ClInclude Include="LayerWnd.h" />
   </ItemGroup>
   <ItemGroup>
@@ -250,6 +255,9 @@
     <ClCompile Include="RulerRenderer.cpp" />
     <ClCompile Include="SnapManager.cpp" />
     <ClCompile Include="M2DrawControl.cpp" />
+    <ClCompile Include="SvgWriter.cpp" />
+    <ClCompile Include="SvgReader.cpp" />
+    <ClCompile Include="UndoManager.cpp" />
     <ClCompile Include="ToolManager.cpp" />
     <ClCompile Include="ToolBoxPane.cpp" />
     <ClCompile Include="ToolOptionBar.cpp" />

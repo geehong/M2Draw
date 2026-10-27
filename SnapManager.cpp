@@ -153,11 +153,13 @@ void SnapManager::DrawSnapIndicator(
 	ID2D1SolidColorBrush* brush,
 	const SnapResult& snap,
 	float zoom,
-	D2D1_POINT_2F pan) const
+	D2D1_POINT_2F pan,
+	bool invertY) const
 {
 	if (!rt || !brush || !snap.snapped) return;
 
-	D2D1_POINT_2F sp = D2D1::Point2F(snap.pt.x * zoom + pan.x, snap.pt.y * zoom + pan.y);
+	float sy = invertY ? (pan.y - snap.pt.y * zoom) : (snap.pt.y * zoom + pan.y);
+	D2D1_POINT_2F sp = D2D1::Point2F(snap.pt.x * zoom + pan.x, sy);
 
 	const D2D1_COLOR_F savedColor = brush->GetColor();
 

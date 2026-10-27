@@ -130,6 +130,7 @@ void COpacityPopupWnd::HidePopup()
 	{
 		ReleaseCapture();
 		ShowWindow(SW_HIDE);
+		CommitActiveDocUndo(L"불투명도 변경");   // 팝업에서 값을 바꾼 경우(슬라이더 외 입력 포함) 닫힐 때 확정
 		if (m_pOwnerWnd) m_pOwnerWnd->Invalidate(FALSE);
 	}
 }
@@ -250,6 +251,7 @@ void COpacityPopupWnd::OnLButtonUp(UINT nFlags, CPoint point)
 	if (m_bDraggingSlider)
 	{
 		m_bDraggingSlider = false;
+		CommitActiveDocUndo(L"불투명도 변경");   // 슬라이더 드래그가 끝난 시점에 한 단계로 기록
 		return;
 	}
 
@@ -1354,6 +1356,7 @@ void CLayerView::CommitEditName()
 
 		CM2DrawDoc* pDoc = GetDocSafe();
 		if (pDoc) pDoc->UpdateAllViews(nullptr);
+		CommitActiveDocUndo(L"이름 변경");
 	}
 	SafeInvalidate(FALSE);
 }
@@ -1430,6 +1433,8 @@ void CLayerView::OnLButtonUp(UINT /*nFlags*/, CPoint point)
 		ReleaseCapture();
 	}
 
+	// 새 레이어/이동/삭제 버튼, 보이기·잠금 토글, 혼합 모드 등 한 번의 조작이 끝난 시점에 변경 기록
+	CommitActiveDocUndo(L"레이어 패널");
 	SafeInvalidate(FALSE);
 }
 

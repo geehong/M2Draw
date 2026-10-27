@@ -912,6 +912,9 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 	if (m_bUpdating)
 		return;
 
+	// 이 함수는 return 이 많으므로 범위 가드로 어느 경로로 끝나든 편집 결과를 Undo 이력에 기록
+	struct UndoCommitGuard { ~UndoCommitGuard() { CommitActiveDocUndo(L"옵션 변경"); } } undoGuard;
+
 	// 1. 토글 버튼 이벤트 처리
 	if (id == ID_OPT_LINK_RATIO)
 	{

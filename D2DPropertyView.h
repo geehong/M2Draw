@@ -30,9 +30,13 @@ public:
 	// 타깃 도형 설정 및 적용
 	void SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape);
 	void ApplyToShape();
-	void ApplyCanvasSettings();
+	// bLive: 슬라이더 드래그 중 미리보기 - undo 기록/패널 동기화 없이 현재 문서 뷰만 갱신
+	// bForceCommit: 값이 이미 반영되어 있어도 undo 지점을 확정 (드래그 종료 시)
+	void ApplyCanvasSettings(bool bLive = false, bool bForceCommit = false);
 	void SyncControlsFromData();
 	void SyncTransformOnly();
+	CM2DrawDoc* GetActiveDoc() const;
+	void UpdatePresetComboFromInputs();
 
 	enum FillMode
 	{
@@ -135,11 +139,19 @@ protected:
 	std::shared_ptr<M2DrawSlider>       m_sliderGridOpacity;   // Grid Opacity Slider
 	std::shared_ptr<M2DrawNumericInput> m_spinGridOpacity;     // Grid Opacity Number Input
 
-	// [3. Canvas Settings (MODE_CANVAS)]
+	// [3. Document & Canvas Settings (MODE_CANVAS)]
 	std::shared_ptr<M2DrawLabel>        m_lblCanvasHeader;
-	std::shared_ptr<M2DrawLabel>        m_lblCanvasSize;
+	std::shared_ptr<M2DrawLabel>        m_lblDocSize;
 	std::shared_ptr<M2DrawNumericInput> m_spinCanvasW;
 	std::shared_ptr<M2DrawNumericInput> m_spinCanvasH;
+	std::shared_ptr<M2DrawComboBox>     m_cboCanvasPreset;
+	std::shared_ptr<M2DrawLabel>        m_lblOriginMode;
+	std::shared_ptr<M2DrawComboBox>     m_cboOriginMode;
+	std::shared_ptr<M2DrawLabel>        m_lblDocBg;
+	std::shared_ptr<M2DrawColorPalette> m_paletteDocBg;
+	std::shared_ptr<M2DrawLabel>        m_lblDocOpacity;
+	std::shared_ptr<M2DrawSlider>       m_sliderDocOpacity;
+	std::shared_ptr<M2DrawNumericInput> m_spinDocOpacity;
 	std::shared_ptr<M2DrawLabel>        m_lblCanvasBg;
 	std::shared_ptr<M2DrawColorPalette> m_paletteCanvasBg;
 
@@ -157,6 +169,7 @@ protected:
 
 	void InitControls();
 	void UpdateLayout(float width, float height);
+	void NotifyGridChanged();
 
 	// MFC 메시지 맵 핸들러
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
@@ -168,7 +181,9 @@ protected:
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
 	afx_msg void OnChar(UINT nChar, UINT nRepCnt, UINT nFlags);
+	afx_msg void OnSetFocus(CWnd* pOldWnd);
 	afx_msg void OnKillFocus(CWnd* pNewWnd);
+	afx_msg int OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message);
 	afx_msg UINT OnGetDlgCode();
 
 	virtual BOOL PreTranslateMessage(MSG* pMsg) override;

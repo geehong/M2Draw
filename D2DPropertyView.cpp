@@ -55,6 +55,57 @@ namespace
 
 		if (h < 0.0f) h += 360.0f;
 	}
+
+	struct CanvasPresetInfo
+	{
+		std::wstring name;
+		float width;
+		float height;
+		ge::CanvasOriginMode originMode;
+	};
+
+	static const std::vector<CanvasPresetInfo> g_canvasPresets = {
+		{ L"사용자 지정 (Custom)", 0.0f, 0.0f, ge::CanvasOriginMode::TopLeft },
+		// ISO A 시리즈 (가로 / 세로) -> 문서/인쇄: BottomLeft
+		{ L"A4 가로 (297 x 210 mm)", 1123.0f, 794.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A4 세로 (210 x 297 mm)", 794.0f, 1123.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A3 가로 (420 x 297 mm)", 1587.0f, 1123.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A3 세로 (297 x 420 mm)", 1123.0f, 1587.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A2 가로 (594 x 420 mm)", 2245.0f, 1587.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A2 세로 (420 x 594 mm)", 1587.0f, 2245.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A1 가로 (841 x 594 mm)", 3179.0f, 2245.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A1 세로 (594 x 841 mm)", 2245.0f, 3179.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A0 가로 (1189 x 841 mm)", 4494.0f, 3179.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A0 세로 (841 x 1189 mm)", 3179.0f, 4494.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A5 가로 (210 x 148 mm)", 794.0f, 559.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"A5 세로 (148 x 210 mm)", 559.0f, 794.0f, ge::CanvasOriginMode::BottomLeft },
+		// ISO B 시리즈 -> 문서/인쇄: BottomLeft
+		{ L"B4 가로 (353 x 250 mm)", 1334.0f, 945.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"B4 세로 (250 x 353 mm)", 945.0f, 1334.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"B5 가로 (250 x 176 mm)", 945.0f, 665.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"B5 세로 (176 x 250 mm)", 665.0f, 945.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"B0 세로 (1000 x 1414 mm)", 3780.0f, 5344.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"B1 세로 (707 x 1000 mm)", 2672.0f, 3780.0f, ge::CanvasOriginMode::BottomLeft },
+		// US 북미 규격 -> 문서/인쇄: BottomLeft
+		{ L"US Letter 가로 (11 x 8.5 in)", 1056.0f, 816.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"US Letter 세로 (8.5 x 11 in)", 816.0f, 1056.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"US Legal 세로 (8.5 x 14 in)", 816.0f, 1344.0f, ge::CanvasOriginMode::BottomLeft },
+		{ L"US Tabloid (11 x 17 in)", 1056.0f, 1632.0f, ge::CanvasOriginMode::BottomLeft },
+		// 웹 & 디스플레이 표준 -> 웹/화면: TopLeft
+		{ L"웹 FHD (1920 x 1080 px)", 1920.0f, 1080.0f, ge::CanvasOriginMode::TopLeft },
+		{ L"웹 표준 XGA (1024 x 768 px)", 1024.0f, 768.0f, ge::CanvasOriginMode::TopLeft },
+		{ L"노트북 HD (1366 x 768 px)", 1366.0f, 768.0f, ge::CanvasOriginMode::TopLeft },
+		{ L"디스플레이 QHD (2560 x 1440 px)", 2560.0f, 1440.0f, ge::CanvasOriginMode::TopLeft },
+		{ L"4K UHD (3840 x 2160 px)", 3840.0f, 2160.0f, ge::CanvasOriginMode::TopLeft },
+		// 모바일 & 태블릿 -> 웹/화면: TopLeft
+		{ L"모바일 세로 (390 x 844 px)", 390.0f, 844.0f, ge::CanvasOriginMode::TopLeft },
+		{ L"모바일 세로 (412 x 915 px)", 412.0f, 915.0f, ge::CanvasOriginMode::TopLeft },
+		{ L"태블릿 iPad 가로 (1080 x 810 px)", 1080.0f, 810.0f, ge::CanvasOriginMode::TopLeft },
+		{ L"태블릿 iPad 세로 (810 x 1080 px)", 810.0f, 1080.0f, ge::CanvasOriginMode::TopLeft },
+		{ L"태블릿 iPad Pro (1024 x 1366 px)", 1024.0f, 1366.0f, ge::CanvasOriginMode::TopLeft },
+		// SNS / 정사각형 -> 웹/화면: TopLeft
+		{ L"정사각형 SNS (1080 x 1080 px)", 1080.0f, 1080.0f, ge::CanvasOriginMode::TopLeft }
+	};
 }
 
 BEGIN_MESSAGE_MAP(CD2DPropertyView, CWnd)
@@ -67,7 +118,9 @@ BEGIN_MESSAGE_MAP(CD2DPropertyView, CWnd)
 	ON_WM_LBUTTONUP()
 	ON_WM_KEYDOWN()
 	ON_WM_CHAR()
+	ON_WM_SETFOCUS()
 	ON_WM_KILLFOCUS()
+	ON_WM_MOUSEACTIVATE()
 	ON_WM_GETDLGCODE()
 END_MESSAGE_MAP()
 
@@ -193,8 +246,137 @@ void CD2DPropertyView::ApplyToShape()
 	m_pActiveDoc->UpdateAllViews(nullptr);
 }
 
-void CD2DPropertyView::ApplyCanvasSettings()
+CM2DrawDoc* CD2DPropertyView::GetActiveDoc() const
 {
+	if (m_pActiveDoc) return m_pActiveDoc;
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMDIFrameWnd)))
+	{
+		CMDIFrameWnd* pFrame = static_cast<CMDIFrameWnd*>(pMainWnd);
+		CMDIChildWnd* pChild = pFrame->MDIGetActive();
+		if (pChild)
+		{
+			CDocument* pDoc = pChild->GetActiveDocument();
+			if (pDoc && pDoc->IsKindOf(RUNTIME_CLASS(CM2DrawDoc)))
+			{
+				return static_cast<CM2DrawDoc*>(pDoc);
+			}
+		}
+	}
+	return nullptr;
+}
+
+void CD2DPropertyView::UpdatePresetComboFromInputs()
+{
+	if (!m_cboCanvasPreset || !m_spinCanvasW || !m_spinCanvasH) return;
+	float w = static_cast<float>(m_spinCanvasW->GetValue());
+	float h = static_cast<float>(m_spinCanvasH->GetValue());
+	int matchedIdx = 0; // 사용자 지정 (Custom)
+	for (size_t i = 1; i < g_canvasPresets.size(); ++i)
+	{
+		if (std::abs(g_canvasPresets[i].width - w) < 0.5f &&
+		    std::abs(g_canvasPresets[i].height - h) < 0.5f)
+		{
+			matchedIdx = static_cast<int>(i);
+			break;
+		}
+	}
+	m_cboCanvasPreset->SetCurSel(matchedIdx, false);
+}
+
+void CD2DPropertyView::NotifyGridChanged()
+{
+	CM2DrawDoc* pDoc = GetActiveDoc();
+	if (pDoc)
+	{
+		pDoc->UpdateAllViews(nullptr);
+	}
+	else
+	{
+		CWinApp* pApp = AfxGetApp();
+		if (pApp)
+		{
+			POSITION posDocTemplate = pApp->GetFirstDocTemplatePosition();
+			while (posDocTemplate)
+			{
+				CDocTemplate* pDocTemplate = pApp->GetNextDocTemplate(posDocTemplate);
+				if (pDocTemplate)
+				{
+					POSITION posDoc = pDocTemplate->GetFirstDocPosition();
+					while (posDoc)
+					{
+						CDocument* pDocIter = pDocTemplate->GetNextDoc(posDoc);
+						if (pDocIter)
+						{
+							pDocIter->UpdateAllViews(nullptr);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	CMainFrame* pMain = dynamic_cast<CMainFrame*>(AfxGetMainWnd());
+	if (pMain)
+	{
+		CD2DPropertyView& objPropView = pMain->GetPropertiesWnd().GetD2DPropView();
+		if (objPropView.GetSafeHwnd() && &objPropView != this)
+		{
+			objPropView.SyncControlsFromData();
+			objPropView.SafeInvalidate(FALSE);
+		}
+	}
+
+	SafeInvalidate(FALSE);
+}
+
+void CD2DPropertyView::ApplyCanvasSettings(bool bLive, bool bForceCommit)
+{
+	if (m_bUpdating) return;
+	// Canvas Settings 모드가 아닐 때는 문서 캔버스/원점 설정을 절대 건드리지 않도록 방어
+	if (m_paneMode != MODE_CANVAS) return;
+
+	CM2DrawDoc* pDoc = GetActiveDoc();
+	if (pDoc)
+	{
+		ge::Document& doc = pDoc->GetDoc();
+		float newW = m_spinCanvasW ? static_cast<float>(m_spinCanvasW->GetValue()) : doc.width;
+		float newH = m_spinCanvasH ? static_cast<float>(m_spinCanvasH->GetValue()) : doc.height;
+		
+		// 1. 도큐멘트 배경색 (투명도 포함)
+		D2D1_COLOR_F docClr = m_paletteDocBg ? m_paletteDocBg->GetSelectedColor() : D2D1::ColorF(1, 1, 1, 1);
+		float docAlpha = m_sliderDocOpacity ? (m_sliderDocOpacity->GetValue() / 100.0f) : doc.backgroundColor.a;
+		ge::Color newDocBg(docClr.r, docClr.g, docClr.b, docAlpha);
+
+		// 2. 캔버스 작업대(전체 화면) 배경색
+		D2D1_COLOR_F canvasClr = m_paletteCanvasBg ? m_paletteCanvasBg->GetSelectedColor() : D2D1::ColorF(0.84f, 0.85f, 0.88f, 1.0f);
+		ge::Color newCanvasBg(canvasClr.r, canvasClr.g, canvasClr.b, 1.0f);
+
+		ge::CanvasOriginMode newOrigin = (m_cboOriginMode && m_cboOriginMode->GetCurSel() == 0)
+			? ge::CanvasOriginMode::BottomLeft : ge::CanvasOriginMode::TopLeft;
+
+		bool bChanged = doc.width != newW || doc.height != newH || doc.backgroundColor != newDocBg ||
+		    doc.canvasColor != newCanvasBg || doc.originMode != newOrigin;
+		if (bChanged)
+		{
+			doc.width = newW;
+			doc.height = newH;
+			doc.backgroundColor = newDocBg;
+			doc.canvasColor = newCanvasBg;
+			doc.originMode = newOrigin;
+			if (!bLive)
+				pDoc->CommitUndoPoint(L"Document & Canvas Settings");
+			pDoc->UpdateAllViews(nullptr);
+		}
+		else if (bForceCommit)
+		{
+			pDoc->CommitUndoPoint(L"Document & Canvas Settings");
+		}
+
+		// 드래그 중에는 다른 문서/패널 동기화를 생략해 부드럽게 갱신
+		if (bLive) return;
+	}
+
 	CWinApp* pApp = AfxGetApp();
 	if (pApp)
 	{
@@ -207,10 +389,10 @@ void CD2DPropertyView::ApplyCanvasSettings()
 				POSITION posDoc = pDocTemplate->GetFirstDocPosition();
 				while (posDoc)
 				{
-					CDocument* pDoc = pDocTemplate->GetNextDoc(posDoc);
-					if (pDoc)
+					CDocument* pDocIter = pDocTemplate->GetNextDoc(posDoc);
+					if (pDocIter && pDocIter != pDoc)
 					{
-						pDoc->UpdateAllViews(nullptr);
+						pDocIter->UpdateAllViews(nullptr);
 					}
 				}
 			}
@@ -220,7 +402,7 @@ void CD2DPropertyView::ApplyCanvasSettings()
 		if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
 		{
 			CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
-			pMainFrame->GetOptionBar().SyncSelection(m_pActiveDoc, GetSelectedShape());
+			pMainFrame->GetOptionBar().SyncSelection(pDoc, GetSelectedShape());
 		}
 	}
 
@@ -597,8 +779,7 @@ void CD2DPropertyView::InitControls()
 		m_chkGridView = std::make_shared<M2DrawCheckBox>(L"View Grid", grid.enabled);
 		m_chkGridView->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
 			GetApp()->GetGrid().enabled = bChecked;
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_chkGridView);
 
@@ -606,16 +787,14 @@ void CD2DPropertyView::InitControls()
 		m_chkGridSnap->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
 			GetApp()->GetGrid().snapToGrid = bChecked;
 			GetApp()->GetSnapManager().EnableTarget(SnapTargets::Grid, bChecked);
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_chkGridSnap);
 
 		m_chkRulerView = std::make_shared<M2DrawCheckBox>(L"View Ruler", ruler.enabled);
 		m_chkRulerView->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
 			GetApp()->GetRuler().enabled = bChecked;
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_chkRulerView);
 
@@ -632,8 +811,7 @@ void CD2DPropertyView::InitControls()
 		m_cboUnit->SetCurSel(static_cast<int>(grid.unit));
 		m_cboUnit->SetOnSelectionChanged([this](M2DrawComboBox* /*pCombo*/, int sel) {
 			GetApp()->GetGrid().SetUnit(static_cast<CanvasUnit>(sel));
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_cboUnit);
 
@@ -644,18 +822,16 @@ void CD2DPropertyView::InitControls()
 		m_sliderGridStep = std::make_shared<M2DrawSlider>(1.0f, 200.0f, max(1.0f, grid.stepInUnit));
 		m_sliderGridStep->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
 			GetApp()->GetGrid().stepInUnit = val;
-			if (m_spinGridStep) m_spinGridStep->SetValue(val);
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			if (m_spinGridStep) m_spinGridStep->SetValue(val, false);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_sliderGridStep);
 
 		m_spinGridStep = std::make_shared<M2DrawNumericInput>(1.0, 500.0, max(1.0f, grid.stepInUnit), 1.0);
 		m_spinGridStep->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			GetApp()->GetGrid().stepInUnit = static_cast<float>(val);
-			if (m_sliderGridStep) m_sliderGridStep->SetValue(static_cast<float>(val));
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			if (m_sliderGridStep) m_sliderGridStep->SetValue(static_cast<float>(val), false);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_spinGridStep);
 
@@ -667,9 +843,8 @@ void CD2DPropertyView::InitControls()
 		m_sliderGridMajor->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
 			int ival = static_cast<int>(val + 0.5f);
 			GetApp()->GetGrid().majorEvery = ival;
-			if (m_spinGridMajor) m_spinGridMajor->SetValue(ival);
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			if (m_spinGridMajor) m_spinGridMajor->SetValue(ival, false);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_sliderGridMajor);
 
@@ -678,9 +853,8 @@ void CD2DPropertyView::InitControls()
 		m_spinGridMajor->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			int ival = static_cast<int>(val);
 			GetApp()->GetGrid().majorEvery = ival;
-			if (m_sliderGridMajor) m_sliderGridMajor->SetValue(static_cast<float>(ival));
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			if (m_sliderGridMajor) m_sliderGridMajor->SetValue(static_cast<float>(ival), false);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_spinGridMajor);
 
@@ -724,8 +898,7 @@ void CD2DPropertyView::InitControls()
 				m_fMajorHue = h; m_fMajorSat = s; m_fMajorLight = l;
 				g.major = HSLtoRGB(m_fMajorHue, m_fMajorSat, m_fMajorLight, g.major.a);
 			}
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			NotifyGridChanged();
 		});
 		m_expGridWheel->AddChild(m_gridWheel);
 		m_expGridWheel->SetOnToggle([this](M2DrawExpander* /*pExp*/, bool /*bExpanded*/) {
@@ -747,13 +920,12 @@ void CD2DPropertyView::InitControls()
 		m_sliderGridOpacity = std::make_shared<M2DrawSlider>(0.0f, 100.0f, initGridAlpha);
 		m_sliderGridOpacity->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
 			GridRenderer& g = GetApp()->GetGrid();
-			if (m_spinGridOpacity) m_spinGridOpacity->SetValue(val);
+			if (m_spinGridOpacity) m_spinGridOpacity->SetValue(val, false);
 			if (m_canvasColorTarget == 0)
 				g.minor.a = val / 100.0f;
 			else
 				g.major.a = val / 100.0f;
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_sliderGridOpacity);
 
@@ -761,28 +933,29 @@ void CD2DPropertyView::InitControls()
 		m_spinGridOpacity->SetSuffix(L"%");
 		m_spinGridOpacity->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			GridRenderer& g = GetApp()->GetGrid();
-			if (m_sliderGridOpacity) m_sliderGridOpacity->SetValue(static_cast<float>(val));
+			if (m_sliderGridOpacity) m_sliderGridOpacity->SetValue(static_cast<float>(val), false);
 			if (m_canvasColorTarget == 0)
 				g.minor.a = static_cast<float>(val) / 100.0f;
 			else
 				g.major.a = static_cast<float>(val) / 100.0f;
-			ApplyCanvasSettings();
-			SafeInvalidate(FALSE);
+			NotifyGridChanged();
 		});
 		m_pCurrentPanel->AddChild(m_spinGridOpacity);
 	}
 	else
 	{
-		// [3. Canvas Settings Mode (MODE_CANVAS)]
-		m_lblCanvasHeader = std::make_shared<M2DrawLabel>(L"■ Canvas Settings");
+		// [3. Document & Canvas Settings (MODE_CANVAS)]
+		m_lblCanvasHeader = std::make_shared<M2DrawLabel>(L"■ Document & Canvas Settings");
 		m_pCurrentPanel->AddChild(m_lblCanvasHeader);
 
-		m_lblCanvasSize = std::make_shared<M2DrawLabel>(L"● Canvas Dimensions (W x H)");
-		m_pCurrentPanel->AddChild(m_lblCanvasSize);
+		// 1. Document Dimensions (문서 규격 W x H)
+		m_lblDocSize = std::make_shared<M2DrawLabel>(L"● Document Dimensions (W x H)");
+		m_pCurrentPanel->AddChild(m_lblDocSize);
 
 		m_spinCanvasW = std::make_shared<M2DrawNumericInput>(100.0, 10000.0, 1920.0, 50.0);
 		m_spinCanvasW->SetSuffix(L"px");
 		m_spinCanvasW->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double /*val*/) {
+			UpdatePresetComboFromInputs();
 			ApplyCanvasSettings();
 		});
 		m_pCurrentPanel->AddChild(m_spinCanvasW);
@@ -790,14 +963,92 @@ void CD2DPropertyView::InitControls()
 		m_spinCanvasH = std::make_shared<M2DrawNumericInput>(100.0, 10000.0, 1080.0, 50.0);
 		m_spinCanvasH->SetSuffix(L"px");
 		m_spinCanvasH->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double /*val*/) {
+			UpdatePresetComboFromInputs();
 			ApplyCanvasSettings();
 		});
 		m_pCurrentPanel->AddChild(m_spinCanvasH);
 
-		m_lblCanvasBg = std::make_shared<M2DrawLabel>(L"● Background Color");
+		// 캔버스 표준 규격 프리셋 콤보박스 (드롭다운)
+		m_cboCanvasPreset = std::make_shared<M2DrawComboBox>();
+		m_cboCanvasPreset->SetItemHeight(20.0f);
+		for (const auto& item : g_canvasPresets)
+		{
+			m_cboCanvasPreset->AddItem(item.name);
+		}
+		m_cboCanvasPreset->SetCurSel(21, false); // Default: "웹 FHD (1920 x 1080 px)"
+		m_cboCanvasPreset->SetOnSelectionChanged([this](M2DrawComboBox* /*pCombo*/, int sel) {
+			if (sel > 0 && sel < static_cast<int>(g_canvasPresets.size()))
+			{
+				const auto& preset = g_canvasPresets[sel];
+				if (m_spinCanvasW) m_spinCanvasW->SetValue(preset.width, false);
+				if (m_spinCanvasH) m_spinCanvasH->SetValue(preset.height, false);
+				if (m_cboOriginMode)
+				{
+					m_cboOriginMode->SetCurSel(preset.originMode == ge::CanvasOriginMode::BottomLeft ? 0 : 1, false);
+				}
+				ApplyCanvasSettings();
+				SafeInvalidate(FALSE);
+			}
+		});
+		m_pCurrentPanel->AddChild(m_cboCanvasPreset);
+
+		// 좌표계 원점 모드 선택
+		m_lblOriginMode = std::make_shared<M2DrawLabel>(L"● Coordinate Origin (0,0)");
+		m_pCurrentPanel->AddChild(m_lblOriginMode);
+
+		m_cboOriginMode = std::make_shared<M2DrawComboBox>();
+		m_cboOriginMode->SetItemHeight(20.0f);
+		m_cboOriginMode->AddItem(L"좌하단 (0,0) - 문서/인쇄 규격 (Y↑)");
+		m_cboOriginMode->AddItem(L"좌상단 (0,0) - 웹/화면 규격 (Y↓)");
+		CM2DrawDoc* pCurDoc = GetActiveDoc();
+		int defaultOriginSel = (pCurDoc && pCurDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft) ? 0 : 1;
+		m_cboOriginMode->SetCurSel(defaultOriginSel, false);
+		m_cboOriginMode->SetOnSelectionChanged([this](M2DrawComboBox* /*pCombo*/, int /*sel*/) {
+			ApplyCanvasSettings();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_cboOriginMode);
+
+		// 2. Document Background Color (도큐멘트 용지 배경색 + 투명도)
+		m_lblDocBg = std::make_shared<M2DrawLabel>(L"● Document Background Color");
+		m_pCurrentPanel->AddChild(m_lblDocBg);
+
+		m_paletteDocBg = std::make_shared<M2DrawColorPalette>();
+		m_paletteDocBg->SetSelectedColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+		m_paletteDocBg->SetOnColorSelected([this](M2DrawColorPalette* /*pPal*/, D2D1_COLOR_F /*clr*/) {
+			ApplyCanvasSettings();
+		});
+		m_pCurrentPanel->AddChild(m_paletteDocBg);
+
+		m_lblDocOpacity = std::make_shared<M2DrawLabel>(L"Document Opacity (%)");
+		m_pCurrentPanel->AddChild(m_lblDocOpacity);
+
+		float initDocAlpha = pCurDoc ? (pCurDoc->GetDoc().backgroundColor.a * 100.0f) : 100.0f;
+		m_sliderDocOpacity = std::make_shared<M2DrawSlider>(0.0f, 100.0f, initDocAlpha);
+		m_sliderDocOpacity->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
+			if (m_spinDocOpacity) m_spinDocOpacity->SetValue(val, false);
+			// 드래그 중이면 가벼운 라이브 갱신, 클릭 등 단발 변경이면 즉시 확정
+			ApplyCanvasSettings(m_sliderDocOpacity && m_sliderDocOpacity->IsDragging());
+		});
+		m_sliderDocOpacity->SetOnReleased([this](M2DrawSlider* /*pSlider*/) {
+			ApplyCanvasSettings(false, true);
+		});
+		m_pCurrentPanel->AddChild(m_sliderDocOpacity);
+
+		m_spinDocOpacity = std::make_shared<M2DrawNumericInput>(0.0, 100.0, initDocAlpha, 5.0);
+		m_spinDocOpacity->SetSuffix(L"%");
+		m_spinDocOpacity->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
+			if (m_sliderDocOpacity) m_sliderDocOpacity->SetValue(static_cast<float>(val), false);
+			ApplyCanvasSettings();
+		});
+		m_pCurrentPanel->AddChild(m_spinDocOpacity);
+
+		// 3. Canvas Workspace Color (전체 월드 화면 배경색)
+		m_lblCanvasBg = std::make_shared<M2DrawLabel>(L"● Canvas Workspace Color (전체 화면)");
 		m_pCurrentPanel->AddChild(m_lblCanvasBg);
 
 		m_paletteCanvasBg = std::make_shared<M2DrawColorPalette>();
+		m_paletteCanvasBg->SetSelectedColor(D2D1::ColorF(0.84f, 0.85f, 0.88f, 1.0f));
 		m_paletteCanvasBg->SetOnColorSelected([this](M2DrawColorPalette* /*pPal*/, D2D1_COLOR_F /*clr*/) {
 			ApplyCanvasSettings();
 		});
@@ -970,7 +1221,43 @@ void CD2DPropertyView::SyncControlsFromData()
 	else
 	{
 		// Canvas Settings Mode
-		// Future expansion
+		CM2DrawDoc* pDoc = GetActiveDoc();
+		if (pDoc)
+		{
+			const ge::Document& doc = pDoc->GetDoc();
+			const bool prev = m_bUpdating;
+			m_bUpdating = true;
+			if (m_spinCanvasW) m_spinCanvasW->SetValue(doc.width, false);
+			if (m_spinCanvasH) m_spinCanvasH->SetValue(doc.height, false);
+			UpdatePresetComboFromInputs();
+			if (m_cboOriginMode)
+			{
+				m_cboOriginMode->SetCurSel(doc.originMode == ge::CanvasOriginMode::BottomLeft ? 0 : 1, false);
+			}
+			if (m_paletteDocBg)
+			{
+				m_paletteDocBg->SetSelectedColor(D2D1::ColorF(
+					doc.backgroundColor.r,
+					doc.backgroundColor.g,
+					doc.backgroundColor.b,
+					1.0f
+				));
+			}
+			float docAlpha = doc.backgroundColor.a * 100.0f;
+			if (m_sliderDocOpacity) m_sliderDocOpacity->SetValue(docAlpha);
+			if (m_spinDocOpacity)   m_spinDocOpacity->SetValue(docAlpha);
+
+			if (m_paletteCanvasBg)
+			{
+				m_paletteCanvasBg->SetSelectedColor(D2D1::ColorF(
+					doc.canvasColor.r,
+					doc.canvasColor.g,
+					doc.canvasColor.b,
+					1.0f
+				));
+			}
+			m_bUpdating = prev;
+		}
 	}
 }
 
@@ -1298,16 +1585,16 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 	}
 	else
 	{
-		// [MODE_CANVAS: Canvas Settings]
+		// [MODE_CANVAS: Document & Canvas Settings]
 		if (m_lblCanvasHeader)
 		{
 			m_lblCanvasHeader->SetBounds(left, y, right, y + 20.0f);
 			y += 24.0f;
 		}
 
-		if (m_lblCanvasSize)
+		if (m_lblDocSize)
 		{
-			m_lblCanvasSize->SetBounds(left, y, right, y + 18.0f);
+			m_lblDocSize->SetBounds(left, y, right, y + 18.0f);
 			y += 20.0f;
 		}
 
@@ -1320,8 +1607,57 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 		{
 			m_spinCanvasH->SetBounds(left + halfW + 6.0f, y, right, y + 26.0f);
 		}
+		y += 32.0f;
+
+		if (m_cboCanvasPreset)
+		{
+			m_cboCanvasPreset->SetBounds(left, y, right, y + 26.0f);
+			y += 34.0f;
+		}
+
+		if (m_lblOriginMode)
+		{
+			m_lblOriginMode->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+
+		if (m_cboOriginMode)
+		{
+			m_cboOriginMode->SetBounds(left, y, right, y + 26.0f);
+			y += 34.0f;
+		}
+
+		// 2. Document Background Color (도큐멘트 용지 배경색)
+		if (m_lblDocBg)
+		{
+			m_lblDocBg->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+
+		if (m_paletteDocBg)
+		{
+			m_paletteDocBg->SetBounds(left, y, right, y + 42.0f);
+			y += 46.0f;
+		}
+
+		if (m_lblDocOpacity)
+		{
+			m_lblDocOpacity->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+		float numW = 75.0f;
+		float sliderW = contentW - numW - 8.0f;
+		if (m_sliderDocOpacity)
+		{
+			m_sliderDocOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+		}
+		if (m_spinDocOpacity)
+		{
+			m_spinDocOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+		}
 		y += 34.0f;
 
+		// 3. Canvas Workspace Color (전체 월드 화면 배경색)
 		if (m_lblCanvasBg)
 		{
 			m_lblCanvasBg->SetBounds(left, y, right, y + 18.0f);
@@ -1483,6 +1819,7 @@ void CD2DPropertyView::OnPaint()
 
 void CD2DPropertyView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 {
+	SetFocus();
 	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
 
 	// 이벤트 처리 중 콜백이 패널을 재구성(SetPaneMode -> InitControls)해도 실행 중인 패널이 해제되지 않도록 지역 참조로 유지
@@ -1518,6 +1855,8 @@ void CD2DPropertyView::OnLButtonUp(UINT /*nFlags*/, CPoint point)
 	if (std::shared_ptr<M2DrawPanel> panel = m_pCurrentPanel)
 	{
 		panel->OnLButtonUp(ptD2D);
+		// 슬라이더/스핀/체크박스 등 한 번의 조작이 끝난 시점에 변경이 있었으면 Undo 이력에 기록 (드래그 중에는 기록하지 않음)
+		CommitActiveDocUndo(L"속성 변경");
 	}
 
 	if (GetCapture() == this)
@@ -1534,6 +1873,7 @@ void CD2DPropertyView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	{
 		if (panel->OnKeyDown(nChar))
 		{
+			CommitActiveDocUndo(L"속성 변경");
 			SafeInvalidate(FALSE);
 			return;
 		}
@@ -1548,11 +1888,18 @@ void CD2DPropertyView::OnChar(UINT nChar, UINT nRepCnt, UINT nFlags)
 	{
 		if (panel->OnChar(nChar))
 		{
+			CommitActiveDocUndo(L"속성 변경");
 			SafeInvalidate(FALSE);
 			return;
 		}
 	}
 	CWnd::OnChar(nChar, nRepCnt, nFlags);
+}
+
+void CD2DPropertyView::OnSetFocus(CWnd* pOldWnd)
+{
+	CWnd::OnSetFocus(pOldWnd);
+	SafeInvalidate(FALSE);
 }
 
 void CD2DPropertyView::OnKillFocus(CWnd* pNewWnd)
@@ -1573,6 +1920,11 @@ void CD2DPropertyView::OnKillFocus(CWnd* pNewWnd)
 	}
 }
 
+int CD2DPropertyView::OnMouseActivate(CWnd* /*pDesktopWnd*/, UINT /*nHitTest*/, UINT /*message*/)
+{
+	return MA_ACTIVATE;
+}
+
 UINT CD2DPropertyView::OnGetDlgCode()
 {
 	return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
@@ -1582,13 +1934,10 @@ BOOL CD2DPropertyView::PreTranslateMessage(MSG* pMsg)
 {
 	if (pMsg->message == WM_KEYDOWN)
 	{
-		if (pMsg->wParam == VK_RETURN || pMsg->wParam == VK_ESCAPE || pMsg->wParam == VK_BACK)
+		if (m_pCurrentPanel && m_pCurrentPanel->OnKeyDown(static_cast<UINT>(pMsg->wParam)))
 		{
-			if (m_pCurrentPanel && m_pCurrentPanel->OnKeyDown(static_cast<UINT>(pMsg->wParam)))
-			{
-				SafeInvalidate(FALSE);
-				return TRUE;
-			}
+			SafeInvalidate(FALSE);
+			return TRUE;
 		}
 	}
 	else if (pMsg->message == WM_CHAR)

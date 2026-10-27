@@ -1,8 +1,14 @@
 #include "pch.h"
 #include "D2DGraphicEngine.h"
 #include "D2DLayer.h"
+#include "GeNodeVisitor.h"
 
 namespace ge {
+
+void LayerNode::Accept(INodeVisitor& visitor)
+{
+	visitor.Visit(*this);
+}
 
 LayerNode::LayerNode()
 {

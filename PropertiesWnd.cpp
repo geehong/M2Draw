@@ -1072,7 +1072,14 @@ void CPropertiesWnd::SetPropListFont()
 void CPropertiesWnd::OnSetFocus(CWnd* pOldWnd)
 {
 	CDockablePane::OnSetFocus(pOldWnd);
-	m_wndPropList.SetFocus();
+	if (m_wndD2DProp.GetSafeHwnd() && m_wndD2DProp.IsWindowVisible())
+	{
+		m_wndD2DProp.SetFocus();
+	}
+	else
+	{
+		m_wndPropList.SetFocus();
+	}
 }
 
 void CPropertiesWnd::OnSettingChange(UINT uFlags, LPCTSTR lpszSection)

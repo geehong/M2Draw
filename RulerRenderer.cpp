@@ -83,7 +83,7 @@ void RulerRenderer::DiscardDeviceResources()
 
 void RulerRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
                           D2D1_SIZE_F view, float zoom, D2D1_POINT_2F pan,
-                          const GridRenderer& grid)
+                          const GridRenderer& grid, bool invertY)
 {
 	if (!enabled || !rt || !brush || zoom <= 0.0f)
 		return;
@@ -217,7 +217,7 @@ void RulerRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 			if (m_pTextFormat)
 			{
 				wchar_t szNum[32];
-				double val = i * stepUnit;
+				double val = invertY ? (-i * stepUnit) : (i * stepUnit);
 				if (std::abs(val - std::round(val)) < 0.01)
 					swprintf_s(szNum, L"%d", static_cast<int>(std::round(val)));
 				else

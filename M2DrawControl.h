@@ -212,6 +212,9 @@ public:
 
 	void SetAccentColor(D2D1_COLOR_F clr) { m_accentColor = clr; }
 	void SetOnChanged(ChangeCallback cb) { m_onChanged = cb; }
+	// 드래그가 끝나(마우스를 놓)았을 때 한 번 호출
+	void SetOnReleased(std::function<void(M2DrawSlider*)> cb) { m_onReleased = cb; }
+	bool IsDragging() const { return m_isDragging; }
 
 	void Draw(ID2D1RenderTarget* pRT, ID2D1SolidColorBrush* pBrush,
 		IDWriteFactory* pDWFactory, IDWriteTextFormat* pTextFormat) override;
@@ -228,6 +231,7 @@ private:
 	bool           m_isDragging = false;
 	D2D1_COLOR_F   m_accentColor = D2D1::ColorF(0.0f, 0.48f, 0.85f, 1.0f);
 	ChangeCallback m_onChanged;
+	std::function<void(M2DrawSlider*)> m_onReleased;
 
 	void UpdateValueFromX(float mouseX);
 };
@@ -278,6 +282,7 @@ private:
 
 	// 인라인 텍스트 직접 입력/편집 상태
 	bool           m_bEditing = false;
+	bool           m_bSelectAllOnFirstKey = false;
 	std::wstring   m_editText;
 
 	// 버튼 히트 영역
@@ -511,7 +516,7 @@ public:
 	int GetItemCount() const { return static_cast<int>(m_items.size()); }
 	const std::wstring& GetItemText(int index) const;
 
-	void SetCurSel(int index);
+	void SetCurSel(int index, bool bTriggerCallback = true);
 	int GetCurSel() const { return m_curSel; }
 
 	bool IsDropped() const { return m_bDropped; }

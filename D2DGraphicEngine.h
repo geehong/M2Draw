@@ -30,6 +30,7 @@
 #include <optional>
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 
 namespace ge {
@@ -138,6 +139,7 @@ inline Matrix2D operator*(const D2D1_MATRIX_3X2_F& lhs, const Matrix2D& rhs) {
 struct Viewport {
 	float zoom = 1.0f;
 	Vec2  pan{};
+	bool  invertY = false; // true: 좌하단이 (0,0)이고 Y축 위로 증가 (문서/CAD 모드)
 	Matrix2D ToMatrix() const;
 	Vec2 ScreenToWorld(Vec2 screenPt) const;
 	Vec2 WorldToScreen(Vec2 worldPt) const;
@@ -171,6 +173,9 @@ struct Color {
 	D2D1_COLOR_F ToD2D() const { return D2D1::ColorF(r, g, b, a); }
 	static Color FromD2D(const D2D1_COLOR_F& c) { return { c.r, c.g, c.b, c.a }; }
 #endif
+
+	bool operator==(const Color& o) const { return r == o.r && g == o.g && b == o.b && a == o.a; }
+	bool operator!=(const Color& o) const { return !(*this == o); }
 };
 
 enum class FillType : uint8_t { None = 0, Solid = 1, Pattern = 2 };
@@ -339,6 +344,7 @@ struct HitResult {
 };
 
 class Document;
+class INodeVisitor;
 
 // ---- 모든 씬 노드의 기반 클래스 ---------------------------------------------
 class GroupNode;
@@ -348,11 +354,13 @@ public:
 	virtual ~Node() = default;
 	virtual NodeKind Kind() const = 0;
 	virtual std::unique_ptr<Node> Clone() const = 0;
+	virtual void Accept(INodeVisitor& visitor) = 0;
 
 	// 로컬 바운딩 박스 (자신의 m_xf 적용 전)
 	virtual bool GetLocalBounds(Rect2& out) = 0;
 #ifndef GE_NO_D2D
-	virtual bool GetLocalBounds(ID2D1Factory* f, D2D1_RECT_F& outBounds) {
+	// 비가상: D2D 전용 편의 오버로드가 가상 함수 테이블 모양을 바꾸면 GE_NO_D2D 로 컴파일한 TU 와 앱 본체의 ABI 가 어긋남
+	bool GetLocalBounds(ID2D1Factory* /*f*/, D2D1_RECT_F& outBounds) {
 		Rect2 r;
 		if (GetLocalBounds(r)) {
 			outBounds = r.ToD2D();
@@ -392,7 +400,7 @@ public:
 	bool IsEffectivelyVisible() const;
 	bool IsEffectivelyLocked() const;
 
-	void Invalidate()                        { m_dirty = true; ++m_version; }
+	void Invalidate()                        { m_dirty = true; m_version = NextVersion(); }
 	bool IsDirty() const                     { return m_dirty; }
 
 	// 부모 체인을 곱한 월드 변환 (자신 포함)
@@ -413,9 +421,13 @@ protected:
 		m_visible = o.m_visible; m_locked = o.m_locked; m_opacity = o.m_opacity;
 		m_blendMode = o.m_blendMode;
 	}
-	void ResetIdentity() { m_id = 0; m_parent = nullptr; m_version = 1; m_dirty = true; }
+	void ResetIdentity() { m_id = 0; m_parent = nullptr; m_version = NextVersion(); m_dirty = true; }
 
-	uint32_t     m_version = 1;
+	// 버전은 프로세스 전역에서 겹치지 않는 값 (같은 NodeId 를 가진 다른 노드 - 예: Undo 복원으로 재생성된 노드 -
+	// 가 렌더러 지오메트리 캐시의 오래된 항목과 우연히 일치하는 것을 방지)
+	static uint32_t NextVersion() { static uint32_t s_counter = 0; return ++s_counter; }
+
+	uint32_t     m_version = NextVersion();
 	friend class GroupNode;
 	friend class Document;
 	NodeId       m_id = 0;                 // Document 가 발급
@@ -435,6 +447,7 @@ class PathNode : public Node {
 public:
 	NodeKind Kind() const override { return NodeKind::Path; }
 	std::unique_ptr<Node> Clone() const override;
+	void Accept(INodeVisitor& visitor) override;
 	bool GetLocalBounds(Rect2& out) override;
 	using Node::GetLocalBounds;
 
@@ -495,6 +508,7 @@ class GroupNode : public Node {
 public:
 	NodeKind Kind() const override { return NodeKind::Group; }
 	std::unique_ptr<Node> Clone() const override;
+	void Accept(INodeVisitor& visitor) override;
 	bool GetLocalBounds(Rect2& out) override;
 
 	const std::vector<std::unique_ptr<Node>>& GetChildren() const { return m_children; }
@@ -519,10 +533,16 @@ protected:
 
 namespace ge {
 
+enum class CanvasOriginMode : uint8_t {
+	TopLeft = 0,    // 웹/화면: 좌상단 (0,0), Y축 아래로 증가 (화면 표준)
+	BottomLeft = 1  // 문서/인쇄: 좌하단 (0,0), Y축 위로 증가 (CAD/수학/인쇄 표준)
+};
+
 // ---- 문서 (Scene 루트) ------------------------------------------------------
 class Document {
 public:
 	Document();
+	void Clear(bool addDefaultLayer = false);
 
 	// 레이어
 	const std::vector<std::unique_ptr<LayerNode>>& GetLayers() const { return m_layers; }
@@ -569,12 +589,19 @@ public:
 	void AlignSelection(AlignMode mode, bool toCanvas);
 	void DistributeSelection(bool horizontal);
 
-	// 캔버스 크기
+	// 캔버스/도큐멘트 크기 및 배경색, 원점 모드
 	float width  = 1920.0f;
 	float height = 1080.0f;
+	Color backgroundColor = Color(1.0f, 1.0f, 1.0f, 1.0f); // 도큐멘트(용지) 배경색 (투명도 포함)
+	Color canvasColor     = Color(0.84f, 0.85f, 0.88f, 1.0f); // 캔버스(전체 월드 작업대) 배경색
+	CanvasOriginMode originMode = CanvasOriginMode::TopLeft;
 
 	NodeId IssueId() { return ++m_nextId; }
 		void   AssignIds(Node& node);   // id==0 인 노드(하위 포함)에 ID 발급
+	// 파일/스냅샷 복원용: 노드 ID 를 지정하고 발급 카운터가 그 값보다 커지도록 보장 (이후 새 ID 와 충돌 방지)
+	void   RestoreNodeId(Node& node, NodeId id);
+	// 트리 전체에서 ID 0 / 중복 ID 를 찾아 새 ID 로 교체 (파일에서 읽은 문서의 무결성 보장)
+	void   EnsureUniqueIds();
 
 private:
 	std::vector<std::unique_ptr<LayerNode>> m_layers;   // 0 = 최하단 레이어

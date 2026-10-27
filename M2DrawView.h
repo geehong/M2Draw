@@ -53,6 +53,11 @@ public:
 	// 캔버스의 (0,0) 원점을 화면 중앙에 맞춤
 	void CenterOrigin();
 
+	// 화면(Client) ↔ 월드(World) 좌표계 변환 (문서 좌하단/웹 좌상단 원점 모드 자동 반영)
+	D2D1_POINT_2F ScreenToWorld(D2D1_POINT_2F screenPt) const;
+	D2D1_POINT_2F ScreenToWorld(CPoint screenPt) const;
+	D2D1_POINT_2F WorldToScreen(D2D1_POINT_2F worldPt) const;
+
 // Direct2D 리소스
 protected:
 	ID2D1Factory*          m_pD2DFactory;

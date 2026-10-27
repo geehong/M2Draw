@@ -1,7 +1,18 @@
 #include "pch.h"
 #include "D2DGraphicEngine.h"
+#include "GeNodeVisitor.h"
 
 namespace ge {
+
+void PathNode::Accept(INodeVisitor& visitor)
+{
+	visitor.Visit(*this);
+}
+
+void GroupNode::Accept(INodeVisitor& visitor)
+{
+	visitor.Visit(*this);
+}
 
 // ============================================================================
 // 1. Math
@@ -89,18 +100,28 @@ Rect2 Matrix2D::TransformRect(const Rect2& r) const
 
 Matrix2D Viewport::ToMatrix() const
 {
+	if (invertY) {
+		Matrix2D m;
+		m.m11 = zoom;
+		m.m22 = -zoom;
+		m.dx = pan.x;
+		m.dy = pan.y;
+		return m;
+	}
 	return Matrix2D::Scale(zoom, zoom) * Matrix2D::Translation(pan.x, pan.y);
 }
 
 Vec2 Viewport::ScreenToWorld(Vec2 s) const
 {
 	if (zoom <= 0.0001f) return s;
-	return { (s.x - pan.x) / zoom, (s.y - pan.y) / zoom };
+	float wy = invertY ? (pan.y - s.y) / zoom : (s.y - pan.y) / zoom;
+	return { (s.x - pan.x) / zoom, wy };
 }
 
 Vec2 Viewport::WorldToScreen(Vec2 w) const
 {
-	return { w.x * zoom + pan.x, w.y * zoom + pan.y };
+	float sy = invertY ? (pan.y - w.y * zoom) : (w.y * zoom + pan.y);
+	return { w.x * zoom + pan.x, sy };
 }
 
 // ============================================================================
@@ -366,6 +387,17 @@ Document::Document()
 	AddLayer(L"Layer 1");
 }
 
+void Document::Clear(bool addDefaultLayer)
+{
+	m_selection.clear();
+	m_layers.clear();
+	m_activeLayer = 0;
+	m_nextId = 0;
+	if (addDefaultLayer) {
+		AddLayer(L"Layer 1");
+	}
+}
+
 LayerNode* Document::AddLayer(const std::wstring& name, int index)
 {
 	auto layer = std::make_unique<LayerNode>();
@@ -511,6 +543,27 @@ void Document::AssignIds(Node& node)
 	if (node.m_id == 0) node.m_id = IssueId();
 	if (node.Kind() != NodeKind::Path)
 		for (const auto& c : static_cast<GroupNode&>(node).GetChildren()) AssignIds(*c);
+}
+
+void Document::RestoreNodeId(Node& node, NodeId id)
+{
+	if (id == 0) return;
+	node.m_id = id;
+	if (id > m_nextId) m_nextId = id;
+}
+
+void Document::EnsureUniqueIds()
+{
+	std::unordered_set<NodeId> used;
+	std::function<void(Node&)> walk = [&](Node& n) {
+		if (n.m_id == 0 || !used.insert(n.m_id).second) {
+			n.m_id = IssueId();                // 0 또는 중복 -> 새 ID (카운터는 항상 기존 최대값보다 큼)
+			used.insert(n.m_id);
+		}
+		if (n.Kind() != NodeKind::Path)
+			for (const auto& c : static_cast<GroupNode&>(n).GetChildren()) walk(*c);
+	};
+	for (const auto& layer : m_layers) walk(*layer);
 }
 
 static Node* FindIn(Node& n, NodeId id)

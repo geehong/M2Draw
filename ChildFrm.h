@@ -1,4 +1,4 @@
-﻿
+
 // ChildFrm.h: CChildFrame 클래스의 인터페이스
 //
 
@@ -20,6 +20,7 @@ public:
 
 // 재정의입니다.
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
+	virtual void OnUpdateFrameTitle(BOOL bAddToTitle);
 
 // 구현입니다.
 public:

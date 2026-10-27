@@ -1,4 +1,4 @@
-﻿
+
 // ChildFrm.cpp: CChildFrame 클래스의 구현
 //
 
@@ -38,6 +38,35 @@ BOOL CChildFrame::PreCreateWindow(CREATESTRUCT& cs)
 		return FALSE;
 
 	return TRUE;
+}
+
+void CChildFrame::OnUpdateFrameTitle(BOOL bAddToTitle)
+{
+	CMDIChildWndEx::OnUpdateFrameTitle(bAddToTitle);
+
+	CDocument* pDoc = GetActiveDocument();
+	if (pDoc != nullptr)
+	{
+		CString strTitle;
+		GetWindowText(strTitle);
+
+		bool bModified = (pDoc->IsModified() == TRUE);
+		bool bHasStar = (strTitle.Right(2) == _T(" *") || strTitle.Right(1) == _T("*"));
+
+		if (bModified && !bHasStar)
+		{
+			strTitle += _T(" *");
+			SetWindowText(strTitle);
+		}
+		else if (!bModified && bHasStar)
+		{
+			if (strTitle.Right(2) == _T(" *"))
+				strTitle = strTitle.Left(strTitle.GetLength() - 2);
+			else if (strTitle.Right(1) == _T("*"))
+				strTitle = strTitle.Left(strTitle.GetLength() - 1);
+			SetWindowText(strTitle);
+		}
+	}
 }
 
 // CChildFrame 진단

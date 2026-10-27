@@ -1,5 +1,6 @@
 #pragma once
 #include "D2DGraphicEngine.h"
+#include "UndoManager.h"
 
 using ShapeKind = ge::ShapeKind;
 using RectParams = ge::RectParams;
@@ -48,9 +49,30 @@ public:
 	// --- 복제 (Ctrl+D) ---
 	bool DuplicateSelectedObjects();
 
+	// --- Undo / Redo (Ctrl+Z / Ctrl+Y) ---
+	ge::UndoManager& GetUndoManager() { return m_undoMgr; }
+	// 편집이 끝난 지점에서 호출: 마지막 확정 상태와 달라졌으면 Undo 이력에 기록하고 수정 표시를 켬 (true = 변경됨)
+	bool CommitUndoPoint(const std::wstring& actionName);
+	// 문서 교체(Undo/Redo/열기/새 문서) 후 선택 도구의 진행 중 상태(노드 포인터) 폐기
+	void ResetToolInteraction();
+
+	afx_msg void OnEditUndo();
+	afx_msg void OnUpdateEditUndo(CCmdUI* pCmdUI);
+	afx_msg void OnEditRedo();
+	afx_msg void OnUpdateEditRedo(CCmdUI* pCmdUI);
+
+private:
+	ge::UndoManager m_undoMgr;
+
 // 재정의입니다.
 public:
 	virtual BOOL OnNewDocument();
+	virtual BOOL OnOpenDocument(LPCTSTR lpszPathName);
+	virtual BOOL OnSaveDocument(LPCTSTR lpszPathName);
+	virtual BOOL DoSave(LPCTSTR lpszPathName, BOOL bReplace = TRUE);
+	virtual void SetPathName(LPCTSTR lpszPathName, BOOL bAddToMRU = TRUE);
+	void SetModifiedFlag(BOOL bModified = TRUE);   // CDocument::SetModifiedFlag 는 가상 함수가 아니므로 숨김(hiding) 임에 주의
+	void UpdateTitleWithModified();
 	virtual void Serialize(CArchive& ar);
 #ifdef SHARED_HANDLERS
 	virtual void InitializeSearchContent();

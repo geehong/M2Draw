@@ -157,12 +157,49 @@ void CM2DrawView::CenterOrigin()
 		float availableW = static_cast<float>(rc.Width()) - rulerT;
 		float availableH = static_cast<float>(rc.Height()) - rulerT;
 
-		// 캔버스 가용 영역의 정확한 중앙에 (0, 0) 원점이 오도록 Pan 설정
-		m_ptPan.x = rulerT + availableW * 0.5f;
-		m_ptPan.y = rulerT + availableH * 0.5f;
+		CM2DrawDoc* pDoc = GetDocument();
+		bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+		float docW = (pDoc ? pDoc->GetDoc().width : 1920.0f) * m_fZoom;
+		float docH = (pDoc ? pDoc->GetDoc().height : 1080.0f) * m_fZoom;
+
+		// 캔버스 페이지가 뷰포트 정중앙에 오도록 Pan 설정
+		m_ptPan.x = rulerT + (availableW - docW) * 0.5f;
+		if (isBottomLeft)
+		{
+			// 좌하단이 (0,0)이고 종이가 위로 뻗으므로, pan.y는 종이 하단 위치 (빨간선이 하단에 정렬)
+			m_ptPan.y = rulerT + (availableH - docH) * 0.5f + docH;
+		}
+		else
+		{
+			// 좌상단이 (0,0)이고 종이가 아래로 뻗으므로, pan.y는 종이 상단 위치 (빨간선이 상단에 정렬)
+			m_ptPan.y = rulerT + (availableH - docH) * 0.5f;
+		}
 		m_bCenteredOriginOnLoad = true;
 		Invalidate(FALSE);
 	}
+}
+
+D2D1_POINT_2F CM2DrawView::ScreenToWorld(D2D1_POINT_2F screenPt) const
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	float wx = (screenPt.x - m_ptPan.x) / m_fZoom;
+	float wy = isBottomLeft ? (m_ptPan.y - screenPt.y) / m_fZoom : (screenPt.y - m_ptPan.y) / m_fZoom;
+	return D2D1::Point2F(wx, wy);
+}
+
+D2D1_POINT_2F CM2DrawView::ScreenToWorld(CPoint screenPt) const
+{
+	return ScreenToWorld(D2D1::Point2F(static_cast<float>(screenPt.x), static_cast<float>(screenPt.y)));
+}
+
+D2D1_POINT_2F CM2DrawView::WorldToScreen(D2D1_POINT_2F worldPt) const
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	float sx = worldPt.x * m_fZoom + m_ptPan.x;
+	float sy = isBottomLeft ? (m_ptPan.y - worldPt.y * m_fZoom) : (worldPt.y * m_fZoom + m_ptPan.y);
+	return D2D1::Point2F(sx, sy);
 }
 
 void CM2DrawView::OnSize(UINT nType, int cx, int cy)
@@ -269,11 +306,10 @@ BOOL CM2DrawView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 
 void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 {
-	float worldX = (point.x - m_ptPan.x) / m_fZoom;
-	float worldY = (point.y - m_ptPan.y) / m_fZoom;
-	D2D1_POINT_2F rawWorld = D2D1::Point2F(worldX, worldY);
-
 	CM2DrawDoc* pDoc = GetDocument();
+	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	D2D1_POINT_2F rawWorld = ScreenToWorld(point);
+
 	const ge::Document* pGeDoc = pDoc ? &pDoc->GetDoc() : nullptr;
 	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc);
 	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
@@ -289,7 +325,7 @@ void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 	e.altDown = (::GetKeyState(VK_MENU) & 0x8000) != 0;
 	e.shiftDown = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
 	e.ctrlDown = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
-	e.view = { m_fZoom, m_ptPan };
+	e.view = { m_fZoom, { m_ptPan.x, m_ptPan.y }, isBottomLeft };
 	e.pDoc = pDoc;
 	e.pView = this;
 	e.pD2DFactory = m_pD2DFactory;
@@ -307,11 +343,10 @@ void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 {
-	float worldX = (point.x - m_ptPan.x) / m_fZoom;
-	float worldY = (point.y - m_ptPan.y) / m_fZoom;
-	D2D1_POINT_2F rawWorld = D2D1::Point2F(worldX, worldY);
-
 	CM2DrawDoc* pDoc = GetDocument();
+	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	D2D1_POINT_2F rawWorld = ScreenToWorld(point);
+
 	const ge::Document* pGeDoc = pDoc ? &pDoc->GetDoc() : nullptr;
 	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc);
 	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
@@ -326,7 +361,7 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 	e.altDown = (::GetKeyState(VK_MENU) & 0x8000) != 0;
 	e.shiftDown = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
 	e.ctrlDown = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
-	e.view = { m_fZoom, m_ptPan };
+	e.view = { m_fZoom, { m_ptPan.x, m_ptPan.y }, isBottomLeft };
 	e.pDoc = pDoc;
 	e.pView = this;
 	e.pD2DFactory = m_pD2DFactory;
@@ -335,6 +370,11 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 	if (pTool)
 	{
 		pTool->OnUp(e);
+		// 도형 생성/이동/변형/노드 편집 등 한 번의 마우스 조작이 끝난 시점에 변경이 있었으면 Undo 이력에 기록
+		if (pDoc)
+		{
+			pDoc->CommitUndoPoint(pTool->GetName());
+		}
 		Invalidate(FALSE);
 	}
 
@@ -352,6 +392,7 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 	if (pActiveTool && activeType != ToolType::Select && activeType != ToolType::Pan)
 	{
 		bool switchSelect = pActiveTool->OnDoubleClicked(pDoc);
+		if (pDoc) pDoc->CommitUndoPoint(pActiveTool->GetName());   // 더블클릭으로 마무리된 도형/패스 기록
 		if (switchSelect)
 		{
 			// 도구 전환(OnToolChanged)이 선택을 해제하므로 방금 완료된 도형을 먼저 기억
@@ -411,11 +452,10 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	}
 
 	// 상태표시줄(하단 좌측 붉은색 영역)에 마우스 포인터 좌표 실시간 표시
-	float worldX = (point.x - m_ptPan.x) / m_fZoom;
-	float worldY = (point.y - m_ptPan.y) / m_fZoom;
-	D2D1_POINT_2F rawWorld = D2D1::Point2F(worldX, worldY);
-
 	CM2DrawDoc* pDoc = GetDocument();
+	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+	D2D1_POINT_2F rawWorld = ScreenToWorld(point);
+
 	const ge::Document* pGeDoc = pDoc ? &pDoc->GetDoc() : nullptr;
 	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc);
 	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
@@ -445,7 +485,7 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	e.altDown = (::GetKeyState(VK_MENU) & 0x8000) != 0;
 	e.shiftDown = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
 	e.ctrlDown = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
-	e.view = { m_fZoom, m_ptPan };
+	e.view = { m_fZoom, { m_ptPan.x, m_ptPan.y }, isBottomLeft };
 	e.pDoc = pDoc;
 	e.pView = this;
 	e.pD2DFactory = m_pD2DFactory;
@@ -517,6 +557,8 @@ void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	if (pTool)
 	{
 		pTool->OnKeyDown(nChar, GetDocument());
+		// Enter 로 마무리한 펜 패스 등 키 입력으로 생긴 변경 기록
+		if (CM2DrawDoc* pKeyDoc = GetDocument()) pKeyDoc->CommitUndoPoint(pTool->GetName());
 		Invalidate(FALSE);
 	}
 
@@ -606,8 +648,19 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 	float width = static_cast<float>(rcClient.Width());
 	float height = static_cast<float>(rcClient.Height());
 
+	const ge::Document& geDoc = pDoc->GetDoc();
+	float docW = geDoc.width;
+	float docH = geDoc.height;
+	bool isBottomLeft = (geDoc.originMode == ge::CanvasOriginMode::BottomLeft);
+
 	m_pRenderTarget->BeginDraw();
-	m_pRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::White));
+	// 0. 데스크톱 작업대(캔버스 월드) 배경 클리어 (geDoc.canvasColor)
+	m_pRenderTarget->Clear(D2D1::ColorF(
+		geDoc.canvasColor.r,
+		geDoc.canvasColor.g,
+		geDoc.canvasColor.b,
+		1.0f
+	));
 
 	m_pRenderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
 
@@ -621,6 +674,63 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 		);
 	}
 
+	// 0.5. 도큐멘트 대지(용지 아트보드) 렌더링: (0, 0) ~ (doc.width, doc.height)
+	float paperLeft   = m_ptPan.x;
+	float paperRight  = m_ptPan.x + docW * m_fZoom;
+	float paperTop    = isBottomLeft ? (m_ptPan.y - docH * m_fZoom) : m_ptPan.y;
+	float paperBottom = isBottomLeft ? m_ptPan.y : (m_ptPan.y + docH * m_fZoom);
+
+	D2D1_RECT_F paperRc = D2D1::RectF(paperLeft, paperTop, paperRight, paperBottom);
+
+	// 종이 그림자 (Drop Shadow - 문서가 불투명할 때만 표시)
+	if (geDoc.backgroundColor.a > 0.05f)
+	{
+		D2D1_RECT_F shadowRc = D2D1::RectF(paperLeft + 5.0f, paperTop + 5.0f, paperRight + 5.0f, paperBottom + 5.0f);
+		m_pSolidBrush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.16f * geDoc.backgroundColor.a));
+		m_pRenderTarget->FillRectangle(shadowRc, m_pSolidBrush);
+	}
+
+	// 투명도 있는 문서일 경우: 투명 체커보드(격자 무늬) 패턴 렌더링
+	if (geDoc.backgroundColor.a < 0.999f)
+	{
+		const float checkSize = 12.0f;
+		m_pRenderTarget->PushAxisAlignedClip(paperRc, D2D1_ANTIALIAS_MODE_ALIASED);
+		int c0 = static_cast<int>(floorf(paperLeft / checkSize));
+		int c1 = static_cast<int>(ceilf(paperRight / checkSize));
+		int r0 = static_cast<int>(floorf(paperTop / checkSize));
+		int r1 = static_cast<int>(ceilf(paperBottom / checkSize));
+		for (int r = r0; r < r1; ++r)
+		{
+			for (int c = c0; c < c1; ++c)
+			{
+				m_pSolidBrush->SetColor(((r + c) % 2 == 0)
+					? D2D1::ColorF(0.96f, 0.96f, 0.96f, 1.0f)
+					: D2D1::ColorF(0.86f, 0.86f, 0.88f, 1.0f));
+				m_pRenderTarget->FillRectangle(
+					D2D1::RectF(c * checkSize, r * checkSize, (c + 1) * checkSize, (r + 1) * checkSize),
+					m_pSolidBrush
+				);
+			}
+		}
+		m_pRenderTarget->PopAxisAlignedClip();
+	}
+
+	// 도큐멘트 본체 (Document Paper Background)
+	if (geDoc.backgroundColor.a > 0.001f)
+	{
+		m_pSolidBrush->SetColor(D2D1::ColorF(
+			geDoc.backgroundColor.r,
+			geDoc.backgroundColor.g,
+			geDoc.backgroundColor.b,
+			geDoc.backgroundColor.a
+		));
+		m_pRenderTarget->FillRectangle(paperRc, m_pSolidBrush);
+	}
+
+	// 도큐멘트 외곽 테두리선 (Document Paper Border)
+	m_pSolidBrush->SetColor(D2D1::ColorF(0.52f, 0.55f, 0.62f, 0.9f));
+	m_pRenderTarget->DrawRectangle(paperRc, m_pSolidBrush, 1.0f);
+
 	GetApp()->GetGrid().Render(
 		m_pRenderTarget,
 		m_pSolidBrush,
@@ -630,7 +740,7 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 	);
 
 	// 1. 문서 씬 그래프 렌더링 (단일 모델)
-	ge::Viewport view = { m_fZoom, { m_ptPan.x, m_ptPan.y } };
+	ge::Viewport view = { m_fZoom, { m_ptPan.x, m_ptPan.y }, isBottomLeft };
 	m_renderer.DrawDocument(pDoc->GetDoc(), view);
 
 	// 2. 활성 도구의 오버레이(작성 중인 선, 사각형, 펜 핸들 등) 렌더링
@@ -650,7 +760,7 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 	// 4. 스냅 인디케이터(자석 원형/다이아몬드/삼각형/십자선) 렌더링
 	if (m_lastSnap.snapped)
 	{
-		GetApp()->GetSnapManager().DrawSnapIndicator(m_pRenderTarget, m_pSolidBrush, m_lastSnap, m_fZoom, m_ptPan);
+		GetApp()->GetSnapManager().DrawSnapIndicator(m_pRenderTarget, m_pSolidBrush, m_lastSnap, m_fZoom, m_ptPan, isBottomLeft);
 	}
 
 	if (rulerT > 0.0f)
@@ -665,7 +775,8 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 		D2D1::SizeF(width, height),
 		m_fZoom,
 		m_ptPan,
-		GetApp()->GetGrid()
+		GetApp()->GetGrid(),
+		isBottomLeft
 	);
 
 	HRESULT hr = m_pRenderTarget->EndDraw();
@@ -709,6 +820,7 @@ void CM2DrawView::OnRButtonUp(UINT /* nFlags */, CPoint point)
 	if (pActiveTool && activeType != ToolType::Select && activeType != ToolType::Pan)
 	{
 		bool switchSelect = pActiveTool->OnRightClicked(pDoc);
+		if (pDoc) pDoc->CommitUndoPoint(pActiveTool->GetName());   // 우클릭으로 마무리된 도형/패스 기록
 		if (switchSelect)
 		{
 			// 도구 전환(OnToolChanged)이 선택을 해제하므로 방금 완료된 도형을 먼저 기억
