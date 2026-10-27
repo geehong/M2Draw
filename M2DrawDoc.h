@@ -34,6 +34,8 @@ public:
 
 	// 선택의 단일 출처는 ge::Document::GetSelection(). 대표(첫 번째) 선택 노드, 없으면 nullptr
 	ge::Node* GetPrimarySelection() const;
+	// 숨김/잠금(조상 포함) 상태가 된 노드를 선택에서 제외. 선택이 바뀌었으면 true (패널 갱신은 호출 측)
+	bool PruneNonInteractiveSelection();
 
 	// 펜 도구가 작성 중인 패스 (문서에 아직 등록되지 않은 임시 도형)
 	std::unique_ptr<PathShape>          m_currentPath;

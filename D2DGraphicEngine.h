@@ -248,6 +248,26 @@ struct SubPath {
 
 enum class NodeKind : uint8_t { Path, Group, Layer };
 
+// 혼합 모드 (SVG/CSS mix-blend-mode 와 1:1 대응). 모든 노드에 지정 가능, 렌더링 적용은 Phase 2
+enum class LayerBlendMode : uint8_t {
+	Normal = 0,    // 정상
+	Darken,        // 어둡게
+	Multiply,      // 곱하기
+	ColorBurn,     // 컬러 번
+	Lighten,       // 밝게
+	Screen,        // 화면(스크린)
+	ColorDodge,    // 컬러 닷지
+	Overlay,       // 오버레이
+	SoftLight,     // 부드러운 빛
+	HardLight,     // 강렬한 빛
+	Difference,    // 디퍼런스(다름)
+	Exclusion,     // 익스클루전(제외)
+	Hue,           // 색조
+	Saturation,    // 채도
+	Color,         // 색상
+	Luminosity     // 광도
+};
+
 // 파라메트릭 도형 종류 (구엔진과 1:1 호환 및 확장 지원)
 enum class ShapeKind {
 	Path = 0,
@@ -343,8 +363,14 @@ public:
 	void SetVisible(bool v)                  { m_visible = v; }
 	bool IsLocked() const                    { return m_locked; }
 	void SetLocked(bool v)                   { m_locked = v; }
-	float GetOpacity() const                 { return m_opacity; }
-	void SetOpacity(float v)                 { m_opacity = v; }
+	float GetOpacity() const                 { return m_opacity; }   // 0.0 ~ 1.0
+	void SetOpacity(float v)                 { m_opacity = (std::max)(0.0f, (std::min)(1.0f, v)); }
+	LayerBlendMode GetBlendMode() const      { return m_blendMode; }
+	void SetBlendMode(LayerBlendMode m)      { m_blendMode = m; }
+
+	// 자신 + 조상(그룹/레이어) 체인까지 고려한 최종 가시성/잠금
+	bool IsEffectivelyVisible() const;
+	bool IsEffectivelyLocked() const;
 
 	void Invalidate()                        { m_dirty = true; ++m_version; }
 	bool IsDirty() const                     { return m_dirty; }
@@ -470,6 +496,7 @@ protected:
 	void CopyNodePropsFrom(const Node& o) {
 		m_name = o.m_name; m_xf = o.m_xf; m_style = o.m_style;
 		m_visible = o.m_visible; m_locked = o.m_locked; m_opacity = o.m_opacity;
+		m_blendMode = o.m_blendMode;
 	}
 	void ResetIdentity() { m_id = 0; m_parent = nullptr; m_version = 1; m_dirty = true; }
 
@@ -484,6 +511,7 @@ protected:
 	bool         m_visible = true;
 	bool         m_locked  = false;
 	float        m_opacity = 1.0f;
+	LayerBlendMode m_blendMode = LayerBlendMode::Normal;
 	bool         m_dirty   = true;
 };
 

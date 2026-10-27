@@ -60,6 +60,21 @@ ge::Node* CM2DrawDoc::GetPrimarySelection() const
 	return sel.empty() ? nullptr : sel.front();
 }
 
+bool CM2DrawDoc::PruneNonInteractiveSelection()
+{
+	const auto& sel = m_doc.GetSelection();
+	std::vector<ge::Node*> kept;
+	for (ge::Node* n : sel)
+	{
+		if (n && n->IsEffectivelyVisible() && !n->IsEffectivelyLocked())
+			kept.push_back(n);
+	}
+	if (kept.size() == sel.size())
+		return false;
+	m_doc.SetSelection(kept);
+	return true;
+}
+
 
 
 

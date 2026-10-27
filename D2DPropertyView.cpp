@@ -1485,9 +1485,10 @@ void CD2DPropertyView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 {
 	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
 
-	if (m_pCurrentPanel)
+	// 이벤트 처리 중 콜백이 패널을 재구성(SetPaneMode -> InitControls)해도 실행 중인 패널이 해제되지 않도록 지역 참조로 유지
+	if (std::shared_ptr<M2DrawPanel> panel = m_pCurrentPanel)
 	{
-		if (m_pCurrentPanel->OnLButtonDown(ptD2D))
+		if (panel->OnLButtonDown(ptD2D))
 		{
 			SetCapture();
 			SafeInvalidate(FALSE);
@@ -1499,9 +1500,10 @@ void CD2DPropertyView::OnMouseMove(UINT /*nFlags*/, CPoint point)
 {
 	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
 
-	if (m_pCurrentPanel)
+	// 이벤트 처리 중 콜백이 패널을 재구성(SetPaneMode -> InitControls)해도 실행 중인 패널이 해제되지 않도록 지역 참조로 유지
+	if (std::shared_ptr<M2DrawPanel> panel = m_pCurrentPanel)
 	{
-		if (m_pCurrentPanel->OnMouseMove(ptD2D))
+		if (panel->OnMouseMove(ptD2D))
 		{
 			SafeInvalidate(FALSE);
 		}
@@ -1512,9 +1514,10 @@ void CD2DPropertyView::OnLButtonUp(UINT /*nFlags*/, CPoint point)
 {
 	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
 
-	if (m_pCurrentPanel)
+	// 이벤트 처리 중 콜백이 패널을 재구성(SetPaneMode -> InitControls)해도 실행 중인 패널이 해제되지 않도록 지역 참조로 유지
+	if (std::shared_ptr<M2DrawPanel> panel = m_pCurrentPanel)
 	{
-		m_pCurrentPanel->OnLButtonUp(ptD2D);
+		panel->OnLButtonUp(ptD2D);
 	}
 
 	if (GetCapture() == this)
@@ -1526,9 +1529,10 @@ void CD2DPropertyView::OnLButtonUp(UINT /*nFlags*/, CPoint point)
 
 void CD2DPropertyView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
-	if (m_pCurrentPanel)
+	// 이벤트 처리 중 콜백이 패널을 재구성(SetPaneMode -> InitControls)해도 실행 중인 패널이 해제되지 않도록 지역 참조로 유지
+	if (std::shared_ptr<M2DrawPanel> panel = m_pCurrentPanel)
 	{
-		if (m_pCurrentPanel->OnKeyDown(nChar))
+		if (panel->OnKeyDown(nChar))
 		{
 			SafeInvalidate(FALSE);
 			return;
@@ -1539,9 +1543,10 @@ void CD2DPropertyView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 
 void CD2DPropertyView::OnChar(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
-	if (m_pCurrentPanel)
+	// 이벤트 처리 중 콜백이 패널을 재구성(SetPaneMode -> InitControls)해도 실행 중인 패널이 해제되지 않도록 지역 참조로 유지
+	if (std::shared_ptr<M2DrawPanel> panel = m_pCurrentPanel)
 	{
-		if (m_pCurrentPanel->OnChar(nChar))
+		if (panel->OnChar(nChar))
 		{
 			SafeInvalidate(FALSE);
 			return;

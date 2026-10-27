@@ -271,6 +271,22 @@ float Node::GetEffectiveOpacity() const
 	return o;
 }
 
+bool Node::IsEffectivelyVisible() const
+{
+	if (!m_visible) return false;
+	for (const GroupNode* p = m_parent; p; p = p->GetParent())
+		if (!p->IsVisible()) return false;
+	return true;
+}
+
+bool Node::IsEffectivelyLocked() const
+{
+	if (m_locked) return true;
+	for (const GroupNode* p = m_parent; p; p = p->GetParent())
+		if (p->IsLocked()) return true;
+	return false;
+}
+
 // ---- GroupNode --------------------------------------------------------------
 std::unique_ptr<Node> GroupNode::Clone() const
 {
@@ -840,7 +856,11 @@ void D2DRenderer::DrawPath(PathNode& node, const Matrix2D& worldXf, const Viewpo
 	ID2D1Geometry* geo = GetGeometry(node);
 	if (!geo) return;
 	const Style& st = node.GetStyle();
-	const float op = node.GetEffectiveOpacity();
+	// 레이어 불투명도는 DrawDocument 의 PushLayer 로 합성되므로 여기서는 레이어 아래(자신 + 그룹)만 곱함
+	// (그룹 불투명도의 레이어 합성 전환은 Phase 2 S2)
+	float op = node.GetOpacity();
+	for (const GroupNode* p = node.GetParent(); p && p->Kind() != NodeKind::Layer; p = p->GetParent())
+		op *= p->GetOpacity();
 
 	m_rt->SetTransform(ToD2D(worldXf * view.ToMatrix()));
 	if (st.fillType == FillType::Solid && st.fill.a > 0.0f) {
@@ -942,7 +962,7 @@ HitResult HitTester::HitTest(Document& doc, Vec2 screenPt, float tolPx,
 		return dx * dx + dy * dy <= tolPx * tolPx;
 	};
 	for (Node* sel : doc.GetSelection()) {
-		if (!sel || sel->Kind() != NodeKind::Path || sel->IsLocked() || !sel->IsVisible()) continue;
+		if (!sel || sel->Kind() != NodeKind::Path || sel->IsEffectivelyLocked() || !sel->IsEffectivelyVisible()) continue;
 		PathNode& p = static_cast<PathNode&>(*sel);
 		const Matrix2D w = p.GetWorldTransform();
 		const auto& paths = p.GetPaths();

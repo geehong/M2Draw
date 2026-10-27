@@ -9,10 +9,16 @@
 // SelectTool 구현 (도형 선택, 이동, 스케일, 회전, 에디트 포인트 편집)
 // ============================================================================
 
-// 레이어 상호작용 가능 여부 (숨김/잠금 레이어 제외; 조상 체인 일반화는 Step 0.3)
+// 레이어 상호작용 가능 여부 (숨김/잠금 레이어 제외)
 static bool IsLayerInteractive(const ge::LayerNode* pLayer)
 {
 	return pLayer && pLayer->IsVisible() && !pLayer->IsLocked();
+}
+
+// 노드 상호작용 가능 여부 (자신 + 조상 그룹/레이어 체인의 가시성/잠금)
+static bool IsInteractive(const ge::Node* n)
+{
+	return n && n->IsEffectivelyVisible() && !n->IsEffectivelyLocked();
 }
 
 // 선택 가능한 최상위 도형을 위에서 아래로 순회 (위 레이어 -> 아래 레이어, 레이어 안에서도 위 -> 아래).
@@ -167,7 +173,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 	for (ge::Node* n : sel)
 	{
 		PathShape* ps = dynamic_cast<PathShape*>(n);
-		if (!ps) continue;
+		if (!ps || !IsInteractive(ps)) continue;
 		HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
 		if (IsEditPart(hr))
 		{
@@ -189,7 +195,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 	// 2. 이미 선택된 도형 중 닫힌 도형(열린 곡선/직선 제외)의 바운딩 박스 핸들 클릭 여부 검사
 	for (ge::Node* n : sel)
 	{
-		if (IsOpenPath(n)) continue;
+		if (!IsInteractive(n) || IsOpenPath(n)) continue;
 		D2D1_POINT_2F handles[9];
 		D2D1_RECT_F localBounds;
 		if (!GetHandleScreenPositions(n, e.view, e.pD2DFactory, handles, &localBounds)) continue;
@@ -300,6 +306,7 @@ void SelectTool::OnMove(const ToolEvent& e)
 		// 1) 선택된 도형의 노드(앵커/핸들) 및 바운딩 박스 핸들 호버 검사
 		for (ge::Node* n : sel)
 		{
+			if (!IsInteractive(n)) continue;
 			PathShape* ps = dynamic_cast<PathShape*>(n);
 			if (ps && IsEditPart(ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory)))
 			{
@@ -552,7 +559,7 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 
 	for (Shape* shape : sel)
 	{
-		if (!shape || !shape->IsVisible()) continue;
+		if (!shape || !shape->IsEffectivelyVisible()) continue;
 		D2D1_POINT_2F handles[9];
 		D2D1_RECT_F localBounds;
 		if (!GetHandleScreenPositions(shape, view, f, handles, &localBounds))

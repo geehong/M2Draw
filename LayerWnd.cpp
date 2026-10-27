@@ -729,6 +729,18 @@ void CLayerView::UpdateLayout(float width, float height)
 	m_totalContentHeight = curY + m_scrollY;
 }
 
+// 가시성/잠금 변경 후 숨김·잠김(조상 포함) 노드를 선택에서 제외.
+// 레이어 패널은 재구성하지 않음 (체크박스 콜백 실행 중 RefreshLayers 로 행이 파괴되는 것을 방지)
+static void PruneSelectionAfterToggle(CM2DrawDoc* pDoc)
+{
+	if (pDoc && pDoc->PruneNonInteractiveSelection())
+	{
+		ge::Node* pPrimary = pDoc->GetPrimarySelection();
+		SyncPropertiesWithSelection(pPrimary, pDoc);
+		SyncOptionBarWithSelection(pPrimary, pDoc);
+	}
+}
+
 void CLayerView::RefreshLayers()
 {
 	CM2DrawDoc* pDoc = GetDocSafe();
@@ -809,6 +821,7 @@ void CLayerView::RefreshLayers()
 			CM2DrawDoc* pActiveDoc = GetDocSafe();
 			if (pActiveDoc)
 			{
+				PruneSelectionAfterToggle(pActiveDoc);
 				pActiveDoc->UpdateAllViews(nullptr);
 			}
 			CString strLog;
@@ -823,7 +836,7 @@ void CLayerView::RefreshLayers()
 		rowLayer.chkLocked->SetOnChanged([this, layer](M2DrawCheckBox*, bool bChecked) {
 			layer->SetLocked(bChecked);
 			CM2DrawDoc* pActiveDoc = GetDocSafe();
-			if (pActiveDoc) pActiveDoc->UpdateAllViews(nullptr);
+			if (pActiveDoc) { PruneSelectionAfterToggle(pActiveDoc); pActiveDoc->UpdateAllViews(nullptr); }
 			CString strLog;
 			strLog.Format(_T("[레이어 패널] [잠금 🔒] 토글: '%s' (상태: %s)"),
 				layer->GetName().c_str(), bChecked ? _T("잠김") : _T("해제"));
@@ -863,6 +876,7 @@ void CLayerView::RefreshLayers()
 				CM2DrawDoc* pActiveDoc = GetDocSafe();
 				if (pActiveDoc)
 				{
+					PruneSelectionAfterToggle(pActiveDoc);
 					pActiveDoc->UpdateAllViews(nullptr);
 				}
 				CString strLog;
@@ -876,7 +890,7 @@ void CLayerView::RefreshLayers()
 			rowChild.chkLocked->SetOnChanged([this, child](M2DrawCheckBox*, bool bChecked) {
 				child->SetLocked(bChecked);
 				CM2DrawDoc* pActiveDoc = GetDocSafe();
-				if (pActiveDoc) pActiveDoc->UpdateAllViews(nullptr);
+				if (pActiveDoc) { PruneSelectionAfterToggle(pActiveDoc); pActiveDoc->UpdateAllViews(nullptr); }
 				CString strLog;
 				strLog.Format(_T("[레이어 패널] [잠금 🔒] 토글: '%s' (상태: %s)"),
 					child->GetName().c_str(), bChecked ? _T("잠김") : _T("해제"));
@@ -1212,15 +1226,20 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 				}
 			}
 
+			// 아래 선택 갱신이 RefreshLayers() 로 m_rowItems 를 재구성하므로(row 무효화) 필요한 값을 먼저 복사
+			ge::Node* const pRowNode = row.pNode;
+			const bool bRowIsLayer = row.isLayer;
+			const D2D1_RECT_F labelRect = row.labelRect;
+
 			// E. 라벨 또는 행 클릭 -> 캔버스 및 속성창 선택 동기화!
-			if (pDoc && row.pNode)
+			if (pDoc && pRowNode)
 			{
-				if (row.isLayer)
+				if (bRowIsLayer)
 				{
 					auto& doc = pDoc->GetDoc();
 					for (size_t i = 0; i < doc.GetLayers().size(); ++i)
 					{
-						if (doc.GetLayers()[i].get() == row.pNode)
+						if (doc.GetLayers()[i].get() == pRowNode)
 						{
 							doc.SetActiveLayer(static_cast<int>(i));
 							doc.ClearSelection();
@@ -1229,7 +1248,7 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 						}
 					}
 					CString strLog;
-					strLog.Format(_T("[레이어 패널] 활성 레이어 전환: '%s'"), row.pNode->GetName().c_str());
+					strLog.Format(_T("[레이어 패널] 활성 레이어 전환: '%s'"), pRowNode->GetName().c_str());
 					LogAppEvent(strLog);
 				}
 				else
@@ -1238,11 +1257,11 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 					SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
 					if (pSelect)
 					{
-						pSelect->SelectNode(row.pNode, pDoc);
+						pSelect->SelectNode(pRowNode, pDoc);
 					}
 
 					CString strLog;
-					strLog.Format(_T("[레이어 패널] 오브젝트 선택됨: '%s'"), row.pNode->GetName().c_str());
+					strLog.Format(_T("[레이어 패널] 오브젝트 선택됨: '%s'"), pRowNode->GetName().c_str());
 					LogAppEvent(strLog);
 				}
 
@@ -1252,15 +1271,15 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 
 			// 천천히 더블클릭/재클릭 감지 -> 이름 변경 인라인 에디트
 			DWORD dwNow = ::GetTickCount();
-			if (m_pLastClickedNode == row.pNode && (dwNow - m_dwLastClickTime) > 500 && (dwNow - m_dwLastClickTime) < 1800)
+			if (pRowNode && m_pLastClickedNode == pRowNode && (dwNow - m_dwLastClickTime) > 500 && (dwNow - m_dwLastClickTime) < 1800)
 			{
-				if (ptD2D.x >= row.labelRect.left && ptD2D.x <= row.labelRect.right)
+				if (ptD2D.x >= labelRect.left && ptD2D.x <= labelRect.right)
 				{
-					m_pEditingNode = row.pNode;
-					CRect rcEdit(static_cast<int>(row.labelRect.left), static_cast<int>(row.labelRect.top + 2),
-						static_cast<int>(row.labelRect.right), static_cast<int>(row.labelRect.bottom - 2));
+					m_pEditingNode = pRowNode;
+					CRect rcEdit(static_cast<int>(labelRect.left), static_cast<int>(labelRect.top + 2),
+						static_cast<int>(labelRect.right), static_cast<int>(labelRect.bottom - 2));
 					m_wndEditName.MoveWindow(&rcEdit);
-					m_wndEditName.SetWindowText(row.pNode->GetName().c_str());
+					m_wndEditName.SetWindowText(pRowNode->GetName().c_str());
 					m_wndEditName.ShowWindow(SW_SHOW);
 					m_wndEditName.SetFocus();
 					m_wndEditName.SetSel(0, -1);
@@ -1268,7 +1287,7 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 				}
 			}
 
-			m_pLastClickedNode = row.pNode;
+			m_pLastClickedNode = pRowNode;
 			m_dwLastClickTime = dwNow;
 			return;
 		}
