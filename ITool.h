@@ -13,8 +13,6 @@ class CM2DrawView;
 using ViewportTransform = ge::Viewport;
 using CoordinateSpace = ge::CoordinateSpace;
 using FillType = ge::FillType;
-using Shape = ge::Node;
-using PathShape = ge::PathNode;
 using HitResult = ge::HitResult;
 
 using ShapeKind = ge::ShapeKind;
@@ -201,19 +199,19 @@ private:
 	ge::Node*     m_xfTarget = nullptr;   // 스케일/회전 핸들을 잡은 도형 (드래그 동안만 유효)
 
 	// 노드(앵커/핸들) 편집 상태 (열린 패스: 직선, 곡선 등) — 드래그 동안만 유효
-	PathShape*     m_editShape = nullptr;
+	ge::PathNode*     m_editShape = nullptr;
 	HitResult      m_editHit;
 	bool           m_hoverIsNode = false;
 	bool           m_hoverOnShape = false; // 스트로크/면 위에 마우스가 올라가 있는지
 
-	static bool IsOpenPath(Shape* shape);
-	void ApplyNodeEdit(PathShape* shape, const ToolEvent& e);
+	static bool IsOpenPath(ge::Node* shape);
+	void ApplyNodeEdit(ge::PathNode* shape, const ToolEvent& e);
 
 	Handle HitHandle(D2D1_POINT_2F screenPt, const D2D1_POINT_2F handles[9], float tolPx) const;
-	bool GetHandleScreenPositions(Shape* shape, const ViewportTransform& view, ID2D1Factory* f, D2D1_POINT_2F outHandles[9], D2D1_RECT_F* outLocalBounds = nullptr) const;
+	bool GetHandleScreenPositions(ge::Node* shape, const ViewportTransform& view, ID2D1Factory* f, D2D1_POINT_2F outHandles[9], D2D1_RECT_F* outLocalBounds = nullptr) const;
 	void ApplyMove(const std::vector<ge::Node*>& selection);
-	void ApplyScale(Shape* shape);
-	void ApplyRotate(Shape* shape);
+	void ApplyScale(ge::Node* shape);
+	void ApplyRotate(ge::Node* shape);
 };
 
 // ============================================================================
@@ -225,7 +223,7 @@ protected:
 	ToolCreationSetting            m_setting;
 	D2D1_POINT_2F                  m_hoverPt{ 0.0f, 0.0f };
 	bool                           m_hasHover = false;
-	std::unique_ptr<PathShape>     m_previewShape; // 구형 미리보기 도형
+	std::unique_ptr<ge::PathNode>     m_previewShape; // 구형 미리보기 도형
 	std::unique_ptr<ge::PathNode>  m_previewNode;  // 신엔진 미리보기 노드
 	ge::NodeId                     m_lastCommittedId = 0;     // 방금 완료된 도형 NodeId (대기 상태에서 앵커 표시)
 
@@ -349,8 +347,8 @@ protected:
 	void CalculateExtents(D2D1_POINT_2F curPt, bool shiftDown, bool altDown, D2D1_POINT_2F& outP0, D2D1_POINT_2F& outP1) const;
 
 	// 엔진 기하학 팩토리/업데이터 (정점 계산)
-	std::unique_ptr<PathShape> CreateShapeInstance(D2D1_POINT_2F p0, D2D1_POINT_2F p1, CM2DrawDoc* pDoc = nullptr);
-	void UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POINT_2F p1);
+	std::unique_ptr<ge::PathNode> CreateShapeInstance(D2D1_POINT_2F p0, D2D1_POINT_2F p1, CM2DrawDoc* pDoc = nullptr);
+	void UpdateGeometry(ge::PathNode* pShape, D2D1_POINT_2F p0, D2D1_POINT_2F p1);
 };
 
 // ============================================================================

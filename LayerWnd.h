@@ -90,6 +90,13 @@ protected:
 		std::shared_ptr<M2DrawCheckBox>     chkLocked;    // [4. 🔒/unlock 잠금 아이콘 체크박스]
 	};
 
+	// 이름 변경 더블클릭 대상 영역: 아이콘 ~ 라벨 ~ 첫 번째 버튼 직전까지
+	static bool IsInNameArea(const LayerRowItem& row, D2D1_POINT_2F pt);
+	// 인라인 이름 편집 시작 (편집 상자는 라벨 위치에서 110px 폭)
+	void BeginEditName(ge::Node* pNode, const D2D1_RECT_F& labelRect, const D2D1_RECT_F& rowRect);
+	// 편집 상자 숨김 (편집 상자가 포커스를 가지고 있으면 레이어 뷰로 포커스 반환)
+	void HideEditBox();
+
 	CM2DrawDoc*                        m_pDoc = nullptr;
 	std::vector<LayerRowItem>          m_rowItems;
 	std::shared_ptr<M2DrawControl>     m_capturedControl;

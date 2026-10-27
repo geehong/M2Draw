@@ -312,7 +312,7 @@ void CPropertiesWnd::SetSelectedShape(ge::Node* pShape, CM2DrawDoc* pDoc)
 		}
 	}
 
-	if (Shape* shape = GetSelectedShape())
+	if (ge::Node* shape = GetSelectedShape())
 	{
 		CString strTitle;
 		if (!shape->GetName().empty())
@@ -509,7 +509,7 @@ void CPropertiesWnd::InitShapePropList()
 		return;
 	}
 
-	Shape* shape = GetSelectedShape();
+	ge::Node* shape = GetSelectedShape();
 
 	// 타이틀: {쉐이프 이름} 설정
 	CString strGroupTitle;
@@ -868,7 +868,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	{
 		if (GetSelectedShape())
 		{
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			shape->SetName(val.bstrVal ? val.bstrVal : L"");
 			CString strTitle;
 			strTitle.Format(_T("{%s} 설정"), shape->GetName().c_str());
@@ -888,7 +888,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		val.ChangeType(VT_R8);
 		if (GetSelectedShape())
 		{
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			shape->GetStyleRef().strokeWidth = static_cast<float>(val.dblVal);
 			shape->Invalidate();
 			strLogMsg.Format(_T("[쉐이프 속성] 라인 굵기: %.1f px"), shape->GetStyle().strokeWidth);
@@ -901,7 +901,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		CMFCPropertyGridColorProperty* pColor = dynamic_cast<CMFCPropertyGridColorProperty*>(pProp);
 		if (pColor && GetSelectedShape())
 		{
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			COLORREF c = pColor->GetColor();
 			shape->GetStyleRef().stroke = D2D1::ColorF(
 				GetRValue(c) / 255.0f,
@@ -919,7 +919,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	{
 		if (GetSelectedShape())
 		{
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			CString strDash = val.bstrVal;
 			if (strDash.Find(_T("대시-점선")) >= 0)
 				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH_DOT;
@@ -940,7 +940,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	{
 		if (GetSelectedShape())
 		{
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			CString strFillType = val.bstrVal;
 			if (strFillType.Find(_T("단색")) >= 0)
 				shape->GetStyleRef().fillType = FillType::Solid;
@@ -960,7 +960,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 		CMFCPropertyGridColorProperty* pColor = dynamic_cast<CMFCPropertyGridColorProperty*>(pProp);
 		if (pColor && GetSelectedShape())
 		{
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			COLORREF c = pColor->GetColor();
 			shape->GetStyleRef().fill = D2D1::ColorF(
 				GetRValue(c) / 255.0f,

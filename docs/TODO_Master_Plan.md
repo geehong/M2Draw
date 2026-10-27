@@ -82,11 +82,18 @@
 - [x] 0.4.2 `SyncDocSelection` 및 인덱스 기반 사용처(PropertyView, ToolOptionBar, LayerWnd, Doc 삭제) 정리
 - [x] 0.4.3 빌드 + 다중 선택/마키 선택/레이어 패널 선택 동기화 확인
 
-### Step 0.5 구형 잔재 제거 (D6, D15)
+### Step 0.5 구형 잔재 제거 (D6, D15)  — ✅ 완료 (사용자 확인 2026-10-27)
 - [x] 0.5.1 ~~`m_shapes`, `m_currentPath`, 이름 기반 삭제 로직 제거~~ → Step 0.2b 로 통합
-- [ ] 0.5.2 `Shape`/`PathShape` using 별칭 정리
-- [ ] 0.5.3 `D2DVectorEngine_old.h`, `backup_toolbar_20261021/` 삭제 (vcxproj 참조 포함)
-- [ ] 0.5.4 빌드 + 삭제 기능(Del, 레이어 휴지통) 확인
+- [x] 0.5.2 `Shape`/`PathShape` 별칭(ITool.h, M2DrawDoc.h 에 중복 정의) 삭제 → `ge::Node`/`ge::PathNode` 로 치환 (66곳, 주석·UI 문자열은 유지)
+  - `ShapeKind`, `BezierNode`, `RectParams` 등 단순 전달 별칭은 의미 혼동이 없어 유지
+- [x] 0.5.3 `D2DVectorEngine_old.h`, `backup_toolbar_20261021/`(19개 파일) 삭제 — 빌드 파일 참조 없음, git 이력으로 복구 가능
+- [x] 0.5.4 빌드 성공 / 확인 완료: 앱 전반 회귀 (동작 변경 없는 정리 작업)
+- [x] UI 개선 (사용자 요청): 레이어 패널 이름 변경을 **더블클릭**으로도 가능하게
+  - 대상 영역을 라벨(65px)에서 "아이콘 ~ 라벨 ~ 첫 버튼 직전"으로 확대, 편집 상자는 110px 폭 (사용자 요청으로 축소)
+  - 천천히 두 번 클릭 방식도 같은 영역·같은 함수(`BeginEditName`) 사용
+  - fix (사용자 보고): 한 번 이름을 바꾼 뒤 다른 항목의 이름 변경이 시작되지 않던 문제
+    — 편집 상자가 포커스를 받는 순간 레이어 뷰 `OnKillFocus`가 확정·숨김을 실행해 즉시 닫히던 것. 편집 상자로 가는 포커스 이동은 제외
+  - fix: Enter 확정 / Esc 취소 (`PreTranslateMessage`), 확정 시 재진입 방지 및 숨겨진 편집 상자에 포커스가 남지 않도록 처리
 
 ### Step 0.6 모델에서 D2D/MFC 의존 분리 (D8, D9, D12)
 - [ ] 0.6.1 `Node::Draw` 삭제 → 렌더러를 거쳐 그리도록 함
@@ -150,8 +157,9 @@
 ### Step 2.1 Style 모델 마이그레이션 (Paint/Gradient/Stroke)
 - [ ] 2.1.1 신규 `Style` 구조체 도입: `Paint(Solid, Gradient)`, `Stroke(cap, join, miter, dashArray)`
 - [ ] 2.1.2 기존 `FillType`, `DashStyle` enum 마이그레이션 및 변환 헬퍼 작성
-- [ ] 2.1.3 `PropertyView` 및 `ToolOptionBar`의 스타일 바인딩 UI 업데이트
-- [ ] 2.1.4 빌드 확인 및 도형별 선/면 스타일 정상 반영 확인
+- [ ] 2.1.3 `PropertyView` 스타일 UI 업데이트: Stroke Cap(Butt/Round/Square), Join(Miter/Round/Bevel) 콤보 및 커스텀 DashArray 입력 컨트롤 추가
+- [ ] 2.1.4 `ToolOptionBar`의 스타일 바인딩 UI 업데이트
+- [ ] 2.1.5 빌드 확인 및 도형별 선/면 스타일 정상 반영 확인
 
 ### Step 2.2 렌더러를 SVG 규칙에 맞춤 (S1~S4 해소)
 - [ ] 2.2.1 S1: 열린 서브패스도 면 채우기가 가능하도록 `D2D1_FIGURE_BEGIN_FILLED` 처리
@@ -160,11 +168,14 @@
 - [ ] 2.2.4 S4: `ID2D1StrokeStyle`에 LineCap(Butt/Round/Square), LineJoin(Miter/Round/Bevel), DashArray 바인딩
 - [ ] 2.2.5 빌드 확인 및 SVG 렌더링 의미론 일치 여부 비교 검증
 
-### Step 2.3 그라디언트 렌더링 + 편집 핸들
+### Step 2.3 그라디언트 렌더링 + 편집 핸들 & 속성창 UI
 - [ ] 2.3.1 `ID2D1LinearGradientBrush`, `ID2D1RadialGradientBrush` 캐싱 및 렌더러 연동
 - [ ] 2.3.2 캔버스 상의 그라디언트 시작점/끝점/초점 조작용 오버레이 기즈모 핸들 구현
-- [ ] 2.3.3 속성창에 Color Stop 편집기(오프셋, 색상, 알파) 연동
-- [ ] 2.3.4 빌드 확인 및 선형/방사형 그라디언트 렌더링 검증
+- [ ] 2.3.3 **`PropertyView` 그라디언트 편집 컨트롤 구현**:
+  - Linear/Radial 타입 라디오 토글
+  - 컬러 스톱 바 (Color Stop 추가, 삭제, 위치 드래그 슬라이더, 각 스톱별 색상/알파 편집)
+  - 시작점/끝점 수치 입력 및 그라디언트 반전(Reverse) 버튼
+- [ ] 2.3.4 빌드 확인 및 선형/방사형 그라디언트 렌더링 및 속성창 연동 검증
 
 ### Step 2.4 클리핑 마스크
 - [ ] 2.4.1 `GroupNode::m_clipPath` (마스크로 사용할 자식 노드 지정) 모델 필드 추가
@@ -186,10 +197,10 @@
 - [ ] 2.6.4 패스 방향 반전(Reverse Path): 서브패스 정점 순서 및 In/Out 핸들 반전
 - [ ] 2.6.5 빌드 확인 및 각 패스 연산 동작 검증
 
-### Step 2.7 엔진 기능 UI 연결
+### Step 2.7 엔진 기능 UI 연결 (정렬/불리언/그룹/노드)
 - [ ] 2.7.1 그룹화 (Ctrl+G) 및 그룹 해제 (Ctrl+Shift+G) 메뉴/단축키 핸들러 연결
 - [ ] 2.7.2 Z-Order 변경 (Bring to Front, Send to Back, Forward, Backward) 단축키/메뉴 연결
-- [ ] 2.7.3 정렬 및 분배 (좌/우/상/하/중앙 정렬, 균등 간격 분배) 툴바/옵션바 UI 연결
+- [ ] 2.7.3 **속성창 및 옵션바 연동**: 정렬/분배 버튼 그룹(좌/우/상/하/중앙, 균등 간격), 불리언 연산 버튼 그룹(합집합/차집합/교집합/XOR) 배치
 - [ ] 2.7.4 노드 툴(직접 선택 도구)을 통한 앵커 추가(`InsertNodeOnSegment`) 및 삭제(`RemoveNode`) 연결
 - [ ] 2.7.5 빌드 확인 및 UI를 통한 모든 조작 검증
 
@@ -209,11 +220,17 @@
 
 ## Phase 3 — 텍스트 & 이미지
 
-### Step 3.1 TextNode 모델 + DirectWrite 렌더
+### Step 3.1 TextNode 모델 + DirectWrite 렌더 & 속성창 UI
 - [ ] 3.1.1 `NodeKind::Text` 및 `TextNode` 클래스 구현 (문자열, 글꼴, 크기, 굵기, 정렬, Point/Area 모드)
 - [ ] 3.1.2 DirectWrite(`IDWriteFactory`, `IDWriteTextFormat`, `IDWriteTextLayout`) 렌더러 캐시 파이프라인 구축
 - [ ] 3.1.3 변환 행렬(`m_xf`)과 결합된 텍스트 렌더링 및 히트테스트 바운딩 박스 구현
-- [ ] 3.1.4 빌드 확인 및 화면 출력 검증
+- [ ] 3.1.4 **`PropertyView` 텍스트 패널 모드/섹션 구현**:
+  - 글꼴 패밀리 콤보박스 (시스템 글꼴 열거)
+  - 폰트 크기, 굵기(Bold/Regular), 기울임(Italic), 밑줄 토글
+  - 정렬 (좌/가운데/우/양쪽 정렬)
+  - 자간(Letter Spacing) 및 줄간격(Line Spacing) 슬라이더/스핀
+  - Point Text ↔ Area Box Text 모드 전환 토글
+- [ ] 3.1.5 빌드 확인 및 화면 출력 및 속성창 변경 검증
 
 ### Step 3.2 TextTool (인라인 편집, IME)
 - [ ] 3.2.1 캔버스 클릭 시 Point Text 생성, 드래그 시 Area Box Text 생성
@@ -225,15 +242,17 @@
 ### Step 3.3 텍스트 → 윤곽선 변환 (Convert to Curves)
 - [ ] 3.3.1 `IDWriteFontFace::GetGlyphRunOutline` 인터페이스를 통한 벡터 윤곽선 기하학 추출
 - [ ] 3.3.2 추출된 기하학 데이터를 `PathNode`의 `SubPath` 목록으로 변환
-- [ ] 3.3.3 메뉴(Ctrl+Shift+O 등) 연결: `TextNode`를 일반 `PathNode`로 치환
+- [ ] 3.3.3 메뉴 및 속성창 버튼 연결: `TextNode`를 일반 `PathNode`로 치환
 - [ ] 3.3.4 빌드 확인 및 글꼴 아웃라인의 베지에 노드 편집 가능 여부 검증
 
-### Step 3.4 ImageNode + 리소스 테이블
+### Step 3.4 ImageNode + 리소스 테이블 & 속성창 UI
 - [ ] 3.4.1 `Document`에 비트맵 리소스 테이블(ID, 파일 경로/바이너리 데이터) 추가
 - [ ] 3.4.2 `ImageNode` 구현: 리소스 참조, 로컬 바운드, `objectFit` 옵션
 - [ ] 3.4.3 WIC(Windows Imaging Component)를 이용한 이미지 로딩 및 `ID2D1Bitmap` 렌더링
-- [ ] 3.4.4 이미지 불러오기(메뉴/드래그 앤 드롭) 도구 연동
-- [ ] 3.4.5 빌드 확인 및 이미지 이동/스케일/회전 검증
+- [ ] 3.4.4 **`PropertyView` 이미지 패널 모드/섹션 구현**: 원본 크기 표시, 맞춤 모드(Fit/Fill/Stretch) 콤보, 이미지 교체 버튼
+- [ ] 3.4.5 이미지 불러오기(메뉴/드래그 앤 드롭) 도구 연동
+- [ ] 3.4.6 빌드 확인 및 이미지 이동/스케일/회전 및 속성창 검증
+
 
 ### Step 3.5 텍스트/이미지 SVG 출력
 - [ ] 3.5.1 `SvgWriter`에 `TextNode` 직렬화 연동 (`<text>`, `<tspan>`, 글꼴 속성 매핑)
@@ -250,10 +269,17 @@
 - [ ] 4.1.2 캔버스 뷰포트에 아트보드 경계 및 배경 렌더링, 페이지 전환 탭/UI 구성
 - [ ] 4.1.3 빌드 확인 및 다중 페이지 전환/생성/삭제 검증
 
-### Step 4.2 FrameNode + Frame 도구
+### Step 4.2 FrameNode + Frame 도구 & 속성창 UI
 - [ ] 4.2.1 `GroupNode`를 상속받는 `FrameNode` 구현 (레이아웃 속성, 패딩, 갭, 배경/테두리, 클리핑)
 - [ ] 4.2.2 도구상자에 Frame 도구 추가 (드래그하여 프레임 생성, 선택된 노드들을 Frame으로 감싸기)
-- [ ] 4.2.3 빌드 확인 및 프레임 계층 렌더링 검증
+- [ ] 4.2.3 **`PropertyView` 프레임/Auto Layout 패널 모드/섹션 구현**:
+  - 레이아웃 모드 (None, Row, Column, Grid) 토글 버튼
+  - 간격(Gap), 안쪽 여백(Padding - 상하좌우 개별/통합) 스핀 컨트롤
+  - 가로/세로 크기 결정 규칙 (Fixed, Hug Content, Fill Container) 콤보
+  - 정렬 (Main Align, Cross Align, Flex Wrap 토글)
+  - 코너 반경(Corner Radius 4각 분리), 박스 그림자(Box Shadow), 클리핑(Clip Content) 체크
+  - 시맨틱 HTML 태그 선택 콤보 (`<div>`, `<section>`, `<header>`, `<nav>`, `<button>` 등)
+- [ ] 4.2.4 빌드 확인 및 프레임 계층 렌더링 및 속성창 조작 검증
 
 ### Step 4.3 LayoutEngine (flexbox 부분 구현)
 - [ ] 4.3.1 `LayoutEngine` 서비스 클래스 구현: Row/Column 흐름, gap, padding 계산

@@ -45,7 +45,7 @@ static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const
 {
 	ge::Node* hit = nullptr;
 	ForEachSelectableTopDown(pDoc, [&](ge::Node* n) {
-		PathShape* ps = dynamic_cast<PathShape*>(n);
+		ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
 		if (ps && ps->HitTestScreenSpace(screenPt, 8.0f, view, f).part != HitResult::Part::None)
 		{
 			hit = n;
@@ -77,9 +77,9 @@ static bool IsEditPart(const HitResult& hr)
 	return hr.part == HitResult::Part::Anchor || hr.part == HitResult::Part::HandleIn || hr.part == HitResult::Part::HandleOut;
 }
 
-bool SelectTool::IsOpenPath(Shape* shape)
+bool SelectTool::IsOpenPath(ge::Node* shape)
 {
-	PathShape* ps = dynamic_cast<PathShape*>(shape);
+	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(shape);
 	if (!ps || ps->GetPaths().empty()) return false;
 	for (const auto& sp : ps->GetPaths())
 	{
@@ -136,7 +136,7 @@ SelectTool::Handle SelectTool::HitHandle(D2D1_POINT_2F screenPt, const D2D1_POIN
 	return Handle::None;
 }
 
-bool SelectTool::GetHandleScreenPositions(Shape* shape, const ViewportTransform& view, ID2D1Factory* f,
+bool SelectTool::GetHandleScreenPositions(ge::Node* shape, const ViewportTransform& view, ID2D1Factory* f,
                                           D2D1_POINT_2F outHandles[9], D2D1_RECT_F* outLocalBounds) const
 {
 	if (!shape || !f) return false;
@@ -150,7 +150,7 @@ bool SelectTool::GetHandleScreenPositions(Shape* shape, const ViewportTransform&
 	}
 
 	D2D1_POINT_2F localHandles[9];
-	Shape::GetLocalHandlePoints(b, localHandles);
+	ge::Node::GetLocalHandlePoints(b, localHandles);
 
 	for (int i = 0; i < 9; ++i)
 	{
@@ -172,7 +172,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 	// 1. 이미 선택된 패스 도형의 노드(앵커, 핸들 In/Out) 클릭 여부 최우선 검사
 	for (ge::Node* n : sel)
 	{
-		PathShape* ps = dynamic_cast<PathShape*>(n);
+		ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
 		if (!ps || !IsInteractive(ps)) continue;
 		HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
 		if (IsEditPart(hr))
@@ -307,7 +307,7 @@ void SelectTool::OnMove(const ToolEvent& e)
 		for (ge::Node* n : sel)
 		{
 			if (!IsInteractive(n)) continue;
-			PathShape* ps = dynamic_cast<PathShape*>(n);
+			ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
 			if (ps && IsEditPart(ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory)))
 			{
 				m_hoverIsNode = true;
@@ -390,7 +390,7 @@ void SelectTool::OnMove(const ToolEvent& e)
 }
 
 // 엔진에 에디트 포인트 조작 위임!
-void SelectTool::ApplyNodeEdit(PathShape* shape, const ToolEvent& e)
+void SelectTool::ApplyNodeEdit(ge::PathNode* shape, const ToolEvent& e)
 {
 	if (!shape) return;
 	// Alt 키가 눌려있으면 대칭/스무스 구속을 깨고 한쪽 핸들만 독립적으로 꺾음 (일러스트레이터 방식)
@@ -410,7 +410,7 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 		// 기준(대표) 도형의 첫 앵커를 그리드에 맞춰 스냅 거리 계산
 		ge::Node* primary = selection.front();
 		auto itP = m_initialXfs.find(primary);
-		PathShape* ps = dynamic_cast<PathShape*>(primary);
+		ge::PathNode* ps = dynamic_cast<ge::PathNode*>(primary);
 		if (ps && itP != m_initialXfs.end() && !ps->GetPaths().empty() && !ps->GetPaths()[0].nodes.empty())
 		{
 			D2D1_POINT_2F p0 = itP->second.TransformPoint(ps->GetPaths()[0].nodes[0].anchor);
@@ -439,14 +439,14 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 }
 
 // 엔진에 스케일 변형 위임!
-void SelectTool::ApplyScale(Shape* shape)
+void SelectTool::ApplyScale(ge::Node* shape)
 {
 	if (!shape) return;
 	shape->ScaleByHandle(static_cast<int>(m_handle), m_dragCurrentWorld, m_initialLocalBounds, m_initialXf);
 }
 
 // 엔진에 회전 변형 위임!
-void SelectTool::ApplyRotate(Shape* shape)
+void SelectTool::ApplyRotate(ge::Node* shape)
 {
 	if (!shape) return;
 	shape->RotateAboutCenter(m_dragStartWorld, m_dragCurrentWorld, m_initialLocalBounds, m_initialXf);
@@ -557,7 +557,7 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	rt->GetFactory(&f);
 	if (!f) return;
 
-	for (Shape* shape : sel)
+	for (ge::Node* shape : sel)
 	{
 		if (!shape || !shape->IsEffectivelyVisible()) continue;
 		D2D1_POINT_2F handles[9];
@@ -622,7 +622,7 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 		}
 
 		// 개별 정점(Anchor) 및 베이지어 핸들(Handle) 에디트 포인트 표시
-		PathShape* pathShape = dynamic_cast<PathShape*>(shape);
+		ge::PathNode* pathShape = dynamic_cast<ge::PathNode*>(shape);
 		if (pathShape)
 		{
 			for (const auto& sp : pathShape->GetPaths())
@@ -774,7 +774,7 @@ void BaseShapeTool::DrawCommittedShapeAnchors(ID2D1RenderTarget* rt, ID2D1SolidC
                                              const ViewportTransform& view, CM2DrawDoc* pDoc)
 {
 	if (!rt || !brush || !pDoc) return;
-	PathShape* ps = m_lastCommittedId ? dynamic_cast<PathShape*>(pDoc->GetDoc().FindById(m_lastCommittedId)) : nullptr;
+	ge::PathNode* ps = m_lastCommittedId ? dynamic_cast<ge::PathNode*>(pDoc->GetDoc().FindById(m_lastCommittedId)) : nullptr;
 	if (!ps) return;
 
 	for (const auto& sp : ps->GetPaths())
@@ -1167,9 +1167,9 @@ void BoxShapeTool::UpdatePreviewGeometry(D2D1_POINT_2F curPt)
 	}
 }
 
-std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D2D1_POINT_2F p1, CM2DrawDoc* pDoc)
+std::unique_ptr<ge::PathNode> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D2D1_POINT_2F p1, CM2DrawDoc* pDoc)
 {
-	auto shape = std::make_unique<PathShape>();
+	auto shape = std::make_unique<ge::PathNode>();
 
 	// Inkscape 스타일 자동 명명 (rect1, ellipse1, star1 등)
 	auto getAutoName = [&](ge::ShapeKind geKind, const wchar_t* fallback) -> std::wstring {
@@ -1310,7 +1310,7 @@ std::unique_ptr<PathShape> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0, D
 	return shape;
 }
 
-void BoxShapeTool::UpdateGeometry(PathShape* pShape, D2D1_POINT_2F p0, D2D1_POINT_2F p1)
+void BoxShapeTool::UpdateGeometry(ge::PathNode* pShape, D2D1_POINT_2F p0, D2D1_POINT_2F p1)
 {
 	if (!pShape || pShape->GetPaths().empty()) return;
 
@@ -1615,7 +1615,7 @@ void MultiPointShapeTool::OnDown(const ToolEvent& e)
 
 	if (!m_previewShape)
 	{
-		m_previewShape = std::make_unique<PathShape>();
+		m_previewShape = std::make_unique<ge::PathNode>();
 		m_previewShape->SetName(m_pName ? m_pName : L"");
 		m_previewShape->GetStyleRef().stroke = m_setting.strokeColor;
 		m_previewShape->GetStyleRef().strokeWidth = m_setting.strokeWidth;

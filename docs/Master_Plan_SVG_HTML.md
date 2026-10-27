@@ -162,11 +162,23 @@ struct Style {
 - 기존 `FillType`/`DashStyle`/`DashStyleWrapper`는 Phase 2에서 이 구조로 마이그레이션 (UI의 DashStyle 콤보는 프리셋 → dashArray 변환).
 - SVG 기본값(`fill-rule: nonzero`, `stroke-miterlimit: 4`)을 기본값으로 채택.
 
+### 2.4 속성창(PropertyView) 아키텍처 및 UI 연동 계획
+기능 확장에 따라 `CD2DPropertyView`의 패널 모드 및 섹션 컨트롤을 유기적으로 확장합니다.
+
+| 속성창 모드/섹션 | 대상 객체 / 상태 | 포함 컨트롤 및 연동 기능 |
+|---|---|---|
+| **스타일 섹션** (공통) | 단일/다중 노드 | - 채우기/윤곽선 색상 휠, 투명도 슬라이더<br>- **Fill 모드**: 단색, 선형/방사형 그라디언트(Color Stop 편집 바, 반전 버튼)<br>- **Stroke 모드**: 두께, Cap(Butt/Round/Square), Join(Miter/Round/Bevel), DashArray 프리셋/커스텀 |
+| **도형/패스 속성** | `PathNode` | - 기본 변환(X, Y, W, H, 회전각)<br>- 파라메트릭 도형별 맞춤 파라미터(Corner Radius, Star Points/InnerRadius, Polygon Sides 등)<br>- 불리언 연산/패스 분할/단순화 실행 버튼 |
+| **텍스트 패널** (신규) | `TextNode` (Phase 3) | - 글꼴 패밀리(DirectWrite 폰트 콤보박스), 크기, 스타일(Regular/Bold/Italic)<br>- 정렬(좌/중앙/우/양쪽), 행간(Line-Height), 자간(Letter-Spacing)<br>- 텍스트 모드(Point Text / Area Box Text), 윤곽선 변환(Convert to Curves) 버튼 |
+| **이미지 패널** (신규) | `ImageNode` (Phase 3) | - 원본 크기, 배치 모드(Fill/Fit/Crop), 이미지 교체/추출 버튼, 투명도 제어 |
+| **프레임/레이아웃 패널** (신규) | `FrameNode` (Phase 4) | - 레이아웃 방향(Row/Column/None), Gap, Padding(상하좌우 개별/통합)<br>- 정렬 방식(Main Align, Cross Align, Wrap 허용)<br>- 크기 규칙(Sizing: Fixed / Hug / Fill), 모서리 Radius(4모서리), Box-Shadow, 시맨틱 태그 선택 |
+| **환경설정 패널** (전환) | 캔버스 / 그리드 / 스냅 | - 그리드 뷰/스냅 간격, 색상, 스케일<br>- **오브젝트 스냅 설정 (신규)**: 스냅 On/Off, 대상(정점, 중간점, 중심점, 변/선 위, 교차점) 개별 체크박스 |
+
 ---
 
 ## 3. 단계별 실행 계획
 
-각 단계는 **완료 기준(DoD)** 을 모두 만족해야 다음 단계로 넘어간다.
+각 단계는 **완료 기준(DoD)** 을 모두 만족해야 다음 단계로 넘어간다. 기능 구현 시 **해당 기능을 조작할 수 있는 속성창(PropertyView) 및 옵션바 UI 작업을 반드시 세트로 진행**한다.
 
 ### Phase 0 — 기반 정리 (결함 제거) 🔴 최우선
 
@@ -210,17 +222,17 @@ struct Style {
 
 | # | 작업 |
 |---|---|
-| 2.1 | Style 마이그레이션 (§2.3): Paint/Gradient/Stroke(cap·join·miter·dashArray), fillRule. PropertyView·ToolOptionBar UI 갱신 |
+| 2.1 | Style 마이그레이션 (§2.3): Paint/Gradient/Stroke(cap·join·miter·dashArray), fillRule. **PropertyView(Cap/Join 콤보, DashArray 제어)·ToolOptionBar UI 갱신** |
 | 2.2 | 렌더러 SVG 정렬: S1 열린 패스 채우기, S2 그룹 opacity < 1 이면 `PushLayer`, S3 블렌드 모드(`ID2D1DeviceContext` + Blend Effect 또는 레이어 오프스크린 합성) |
-| 2.3 | 그라디언트 렌더링(`ID2D1LinearGradientBrush`/`RadialGradientBrush`, 브러시 캐시) + 캔버스 그라디언트 편집 핸들 도구 |
+| 2.3 | 그라디언트 렌더링 + **PropertyView Color Stop 편집 바(색상/위치 조절, 추가/삭제, 프리셋)** 및 캔버스 그라디언트 편집 핸들 도구 |
 | 2.4 | 클리핑 마스크: `GroupNode::clipPath`(첫 자식 또는 지정 노드) → D2D `PushLayer(geometricMask)` / SVG `<clipPath>` |
 | 2.5 | 불리언 연산 완성: 월드 변환 적용 → `CombineWithGeometry` → `ID2D1GeometrySink` 구현체로 베지에 수신 → SubPath 복원 → Command로 교체. Union/Subtract/Intersect/Exclude(XOR) + Divide |
 | 2.6 | 패스 연산: Simplify(RDP + 베지에 피팅), Outline Stroke(`Widen`), Offset Path, Join/Split Path, Reverse Path |
-| 2.7 | 엔진 기능 UI 연결: 그룹(Ctrl+G / Ctrl+Shift+G), Z-Order(Ctrl+] / [ …), 정렬·분배 패널, 노드 추가/삭제 도구(Direct Selection) |
+| 2.7 | 엔진 기능 UI 연결: 그룹(Ctrl+G / Ctrl+Shift+G), Z-Order(Ctrl+] / [ …), **정렬·분배 패널/옵션바 UI, 속성창 불리언/패스 버튼**, 노드 추가/삭제 도구(Direct Selection) |
 | 2.8 | SVG 출력 다듬기: 파라메트릭 도형은 `<rect rx>`/`<ellipse>`/`<polygon>` 네이티브 요소로 출력 옵션, `<defs>`(gradient, clipPath) 중복 제거, "순수 SVG로 내보내기"(m2 네임스페이스 제거) 옵션 |
 | 2.9 | SVG 가져오기 확장: 외부 SVG(`rect/circle/ellipse/line/polyline/polygon/path` 전체 명령 `MLHVCSQTAZ` 상대/절대, `transform`, `style` 속성, `use`)를 PathNode로 변환. 원호(A)는 베지에로 근사 |
 
-**DoD**: W3C SVG 기본 도형/패스 샘플 세트를 import → export 시 브라우저 렌더링과 시각적으로 일치. 화면 렌더와 Chrome 렌더 비교에서 차이 없음(열린 패스, 그룹 opacity, 대시, 조인 포함).
+**DoD**: W3C SVG 기본 도형/패스 샘플 세트를 import → export 시 브라우저 렌더링과 시각적으로 일치. 화면 렌더와 Chrome 렌더 비교에서 차이 없음(열린 패스, 그룹 opacity, 대시, 조인 포함). **새로 추가된 모든 스타일 속성이 속성창에서 양방향 편집 가능.**
 
 ### Phase 3 — 텍스트 & 이미지 (SVG/HTML 공통)
 
@@ -229,9 +241,10 @@ struct Style {
 | 3.1 | `NodeKind::Text`, `TextNode`: runs(텍스트 + 글꼴/크기/굵기/기울임/색), Point 텍스트 / Area(박스) 텍스트, 정렬, 줄간격, 자간 |
 | 3.2 | 렌더링: DirectWrite `IDWriteTextLayout` (렌더러 쪽 캐시, 모델에는 줄바꿈 결과 저장 안 함) |
 | 3.3 | `TextTool` 구현: 클릭 생성, 인라인 편집(캐럿·선택·IME 한글 조합), 박스 드래그 생성 |
-| 3.4 | 텍스트 → 윤곽선 변환 (`IDWriteFontFace::GetGlyphRunOutline` → PathNode) |
-| 3.5 | `ImageNode`: Document 리소스 테이블(id → 바이트/경로), WIC 디코딩, 렌더 캐시 |
-| 3.6 | SVG 출력: `<text>`/`<tspan>`(Area 텍스트는 줄바꿈 계산 결과를 tspan으로 출력 or 윤곽선 옵션), `<image href="data:..."|파일>` |
+| 3.4 | **PropertyView 텍스트 모드/섹션 구현**: 글꼴 콤보(시스템 폰트 열거), 크기/굵기/자간/행간 컨트롤, 텍스트 정렬 토글, 윤곽선 변환 버튼 |
+| 3.5 | `ImageNode`: Document 리소스 테이블(id → 바이트/경로), WIC 디코딩, 렌더 캐시 + **PropertyView 이미지 속성(크기, 맞춤, 교체 버튼)** |
+| 3.6 | 텍스트 → 윤곽선 변환 (`IDWriteFontFace::GetGlyphRunOutline` → PathNode) |
+| 3.7 | SVG 출력: `<text>`/`<tspan>`(Area 텍스트는 줄바꿈 계산 결과를 tspan으로 출력 or 윤곽선 옵션), `<image href="data:..."|파일>` |
 
 **DoD**: 한글/영문 혼합 텍스트 생성·편집·저장·SVG 출력 가능. 이미지 삽입·변형·저장 가능.
 
@@ -257,13 +270,14 @@ struct Style {
 |---|---|
 | 4.3.1 | `Page`(Artboard) 개념 추가: 문서 = 여러 페이지, 페이지마다 크기/배경. 일러스트 모드 = 페이지 1개 + Frame 미사용 |
 | 4.3.2 | `FrameNode : GroupNode` 및 Frame 도구 (드래그 생성, 선택 영역을 Frame으로 감싸기) |
-| 4.3.3 | `LayoutEngine` (모델 외부 서비스): flexbox 부분 구현(방향, gap, padding, align, Fixed/Hug/Fill, wrap). 결과는 자식의 *계산 위치 캐시*에 기록, 저장 안 함 |
-| 4.3.4 | 규칙: `layout != None` 인 Frame의 직계 자식은 위치를 LayoutEngine이 결정 → 선택 툴에서 이동 = 순서 변경(드래그 재정렬), 회전/스큐는 CSS transform 별도 속성으로 제한 |
-| 4.3.5 | TextNode의 Frame 내 동작: 폭 Fill/Fixed 시 자동 줄바꿈, 높이 Hug |
-| 4.3.6 | `HtmlExporter` (Visitor): Frame → 태그 + 클래스, 스타일은 클래스 단위 CSS로 추출(중복 스타일 병합), Text → `<p>/<h1~6>/<span>`, Image → `<img>`, 벡터 그룹 → 인라인 `<svg>`(Phase 2의 SvgWriter 재사용), 폰트 → `@font-face` 또는 웹폰트 링크 |
-| 4.3.7 | 미리보기: WebView2로 내보낸 HTML을 앱 안에서 바로 확인 |
-| 4.3.8 | 반응형: 브레이크포인트 편집 UI + 속성 오버라이드 → `@media` 출력 |
-| 4.3.9 | 컴포넌트(선택): 재사용 Frame(마스터/인스턴스) → HTML에서는 반복 마크업 |
+| 4.3.3 | **PropertyView 프레임/Auto Layout 모드/섹션 구현**: 레이아웃 방향(Row/Col), Gap/Padding 스핀/슬라이더, Sizing(Fixed/Hug/Fill), 정렬 토글, Radius(4각), Shadow, HTML 태그 콤보 |
+| 4.3.4 | `LayoutEngine` (모델 외부 서비스): flexbox 부분 구현(방향, gap, padding, align, Fixed/Hug/Fill, wrap). 결과는 자식의 *계산 위치 캐시*에 기록, 저장 안 함 |
+| 4.3.5 | 규칙: `layout != None` 인 Frame의 직계 자식은 위치를 LayoutEngine이 결정 → 선택 툴에서 이동 = 순서 변경(드래그 재정렬), 회전/스큐는 CSS transform 별도 속성으로 제한 |
+| 4.3.6 | TextNode의 Frame 내 동작: 폭 Fill/Fixed 시 자동 줄바꿈, 높이 Hug |
+| 4.3.7 | `HtmlExporter` (Visitor): Frame → 태그 + 클래스, 스타일은 클래스 단위 CSS로 추출(중복 스타일 병합), Text → `<p>/<h1~6>/<span>`, Image → `<img>`, 벡터 그룹 → 인라인 `<svg>`(Phase 2의 SvgWriter 재사용), 폰트 → `@font-face` 또는 웹폰트 링크 |
+| 4.3.8 | 미리보기: WebView2로 내보낸 HTML을 앱 안에서 바로 확인 |
+| 4.3.9 | 반응형: 브레이크포인트 편집 UI + 속성 오버라이드 → `@media` 출력 |
+| 4.3.10 | 컴포넌트(선택): 재사용 Frame(마스터/인스턴스) → HTML에서는 반복 마크업 |
 
 **DoD**: Header / Hero / 카드 3열 / Footer 구성의 샘플 페이지를 디자인 → HTML 출력 → Chrome에서 디자인과 일치, 창 폭 변경 시 Fill/Hug 규칙대로 반응.
 

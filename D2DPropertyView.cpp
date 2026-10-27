@@ -121,7 +121,7 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 	m_pActiveDoc = pDoc;
 	m_selectedNodeId = (pDoc && pShape) ? pShape->GetId() : 0;
 
-	if (Shape* shape = GetSelectedShape())
+	if (ge::Node* shape = GetSelectedShape())
 	{
 		m_strShapeType = shape->GetShapeTypeName();
 		m_strShapeName = shape->GetName().empty() ? m_strShapeType : CString(shape->GetName().c_str());
@@ -162,7 +162,7 @@ void CD2DPropertyView::ApplyToShape()
 	if (!GetSelectedShape())
 		return;
 
-	Shape* shape = GetSelectedShape();
+	ge::Node* shape = GetSelectedShape();
 	if (!shape) return;
 
 	if (m_bFillEnabled)
@@ -255,7 +255,7 @@ void CD2DPropertyView::InitControls()
 		m_spinTransX->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			if (m_bUpdating) return;
 			if (!GetSelectedShape()) return;
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			if (!shape) return;
 			CanvasUnit curUnit = GetApp()->GetGrid().unit;
 			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -275,7 +275,7 @@ void CD2DPropertyView::InitControls()
 		m_spinTransY->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			if (m_bUpdating) return;
 			if (!GetSelectedShape()) return;
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			if (!shape) return;
 			CanvasUnit curUnit = GetApp()->GetGrid().unit;
 			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -295,7 +295,7 @@ void CD2DPropertyView::InitControls()
 		m_spinTransW->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			if (m_bUpdating) return;
 			if (!GetSelectedShape()) return;
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			if (!shape) return;
 			CanvasUnit curUnit = GetApp()->GetGrid().unit;
 			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -326,7 +326,7 @@ void CD2DPropertyView::InitControls()
 		m_spinTransH->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			if (m_bUpdating) return;
 			if (!GetSelectedShape()) return;
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			if (!shape) return;
 			CanvasUnit curUnit = GetApp()->GetGrid().unit;
 			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -567,7 +567,7 @@ void CD2DPropertyView::InitControls()
 		m_chkCloseShape->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
 			if (GetSelectedShape())
 			{
-				PathShape* pathShape = dynamic_cast<PathShape*>(GetSelectedShape());
+				ge::PathNode* pathShape = dynamic_cast<ge::PathNode*>(GetSelectedShape());
 				if (pathShape)
 				{
 					for (auto& sp : pathShape->GetPathsRef())
@@ -833,7 +833,7 @@ void CD2DPropertyView::SyncControlsFromData()
 
 		if (GetSelectedShape())
 		{
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			if (shape)
 			{
 				D2D1_RECT_F lb;
@@ -877,7 +877,7 @@ void CD2DPropertyView::SyncControlsFromData()
 		// 만약 선택된 도형이 있다면 도형의 픽셀 단위 선 굵기로부터 현재 단위값 갱신
 		if (GetSelectedShape())
 		{
-			Shape* shape = GetSelectedShape();
+			ge::Node* shape = GetSelectedShape();
 			if (shape)
 			{
 				m_fStrokeWidth = shape->GetStyle().strokeWidth / pxPerUnit;
@@ -926,7 +926,7 @@ void CD2DPropertyView::SyncControlsFromData()
 			bool isClosed = false;
 			if (GetSelectedShape())
 			{
-				PathShape* pathShape = dynamic_cast<PathShape*>(GetSelectedShape());
+				ge::PathNode* pathShape = dynamic_cast<ge::PathNode*>(GetSelectedShape());
 				if (pathShape && !pathShape->GetPaths().empty())
 				{
 					isClosed = pathShape->GetPaths()[0].closed;
@@ -980,7 +980,7 @@ void CD2DPropertyView::SyncTransformOnly()
 	if (!GetSelectedShape())
 		return;
 
-	Shape* shape = GetSelectedShape();
+	ge::Node* shape = GetSelectedShape();
 	if (!shape) return;
 
 	CanvasUnit curUnit = GetApp()->GetGrid().unit;
@@ -1177,7 +1177,7 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			bool isPath = false;
 			if (GetSelectedShape())
 			{
-				isPath = (dynamic_cast<PathShape*>(GetSelectedShape()) != nullptr);
+				isPath = (dynamic_cast<ge::PathNode*>(GetSelectedShape()) != nullptr);
 			}
 			m_chkCloseShape->SetVisible(isPath);
 			if (isPath)

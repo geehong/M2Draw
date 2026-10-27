@@ -1,8 +1,6 @@
 #pragma once
 #include "D2DGraphicEngine.h"
 
-using Shape = ge::Node;
-using PathShape = ge::PathNode;
 using ShapeKind = ge::ShapeKind;
 using RectParams = ge::RectParams;
 using TriangleParams = ge::TriangleParams;
@@ -38,8 +36,8 @@ public:
 	bool PruneNonInteractiveSelection();
 
 	// 펜 도구가 작성 중인 패스 (문서에 아직 등록되지 않은 임시 도형)
-	std::unique_ptr<PathShape>          m_currentPath;
-	std::unique_ptr<PathShape>&          GetCurrentPath() { return m_currentPath; }
+	std::unique_ptr<ge::PathNode>          m_currentPath;
+	std::unique_ptr<ge::PathNode>&          GetCurrentPath() { return m_currentPath; }
 
 	// --- 스마트 삭제 연동 기능 (키보드 Del 키 & 레이어 패널 휴지통 공용) ---
 	bool HasSelectedObjects() const;

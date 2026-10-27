@@ -1230,6 +1230,8 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 			ge::Node* const pRowNode = row.pNode;
 			const bool bRowIsLayer = row.isLayer;
 			const D2D1_RECT_F labelRect = row.labelRect;
+			const D2D1_RECT_F rowRect = row.rowRect;
+			const bool bInNameArea = IsInNameArea(row, ptD2D);
 
 			// E. 라벨 또는 행 클릭 -> 캔버스 및 속성창 선택 동기화!
 			if (pDoc && pRowNode)
@@ -1273,16 +1275,10 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 			DWORD dwNow = ::GetTickCount();
 			if (pRowNode && m_pLastClickedNode == pRowNode && (dwNow - m_dwLastClickTime) > 500 && (dwNow - m_dwLastClickTime) < 1800)
 			{
-				if (ptD2D.x >= labelRect.left && ptD2D.x <= labelRect.right)
+				if (bInNameArea)
 				{
-					m_pEditingNode = pRowNode;
-					CRect rcEdit(static_cast<int>(labelRect.left), static_cast<int>(labelRect.top + 2),
-						static_cast<int>(labelRect.right), static_cast<int>(labelRect.bottom - 2));
-					m_wndEditName.MoveWindow(&rcEdit);
-					m_wndEditName.SetWindowText(pRowNode->GetName().c_str());
-					m_wndEditName.ShowWindow(SW_SHOW);
-					m_wndEditName.SetFocus();
-					m_wndEditName.SetSel(0, -1);
+					m_pLastClickedNode = nullptr;
+					BeginEditName(pRowNode, labelRect, rowRect);
 					return;
 				}
 			}
@@ -1294,61 +1290,91 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 	}
 }
 
+bool CLayerView::IsInNameArea(const LayerRowItem& row, D2D1_POINT_2F pt)
+{
+	if (pt.y < row.rowRect.top || pt.y > row.rowRect.bottom) return false;
+	// 오른쪽 경계: 첫 번째 버튼(보기 체크박스) 시작점, 없으면 라벨 끝 + 여유
+	float right = row.labelRect.right + 6.0f;
+	if (row.chkVisible) right = row.chkVisible->GetBounds().left;
+	return pt.x >= row.iconRect.left && pt.x < right;
+}
+
+void CLayerView::BeginEditName(ge::Node* pNode, const D2D1_RECT_F& labelRect, const D2D1_RECT_F& rowRect)
+{
+	if (!pNode || !m_wndEditName.GetSafeHwnd()) return;
+	m_pEditingNode = pNode;
+	// 라벨 폭(65px)보다 약간 넓게(110px), 단 행 오른쪽 끝은 넘지 않음
+	const float kEditWidth = 110.0f;
+	const float right = (std::min)(labelRect.left + kEditWidth, rowRect.right - 6.0f);
+	CRect rcEdit(static_cast<int>(labelRect.left), static_cast<int>(labelRect.top + 2),
+		static_cast<int>(right), static_cast<int>(labelRect.bottom - 2));
+	m_wndEditName.MoveWindow(&rcEdit);
+	m_wndEditName.SetWindowText(pNode->GetName().c_str());
+	m_wndEditName.ShowWindow(SW_SHOW);
+	m_wndEditName.SetFocus();
+	m_wndEditName.SetSel(0, -1);
+}
+
 void CLayerView::OnLButtonDblClk(UINT /*nFlags*/, CPoint point)
 {
 	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
 
-	for (auto& row : m_rowItems)
+	for (const auto& row : m_rowItems)
 	{
-		if (ptD2D.y >= row.rowRect.top && ptD2D.y <= row.rowRect.bottom)
+		if (row.pNode && IsInNameArea(row, ptD2D))
 		{
-			if (ptD2D.x >= row.labelRect.left && ptD2D.x <= row.labelRect.right && row.pNode)
-			{
-				m_pEditingNode = row.pNode;
-				CRect rcEdit(static_cast<int>(row.labelRect.left), static_cast<int>(row.labelRect.top + 2),
-					static_cast<int>(row.labelRect.right), static_cast<int>(row.labelRect.bottom - 2));
-				m_wndEditName.MoveWindow(&rcEdit);
-				m_wndEditName.SetWindowText(row.pNode->GetName().c_str());
-				m_wndEditName.ShowWindow(SW_SHOW);
-				m_wndEditName.SetFocus();
-				m_wndEditName.SetSel(0, -1);
-				return;
-			}
+			// 첫 번째 클릭(OnLButtonDown)의 "천천히 두 번 클릭" 타이머가 이어서 재발동하지 않도록 초기화
+			m_pLastClickedNode = nullptr;
+			BeginEditName(row.pNode, row.labelRect, row.rowRect);
+			return;
 		}
 	}
 }
 
 void CLayerView::CommitEditName()
 {
-	if (m_wndEditName.GetSafeHwnd() && m_wndEditName.IsWindowVisible() && m_pEditingNode)
-	{
-		CString strText;
-		m_wndEditName.GetWindowText(strText);
-		strText.Trim();
-		if (!strText.IsEmpty())
-		{
-			m_pEditingNode->SetName((LPCTSTR)strText);
-			CString strLog;
-			strLog.Format(_T("[레이어 패널] 이름 변경 완료: '%s'"), (LPCTSTR)strText);
-			LogAppEvent(strLog);
+	if (!m_wndEditName.GetSafeHwnd() || !m_wndEditName.IsWindowVisible() || !m_pEditingNode)
+		return;
 
-			CM2DrawDoc* pDoc = GetDocSafe();
-			if (pDoc) pDoc->UpdateAllViews(nullptr);
-		}
-		m_wndEditName.ShowWindow(SW_HIDE);
-		m_pEditingNode = nullptr;
-		SafeInvalidate(FALSE);
+	// 아래 포커스 이동이 EN_KILLFOCUS -> CommitEditName 을 다시 부르므로 먼저 편집 상태를 해제 (재진입 방지)
+	ge::Node* pNode = m_pEditingNode;
+	m_pEditingNode = nullptr;
+
+	CString strText;
+	m_wndEditName.GetWindowText(strText);
+	strText.Trim();
+	HideEditBox();
+
+	if (!strText.IsEmpty())
+	{
+		pNode->SetName((LPCTSTR)strText);
+		CString strLog;
+		strLog.Format(_T("[레이어 패널] 이름 변경 완료: '%s'"), (LPCTSTR)strText);
+		LogAppEvent(strLog);
+
+		CM2DrawDoc* pDoc = GetDocSafe();
+		if (pDoc) pDoc->UpdateAllViews(nullptr);
 	}
+	SafeInvalidate(FALSE);
 }
 
 void CLayerView::CancelEditName()
 {
 	if (m_wndEditName.GetSafeHwnd() && m_wndEditName.IsWindowVisible())
 	{
-		m_wndEditName.ShowWindow(SW_HIDE);
 		m_pEditingNode = nullptr;
+		HideEditBox();
 		SafeInvalidate(FALSE);
 	}
+}
+
+void CLayerView::HideEditBox()
+{
+	// 편집 상자가 포커스를 가진 채 숨겨지면 키 입력이 숨은 창으로 가므로 레이어 뷰로 포커스를 돌려줌
+	// (EN_KILLFOCUS 로 들어온 경우엔 포커스가 이미 다른 곳으로 이동 중이므로 건드리지 않음)
+	if (::GetFocus() == m_wndEditName.GetSafeHwnd())
+		SetFocus();
+	m_wndEditName.ShowWindow(SW_HIDE);
 }
 
 void CLayerView::OnEditKillFocus()
@@ -1428,7 +1454,11 @@ BOOL CLayerView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 void CLayerView::OnKillFocus(CWnd* pNewWnd)
 {
 	CWnd::OnKillFocus(pNewWnd);
-	CommitEditName();
+	// 포커스가 이름 편집 상자로 넘어가는 경우(편집 시작)는 확정하지 않음.
+	// (이전에는 여기서 확정 -> 방금 연 편집 상자가 즉시 닫혀, 레이어 뷰가 포커스를 가진 뒤로는 이름 변경이 시작되지 않았음)
+	const bool bFocusToEdit = pNewWnd && pNewWnd->GetSafeHwnd() == m_wndEditName.GetSafeHwnd();
+	if (!bFocusToEdit)
+		CommitEditName();
 	if (m_capturedControl)
 	{
 		m_capturedControl->ResetState();
@@ -1439,6 +1469,14 @@ void CLayerView::OnKillFocus(CWnd* pNewWnd)
 
 BOOL CLayerView::PreTranslateMessage(MSG* pMsg)
 {
+	// 이름 편집 상자: Enter = 확정, Esc = 취소 (단일행 CEdit 은 Enter 를 스스로 처리하지 않음)
+	if (pMsg->message == WM_KEYDOWN && pMsg->hwnd == m_wndEditName.GetSafeHwnd()
+		&& m_wndEditName.IsWindowVisible())
+	{
+		if (pMsg->wParam == VK_RETURN) { CommitEditName(); return TRUE; }
+		if (pMsg->wParam == VK_ESCAPE) { CancelEditName(); return TRUE; }
+	}
+
 	if (pMsg->message == WM_KEYDOWN && (pMsg->wParam == VK_DELETE || pMsg->wParam == VK_BACK))
 	{
 		if (m_wndEditName.GetSafeHwnd() && m_wndEditName.IsWindowVisible())

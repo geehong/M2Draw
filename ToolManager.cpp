@@ -11,7 +11,7 @@ void PenTool::OnDown(const ToolEvent& e)
 	if (!e.pDoc) return;
 
 	auto& currentPath = e.pDoc->GetCurrentPath();
-	if (!currentPath) currentPath = std::make_unique<PathShape>();
+	if (!currentPath) currentPath = std::make_unique<ge::PathNode>();
 
 	D2D1_POINT_2F screenD2D = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
 	D2D1_POINT_2F snappedWorld = e.worldPt;

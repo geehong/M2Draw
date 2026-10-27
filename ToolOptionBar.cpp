@@ -620,7 +620,7 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, ge::Node* pShape)
 	m_pDoc = pDoc;
 	m_selectedNodeId = (pDoc && pShape) ? pShape->GetId() : 0;
 
-	Shape* pBaseShape = GetSelectedShape();
+	ge::Node* pBaseShape = GetSelectedShape();
 	if (!pBaseShape)
 	{
 		if (m_bEditing)
@@ -630,7 +630,7 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, ge::Node* pShape)
 		return;
 	}
 
-	PathShape* pPathShape = dynamic_cast<PathShape*>(pBaseShape);
+	ge::PathNode* pPathShape = dynamic_cast<ge::PathNode*>(pBaseShape);
 
 	// 편집 중인 도형 종류에 맞춰 모드 전환
 	ToolType shapeTool = ToolType::Select;
@@ -950,7 +950,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 
 		if (GetSelectedShape())
 		{
-			PathShape* pShape = dynamic_cast<PathShape*>(GetSelectedShape());
+			ge::PathNode* pShape = dynamic_cast<ge::PathNode*>(GetSelectedShape());
 			if (pShape && pShape->GetKind() == ::ShapeKind::Rect)
 			{
 				RectParams* rp = pShape->GetParamRef<RectParams>();
@@ -1003,7 +1003,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 
 		if (m_bEditing && GetSelectedShape())
 		{
-			PathShape* pShape = dynamic_cast<PathShape*>(GetSelectedShape());
+			ge::PathNode* pShape = dynamic_cast<ge::PathNode*>(GetSelectedShape());
 			if (pShape && !pShape->GetPaths().empty())
 			{
 				for (auto& sp : pShape->GetPathsRef())
@@ -1198,10 +1198,10 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 	if (!GetSelectedShape())
 		return;
 
-	Shape* pShape = GetSelectedShape();
+	ge::Node* pShape = GetSelectedShape();
 	if (!pShape) return;
 
-	PathShape* pPathShape = dynamic_cast<PathShape*>(pShape);
+	ge::PathNode* pPathShape = dynamic_cast<ge::PathNode*>(pShape);
 
 	D2D1_RECT_F lb{};
 	if (!pShape->GetLocalBounds(nullptr, lb)) return;
