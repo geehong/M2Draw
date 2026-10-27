@@ -370,6 +370,78 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(w2.WriteString(oldDoc).find("clipMask") == std::string::npos, L"저장 시 제거된 m2:clipMask 가 다시 출력됨");
 	}
 
+	// ---- 10. 그룹 계층: 월드 변환/불투명도/가시성·잠금 상속/ID 검색/좌표 변환 왕복/SVG 왕복 (2.0.7) ----
+	{
+		auto approx = [](Vec2 a, float x, float y) { return std::abs(a.x - x) < 0.001f && std::abs(a.y - y) < 0.001f; };
+
+		Document d;
+		auto g1u = std::make_unique<GroupNode>();
+		g1u->SetName(L"G1");
+		g1u->SetTransform(Matrix2D::Translation(100.0f, 0.0f));
+		g1u->SetOpacity(0.5f);
+		GroupNode* g1 = static_cast<GroupNode*>(d.AddShape(std::move(g1u)));
+
+		auto g2u = std::make_unique<GroupNode>();
+		g2u->SetName(L"G2");
+		g2u->SetTransform(Matrix2D::Translation(0.0f, 50.0f));
+		g2u->SetOpacity(0.5f);
+		GroupNode* g2 = static_cast<GroupNode*>(g1->AddChild(std::move(g2u)));
+		PathNode* p = static_cast<PathNode*>(g2->AddChild(MakePath(L"deep", 0.0f, 0.0f)));
+		d.AssignIds(*g1);
+
+		// 10-1. 월드 변환/불투명도는 조상 체인을 모두 반영
+		GE_CHECK(p->GetParent() == g2 && g2->GetParent() == g1 && g1->GetParent() == d.GetActiveLayer(), L"중첩 그룹의 부모 체인이 틀림");
+		GE_CHECK(approx(p->GetWorldTransform().TransformPoint(Vec2{ 1.0f, 1.0f }), 101.0f, 51.0f), L"중첩 그룹의 월드 변환이 조상 변환을 합치지 않음");
+		GE_CHECK(std::abs(p->GetEffectiveOpacity() - 0.25f) < 0.0001f, L"중첩 그룹의 최종 불투명도가 조상 곱이 아님");
+
+		// 10-2. 가시성/잠금은 임의 깊이의 조상에서 상속
+		GE_CHECK(p->IsEffectivelyVisible() && !p->IsEffectivelyLocked(), L"초기 상태의 유효 가시성/잠금이 틀림");
+		g1->SetVisible(false);
+		GE_CHECK(!p->IsEffectivelyVisible() && p->IsVisible(), L"조상이 숨겨졌는데 후손이 보이는 것으로 판정됨");
+		g1->SetVisible(true);
+		g2->SetLocked(true);
+		GE_CHECK(p->IsEffectivelyLocked() && !p->IsLocked() && !g1->IsEffectivelyLocked(), L"조상 잠금이 후손에만 전파되어야 함");
+		g2->SetLocked(false);
+
+		// 10-3. 임의 깊이 노드를 ID 로 검색
+		GE_CHECK(d.FindById(p->GetId()) == p && d.FindById(g2->GetId()) == g2, L"중첩 노드를 ID 로 찾지 못함");
+
+		// 10-4. 로컬 -> 화면 -> 로컬 왕복 (중첩 월드 변환 + 줌/팬)
+		Viewport vp{ 3.0f, Vec2{ -40.0f, 25.0f } };
+		const Matrix2D worldXf = p->GetWorldTransform();
+		Vec2 local{ 12.5f, -7.25f };
+		Vec2 scr = CoordinateSpace::LocalToScreen(local, worldXf, vp);
+		auto back = CoordinateSpace::ScreenToLocal(scr, worldXf, vp);
+		GE_CHECK(back.has_value() && approx(*back, local.x, local.y), L"중첩 그룹 아래에서 좌표 변환 왕복 오차 발생");
+
+		// 10-5. SVG 왕복: 계층/이름/변환/불투명도 보존, 재직렬화 결과 동일
+		SvgWriter w;
+		const std::string svg1 = w.WriteString(d);
+		Document back2;
+		GE_CHECK(reader.ReadFromString(svg1, back2), L"중첩 그룹 SVG 를 읽지 못함");
+		Node* rp = back2.FindById(p->GetId());
+		GE_CHECK(rp != nullptr && rp->GetParent() != nullptr && rp->GetParent()->GetParent() != nullptr, L"중첩 그룹 구조가 복원되지 않음");
+		GE_CHECK(approx(rp->GetWorldTransform().TransformPoint(Vec2{ 1.0f, 1.0f }), 101.0f, 51.0f), L"왕복 후 월드 변환이 달라짐");
+		GE_CHECK(std::abs(rp->GetEffectiveOpacity() - 0.25f) < 0.0001f, L"왕복 후 최종 불투명도가 달라짐");
+		GE_CHECK(w.WriteString(back2) == svg1, L"중첩 그룹이 포함된 SVG 가 재직렬화에서 달라짐");
+
+		// 10-6. 그룹화/해제: 해제해도 월드 위치 유지 (그룹 변환이 자식에 합쳐짐)
+		Document d2;
+		Node* a = d2.AddShape(MakePath(L"a", 0.0f, 0.0f));
+		Node* b = d2.AddShape(MakePath(L"b", 40.0f, 0.0f));
+		d2.SetSelection({ a, b });
+		GroupNode* grp = d2.GroupSelection();
+		GE_CHECK(grp != nullptr && grp->GetChildren().size() == 2 && a->GetParent() == grp && b->GetParent() == grp, L"그룹화 결과가 틀림");
+		const NodeId aId = a->GetId();
+		grp->SetTransform(Matrix2D::Translation(10.0f, 20.0f));
+		const Vec2 aWorld = a->GetWorldTransform().TransformPoint(Vec2{ 0.0f, 0.0f });
+		d2.SetSelection({ grp });
+		d2.UngroupSelection();
+		Node* a2 = d2.FindById(aId);
+		GE_CHECK(a2 != nullptr && a2->GetParent() == d2.GetActiveLayer(), L"그룹 해제 후 자식이 부모 레이어로 올라오지 않음");
+		GE_CHECK(approx(a2->GetWorldTransform().TransformPoint(Vec2{ 0.0f, 0.0f }), aWorld.x, aWorld.y), L"그룹 해제 후 월드 위치가 바뀜");
+	}
+
 #undef GE_CHECK
 	return true;
 }

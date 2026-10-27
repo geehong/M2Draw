@@ -199,7 +199,7 @@
 - [x] 2.0.4 **`SvgWriteOptions` + 변경 카운터 (완료 — 2026-10-27)**: 용도별 모드(`Snapshot`: Undo 용·이미지는 참조 ID / `File`: 저장·이미지 임베드 / `Clean`: 순수 SVG 내보내기). `Node` 의 모든 수정 함수가 전역 변경 카운터를 올리고 `UndoManager::CommitChange`는 카운터가 그대로면 직렬화를 건너뜀 (큰 문서·이미지 대비)
 - [x] 2.0.5 **가져오기/붙여넣기 공용 경로 (완료 — 2026-10-27, `Document::ImportNodes`)**: Reader 가 NodeId 를 복원하므로(1.5.6) 다른 문서로 옮길 때 ID 가 중복됨 → 임시 `Document`로 읽은 뒤 `Clone()` + `AssignIds`로 옮기는 `Document::ImportNodes()` (2.9, 5.4 가 사용)
 - [x] 2.0.6 `LayerNode::IsClippingMask` 정리 (완료 — 2026-10-27, 플래그 제거. 클리핑은 2.4 의 `GroupNode::clipPath`): 현재 마스크 없이 빈 `PushLayer`만 만드는 코드(`D2DRenderer::DrawDocument`) 제거 또는 2.4 의미로 재정의
-- [ ] 2.0.7 빌드 확인 + `RunPureModelVerification`에 (좌표 변환 왕복 / 그룹 계층 / `ImportNodes` ID 유일성) 검증 추가
+- [x] 2.0.7 (완료 — 2026-10-27) 빌드 확인 + `RunPureModelVerification`에 (좌표 변환 왕복 / 그룹 계층 / `ImportNodes` ID 유일성) 검증 추가
 
 ### Step 2.1 Style 모델 마이그레이션 (Paint/Gradient/Stroke)
 - [ ] 2.1.1 신규 `Style` 구조체 도입: `Paint(Solid, Gradient)`, `Stroke(cap, join, miter, dashArray)`
