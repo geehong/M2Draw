@@ -12,29 +12,6 @@
 #define IDC_LAYER_BTN_DOWN     42004
 #define IDC_LAYER_BTN_DEL      42005
 
-// 혼합 모드 영문 16개 명칭 (ge::LayerBlendMode 와 1:1 대응)
-static const struct BlendModeItem {
-	ge::LayerBlendMode mode;
-	const wchar_t* name;
-} s_blendModes[] = {
-	{ ge::LayerBlendMode::Normal,     L"Normal" },
-	{ ge::LayerBlendMode::Darken,     L"Darken" },
-	{ ge::LayerBlendMode::Multiply,   L"Multiply" },
-	{ ge::LayerBlendMode::ColorBurn,  L"Color Burn" },
-	{ ge::LayerBlendMode::Lighten,    L"Lighten" },
-	{ ge::LayerBlendMode::Screen,     L"Screen" },
-	{ ge::LayerBlendMode::ColorDodge, L"Color Dodge" },
-	{ ge::LayerBlendMode::Overlay,    L"Overlay" },
-	{ ge::LayerBlendMode::SoftLight,  L"Soft Light" },
-	{ ge::LayerBlendMode::HardLight,  L"Hard Light" },
-	{ ge::LayerBlendMode::Difference, L"Difference" },
-	{ ge::LayerBlendMode::Exclusion,  L"Exclusion" },
-	{ ge::LayerBlendMode::Hue,        L"Hue" },
-	{ ge::LayerBlendMode::Saturation, L"Saturation" },
-	{ ge::LayerBlendMode::Color,      L"Color" },
-	{ ge::LayerBlendMode::Luminosity, L"Luminosity" }
-};
-
 // ============================================================================
 // COpacityPopupWnd: 순수 불투명도(Opacity) 슬라이더 플로팅 팝업
 // ============================================================================
@@ -770,26 +747,26 @@ void CLayerView::AppendNodeRows(ge::Node* node, int depth)
 			CMenu menu;
 			if (menu.CreatePopupMenu())
 			{
-				for (int i = 0; i < 16; ++i)
+				for (int i = 0; i < ge::kBlendModeCount; ++i)
 				{
 					UINT flags = MF_STRING;
-					if (node->GetBlendMode() == s_blendModes[i].mode)
+					if (node->GetBlendMode() == static_cast<ge::LayerBlendMode>(i))
 					{
 						flags |= MF_CHECKED;
 					}
-					menu.AppendMenu(flags, 50000 + i, s_blendModes[i].name);
+					menu.AppendMenu(flags, 50000 + i, ge::BlendModeName(static_cast<ge::LayerBlendMode>(i)));
 				}
 
 				int cmd = menu.TrackPopupMenu(TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD, pt.x, pt.y, this);
-				if (cmd >= 50000 && cmd < 50016)
+				if (cmd >= 50000 && cmd < 50000 + ge::kBlendModeCount)
 				{
 					int selIdx = cmd - 50000;
-					node->SetBlendMode(s_blendModes[selIdx].mode);
+					node->SetBlendMode(static_cast<ge::LayerBlendMode>(selIdx));
 					CM2DrawDoc* pActiveDoc = GetDocSafe();
 					if (pActiveDoc) pActiveDoc->UpdateAllViews(nullptr);
 					CString strLog;
 					strLog.Format(_T("[레이어 패널] 레이어 '%s' 혼합 모드 변경: '%s'"),
-						node->GetName().c_str(), s_blendModes[selIdx].name);
+						node->GetName().c_str(), ge::BlendModeName(static_cast<ge::LayerBlendMode>(selIdx)));
 					LogAppEvent(strLog);
 					SafeInvalidate(FALSE);
 				}

@@ -55,6 +55,9 @@ protected:
 	bool        m_bUpdating = false;
 
 	ge::Node* GetSelectedShape() const;   // m_selectedNodeId 를 문서에서 조회 (없으면 nullptr)
+	bool IsGroupSelected() const;         // 선택된 노드가 그룹이면 도형용 스타일 UI 대신 그룹 전용 UI 표시
+	void ApplyGroupAppearance();          // 그룹 노드 불투명도/혼합 모드를 모델에 반영
+	float LayoutGroupPanel(float left, float right, float contentW, float y);   // 그룹 모드 컨트롤 배치 (끝 y 반환)
 
 	// 도형 상태 데이터
 	CString      m_strShapeName;
@@ -118,6 +121,8 @@ protected:
 	std::shared_ptr<M2DrawLabel>        m_lblOpacity;          // "Opacity"
 	std::shared_ptr<M2DrawSlider>       m_sliderOpacity;       // Opacity bar
 	std::shared_ptr<M2DrawNumericInput> m_spinOpacity;         // Opacity number input
+	std::shared_ptr<M2DrawLabel>        m_lblBlend;            // "Blend Mode" (그룹 전용)
+	std::shared_ptr<M2DrawComboBox>     m_cboBlend;            // 혼합 모드 콤보 (그룹 전용)
 	std::shared_ptr<M2DrawLabel>        m_lblStrokeWidth;      // "Stroke Width"
 	std::shared_ptr<M2DrawSlider>       m_sliderStrokeWidth;   // Stroke width bar
 	std::shared_ptr<M2DrawNumericInput> m_spinStrokeWidth;     // Stroke width number input

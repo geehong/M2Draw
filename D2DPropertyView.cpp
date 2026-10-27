@@ -169,6 +169,27 @@ ge::Node* CD2DPropertyView::GetSelectedShape() const
 	return (m_pActiveDoc && m_selectedNodeId) ? m_pActiveDoc->GetDoc().FindById(m_selectedNodeId) : nullptr;
 }
 
+bool CD2DPropertyView::IsGroupSelected() const
+{
+	const ge::Node* n = GetSelectedShape();
+	return n && n->Kind() == ge::NodeKind::Group;
+}
+
+void CD2DPropertyView::ApplyGroupAppearance()
+{
+	ge::Node* node = GetSelectedShape();
+	if (!m_pActiveDoc || !node || node->Kind() != ge::NodeKind::Group) return;
+
+	node->SetOpacity(m_fOpacity / 100.0f);
+	if (m_cboBlend)
+	{
+		const int sel = m_cboBlend->GetCurSel();
+		if (sel >= 0 && sel < ge::kBlendModeCount)
+			node->SetBlendMode(static_cast<ge::LayerBlendMode>(sel));
+	}
+	m_pActiveDoc->UpdateAllViews(nullptr);
+}
+
 void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 {
 	m_pActiveDoc = pDoc;
@@ -206,6 +227,10 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 		case ge::DashStyle::DashDot: m_selectedDash = 3; break;
 		default:                     m_selectedDash = 4; break;
 		}
+
+		// 그룹: "Opacity" 는 채움/선 알파가 아니라 그룹 노드 자체의 불투명도
+		if (shape->Kind() == ge::NodeKind::Group)
+			m_fOpacity = shape->GetOpacity() * 100.0f;
 	}
 	else
 	{
@@ -241,6 +266,9 @@ void CD2DPropertyView::ApplyToShape()
 
 	ge::Node* shape = GetSelectedShape();
 	if (!shape) return;
+
+	// 그룹은 자체 스타일을 렌더링하지 않으므로 채움/선 값을 쓰지 않음 (그룹 속성은 ApplyGroupAppearance)
+	if (shape->Kind() == ge::NodeKind::Group) return;
 
 	ge::Style& style = shape->GetStyleRef();
 	if (m_bFillEnabled)
@@ -681,6 +709,12 @@ void CD2DPropertyView::InitControls()
 		m_sliderOpacity->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
 			m_fOpacity = val;
 			if (m_spinOpacity) m_spinOpacity->SetValue(val);
+			if (IsGroupSelected())
+			{
+				ApplyGroupAppearance();
+				SafeInvalidate(FALSE);
+				return;
+			}
 			if (m_colorTarget == 0)
 				m_fillColor.a = m_fOpacity / 100.0f;
 			else
@@ -695,6 +729,12 @@ void CD2DPropertyView::InitControls()
 		m_spinOpacity->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			m_fOpacity = static_cast<float>(val);
 			if (m_sliderOpacity) m_sliderOpacity->SetValue(m_fOpacity);
+			if (IsGroupSelected())
+			{
+				ApplyGroupAppearance();
+				SafeInvalidate(FALSE);
+				return;
+			}
 			if (m_colorTarget == 0)
 				m_fillColor.a = m_fOpacity / 100.0f;
 			else
@@ -703,6 +743,21 @@ void CD2DPropertyView::InitControls()
 			SafeInvalidate(FALSE);
 		});
 		m_pCurrentPanel->AddChild(m_spinOpacity);
+
+		// 6-1. 혼합 모드 (그룹 전용: 도형은 채움/선 알파만, 노드 단위 혼합 모드는 그룹/레이어에서 지정)
+		m_lblBlend = std::make_shared<M2DrawLabel>(L"Blend Mode");
+		m_pCurrentPanel->AddChild(m_lblBlend);
+
+		m_cboBlend = std::make_shared<M2DrawComboBox>();
+		m_cboBlend->SetItemHeight(20.0f);
+		for (int i = 0; i < ge::kBlendModeCount; ++i)
+			m_cboBlend->AddItem(ge::BlendModeName(static_cast<ge::LayerBlendMode>(i)));
+		m_cboBlend->SetCurSel(0, false);
+		m_cboBlend->SetOnSelectionChanged([this](M2DrawComboBox* /*pCombo*/, int /*sel*/) {
+			ApplyGroupAppearance();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_cboBlend);
 
 		// 7. Stroke Width Label & Slider Bar & Number Input
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
@@ -1150,12 +1205,23 @@ void CD2DPropertyView::SyncControlsFromData()
 		if (m_lblShapeHeader)
 		{
 			CString str;
-			if (GetSelectedShape())
+			if (IsGroupSelected())
+			{
+				const ge::GroupNode* grp = static_cast<const ge::GroupNode*>(GetSelectedShape());
+				str.Format(_T("● Group: [%s] (%d objects)"), (LPCTSTR)m_strShapeName, static_cast<int>(grp->GetChildren().size()));
+			}
+			else if (GetSelectedShape())
 				str.Format(_T("● Shape: [%s]"), (LPCTSTR)m_strShapeName);
 			else
 				str = _T("● No Selection (Preview Mode)");
 			m_lblShapeHeader->SetText((LPCTSTR)str);
 		}
+
+		// 그룹이면 "Opacity" 가 노드 불투명도임을 라벨로 구분하고 혼합 모드 콤보를 현재 값으로 맞춤
+		if (m_lblOpacity)
+			m_lblOpacity->SetText(IsGroupSelected() ? L"Group Opacity (%)" : L"Opacity (%)");
+		if (m_cboBlend && IsGroupSelected())
+			m_cboBlend->SetCurSel(static_cast<int>(GetSelectedShape()->GetBlendMode()), false);
 
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
@@ -1383,6 +1449,62 @@ void CD2DPropertyView::SyncTransformOnly()
 	}
 }
 
+float CD2DPropertyView::LayoutGroupPanel(float left, float right, float contentW, float y)
+{
+	// 그룹은 자체 채움/선을 렌더링하지 않으므로 도형용 스타일 컨트롤을 모두 숨김
+	if (m_btnTabFill)   m_btnTabFill->SetVisible(false);
+	if (m_btnTabStroke) m_btnTabStroke->SetVisible(false);
+	for (auto& b : m_btnFillModes) b->SetVisible(false);
+	if (m_palette16)    m_palette16->SetVisible(false);
+	if (m_expShapeWheel) m_expShapeWheel->SetVisible(false);
+	if (m_shapeWheel)   m_shapeWheel->SetVisible(false);
+	if (m_lblStrokeWidth)    m_lblStrokeWidth->SetVisible(false);
+	if (m_sliderStrokeWidth) m_sliderStrokeWidth->SetVisible(false);
+	if (m_spinStrokeWidth)   m_spinStrokeWidth->SetVisible(false);
+	for (auto& b : m_btnDashStyles) b->SetVisible(false);
+	if (m_lblDashArray) m_lblDashArray->SetVisible(false);
+	if (m_txtDashArray) m_txtDashArray->SetVisible(false);
+	if (m_lblCapJoin)   m_lblCapJoin->SetVisible(false);
+	if (m_cboLineCap)   m_cboLineCap->SetVisible(false);
+	if (m_cboLineJoin)  m_cboLineJoin->SetVisible(false);
+	if (m_chkCloseShape) m_chkCloseShape->SetVisible(false);
+
+	// Appearance: 그룹 불투명도 + 혼합 모드
+	if (m_lblOpacity)
+	{
+		m_lblOpacity->SetVisible(true);
+		m_lblOpacity->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+	const float numW = 80.0f;
+	const float sliderW = contentW - numW - 8.0f;
+	if (m_sliderOpacity)
+	{
+		m_sliderOpacity->SetVisible(true);
+		m_sliderOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+	}
+	if (m_spinOpacity)
+	{
+		m_spinOpacity->SetVisible(true);
+		m_spinOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+	}
+	y += 34.0f;
+
+	if (m_lblBlend)
+	{
+		m_lblBlend->SetVisible(true);
+		m_lblBlend->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+	if (m_cboBlend)
+	{
+		m_cboBlend->SetVisible(true);
+		m_cboBlend->SetBounds(left, y, right, y + 26.0f);
+		y += 34.0f;
+	}
+	return y;
+}
+
 void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 {
 	if (!m_pCurrentPanel) return;
@@ -1434,6 +1556,19 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			m_chkAspectLink->SetBounds(left, y, right, y + 20.0f);
 			y += 26.0f;
 		}
+
+		// 그룹: 도형용 채우기/선 UI 대신 Appearance(불투명도/혼합 모드)만 표시
+		if (IsGroupSelected())
+		{
+			y = LayoutGroupPanel(left, right, contentW, y);
+			m_pCurrentPanel->SetBounds(0, 0, width, max(y + 20.0f, 600.0f));
+			return;
+		}
+		// 도형/미리보기: 그룹 전용 컨트롤 숨기고 도형용 탭 복원
+		if (m_lblBlend) m_lblBlend->SetVisible(false);
+		if (m_cboBlend) m_cboBlend->SetVisible(false);
+		if (m_btnTabFill)   m_btnTabFill->SetVisible(true);
+		if (m_btnTabStroke) m_btnTabStroke->SetVisible(true);
 
 		// 2. Tabs: [Fill] vs [Stroke]
 		float halfTabW = (contentW - 6.0f) * 0.5f;

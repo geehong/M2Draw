@@ -386,6 +386,18 @@ enum class LayerBlendMode : uint8_t {
 	Luminosity     // 광도
 };
 
+inline constexpr int kBlendModeCount = 16;
+
+// 혼합 모드 표시 이름 (레이어 패널/속성창 공용, 영문 UI 명칭). 값이 범위를 벗어나면 "Normal"
+inline const wchar_t* BlendModeName(LayerBlendMode m) {
+	static const wchar_t* const names[kBlendModeCount] = {
+		L"Normal", L"Darken", L"Multiply", L"Color Burn", L"Lighten", L"Screen", L"Color Dodge", L"Overlay",
+		L"Soft Light", L"Hard Light", L"Difference", L"Exclusion", L"Hue", L"Saturation", L"Color", L"Luminosity"
+	};
+	const int i = static_cast<int>(m);
+	return (i >= 0 && i < kBlendModeCount) ? names[i] : names[0];
+}
+
 // 파라메트릭 도형 종류 (구엔진과 1:1 호환 및 확장 지원)
 enum class ShapeKind {
 	Path = 0,

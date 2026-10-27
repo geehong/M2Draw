@@ -560,6 +560,33 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(w.WriteString(d).find("fill=\"#ff0000\"") != std::string::npos, L"그라디언트 대체 색(첫 스톱)이 출력되지 않음");
 	}
 
+	// ---- 12. 혼합 모드 공용 이름 헬퍼 / 그룹 노드 불투명도·혼합 모드 왕복 (2.1b) ------------------
+	{
+		GE_CHECK(kBlendModeCount == static_cast<int>(LayerBlendMode::Luminosity) + 1, L"혼합 모드 개수 상수가 enum 과 다름");
+		for (int i = 0; i < kBlendModeCount; ++i)
+			GE_CHECK(BlendModeName(static_cast<LayerBlendMode>(i)) != nullptr && BlendModeName(static_cast<LayerBlendMode>(i))[0] != L'\0', L"혼합 모드 이름이 비어 있음");
+		GE_CHECK(std::wstring(BlendModeName(LayerBlendMode::Multiply)) == L"Multiply" && std::wstring(BlendModeName(LayerBlendMode::ColorBurn)) == L"Color Burn", L"혼합 모드 이름이 enum 순서와 맞지 않음");
+		GE_CHECK(std::wstring(BlendModeName(static_cast<LayerBlendMode>(200))) == L"Normal", L"범위를 벗어난 혼합 모드는 Normal 이어야 함");
+
+		// 그룹에 설정한 불투명도/혼합 모드가 SVG 와 Undo 로 왕복됨
+		Document d;
+		auto gu = std::make_unique<GroupNode>();
+		gu->SetName(L"G");
+		GroupNode* g = static_cast<GroupNode*>(d.AddShape(std::move(gu)));
+		g->AddChild(MakePath(L"inner", 0.0f, 0.0f));
+		d.AssignIds(*g);
+		UndoManager um;
+		um.Reset(d);
+		g->SetOpacity(0.4f);
+		g->SetBlendMode(LayerBlendMode::Overlay);
+		GE_CHECK(um.CommitChange(L"그룹 모양", d), L"그룹 불투명도/혼합 모드 변경이 Undo 로 기록되지 않음");
+		SvgWriter w;
+		Document back;
+		GE_CHECK(reader.ReadFromString(w.WriteString(d), back), L"그룹 SVG 를 읽지 못함");
+		const Node* rg = back.FindById(g->GetId());
+		GE_CHECK(rg != nullptr && std::abs(rg->GetOpacity() - 0.4f) < 0.001f && rg->GetBlendMode() == LayerBlendMode::Overlay, L"그룹 불투명도/혼합 모드가 왕복 후 달라짐");
+	}
+
 #undef GE_CHECK
 	return true;
 }
