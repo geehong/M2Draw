@@ -578,6 +578,15 @@ public:
 	// 복제 (Ctrl+D): 선택 항목을 같은 부모의 원본 바로 위에 복제, 새 ID/이름 발급 후 복제본을 선택
 	std::vector<Node*> DuplicateSelection();
 
+	// 다른 Document(파일에서 읽은 임시 문서, 클립보드 SVG 등)의 노드를 이 문서로 가져오기 (SVG 가져오기/붙여넣기 공용 경로).
+	// 소스는 변경하지 않고 Clone() 한 뒤 이 문서의 ID 발급기로 모든 노드(하위 포함)에 새 NodeId 를 부여하므로,
+	// 소스의 ID 가 이 문서와 겹쳐도 충돌하지 않는다. 선택은 바꾸지 않음 (호출 측이 반환값으로 결정).
+	//  - target == nullptr : 활성 레이어에 삽입. 소스가 레이어이면 새 레이어로 추가됨 (index = 레이어 위치)
+	//  - target 지정       : 해당 그룹/레이어의 index 위치(-1 = 최상단)에 삽입. 소스가 레이어이면 그 자식들을 펼쳐서 삽입
+	//  - target 이 이 문서 소속이 아니면 아무것도 하지 않고 빈 목록 반환
+	// 반환: 이 문서에 새로 생성된 최상위 노드들 (소스 순서)
+	std::vector<Node*> ImportNodes(const std::vector<const Node*>& sources, GroupNode* target = nullptr, int index = -1);
+
 		// 노드 제거 (소유권 반환, 선택에서도 제외)
 		std::unique_ptr<Node> RemoveNode(Node* node);
 		Node* FindById(NodeId id) const;

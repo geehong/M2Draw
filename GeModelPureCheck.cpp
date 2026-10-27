@@ -14,6 +14,10 @@
 #include "UndoManager.h"
 #include "GeModelPureCheck.h"
 
+#include <algorithm>
+#include <functional>
+#include <unordered_set>
+
 namespace ge {
 namespace test {
 
@@ -253,6 +257,101 @@ bool RunPureModelVerification(std::wstring* failure)
 		Document cleanDoc;
 		GE_CHECK(reader.ReadFromString(cleanSvg, cleanDoc), L"Clean SVG 를 다시 읽지 못함");
 		GE_CHECK(CountPaths(cleanDoc) == CountPaths(d), L"Clean SVG 왕복 후 도형 개수가 다름");
+	}
+
+	// ---- 8. ImportNodes: 가져온 노드의 NodeId 유일성 (2.0.5) --------------------------------------
+	{
+		// 트리 전체 ID 수집: 0 이거나 중복이면 실패
+		auto collectIds = [](Document& d, std::unordered_set<NodeId>& ids) {
+			bool ok = true;
+			std::function<void(const Node&)> walk = [&](const Node& n) {
+				if (n.GetId() == 0 || !ids.insert(n.GetId()).second) ok = false;
+				if (n.Kind() != NodeKind::Path)
+					for (const auto& c : static_cast<const GroupNode&>(n).GetChildren()) if (c) walk(*c);
+			};
+			for (const auto& l : d.GetLayers()) if (l) walk(*l);
+			return ok;
+		};
+
+		// 소스 문서: 레이어 > 그룹 > 패스 2개 (ID 가 1, 2, 3, 4 부근으로 대상 문서와 겹침)
+		Document src;
+		auto g = std::make_unique<GroupNode>();
+		g->SetName(L"srcGroup");
+		GroupNode* sg = static_cast<GroupNode*>(src.AddShape(std::move(g)));
+		sg->AddChild(MakePath(L"s1", 0.0f, 0.0f));
+		sg->AddChild(MakePath(L"s2", 20.0f, 0.0f));
+		src.AssignIds(*sg);
+		std::unordered_set<NodeId> srcIdsBefore;
+		GE_CHECK(collectIds(src, srcIdsBefore), L"소스 문서 ID 가 유일하지 않음(테스트 전제)");
+
+		// 임시 문서로 읽은 것처럼: SVG 로 직렬화 -> 읽기 (Reader 는 NodeId 를 복원하므로 ID 가 그대로 나옴)
+		SvgWriter w;
+		Document readBack;
+		GE_CHECK(reader.ReadFromString(w.WriteString(src), readBack), L"임포트 테스트용 SVG 읽기 실패");
+		GE_CHECK(readBack.FindById(sg->GetId()) != nullptr, L"임포트 테스트 전제: 읽은 문서가 원본 ID 를 유지해야 함");
+
+		// 대상 문서에 이미 같은 ID 대역의 노드가 있음 (충돌 상황)
+		Document dst;
+		dst.AddShape(MakePath(L"d1", 0.0f, 100.0f));
+		dst.AddShape(MakePath(L"d2", 30.0f, 100.0f));
+		dst.AddShape(MakePath(L"d3", 60.0f, 100.0f));
+		std::unordered_set<NodeId> dummy;
+		GE_CHECK(collectIds(dst, dummy), L"대상 문서 ID 가 유일하지 않음(테스트 전제)");
+		const size_t dstCountBefore = dummy.size();
+
+		// 8-1. 읽은 문서의 그룹을 활성 레이어로 가져오기
+		const Node* readGroup = readBack.GetLayers()[0]->GetChildren()[0].get();
+		std::vector<Node*> imported = dst.ImportNodes({ readGroup });
+		GE_CHECK(imported.size() == 1 && imported[0]->Kind() == NodeKind::Group, L"그룹 가져오기 결과가 틀림");
+		GE_CHECK(imported[0]->GetParent() == dst.GetActiveLayer(), L"가져온 그룹이 활성 레이어에 들어가지 않음");
+		std::unordered_set<NodeId> dstIds;
+		GE_CHECK(collectIds(dst, dstIds), L"가져온 뒤 대상 문서에 중복/0 ID 가 생김");
+		GE_CHECK(dstIds.size() == dstCountBefore + 3, L"가져온 노드 수(그룹 + 자식 2)가 틀림");
+		GE_CHECK(dst.IssueId() > *std::max_element(dstIds.begin(), dstIds.end()), L"가져온 뒤 ID 발급 카운터가 기존 ID 와 충돌할 수 있음");
+		for (const Node* n : { imported[0], static_cast<const GroupNode*>(imported[0])->GetChildren()[0].get() })
+			GE_CHECK(dst.FindById(n->GetId()) == n, L"가져온 노드를 ID 로 찾지 못함");
+		GE_CHECK(imported[0]->GetName() == L"srcGroup", L"가져온 그룹 이름이 보존되지 않음");
+
+		// 소스는 변경되지 않음 (ID, 소속, 개수)
+		std::unordered_set<NodeId> readIds;
+		GE_CHECK(collectIds(readBack, readIds) && readIds == srcIdsBefore, L"가져오기가 소스 문서의 ID 를 바꿈");
+		GE_CHECK(readGroup->GetParent() == readBack.GetLayers()[0].get(), L"가져오기가 소스 노드를 옮김(복제여야 함)");
+
+		// 8-2. 같은 소스를 한 번 더, 이번에는 위치 지정(index 0) -> 여전히 유일
+		GroupNode* layer0 = dst.GetActiveLayer();
+		std::vector<Node*> again = dst.ImportNodes({ readGroup, readGroup }, layer0, 0);
+		GE_CHECK(again.size() == 2 && layer0->IndexOf(again[0]) == 0 && layer0->IndexOf(again[1]) == 1, L"index 지정 삽입 순서가 틀림");
+		std::unordered_set<NodeId> dstIds2;
+		GE_CHECK(collectIds(dst, dstIds2) && dstIds2.size() == dstCountBefore + 3 + 6, L"같은 소스를 반복 가져온 뒤 ID 가 유일하지 않음");
+
+		// 8-3. 자기 문서 안에서 가져오기(복제) + target 이 소스의 후손인 경우
+		GroupNode* inner = static_cast<GroupNode*>(imported[0]);
+		std::vector<Node*> self = dst.ImportNodes({ inner }, inner);
+		GE_CHECK(self.size() == 1 && self[0]->GetParent() == inner && self[0] != inner, L"자기 후손 그룹으로의 가져오기가 실패");
+		std::unordered_set<NodeId> dstIds3;
+		GE_CHECK(collectIds(dst, dstIds3), L"자기 문서에서 가져온 뒤 ID 가 유일하지 않음");
+
+		// 8-4. 레이어 소스: target 없으면 새 레이어, target 있으면 자식만 펼침
+		const size_t layersBefore = dst.GetLayers().size();
+		std::vector<Node*> asLayer = dst.ImportNodes({ readBack.GetLayers()[0].get() });
+		GE_CHECK(asLayer.size() == 1 && asLayer[0]->Kind() == NodeKind::Layer && dst.GetLayers().size() == layersBefore + 1, L"레이어 가져오기가 새 레이어를 만들지 않음");
+		std::unordered_set<NodeId> dstIds4;
+		GE_CHECK(collectIds(dst, dstIds4), L"레이어를 가져온 뒤 ID 가 유일하지 않음");
+		std::vector<Node*> flat = dst.ImportNodes({ readBack.GetLayers()[0].get() }, layer0);
+		GE_CHECK(flat.size() == 1 && flat[0]->Kind() == NodeKind::Group && dst.GetLayers().size() == layersBefore + 1, L"target 지정 시 레이어가 자식으로 펼쳐지지 않음");
+
+		// 8-5. 다른 문서 소속의 target 은 거부 (아무것도 바뀌지 않음)
+		std::unordered_set<NodeId> beforeForeign;
+		collectIds(dst, beforeForeign);
+		std::vector<Node*> rejected = dst.ImportNodes({ readGroup }, readBack.GetActiveLayer());
+		std::unordered_set<NodeId> afterForeign;
+		GE_CHECK(rejected.empty() && collectIds(dst, afterForeign) && afterForeign == beforeForeign, L"다른 문서의 target 으로 가져오기가 거부되지 않음");
+
+		// 8-6. 가져오기도 변경 카운터를 올려 Undo 로 기록됨
+		UndoManager um2;
+		um2.Reset(dst);
+		dst.ImportNodes({ readGroup });
+		GE_CHECK(um2.CommitChange(L"가져오기", dst), L"ImportNodes 가 변경 카운터를 올리지 않음");
 	}
 
 #undef GE_CHECK

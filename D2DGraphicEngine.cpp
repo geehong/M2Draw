@@ -744,6 +744,55 @@ std::vector<Node*> Document::DuplicateSelection()
 	return result;
 }
 
+std::vector<Node*> Document::ImportNodes(const std::vector<const Node*>& sources, GroupNode* target, int index)
+{
+	std::vector<Node*> result;
+
+	// target 은 이 문서의 노드여야 함 (조상 체인의 루트가 이 문서의 레이어)
+	if (target) {
+		const GroupNode* root = target;
+		while (root->GetParent()) root = root->GetParent();
+		bool owned = false;
+		for (const auto& l : m_layers) if (l.get() == root) { owned = true; break; }
+		if (!owned) return result;
+	}
+	GroupNode* dest = target ? target : GetActiveLayer();
+
+	// 1) 먼저 전부 복제: 자기 문서에서 가져오거나 target 이 소스의 후손이어도 삽입 중 소스가 바뀌지 않도록
+	std::vector<std::unique_ptr<Node>> copies;
+	for (const Node* src : sources) {
+		if (!src) continue;
+		if (src->Kind() == NodeKind::Layer && target) {
+			// 레이어를 그룹/레이어 안으로 넣을 수는 없으므로 자식들만 펼침
+			for (const auto& c : static_cast<const GroupNode*>(src)->GetChildren())
+				if (c) copies.push_back(c->Clone());
+		} else {
+			copies.push_back(src->Clone());
+		}
+	}
+
+	// 2) 새 ID 발급 후 삽입. AssignIds 는 id==0 인 노드에만 발급하므로 "Clone 은 ID 를 비운다"는 규약에 의존 (검증은 GeModelPureCheck)
+	int at = index;
+	for (auto& copy : copies) {
+		AssignIds(*copy);
+		if (copy->Kind() == NodeKind::Layer) {
+			// target == nullptr 일 때만 도달: 새 레이어로 추가
+			LayerNode* layer = static_cast<LayerNode*>(copy.release());
+			ChangeTracker::Bump();
+			if (at < 0 || at >= static_cast<int>(m_layers.size()))
+				m_layers.emplace_back(layer);
+			else
+				m_layers.insert(m_layers.begin() + at, std::unique_ptr<LayerNode>(layer));
+			result.push_back(layer);
+		} else {
+			if (!dest) continue;
+			result.push_back(dest->AddChild(std::move(copy), at));
+		}
+		if (at >= 0) ++at;
+	}
+	return result;
+}
+
 void Document::AlignSelection(AlignMode mode, bool toCanvas)
 {
 	Rect2 ref;
