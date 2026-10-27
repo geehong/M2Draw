@@ -100,28 +100,18 @@ Rect2 Matrix2D::TransformRect(const Rect2& r) const
 
 Matrix2D Viewport::ToMatrix() const
 {
-	if (invertY) {
-		Matrix2D m;
-		m.m11 = zoom;
-		m.m22 = -zoom;
-		m.dx = pan.x;
-		m.dy = pan.y;
-		return m;
-	}
 	return Matrix2D::Scale(zoom, zoom) * Matrix2D::Translation(pan.x, pan.y);
 }
 
 Vec2 Viewport::ScreenToWorld(Vec2 s) const
 {
 	if (zoom <= 0.0001f) return s;
-	float wy = invertY ? (pan.y - s.y) / zoom : (s.y - pan.y) / zoom;
-	return { (s.x - pan.x) / zoom, wy };
+	return { (s.x - pan.x) / zoom, (s.y - pan.y) / zoom };
 }
 
 Vec2 Viewport::WorldToScreen(Vec2 w) const
 {
-	float sy = invertY ? (pan.y - w.y * zoom) : (w.y * zoom + pan.y);
-	return { w.x * zoom + pan.x, sy };
+	return { w.x * zoom + pan.x, w.y * zoom + pan.y };
 }
 
 // ============================================================================
@@ -1129,24 +1119,25 @@ void CommandStack::Clear()
 HitResult PathNode::HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, const Viewport& view, ID2D1Factory* f)
 {
 	const float tolSq = tolPx * tolPx;
+	const Matrix2D worldXf = GetWorldTransform();   // 그룹 안쪽 도형도 정확히 판정
 
 	// 1순위: 앵커 및 핸들
 	for (int spIdx = 0; spIdx < static_cast<int>(m_paths.size()); ++spIdx) {
 		const auto& sp = m_paths[spIdx];
 		for (int nIdx = 0; nIdx < static_cast<int>(sp.nodes.size()); ++nIdx) {
 			const auto& node = sp.nodes[nIdx];
-			D2D1_POINT_2F anchorScreen = CoordinateSpace::LocalToScreen(node.anchor.ToD2D(), m_xf, view);
+			D2D1_POINT_2F anchorScreen = CoordinateSpace::LocalToScreen(node.anchor.ToD2D(), worldXf, view);
 			float dx = screenPt.x - anchorScreen.x;
 			float dy = screenPt.y - anchorScreen.y;
 			if ((dx * dx + dy * dy) <= tolSq) return { HitPart::Anchor, spIdx, nIdx, this };
 
 			if (node.HasOut()) {
-				D2D1_POINT_2F hScreen = CoordinateSpace::LocalToScreen(node.AbsOut().ToD2D(), m_xf, view);
+				D2D1_POINT_2F hScreen = CoordinateSpace::LocalToScreen(node.AbsOut().ToD2D(), worldXf, view);
 				if (((screenPt.x - hScreen.x)*(screenPt.x - hScreen.x) + (screenPt.y - hScreen.y)*(screenPt.y - hScreen.y)) <= tolSq)
 					return { HitPart::HandleOut, spIdx, nIdx, this };
 			}
 			if (node.HasIn()) {
-				D2D1_POINT_2F hScreen = CoordinateSpace::LocalToScreen(node.AbsIn().ToD2D(), m_xf, view);
+				D2D1_POINT_2F hScreen = CoordinateSpace::LocalToScreen(node.AbsIn().ToD2D(), worldXf, view);
 				if (((screenPt.x - hScreen.x)*(screenPt.x - hScreen.x) + (screenPt.y - hScreen.y)*(screenPt.y - hScreen.y)) <= tolSq)
 					return { HitPart::HandleIn, spIdx, nIdx, this };
 			}

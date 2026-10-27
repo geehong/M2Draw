@@ -139,7 +139,6 @@ inline Matrix2D operator*(const D2D1_MATRIX_3X2_F& lhs, const Matrix2D& rhs) {
 struct Viewport {
 	float zoom = 1.0f;
 	Vec2  pan{};
-	bool  invertY = false; // true: 좌하단이 (0,0)이고 Y축 위로 증가 (문서/CAD 모드)
 	Matrix2D ToMatrix() const;
 	Vec2 ScreenToWorld(Vec2 screenPt) const;
 	Vec2 WorldToScreen(Vec2 worldPt) const;

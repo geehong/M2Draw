@@ -202,7 +202,8 @@ std::string SvgWriter::WriteString(Document& doc) {
 		m_output += "     m2:backgroundOpacity=\"" + FormatFloat(doc.backgroundColor.a) + "\"\n";
 	}
 	m_output += "     m2:canvasColor=\"" + ColorToHex(doc.canvasColor) + "\"\n";
-	m_output += std::string("     m2:originMode=\"") + (doc.originMode == CanvasOriginMode::BottomLeft ? "bottomLeft" : "topLeft") + "\">\n";
+	m_output += std::string("     m2:originMode=\"") + (doc.originMode == CanvasOriginMode::BottomLeft ? "bottomLeft" : "topLeft") + "\"\n";
+	m_output += "     m2:version=\"2.0\">\n";
 
 	++m_indent;
 

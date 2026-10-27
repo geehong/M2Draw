@@ -41,12 +41,31 @@ static void ForEachSelectableTopDown(CM2DrawDoc* pDoc, Fn fn)
 	}
 }
 
+// 노드(또는 그룹이면 보이고 잠기지 않은 후손 중 하나)가 화면 좌표에서 히트되는지 재귀 검사 (위 -> 아래)
+static bool HitTestNodeRecursive(ge::Node* n, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
+{
+	if (!n || !n->IsVisible() || n->IsLocked()) return false;
+
+	if (auto* group = dynamic_cast<ge::GroupNode*>(n))
+	{
+		const auto& children = group->GetChildren();
+		for (int i = static_cast<int>(children.size()) - 1; i >= 0; --i)
+		{
+			if (HitTestNodeRecursive(children[i].get(), screenPt, view, f)) return true;
+		}
+		return false;
+	}
+
+	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
+	return ps && ps->HitTestScreenSpace(screenPt, 8.0f, view, f).part != HitResult::Part::None;
+}
+
+// 레이어 직속 자식 단위로 반환: 그룹 안쪽 도형을 클릭하면 그룹 전체가 선택 대상이 됨
 static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
 {
 	ge::Node* hit = nullptr;
 	ForEachSelectableTopDown(pDoc, [&](ge::Node* n) {
-		ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
-		if (ps && ps->HitTestScreenSpace(screenPt, 8.0f, view, f).part != HitResult::Part::None)
+		if (HitTestNodeRecursive(n, screenPt, view, f))
 		{
 			hit = n;
 			return true;
@@ -61,10 +80,15 @@ static void ActivateLayerOf(CM2DrawDoc* pDoc, ge::Node* node)
 {
 	if (!pDoc || !node) return;
 	auto& doc = pDoc->GetDoc();
+	// 그룹 안쪽 노드면 최상위 조상(레이어 직속 자식)의 부모 레이어를 찾음
+	ge::GroupNode* parent = node->GetParent();
+	while (parent && parent->GetParent())
+		parent = parent->GetParent();
+
 	const auto& layers = doc.GetLayers();
 	for (size_t i = 0; i < layers.size(); ++i)
 	{
-		if (layers[i].get() == node->GetParent())
+		if (layers[i].get() == parent)
 		{
 			doc.SetActiveLayer(static_cast<int>(i));
 			return;
@@ -538,8 +562,7 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 {
 	if (!rt || !brush || !pDoc) return;
 
-	bool isBottomLeft = (pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
-	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
+	ViewportTransform view = { zoom, { pan.x, pan.y } };
 
 	// 1. 마키(Marquee) 드래그 선택 사각형 렌더링
 	if (m_mode == Mode::Marquee)
@@ -688,11 +711,10 @@ void BaseShapeTool::OnMove(const ToolEvent& e)
 }
 
 void BaseShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
-                                float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
+                                float zoom, D2D1_POINT_2F pan, CM2DrawDoc* /*pDoc*/)
 {
 	if (!rt || !brush) return;
-	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
-	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
+	ViewportTransform view = { zoom, { pan.x, pan.y } };
 
 	// 1. 도형이 생성되어 드래그 중인 경우: 엔진의 Shape 렌더링 파이프라인 활용
 	if (m_previewShape)
@@ -1096,8 +1118,7 @@ void BoxShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brus
                                float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
 {
 	if (!rt || !brush) return;
-	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
-	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
+	ViewportTransform view = { zoom, { pan.x, pan.y } };
 
 	// 1. 첫 번째 포인트가 찍혀서 미리보기가 생성된 상태 (드래그 중이거나 클릭-이동 대기 중)
 	if ((m_previewShape || m_previewNode) && (m_isDragging || m_waitingSecondClick))
@@ -1765,8 +1786,7 @@ void MultiPointShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrus
                                       float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
 {
 	if (!rt || !brush) return;
-	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
-	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
+	ViewportTransform view = { zoom, { pan.x, pan.y } };
 
 	if (m_previewShape && !m_previewShape->GetPaths().empty())
 	{

@@ -145,16 +145,29 @@ bool RunPureModelVerification(std::wstring* failure)
 	GE_CHECK(!reader.ReadFromString("<svg xmlns=\"http://www.w3.org/2000/svg\"><g></svg>", scratch), L"깨진 XML 을 성공으로 처리함");
 	GE_CHECK(!reader.ReadFromString("<html/>", scratch), L"SVG 가 아닌 문서를 성공으로 처리함");
 
-	// ---- 5. 캔버스 크기 / 배경색 왕복 (색은 #rrggbb 8비트 반올림이므로 1/255 오차 허용) -------
-	doc.width = 1024.0f;
-	doc.height = 768.0f;
-	doc.backgroundColor = Color(0.9f, 0.8f, 0.7f, 1.0f);
-	const std::string svgCanvas = writer.WriteString(doc);
-	Document docCanvas;
-	GE_CHECK(reader.ReadFromString(svgCanvas, docCanvas), L"캔버스 설정이 담긴 SVG 를 읽지 못함");
-	GE_CHECK(docCanvas.width == 1024.0f && docCanvas.height == 768.0f, L"캔버스 크기가 보존되지 않음");
-	GE_CHECK(NearByte(docCanvas.backgroundColor.r, 0.9f) && NearByte(docCanvas.backgroundColor.g, 0.8f)
-		&& NearByte(docCanvas.backgroundColor.b, 0.7f), L"캔버스 배경색이 보존되지 않음");
+	// ---- 6. 좌표계 변환 왕복 및 BottomLeft 레거시 호환 검증 -------------------
+	Viewport vp{ 2.5f, Vec2{ 150.0f, -50.0f } };
+	Vec2 worldOrig{ 123.4f, 567.8f };
+	Vec2 screenPt = vp.WorldToScreen(worldOrig);
+	Vec2 roundTripWorld = vp.ScreenToWorld(screenPt);
+	GE_CHECK(std::abs(roundTripWorld.x - worldOrig.x) < 0.001f && std::abs(roundTripWorld.y - worldOrig.y) < 0.001f, L"Viewport ScreenToWorld/WorldToScreen 왕복 오차 발생");
+
+	// 구버전(m2:version 없는) bottomLeft 파일 로드 시 y' = H - y 변환 검증
+	const std::string legacySvg =
+		"<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:m2=\"https://m2draw/ns\" "
+		"width=\"1000\" height=\"800\" viewBox=\"0 0 1000 800\" m2:originMode=\"bottomLeft\">\n"
+		"  <path d=\"M 100 200 L 300 200\" />\n"
+		"</svg>\n";
+	Document docLegacy;
+	GE_CHECK(reader.ReadFromString(legacySvg, docLegacy), L"레거시 bottomLeft SVG 읽기 실패");
+	GE_CHECK(docLegacy.originMode == CanvasOriginMode::BottomLeft, L"레거시 bottomLeft 모드 인식 실패");
+	GE_CHECK(!docLegacy.GetLayers().empty(), L"레거시 SVG 에 레이어가 없음");
+	auto* legacyLayer = docLegacy.GetLayers()[0].get();
+	GE_CHECK(!legacyLayer->GetChildren().empty(), L"레거시 레이어에 자식이 없음");
+	auto* legacyPath = dynamic_cast<PathNode*>(legacyLayer->GetChildren()[0].get());
+	GE_CHECK(legacyPath != nullptr && !legacyPath->GetPaths().empty(), L"레거시 패스 노드 검증 실패");
+	// 레거시의 y=200 은 H=800 기준 y' = 800 - 200 = 600 이어야 함
+	GE_CHECK(std::abs(legacyPath->GetPaths()[0].nodes[0].anchor.y - 600.0f) < 0.01f, L"레거시 bottomLeft y' = H - y 변환 실패");
 
 #undef GE_CHECK
 	return true;

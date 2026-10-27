@@ -27,5 +27,5 @@ public:
 
 	void Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	            D2D1_SIZE_F view, float zoom, D2D1_POINT_2F pan,
-	            const GridRenderer& grid, bool invertY = false);
+	            const GridRenderer& grid, float docH = 0.0f, bool isBottomLeft = false);
 };

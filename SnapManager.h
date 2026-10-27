@@ -94,8 +94,7 @@ public:
 		ID2D1SolidColorBrush* brush,
 		const SnapResult& snap,
 		float zoom,
-		D2D1_POINT_2F pan,
-		bool invertY = false
+		D2D1_POINT_2F pan
 	) const;
 
 private:

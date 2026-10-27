@@ -264,6 +264,7 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 	std::vector<GroupNode*> groupStack;
 	XmlNodeType nodeType;
 	bool sawSvgRoot = false;
+	std::wstring fileVersion;
 
 	// Read 는 문서 끝에서 S_FALSE, XML 오류에서는 실패 HRESULT 를 반환 -> 오류 시 부분 문서를 성공으로 취급하지 않음
 	while (S_OK == (hr = pReader->Read(&nodeType))) {
@@ -333,6 +334,9 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 					} else {
 						outDoc.originMode = CanvasOriginMode::TopLeft;
 					}
+				}
+				if (attrs.count(L"m2:version")) {
+					fileVersion = attrs[L"m2:version"];
 				}
 			}
 			else if (elemName == L"sodipodi:namedview") {
@@ -542,6 +546,35 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 
 	// ID 무결성: 복원된 ID 는 유지하고, 없는/중복된 ID(외부 SVG 등)에만 새 ID 발급
 	outDoc.EnsureUniqueIds();
+
+	// 구버전(버전 없는 레거시 파일) 중 bottomLeft 로 저장되었던 도형 좌표 y' = H - y 보정
+	if (fileVersion.empty() && outDoc.originMode == CanvasOriginMode::BottomLeft) {
+		const float H = outDoc.height;
+		std::function<void(Node&)> invertNodeY = [&](Node& n) {
+			if (n.Kind() == NodeKind::Path) {
+				auto& pNode = static_cast<PathNode&>(n);
+				std::vector<SubPath> sps = pNode.GetPaths();
+				for (auto& sp : sps) {
+					for (auto& pt : sp.nodes) {
+						pt.anchor.y = H - pt.anchor.y;
+						pt.hIn.y = -pt.hIn.y;
+						pt.hOut.y = -pt.hOut.y;
+					}
+				}
+				pNode.SetPaths(sps);
+			} else if (n.Kind() == NodeKind::Group || n.Kind() == NodeKind::Layer) {
+				auto& gNode = static_cast<GroupNode&>(n);
+				for (const auto& child : gNode.GetChildren()) {
+					if (child) {
+						invertNodeY(*child);
+					}
+				}
+			}
+		};
+		for (auto& layer : outDoc.GetLayers()) {
+			if (layer) invertNodeY(*layer);
+		}
+	}
 
 	if (outDoc.GetLayers().empty()) {
 		outDoc.AddLayer(L"Layer 1");

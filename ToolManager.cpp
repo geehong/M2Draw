@@ -228,8 +228,7 @@ bool PenTool::OnRightClicked(CM2DrawDoc* pDoc)
 void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
 {
 	if (!rt || !brush) return;
-	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
-	ViewportTransform view = { zoom, { pan.x, pan.y }, isBottomLeft };
+	ViewportTransform view = { zoom, { pan.x, pan.y } };
 
 	// 1. 패스가 이미 시작된 상태인 경우
 	if (pDoc && pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPaths().empty())

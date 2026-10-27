@@ -113,34 +113,37 @@ SnapResult SnapManager::FindSnapPoint(
 	}
 
 	// 2. 기준 좌표축 (Origin Axis) 스냅
+	bool isBottomLeft = (pDoc && pDoc->originMode == ge::CanvasOriginMode::BottomLeft);
+	float originWorldY = (isBottomLeft && pDoc) ? pDoc->height : grid.originWorld.y;
+
 	if (HasSnapTarget(m_targets, SnapTargets::OriginAxis) && grid.showAxis)
 	{
-		// X축 (Y = originWorld.y)
-		float dy = std::abs(mouseWorld.y - grid.originWorld.y);
+		// X축 (Y = originWorldY)
+		float dy = std::abs(mouseWorld.y - originWorldY);
 		if (dy <= tolWorld)
 		{
-			tryCandidate(D2D1::Point2F(mouseWorld.x, grid.originWorld.y), SnapTargets::OriginAxis, L"X 기준축");
+			tryCandidate(D2D1::Point2F(mouseWorld.x, originWorldY), SnapTargets::OriginAxis, L"X 기준축");
 		}
-		// Y축 (X = originWorld.x)
+		// Y축 (X = grid.originWorld.x)
 		float dx = std::abs(mouseWorld.x - grid.originWorld.x);
 		if (dx <= tolWorld)
 		{
 			tryCandidate(D2D1::Point2F(grid.originWorld.x, mouseWorld.y), SnapTargets::OriginAxis, L"Y 기준축");
 		}
-		// 원점 교차점 (originWorld)
-		tryCandidate(grid.originWorld, SnapTargets::OriginAxis, L"원점 (0, 0)");
+		// 원점 교차점 (grid.originWorld.x, originWorldY)
+		tryCandidate(D2D1::Point2F(grid.originWorld.x, originWorldY), SnapTargets::OriginAxis, L"원점 (0, 0)");
 	}
 
-	// 3. 월드 그리드 (Grid) 격자점 스냅
-	if (HasSnapTarget(m_targets, SnapTargets::Grid) && grid.enabled)
+	// 3. 월드 그리드 (Grid) 격자점 스냅 (그리드 표시 및 스냅 활성화 여부 동시 검사)
+	if (HasSnapTarget(m_targets, SnapTargets::Grid) && grid.enabled && grid.snapToGrid)
 	{
 		float step = grid.GetStepPx();
 		if (step > 0.001f)
 		{
 			float relX = mouseWorld.x - grid.originWorld.x;
-			float relY = mouseWorld.y - grid.originWorld.y;
+			float relY = mouseWorld.y - originWorldY;
 			float gx = grid.originWorld.x + static_cast<float>(std::round(relX / step)) * step;
-			float gy = grid.originWorld.y + static_cast<float>(std::round(relY / step)) * step;
+			float gy = originWorldY + static_cast<float>(std::round(relY / step)) * step;
 			tryCandidate(D2D1::Point2F(gx, gy), SnapTargets::Grid, L"격자 (Grid)");
 		}
 	}
@@ -153,13 +156,11 @@ void SnapManager::DrawSnapIndicator(
 	ID2D1SolidColorBrush* brush,
 	const SnapResult& snap,
 	float zoom,
-	D2D1_POINT_2F pan,
-	bool invertY) const
+	D2D1_POINT_2F pan) const
 {
 	if (!rt || !brush || !snap.snapped) return;
 
-	float sy = invertY ? (pan.y - snap.pt.y * zoom) : (snap.pt.y * zoom + pan.y);
-	D2D1_POINT_2F sp = D2D1::Point2F(snap.pt.x * zoom + pan.x, sy);
+	D2D1_POINT_2F sp = D2D1::Point2F(snap.pt.x * zoom + pan.x, snap.pt.y * zoom + pan.y);
 
 	const D2D1_COLOR_F savedColor = brush->GetColor();
 

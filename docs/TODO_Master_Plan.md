@@ -188,13 +188,13 @@
 
 ### Step 2.0 기반 보강 (재검토에서 신설) — 🔴 Phase 2 의 모든 작업보다 먼저
 > 2026-10-27 코드 검토에서 확인된 문제 4건. 이 단계를 건너뛰면 2.7(그룹)·2.4(클리핑)·3.x(텍스트)·4.x(Frame)가 모두 막힌다.
-- [ ] 2.0.1 **좌표계 정리 (⚠️ 구현 전 사용자 확인 필요 — 권장안 B)**
+- [x] 2.0.1 **좌표계 정리 (안 B 적용 완료 — 2026-10-27)**
   - 문제: `Viewport`는 하단 원점 모드에서 화면 Y 를 뒤집고(`invertY`) 도형 좌표는 뒤집힌 값 그대로 저장되는데, `SvgWriter`는 좌표를 그대로 쓰고 `m2:originMode`만 붙임 → 용지 프리셋(A4 등) 문서를 내보내면 브라우저/Inkscape 에서 상하가 뒤집힘. 텍스트(D2D)도 뒤집힌 변환 아래에서 거울상이 될 가능성
-  - **B(권장)**: 모델/뷰포트는 항상 Y↓(SVG 와 동일)로 저장·렌더링하고, 하단 원점(`CanvasOriginMode::BottomLeft`)은 **눈금자·좌표 표시·숫자 입력/표시에서만** 변환 (Inkscape 방식). `Viewport.invertY` 제거
+  - **B(적용됨)**: 모델/뷰포트는 항상 Y↓(SVG 와 동일)로 저장·렌더링하고, 하단 원점(`CanvasOriginMode::BottomLeft`)은 **눈금자·좌표 표시·숫자 입력/표시에서만** 변환 (Inkscape 방식). `Viewport.invertY` 제거
   - A(대안): 현재 구조 유지 + Writer 에서 `<g transform="matrix(1 0 0 -1 0 H)">` 보정 + 텍스트/이미지 역보정 → 예외 처리가 계속 늘어남
-  - 영향 범위(B): `Viewport`, `ScreenToWorld/WorldToScreen`, `RulerRenderer`, `ToolEvent.unitPt`, 속성창 X/Y/W/H, 옵션바 좌표, 도구 오버레이, 캔버스 설정 UI
-  - 파일 호환: 파일 형식 버전 속성(`m2:version`) 도입. 버전 없는 기존 파일 중 `m2:originMode="bottomLeft"` 인 것은 로드 시 `y' = H - y` 로 변환
-- [ ] 2.0.2 **그룹 선택/조작**: `HitTestTopShape`/핸들/이동/스케일/회전/마키가 `GroupNode`를 다루도록 (현재 `PathNode`만 처리 → 그룹은 캔버스에서 선택 불가)
+  - 영향 범위(B): `Viewport`, `ScreenToWorld/WorldToScreen`, `RulerRenderer`, `ToolEvent.unitPt`, 속성창 X/Y/W/H, 옵션바 좌표, 도구 오버레이, 캔버스 설정 UI 일관 적용 완료
+  - 파일 호환: 파일 형식 버전 속성(`m2:version="2.0"`) 도입. 버전 없는 기존 파일 중 `m2:originMode="bottomLeft"` 인 것은 로드 시 `y' = H - y` 로 변환 처리 완료
+- [x] 2.0.2 **그룹 선택/조작 (완료 — 2026-10-27, 레이어 직속 그룹 단위 선택)**: `HitTestTopShape`/핸들/이동/스케일/회전/마키가 `GroupNode`를 다루도록 (현재 `PathNode`만 처리 → 그룹은 캔버스에서 선택 불가)
 - [ ] 2.0.3 **레이어 패널 계층 트리**: 레이어 → 그룹 → 도형 재귀 표시(접기/펼치기, 들여쓰기), 행 선택/보이기/잠금/이름 변경이 임의 깊이에서 동작 (현재 레이어 아래 1단계만 표시)
 - [ ] 2.0.4 **`SvgWriteOptions` + 변경 카운터**: 용도별 모드(`Snapshot`: Undo 용·이미지는 참조 ID / `File`: 저장·이미지 임베드 / `Clean`: 순수 SVG 내보내기). `Node` 의 모든 수정 함수가 전역 변경 카운터를 올리고 `UndoManager::CommitChange`는 카운터가 그대로면 직렬화를 건너뜀 (큰 문서·이미지 대비)
 - [ ] 2.0.5 **가져오기/붙여넣기 공용 경로**: Reader 가 NodeId 를 복원하므로(1.5.6) 다른 문서로 옮길 때 ID 가 중복됨 → 임시 `Document`로 읽은 뒤 `Clone()` + `AssignIds`로 옮기는 `Document::ImportNodes()` (2.9, 5.4 가 사용)

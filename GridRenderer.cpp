@@ -3,7 +3,7 @@
 #include <cmath>
 
 void GridRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
-                          D2D1_SIZE_F view, float zoom, D2D1_POINT_2F pan)
+                          D2D1_SIZE_F view, float zoom, D2D1_POINT_2F pan, float originWorldY)
 {
 	float worldStepPx = GetStepPx();
 	if (!enabled || !rt || !brush || worldStepPx <= 0.0f || zoom <= 0.0f)
@@ -52,15 +52,15 @@ void GridRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	};
 
 	pass(pan.x + originWorld.x * zoom, view.width,  true);  // 세로선 (원점 오프셋 연동)
-	pass(pan.y + originWorld.y * zoom, view.height, false); // 가로선 (원점 오프셋 연동)
+	pass(pan.y + originWorldY * zoom, view.height, false); // 가로선 (원점 오프셋 연동)
 
 	// 3. X, Y 기준 좌표축 (Origin Axis) 렌더링
 	if (showAxis)
 	{
 		float axisScreenX = snap(originWorld.x * zoom + pan.x);
-		float axisScreenY = snap(originWorld.y * zoom + pan.y);
+		float axisScreenY = snap(originWorldY * zoom + pan.y);
 
-		// X축 기준선 (가로선: Y = originWorld.y)
+		// X축 기준선 (가로선: Y = originWorldY)
 		if (axisScreenY >= 0.0f && axisScreenY <= view.height)
 		{
 			D2D1_COLOR_F cX = axisXColor;

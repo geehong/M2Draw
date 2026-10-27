@@ -461,7 +461,9 @@ void CD2DPropertyView::InitControls()
 			if (!shape) return;
 			CanvasUnit curUnit = GetApp()->GetGrid().unit;
 			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
-			float targetPixelY = static_cast<float>(val) * pxPerUnit;
+			float inputPx = static_cast<float>(val) * pxPerUnit;
+			bool isBottomLeft = (m_pActiveDoc && m_pActiveDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+			float targetPixelY = (isBottomLeft && m_pActiveDoc) ? (m_pActiveDoc->GetDoc().height - inputPx) : inputPx;
 			D2D1_RECT_F localBounds;
 			if (shape->GetLocalBounds(nullptr, localBounds)) {
 				D2D1_POINT_2F curOrigin = shape->GetTransform().TransformPoint(D2D1::Point2F(localBounds.left, localBounds.top));
@@ -1096,8 +1098,10 @@ void CD2DPropertyView::SyncControlsFromData()
 
 					const bool prev = m_bUpdating;
 					m_bUpdating = true;
+					bool isBottomLeft = (m_pActiveDoc && m_pActiveDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+					float dispY = (isBottomLeft && m_pActiveDoc) ? (m_pActiveDoc->GetDoc().height - origin.y) : origin.y;
 					if (m_spinTransX) m_spinTransX->SetValue(origin.x / pxPerUnit, false);
-					if (m_spinTransY) m_spinTransY->SetValue(origin.y / pxPerUnit, false);
+					if (m_spinTransY) m_spinTransY->SetValue(dispY / pxPerUnit, false);
 					if (m_spinTransW) m_spinTransW->SetValue(curW / pxPerUnit, false);
 					if (m_spinTransH) m_spinTransH->SetValue(curH / pxPerUnit, false);
 					m_bUpdating = prev;
@@ -1283,8 +1287,10 @@ void CD2DPropertyView::SyncTransformOnly()
 
 		const bool prev = m_bUpdating;
 		m_bUpdating = true;
+		bool isBottomLeft = (m_pActiveDoc && m_pActiveDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
+		float dispY = (isBottomLeft && m_pActiveDoc) ? (m_pActiveDoc->GetDoc().height - origin.y) : origin.y;
 		if (m_spinTransX) m_spinTransX->SetValue(origin.x / pxPerUnit, false);
-		if (m_spinTransY) m_spinTransY->SetValue(origin.y / pxPerUnit, false);
+		if (m_spinTransY) m_spinTransY->SetValue(dispY / pxPerUnit, false);
 		if (m_spinTransW) m_spinTransW->SetValue(curW / pxPerUnit, false);
 		if (m_spinTransH) m_spinTransH->SetValue(curH / pxPerUnit, false);
 		m_bUpdating = prev;

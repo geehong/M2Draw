@@ -83,7 +83,7 @@ void RulerRenderer::DiscardDeviceResources()
 
 void RulerRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
                           D2D1_SIZE_F view, float zoom, D2D1_POINT_2F pan,
-                          const GridRenderer& grid, bool invertY)
+                          const GridRenderer& grid, float docH, bool isBottomLeft)
 {
 	if (!enabled || !rt || !brush || zoom <= 0.0f)
 		return;
@@ -193,7 +193,8 @@ void RulerRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 
 	// 좌측 눈금자 렌더링 (Y축)
 	{
-		float originScreenY = pan.y + grid.originWorld.y * zoom;
+		float originWorldY = isBottomLeft ? docH : grid.originWorld.y;
+		float originScreenY = pan.y + originWorldY * zoom;
 		int i0 = static_cast<int>(ceilf((T - originScreenY) / stepPx));
 		int i1 = static_cast<int>(floorf((h - originScreenY) / stepPx));
 
@@ -217,7 +218,7 @@ void RulerRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 			if (m_pTextFormat)
 			{
 				wchar_t szNum[32];
-				double val = invertY ? (-i * stepUnit) : (i * stepUnit);
+				double val = isBottomLeft ? (-i * stepUnit) : (i * stepUnit);
 				if (std::abs(val - std::round(val)) < 0.01)
 					swprintf_s(szNum, L"%d", static_cast<int>(std::round(val)));
 				else
@@ -238,8 +239,9 @@ void RulerRenderer::Render(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	// 4. X, Y 기준축 인디케이터 (네모친 부분 표시: X축은 가로선의 우측 끝에 X, Y축은 세로선의 상단 끝에 Y)
 	if (grid.showAxis && m_pTextFormatBold)
 	{
+		float originWorldY = isBottomLeft ? docH : grid.originWorld.y;
 		float originScreenX = snap(pan.x + grid.originWorld.x * zoom);
-		float originScreenY = snap(pan.y + grid.originWorld.y * zoom);
+		float originScreenY = snap(pan.y + originWorldY * zoom);
 
 		// (1) Y축 인디케이터: 상단 눈금자 위치(originScreenX) 상단에 'Y' 배지 박스 표시 (녹색 계열)
 		if (originScreenX >= T && originScreenX <= w)
