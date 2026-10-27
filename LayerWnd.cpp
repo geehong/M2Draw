@@ -1224,10 +1224,7 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 						{
 							doc.SetActiveLayer(static_cast<int>(i));
 							doc.ClearSelection();
-							// SelectTool 선택은 활성 레이어 기준 인덱스이므로 레이어 전환 시 초기화
-							SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
-							if (pSelect) pSelect->ClearSelection();
-							UpdateShapePropertiesSelection(-1, pDoc);
+							UpdateShapePropertiesSelection(nullptr, pDoc);
 							break;
 						}
 					}
@@ -1237,41 +1234,11 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 				}
 				else
 				{
-					auto& doc = pDoc->GetDoc();
-					auto* pLayer = row.pNode->GetParent();
-
-					// 다른 레이어의 도형이면 그 레이어를 활성화 (SelectTool 인덱스는 활성 레이어 기준)
-					if (pLayer && pLayer != doc.GetActiveLayer())
+					// 노드 선택 + 소속 레이어 활성화 + 속성창/옵션바 반영
+					SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
+					if (pSelect)
 					{
-						for (size_t i = 0; i < doc.GetLayers().size(); ++i)
-						{
-							if (doc.GetLayers()[i].get() == pLayer)
-							{
-								doc.SetActiveLayer(static_cast<int>(i));
-								break;
-							}
-						}
-					}
-					doc.SetSelection({ row.pNode });
-
-					int shapeIdx = -1;
-					if (pLayer && pLayer == doc.GetActiveLayer())
-					{
-						int childIdx = pLayer->IndexOf(row.pNode);
-						if (childIdx >= 0 && childIdx < static_cast<int>(pDoc->GetShapes().size()))
-						{
-							shapeIdx = childIdx;
-						}
-					}
-
-					if (shapeIdx >= 0)
-					{
-						SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
-						if (pSelect)
-						{
-							pSelect->SetSelectedIndex(shapeIdx, pDoc);
-						}
-						UpdateShapePropertiesSelection(shapeIdx, pDoc);
+						pSelect->SelectNode(row.pNode, pDoc);
 					}
 
 					CString strLog;

@@ -111,14 +111,18 @@ void CD2DPropertyView::SetPaneMode(PaneMode mode)
 	}
 }
 
-void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex)
+ge::Node* CD2DPropertyView::GetSelectedShape() const
+{
+	return (m_pActiveDoc && m_selectedNodeId) ? m_pActiveDoc->GetDoc().FindById(m_selectedNodeId) : nullptr;
+}
+
+void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 {
 	m_pActiveDoc = pDoc;
-	m_selectedShapeIndex = shapeIndex;
+	m_selectedNodeId = (pDoc && pShape) ? pShape->GetId() : 0;
 
-	if (pDoc && shapeIndex >= 0 && shapeIndex < static_cast<int>(pDoc->GetShapes().size()))
+	if (Shape* shape = GetSelectedShape())
 	{
-		Shape* shape = pDoc->GetShapes()[shapeIndex].get();
 		m_strShapeType = shape->GetShapeTypeName();
 		m_strShapeName = shape->GetName().empty() ? m_strShapeType : CString(shape->GetName().c_str());
 
@@ -155,10 +159,10 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex)
 
 void CD2DPropertyView::ApplyToShape()
 {
-	if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size()))
+	if (!GetSelectedShape())
 		return;
 
-	Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+	Shape* shape = GetSelectedShape();
 	if (!shape) return;
 
 	if (m_bFillEnabled)
@@ -186,27 +190,6 @@ void CD2DPropertyView::ApplyToShape()
 	}
 
 	shape->Invalidate();
-
-	// 신엔진 ge::Document 에도 스타일 동기화
-	if (m_pActiveDoc && m_selectedShapeIndex >= 0)
-	{
-		auto* layer = m_pActiveDoc->GetDoc().GetActiveLayer();
-		if (layer && m_selectedShapeIndex < static_cast<int>(layer->GetChildren().size()))
-		{
-			auto* node = layer->GetChildren()[m_selectedShapeIndex].get();
-			if (node)
-			{
-				ge::Style st;
-				st.fillType = static_cast<ge::FillType>(shape->GetStyle().fillType);
-				st.fill = ge::Color::FromD2D(shape->GetStyle().fill);
-				st.stroke = ge::Color::FromD2D(shape->GetStyle().stroke);
-				st.strokeWidth = shape->GetStyle().strokeWidth;
-				st.dashStyle = static_cast<ge::DashStyle>(shape->GetStyle().dashStyle);
-				node->SetStyle(st);
-			}
-		}
-	}
-
 	m_pActiveDoc->UpdateAllViews(nullptr);
 }
 
@@ -237,7 +220,7 @@ void CD2DPropertyView::ApplyCanvasSettings()
 		if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
 		{
 			CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
-			pMainFrame->GetOptionBar().SyncSelection(m_pActiveDoc, m_selectedShapeIndex);
+			pMainFrame->GetOptionBar().SyncSelection(m_pActiveDoc, GetSelectedShape());
 		}
 	}
 
@@ -271,8 +254,8 @@ void CD2DPropertyView::InitControls()
 		m_spinTransX = std::make_shared<M2DrawNumericInput>(-10000.0, 10000.0, 0.0, 1.0);
 		m_spinTransX->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			if (m_bUpdating) return;
-			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (!GetSelectedShape()) return;
+			Shape* shape = GetSelectedShape();
 			if (!shape) return;
 			CanvasUnit curUnit = GetApp()->GetGrid().unit;
 			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -291,8 +274,8 @@ void CD2DPropertyView::InitControls()
 		m_spinTransY = std::make_shared<M2DrawNumericInput>(-10000.0, 10000.0, 0.0, 1.0);
 		m_spinTransY->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			if (m_bUpdating) return;
-			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (!GetSelectedShape()) return;
+			Shape* shape = GetSelectedShape();
 			if (!shape) return;
 			CanvasUnit curUnit = GetApp()->GetGrid().unit;
 			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -311,8 +294,8 @@ void CD2DPropertyView::InitControls()
 		m_spinTransW = std::make_shared<M2DrawNumericInput>(0.1, 10000.0, 100.0, 1.0);
 		m_spinTransW->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			if (m_bUpdating) return;
-			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (!GetSelectedShape()) return;
+			Shape* shape = GetSelectedShape();
 			if (!shape) return;
 			CanvasUnit curUnit = GetApp()->GetGrid().unit;
 			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -342,8 +325,8 @@ void CD2DPropertyView::InitControls()
 		m_spinTransH = std::make_shared<M2DrawNumericInput>(0.1, 10000.0, 100.0, 1.0);
 		m_spinTransH->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			if (m_bUpdating) return;
-			if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size())) return;
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			if (!GetSelectedShape()) return;
+			Shape* shape = GetSelectedShape();
 			if (!shape) return;
 			CanvasUnit curUnit = GetApp()->GetGrid().unit;
 			float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -582,9 +565,9 @@ void CD2DPropertyView::InitControls()
 		// 9. Close Shape Checkbox (For Multi-point / Path Shapes)
 		m_chkCloseShape = std::make_shared<M2DrawCheckBox>(L"Close Path (Connect start/end)", false);
 		m_chkCloseShape->SetOnChanged([this](M2DrawCheckBox* /*pChk*/, bool bChecked) {
-			if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+			if (GetSelectedShape())
 			{
-				PathShape* pathShape = dynamic_cast<PathShape*>(m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get());
+				PathShape* pathShape = dynamic_cast<PathShape*>(GetSelectedShape());
 				if (pathShape)
 				{
 					for (auto& sp : pathShape->GetPathsRef())
@@ -594,7 +577,7 @@ void CD2DPropertyView::InitControls()
 					pathShape->Invalidate();
 					m_pActiveDoc->UpdateAllViews(nullptr);
 					SafeInvalidate(FALSE);
-					SyncOptionBarWithSelection(m_selectedShapeIndex, m_pActiveDoc);
+					SyncOptionBarWithSelection(GetSelectedShape(), m_pActiveDoc);
 				}
 			}
 		});
@@ -831,7 +814,7 @@ void CD2DPropertyView::SyncControlsFromData()
 		if (m_lblShapeHeader)
 		{
 			CString str;
-			if (m_pActiveDoc && m_selectedShapeIndex >= 0)
+			if (GetSelectedShape())
 				str.Format(_T("● Shape: [%s]"), (LPCTSTR)m_strShapeName);
 			else
 				str = _T("● No Selection (Preview Mode)");
@@ -848,9 +831,9 @@ void CD2DPropertyView::SyncControlsFromData()
 		if (m_spinTransW) m_spinTransW->SetSuffix(unitSuffix);
 		if (m_spinTransH) m_spinTransH->SetSuffix(unitSuffix);
 
-		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		if (GetSelectedShape())
 		{
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			Shape* shape = GetSelectedShape();
 			if (shape)
 			{
 				D2D1_RECT_F lb;
@@ -892,9 +875,9 @@ void CD2DPropertyView::SyncControlsFromData()
 		if (m_spinOpacity)   m_spinOpacity->SetValue(m_fOpacity);
 
 		// 만약 선택된 도형이 있다면 도형의 픽셀 단위 선 굵기로부터 현재 단위값 갱신
-		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		if (GetSelectedShape())
 		{
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			Shape* shape = GetSelectedShape();
 			if (shape)
 			{
 				m_fStrokeWidth = shape->GetStyle().strokeWidth / pxPerUnit;
@@ -941,9 +924,9 @@ void CD2DPropertyView::SyncControlsFromData()
 		if (m_chkCloseShape)
 		{
 			bool isClosed = false;
-			if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+			if (GetSelectedShape())
 			{
-				PathShape* pathShape = dynamic_cast<PathShape*>(m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get());
+				PathShape* pathShape = dynamic_cast<PathShape*>(GetSelectedShape());
 				if (pathShape && !pathShape->GetPaths().empty())
 				{
 					isClosed = pathShape->GetPaths()[0].closed;
@@ -994,10 +977,10 @@ void CD2DPropertyView::SyncControlsFromData()
 void CD2DPropertyView::SyncTransformOnly()
 {
 	if (m_paneMode != MODE_SHAPE) return;
-	if (!m_pActiveDoc || m_selectedShapeIndex < 0 || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size()))
+	if (!GetSelectedShape())
 		return;
 
-	Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+	Shape* shape = GetSelectedShape();
 	if (!shape) return;
 
 	CanvasUnit curUnit = GetApp()->GetGrid().unit;
@@ -1192,9 +1175,9 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 		if (m_chkCloseShape)
 		{
 			bool isPath = false;
-			if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+			if (GetSelectedShape())
 			{
-				isPath = (dynamic_cast<PathShape*>(m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get()) != nullptr);
+				isPath = (dynamic_cast<PathShape*>(GetSelectedShape()) != nullptr);
 			}
 			m_chkCloseShape->SetVisible(isPath);
 			if (isPath)

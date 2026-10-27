@@ -9,19 +9,66 @@
 // SelectTool 구현 (도형 선택, 이동, 스케일, 회전, 에디트 포인트 편집)
 // ============================================================================
 
-static void SyncDocSelection(CM2DrawDoc* pDoc, const std::set<int>& indices)
+// 레이어 상호작용 가능 여부 (숨김/잠금 레이어 제외; 조상 체인 일반화는 Step 0.3)
+static bool IsLayerInteractive(const ge::LayerNode* pLayer)
 {
-	if (!pDoc) return;
-	auto* layer = pDoc->GetDoc().GetActiveLayer();
-	if (!layer) return;
-	const auto& children = layer->GetChildren();
-	std::vector<ge::Node*> selNodes;
-	for (int idx : indices) {
-		if (idx >= 0 && idx < static_cast<int>(children.size())) {
-			selNodes.push_back(children[idx].get());
+	return pLayer && pLayer->IsVisible() && !pLayer->IsLocked();
+}
+
+// 선택 가능한 최상위 도형을 위에서 아래로 순회 (위 레이어 -> 아래 레이어, 레이어 안에서도 위 -> 아래).
+// fn 이 true 를 반환하면 순회 중단. 그룹 단위/그룹 내부 선택은 그룹 UI 연결(Step 2.7)에서 확장.
+template <typename Fn>
+static void ForEachSelectableTopDown(CM2DrawDoc* pDoc, Fn fn)
+{
+	const auto& layers = pDoc->GetDoc().GetLayers();
+	for (int li = static_cast<int>(layers.size()) - 1; li >= 0; --li)
+	{
+		const ge::LayerNode* pLayer = layers[li].get();
+		if (!IsLayerInteractive(pLayer)) continue;
+		const auto& children = pLayer->GetChildren();
+		for (int i = static_cast<int>(children.size()) - 1; i >= 0; --i)
+		{
+			ge::Node* n = children[i].get();
+			if (!n || !n->IsVisible() || n->IsLocked()) continue;
+			if (fn(n)) return;
 		}
 	}
-	pDoc->GetDoc().SetSelection(selNodes);
+}
+
+static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
+{
+	ge::Node* hit = nullptr;
+	ForEachSelectableTopDown(pDoc, [&](ge::Node* n) {
+		PathShape* ps = dynamic_cast<PathShape*>(n);
+		if (ps && ps->HitTestScreenSpace(screenPt, 8.0f, view, f).part != HitResult::Part::None)
+		{
+			hit = n;
+			return true;
+		}
+		return false;
+	});
+	return hit;
+}
+
+// 노드가 속한 레이어를 활성 레이어로 (새 도형 생성/복제 대상 레이어와 일치시킴)
+static void ActivateLayerOf(CM2DrawDoc* pDoc, ge::Node* node)
+{
+	if (!pDoc || !node) return;
+	auto& doc = pDoc->GetDoc();
+	const auto& layers = doc.GetLayers();
+	for (size_t i = 0; i < layers.size(); ++i)
+	{
+		if (layers[i].get() == node->GetParent())
+		{
+			doc.SetActiveLayer(static_cast<int>(i));
+			return;
+		}
+	}
+}
+
+static bool IsEditPart(const HitResult& hr)
+{
+	return hr.part == HitResult::Part::Anchor || hr.part == HitResult::Part::HandleIn || hr.part == HitResult::Part::HandleOut;
 }
 
 bool SelectTool::IsOpenPath(Shape* shape)
@@ -37,7 +84,7 @@ bool SelectTool::IsOpenPath(Shape* shape)
 
 HCURSOR SelectTool::GetCursor() const
 {
-	if (m_mode == Mode::Moving || (m_mode == Mode::None && m_hoverShapeIdx != -1))
+	if (m_mode == Mode::Moving || (m_mode == Mode::None && m_hoverOnShape))
 	{
 		return ::LoadCursor(nullptr, IDC_SIZEALL);
 	}
@@ -106,156 +153,109 @@ bool SelectTool::GetHandleScreenPositions(Shape* shape, const ViewportTransform&
 	return true;
 }
 
-// 활성 레이어가 숨김/잠금이면 선택 도구 상호작용 대상에서 제외 (조상 체인 일반화는 Step 0.3)
-static bool IsActiveLayerInteractive(CM2DrawDoc* pDoc)
-{
-	const ge::LayerNode* pLayer = pDoc ? pDoc->GetDoc().GetActiveLayer() : nullptr;
-	return pLayer && pLayer->IsVisible() && !pLayer->IsLocked();
-}
-
 void SelectTool::OnDown(const ToolEvent& e)
 {
 	if (!e.pDoc) return;
-	if (!IsActiveLayerInteractive(e.pDoc))
-	{
-		m_selectedIndices.clear();
-		SyncDocSelection(e.pDoc, m_selectedIndices);
-		UpdateShapePropertiesSelection(-1, e.pDoc);
-		return;
-	}
 
-	auto& shapes = e.pDoc->GetShapes();
+	auto& doc = e.pDoc->GetDoc();
+	const std::vector<ge::Node*> sel = doc.GetSelection();
 	m_dragStartWorld = e.worldPt;
 	m_dragCurrentWorld = e.worldPt;
 	D2D1_POINT_2F screenPt = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
 
 	// 1. 이미 선택된 패스 도형의 노드(앵커, 핸들 In/Out) 클릭 여부 최우선 검사
-	for (int idx : m_selectedIndices)
+	for (ge::Node* n : sel)
 	{
-		if (idx >= 0 && idx < static_cast<int>(shapes.size()))
+		PathShape* ps = dynamic_cast<PathShape*>(n);
+		if (!ps) continue;
+		HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
+		if (IsEditPart(hr))
 		{
-			PathShape* ps = dynamic_cast<PathShape*>(shapes[idx].get());
-			if (ps)
-			{
-				HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
-				if (hr.part == HitResult::Part::Anchor || hr.part == HitResult::Part::HandleIn || hr.part == HitResult::Part::HandleOut)
-				{
-					m_mode = Mode::EditNode;
-					m_editShapeIdx = idx;
-					m_editHit = hr;
-					m_handle = Handle::None;
-					m_initialXf = ps->GetTransform();
+			m_mode = Mode::EditNode;
+			m_editShape = ps;
+			m_editHit = hr;
+			m_handle = Handle::None;
+			m_initialXf = ps->GetTransform();
 
-					CString partName = (hr.part == HitResult::Part::Anchor) ? _T("정점(Anchor)") :
-					                   (hr.part == HitResult::Part::HandleIn) ? _T("핸들In") : _T("핸들Out");
-					CString str;
-					str.Format(_T("[선택 도구] %s 조절점 드래그 시작 (도형 #%d, 노드 #%d)"), (LPCTSTR)partName, idx + 1, hr.nodeIdx + 1);
-					LogAppEvent(str);
-					return;
-				}
-			}
+			CString partName = (hr.part == HitResult::Part::Anchor) ? _T("정점(Anchor)") :
+			                   (hr.part == HitResult::Part::HandleIn) ? _T("핸들In") : _T("핸들Out");
+			CString str;
+			str.Format(_T("[선택 도구] %s 조절점 드래그 시작 (%s, 노드 #%d)"), (LPCTSTR)partName, ps->GetName().c_str(), hr.nodeIdx + 1);
+			LogAppEvent(str);
+			return;
 		}
 	}
 
 	// 2. 이미 선택된 도형 중 닫힌 도형(열린 곡선/직선 제외)의 바운딩 박스 핸들 클릭 여부 검사
-	for (int idx : m_selectedIndices)
+	for (ge::Node* n : sel)
 	{
-		if (idx >= 0 && idx < static_cast<int>(shapes.size()))
+		if (IsOpenPath(n)) continue;
+		D2D1_POINT_2F handles[9];
+		D2D1_RECT_F localBounds;
+		if (!GetHandleScreenPositions(n, e.view, e.pD2DFactory, handles, &localBounds)) continue;
+
+		Handle hitH = HitHandle(screenPt, handles, 8.0f);
+		if (hitH != Handle::None)
 		{
-			Shape* selectedShape = shapes[idx].get();
-			if (!IsOpenPath(selectedShape))
+			m_handle = hitH;
+			m_xfTarget = n;
+			m_initialXf = n->GetTransform();
+			m_initialLocalBounds = localBounds;
+
+			if (hitH == Handle::Rotate)
 			{
-				D2D1_POINT_2F handles[9];
-				D2D1_RECT_F localBounds;
-
-				if (GetHandleScreenPositions(selectedShape, e.view, e.pD2DFactory, handles, &localBounds))
-				{
-					Handle hitH = HitHandle(screenPt, handles, 8.0f);
-					if (hitH != Handle::None)
-					{
-						m_handle = hitH;
-						m_initialXf = selectedShape->GetTransform();
-						m_initialLocalBounds = localBounds;
-
-						if (hitH == Handle::Rotate)
-						{
-							m_mode = Mode::Rotating;
-							LogAppEvent(_T("[선택 도구] 회전 핸들 드래그 시작"));
-						}
-						else
-						{
-							m_mode = Mode::Scaling;
-							LogAppEvent(_T("[선택 도구] 크기 조절 핸들 드래그 시작"));
-						}
-						return;
-					}
-				}
+				m_mode = Mode::Rotating;
+				LogAppEvent(_T("[선택 도구] 회전 핸들 드래그 시작"));
 			}
+			else
+			{
+				m_mode = Mode::Scaling;
+				LogAppEvent(_T("[선택 도구] 크기 조절 핸들 드래그 시작"));
+			}
+			return;
 		}
 	}
 
-	// 3. 새로운 도형 선택 히트 테스트 (역순: 최상단 도형부터)
-	int clickedIndex = -1;
-	for (int i = static_cast<int>(shapes.size()) - 1; i >= 0; --i)
+	// 3. 새로운 도형 선택 히트 테스트 (모든 레이어, 최상단 도형부터)
+	ge::Node* clicked = HitTestTopShape(e.pDoc, screenPt, e.view, e.pD2DFactory);
+	if (clicked)
 	{
-		PathShape* ps = dynamic_cast<PathShape*>(shapes[i].get());
-		if (ps && ps->IsVisible())
-		{
-			HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
-			if (hr.part != HitResult::Part::None)
-			{
-				clickedIndex = i;
-				break;
-			}
-		}
-	}
-
-	if (clickedIndex != -1)
-	{
+		std::vector<ge::Node*> newSel = sel;
+		auto it = std::find(newSel.begin(), newSel.end(), clicked);
 		if (e.ctrlDown)
 		{
-			if (m_selectedIndices.count(clickedIndex))
-				m_selectedIndices.erase(clickedIndex);
-			else
-				m_selectedIndices.insert(clickedIndex);
+			if (it != newSel.end()) newSel.erase(it);
+			else newSel.push_back(clicked);
 		}
-		else
+		else if (it == newSel.end())
 		{
-			if (!m_selectedIndices.count(clickedIndex))
-			{
-				m_selectedIndices.clear();
-				m_selectedIndices.insert(clickedIndex);
-			}
+			newSel = { clicked };
 		}
+		doc.SetSelection(newSel);
+		ActivateLayerOf(e.pDoc, clicked);
 
 		m_mode = Mode::Moving;
 		m_handle = Handle::None;
-		Shape* selectedShape = shapes[clickedIndex].get();
-		m_initialXf = selectedShape->GetTransform();
-		selectedShape->GetLocalBounds(e.pD2DFactory, m_initialLocalBounds);
+		m_initialXf = clicked->GetTransform();
+		clicked->GetLocalBounds(e.pD2DFactory, m_initialLocalBounds);
 
 		// 다중 선택된 모든 도형의 시작 Transform 캐싱
 		m_initialXfs.clear();
-		for (int idx : m_selectedIndices)
-		{
-			if (idx >= 0 && idx < static_cast<int>(shapes.size()))
-			{
-				m_initialXfs[idx] = shapes[idx]->GetTransform();
-			}
-		}
+		for (ge::Node* n : newSel)
+			m_initialXfs[n] = n->GetTransform();
 
 		CString str;
-		str.Format(_T("[선택 도구] 도형 #%d 선택됨 (현재 선택 수: %d개) | 이동 모드 시작"), clickedIndex + 1, (int)m_selectedIndices.size());
+		str.Format(_T("[선택 도구] '%s' 선택됨 (현재 선택 수: %d개) | 이동 모드 시작"), clicked->GetName().c_str(), static_cast<int>(newSel.size()));
 		LogAppEvent(str);
 
-		UpdateShapePropertiesSelection(GetSelectedIndex(), e.pDoc);
+		UpdateShapePropertiesSelection(e.pDoc->GetPrimarySelection(), e.pDoc);
 	}
 	else
 	{
 		if (!e.ctrlDown)
 		{
-			m_selectedIndices.clear();
-			UpdateShapePropertiesSelection(-1, e.pDoc);
+			doc.ClearSelection();
+			UpdateShapePropertiesSelection(nullptr, e.pDoc);
 		}
 		m_mode = Mode::Marquee; // 빈 공간 드래그 시 마키(고무줄) 선택 모드 진입
 		m_handle = Handle::None;
@@ -263,20 +263,31 @@ void SelectTool::OnDown(const ToolEvent& e)
 	}
 }
 
-void SelectTool::SetSelectedIndex(int index, CM2DrawDoc* pDoc)
+void SelectTool::SelectNode(ge::Node* node, CM2DrawDoc* pDoc)
 {
-	m_selectedIndices.clear();
-	if (index >= 0)
-		m_selectedIndices.insert(index);
-	SyncDocSelection(pDoc, m_selectedIndices);
-	UpdateShapePropertiesSelection(index, pDoc);
+	if (!pDoc) return;
+	if (node)
+	{
+		pDoc->GetDoc().SetSelection({ node });
+		ActivateLayerOf(pDoc, node);
+	}
+	else
+	{
+		pDoc->GetDoc().ClearSelection();
+	}
+	UpdateShapePropertiesSelection(node, pDoc);
+}
+
+void SelectTool::ClearSelection(CM2DrawDoc* pDoc)
+{
+	if (pDoc) pDoc->GetDoc().ClearSelection();
 }
 
 void SelectTool::OnMove(const ToolEvent& e)
 {
 	if (!e.pDoc) return;
 
-	auto& shapes = e.pDoc->GetShapes();
+	const std::vector<ge::Node*> sel = e.pDoc->GetDoc().GetSelection();
 	m_dragCurrentWorld = e.worldPt;
 	D2D1_POINT_2F screenPt = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
 
@@ -284,56 +295,35 @@ void SelectTool::OnMove(const ToolEvent& e)
 	{
 		m_hoverIsNode = false;
 		m_hoverHandle = Handle::None;
-		m_hoverShapeIdx = -1;
-		if (!IsActiveLayerInteractive(e.pDoc)) return;
+		m_hoverOnShape = false;
 
 		// 1) 선택된 도형의 노드(앵커/핸들) 및 바운딩 박스 핸들 호버 검사
-		for (int idx : m_selectedIndices)
+		for (ge::Node* n : sel)
 		{
-			if (idx >= 0 && idx < static_cast<int>(shapes.size()))
+			PathShape* ps = dynamic_cast<PathShape*>(n);
+			if (ps && IsEditPart(ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory)))
 			{
-				PathShape* ps = dynamic_cast<PathShape*>(shapes[idx].get());
-				if (ps)
-				{
-					HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
-					if (hr.part == HitResult::Part::Anchor || hr.part == HitResult::Part::HandleIn || hr.part == HitResult::Part::HandleOut)
-					{
-						m_hoverIsNode = true;
-						return;
-					}
-				}
+				m_hoverIsNode = true;
+				return;
+			}
 
-				if (!IsOpenPath(shapes[idx].get()))
+			if (!IsOpenPath(n))
+			{
+				D2D1_POINT_2F handles[9];
+				if (GetHandleScreenPositions(n, e.view, e.pD2DFactory, handles))
 				{
-					D2D1_POINT_2F handles[9];
-					if (GetHandleScreenPositions(shapes[idx].get(), e.view, e.pD2DFactory, handles))
+					Handle hit = HitHandle(screenPt, handles, 8.0f);
+					if (hit != Handle::None)
 					{
-						Handle hit = HitHandle(screenPt, handles, 8.0f);
-						if (hit != Handle::None)
-						{
-							m_hoverHandle = hit;
-							return;
-						}
+						m_hoverHandle = hit;
+						return;
 					}
 				}
 			}
 		}
 
 		// 2) 도형 스트로크 또는 면(채우기 내부) 호버 검사 -> 4방향 이동 커서(IDC_SIZEALL) 활성화
-		for (int i = static_cast<int>(shapes.size()) - 1; i >= 0; --i)
-		{
-			PathShape* ps = dynamic_cast<PathShape*>(shapes[i].get());
-			if (ps && ps->IsVisible())
-			{
-				HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
-				if (hr.part != HitResult::Part::None)
-				{
-					m_hoverShapeIdx = i;
-					break;
-				}
-			}
-		}
-
+		m_hoverOnShape = HitTestTopShape(e.pDoc, screenPt, e.view, e.pD2DFactory) != nullptr;
 		return;
 	}
 
@@ -345,44 +335,34 @@ void SelectTool::OnMove(const ToolEvent& e)
 
 	if (m_mode == Mode::EditNode)
 	{
-		if (m_editShapeIdx >= 0 && m_editShapeIdx < static_cast<int>(shapes.size()))
+		if (m_editShape)
 		{
-			PathShape* ps = dynamic_cast<PathShape*>(shapes[m_editShapeIdx].get());
-			if (ps)
-			{
-				ApplyNodeEdit(ps, e);
+			ApplyNodeEdit(m_editShape, e);
 
-				static DWORD s_lastNodeTick = 0;
-				DWORD curTick = ::GetTickCount();
-				if (curTick - s_lastNodeTick >= 30)
-				{
-					s_lastNodeTick = curTick;
-					UpdateShapePropertiesSelection(m_editShapeIdx, e.pDoc);
-				}
+			static DWORD s_lastNodeTick = 0;
+			DWORD curTick = ::GetTickCount();
+			if (curTick - s_lastNodeTick >= 30)
+			{
+				s_lastNodeTick = curTick;
+				UpdateShapePropertiesSelection(m_editShape, e.pDoc);
 			}
 		}
 		return;
 	}
 
-	if (m_selectedIndices.empty())
+	if (sel.empty())
 		return;
-
-	int primaryIdx = *m_selectedIndices.begin();
-	if (primaryIdx < 0 || primaryIdx >= static_cast<int>(shapes.size()))
-		return;
-
-	Shape* selectedShape = shapes[primaryIdx].get();
 
 	switch (m_mode)
 	{
 	case Mode::Moving:
-		ApplyMove(shapes);
+		ApplyMove(sel);
 		break;
 	case Mode::Scaling:
-		ApplyScale(selectedShape);
+		ApplyScale(m_xfTarget);
 		break;
 	case Mode::Rotating:
-		ApplyRotate(selectedShape);
+		ApplyRotate(m_xfTarget);
 		break;
 	default:
 		break;
@@ -396,7 +376,8 @@ void SelectTool::OnMove(const ToolEvent& e)
 		if (curTick - s_lastDragTick >= 30)
 		{
 			s_lastDragTick = curTick;
-			UpdateShapePropertiesSelection(primaryIdx, e.pDoc);
+			ge::Node* shown = (m_mode == Mode::Moving || !m_xfTarget) ? sel.front() : m_xfTarget;
+			UpdateShapePropertiesSelection(shown, e.pDoc);
 		}
 	}
 }
@@ -410,48 +391,43 @@ void SelectTool::ApplyNodeEdit(PathShape* shape, const ToolEvent& e)
 }
 
 // 엔진에 평행 이동 위임! (선택된 모든 도형 일괄 이동)
-void SelectTool::ApplyMove(const std::vector<std::unique_ptr<Shape>>& shapes)
+void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 {
 	float dx = m_dragCurrentWorld.x - m_dragStartWorld.x;
 	float dy = m_dragCurrentWorld.y - m_dragStartWorld.y;
 
 	const auto& grid = GetApp()->GetGrid();
 	const auto& snapMgr = GetApp()->GetSnapManager();
-	if (snapMgr.IsEnabled() && HasSnapTarget(snapMgr.GetTargets(), SnapTargets::Grid) && grid.enabled)
+	if (snapMgr.IsEnabled() && HasSnapTarget(snapMgr.GetTargets(), SnapTargets::Grid) && grid.enabled && !selection.empty())
 	{
-		// 기준 도형으로 스냅 거리 계산
-		int primaryIdx = m_selectedIndices.empty() ? -1 : *m_selectedIndices.begin();
-		if (primaryIdx >= 0 && primaryIdx < static_cast<int>(shapes.size()))
+		// 기준(대표) 도형의 첫 앵커를 그리드에 맞춰 스냅 거리 계산
+		ge::Node* primary = selection.front();
+		auto itP = m_initialXfs.find(primary);
+		PathShape* ps = dynamic_cast<PathShape*>(primary);
+		if (ps && itP != m_initialXfs.end() && !ps->GetPaths().empty() && !ps->GetPaths()[0].nodes.empty())
 		{
-			PathShape* ps = dynamic_cast<PathShape*>(shapes[primaryIdx].get());
-			if (ps && !ps->GetPaths().empty() && !ps->GetPathsRef()[0].nodes.empty())
+			D2D1_POINT_2F p0 = itP->second.TransformPoint(ps->GetPaths()[0].nodes[0].anchor);
+			D2D1_POINT_2F targetP0 = grid.SnapPoint(D2D1::Point2F(p0.x + dx, p0.y + dy));
+			dx = targetP0.x - p0.x;
+			dy = targetP0.y - p0.y;
+		}
+		else
+		{
+			float step = grid.GetStepPx();
+			if (step > 0.001f)
 			{
-				D2D1_POINT_2F p0 = m_initialXf.TransformPoint(ps->GetPathsRef()[0].nodes[0].anchor);
-				D2D1_POINT_2F targetP0 = grid.SnapPoint(D2D1::Point2F(p0.x + dx, p0.y + dy));
-				dx = targetP0.x - p0.x;
-				dy = targetP0.y - p0.y;
-			}
-			else
-			{
-				float step = grid.GetStepPx();
-				if (step > 0.001f)
-				{
-					dx = static_cast<float>(std::round(dx / step)) * step;
-					dy = static_cast<float>(std::round(dy / step)) * step;
-				}
+				dx = static_cast<float>(std::round(dx / step)) * step;
+				dy = static_cast<float>(std::round(dy / step)) * step;
 			}
 		}
 	}
 
 	// 선택된 모든 도형에 동일한 이동량 적용
-	for (int idx : m_selectedIndices)
+	for (ge::Node* n : selection)
 	{
-		if (idx >= 0 && idx < static_cast<int>(shapes.size()))
-		{
-			auto it = m_initialXfs.find(idx);
-			D2D1::Matrix3x2F baseInitXf = (it != m_initialXfs.end()) ? it->second : shapes[idx]->GetTransform();
-			shapes[idx]->ApplyTranslation(D2D1::Point2F(dx, dy), baseInitXf);
-		}
+		auto it = m_initialXfs.find(n);
+		D2D1::Matrix3x2F baseInitXf = (it != m_initialXfs.end()) ? it->second : static_cast<D2D1::Matrix3x2F>(n->GetTransform());
+		n->ApplyTranslation(D2D1::Point2F(dx, dy), baseInitXf);
 	}
 }
 
@@ -482,56 +458,54 @@ void SelectTool::OnUp(const ToolEvent& e)
 		// 단순 클릭이 아니라 일정 크기 이상 드래그되었을 때만 영역 선택 판정
 		if ((maxX - minX) > 2.0f || (maxY - minY) > 2.0f)
 		{
-			auto& shapes = e.pDoc->GetShapes();
-			if (!e.ctrlDown)
-			{
-				m_selectedIndices.clear();
-			}
+			auto& doc = e.pDoc->GetDoc();
+			std::vector<ge::Node*> newSel;
+			if (e.ctrlDown) newSel = doc.GetSelection();
 
 			ID2D1Factory* f = e.pD2DFactory;
-			for (int i = 0; i < static_cast<int>(shapes.size()); ++i)
-			{
+			ForEachSelectableTopDown(e.pDoc, [&](ge::Node* n) {
 				D2D1_RECT_F localB{};
-				if (shapes[i]->GetLocalBounds(f, localB))
+				if (!n->GetLocalBounds(f, localB)) return false;
+
+				// 도형의 4개 코너를 월드 변환하여 AABB 산출
+				const ge::Matrix2D& xf = n->GetTransform();
+				D2D1_POINT_2F pts[4] = {
+					xf.TransformPoint(D2D1::Point2F(localB.left, localB.top)),
+					xf.TransformPoint(D2D1::Point2F(localB.right, localB.top)),
+					xf.TransformPoint(D2D1::Point2F(localB.right, localB.bottom)),
+					xf.TransformPoint(D2D1::Point2F(localB.left, localB.bottom))
+				};
+
+				float sMinX = pts[0].x, sMaxX = pts[0].x;
+				float sMinY = pts[0].y, sMaxY = pts[0].y;
+				for (int k = 1; k < 4; ++k)
 				{
-					// 도형의 4개 코너를 월드 변환하여 AABB 산출
-					D2D1_POINT_2F pts[4] = {
-						shapes[i]->GetTransform().TransformPoint(D2D1::Point2F(localB.left, localB.top)),
-						shapes[i]->GetTransform().TransformPoint(D2D1::Point2F(localB.right, localB.top)),
-						shapes[i]->GetTransform().TransformPoint(D2D1::Point2F(localB.right, localB.bottom)),
-						shapes[i]->GetTransform().TransformPoint(D2D1::Point2F(localB.left, localB.bottom))
-					};
-
-					float sMinX = pts[0].x, sMaxX = pts[0].x;
-					float sMinY = pts[0].y, sMaxY = pts[0].y;
-					for (int k = 1; k < 4; ++k)
-					{
-						sMinX = (std::min)(sMinX, pts[k].x);
-						sMaxX = (std::max)(sMaxX, pts[k].x);
-						sMinY = (std::min)(sMinY, pts[k].y);
-						sMaxY = (std::max)(sMaxY, pts[k].y);
-					}
-
-					// 사각형 교차(Intersect) 판정
-					bool intersects = !(sMaxX < minX || sMinX > maxX || sMaxY < minY || sMinY > maxY);
-					if (intersects)
-					{
-						m_selectedIndices.insert(i);
-					}
+					sMinX = (std::min)(sMinX, pts[k].x);
+					sMaxX = (std::max)(sMaxX, pts[k].x);
+					sMinY = (std::min)(sMinY, pts[k].y);
+					sMaxY = (std::max)(sMaxY, pts[k].y);
 				}
-			}
 
-			UpdateShapePropertiesSelection(GetSelectedIndex(), e.pDoc);
-			SyncDocSelection(e.pDoc, m_selectedIndices);
+				// 사각형 교차(Intersect) 판정
+				bool intersects = !(sMaxX < minX || sMinX > maxX || sMaxY < minY || sMinY > maxY);
+				if (intersects && std::find(newSel.begin(), newSel.end(), n) == newSel.end())
+				{
+					newSel.push_back(n);
+				}
+				return false;
+			});
+
+			doc.SetSelection(newSel);
+			ActivateLayerOf(e.pDoc, e.pDoc->GetPrimarySelection());
+			UpdateShapePropertiesSelection(e.pDoc->GetPrimarySelection(), e.pDoc);
 			CString str;
-			str.Format(_T("[선택 도구] 마키 영역 선택 완료 (선택된 도형: %d개)"), static_cast<int>(m_selectedIndices.size()));
+			str.Format(_T("[선택 도구] 마키 영역 선택 완료 (선택된 도형: %d개)"), static_cast<int>(newSel.size()));
 			LogAppEvent(str);
 		}
 	}
-	else if (m_mode != Mode::None)
+	else if (m_mode != Mode::None && e.pDoc)
 	{
-		UpdateShapePropertiesSelection(GetSelectedIndex(), e.pDoc);
-		SyncDocSelection(e.pDoc, m_selectedIndices);
+		UpdateShapePropertiesSelection(e.pDoc->GetPrimarySelection(), e.pDoc);
 		CString str;
 		str.Format(_T("[선택 도구] 변형 완료 (모드: %d)"), static_cast<int>(m_mode));
 		LogAppEvent(str);
@@ -539,6 +513,9 @@ void SelectTool::OnUp(const ToolEvent& e)
 
 	m_mode = Mode::None;
 	m_handle = Handle::None;
+	m_editShape = nullptr;
+	m_xfTarget = nullptr;
+	m_initialXfs.clear();
 }
 
 void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
@@ -566,17 +543,15 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 		rt->DrawRectangle(mr, brush, 1.2f);
 	}
 
-	if (m_selectedIndices.empty()) return;
+	const std::vector<ge::Node*>& sel = pDoc->GetDoc().GetSelection();
+	if (sel.empty()) return;
 
 	ID2D1Factory* f = nullptr;
 	rt->GetFactory(&f);
 	if (!f) return;
 
-	for (int idx : m_selectedIndices)
+	for (Shape* shape : sel)
 	{
-		if (idx < 0 || idx >= static_cast<int>(pDoc->GetShapes().size())) continue;
-
-		Shape* shape = pDoc->GetShapes()[idx].get();
 		if (!shape || !shape->IsVisible()) continue;
 		D2D1_POINT_2F handles[9];
 		D2D1_RECT_F localBounds;
@@ -736,8 +711,7 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 	if (!pAdded) return false;
 
 	auto* pLayer = pDoc->GetDoc().GetActiveLayer();
-	m_lastCommittedIndex = pLayer ? pLayer->IndexOf(pAdded) : -1;
-	pDoc->GetDoc().SetSelection({ pAdded });
+	m_lastCommittedId = pAdded->GetId();
 
 	CString strEngineLog;
 	strEngineLog.Format(_T("[도형 생성] %s (NodeId: %llu, 활성레이어: %s)"),
@@ -746,12 +720,11 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 	LogAppEvent(strEngineLog);
 	SetAppStatusText(strEngineLog);
 
-	// 방금 등록된 도형 정보 표시 (속성창 + 상단 옵션바 수정 모드)
-	UpdateShapePropertiesSelection(m_lastCommittedIndex, pDoc);
+	// 방금 등록된 도형 선택 + 정보 표시 (속성창 + 상단 옵션바 수정 모드)
 	SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
 	if (pSelect)
 	{
-		pSelect->SetSelectedIndex(m_lastCommittedIndex, pDoc);
+		pSelect->SelectNode(pAdded, pDoc);
 	}
 
 	pDoc->UpdateAllViews(nullptr);
@@ -794,10 +767,7 @@ void BaseShapeTool::DrawCommittedShapeAnchors(ID2D1RenderTarget* rt, ID2D1SolidC
                                              const ViewportTransform& view, CM2DrawDoc* pDoc)
 {
 	if (!rt || !brush || !pDoc) return;
-	const auto& shapes = pDoc->GetShapes();
-	if (m_lastCommittedIndex < 0 || m_lastCommittedIndex >= static_cast<int>(shapes.size())) return;
-
-	PathShape* ps = dynamic_cast<PathShape*>(shapes[m_lastCommittedIndex].get());
+	PathShape* ps = m_lastCommittedId ? dynamic_cast<PathShape*>(pDoc->GetDoc().FindById(m_lastCommittedId)) : nullptr;
 	if (!ps) return;
 
 	for (const auto& sp : ps->GetPaths())

@@ -333,12 +333,17 @@ CSize CToolOptionBar::CalcFixedLayout(BOOL bStretch, BOOL bHorz)
 
 void CToolOptionBar::OnToolChanged(ToolType newTool)
 {
-	m_selectedIndex = -1;
+	m_selectedNodeId = 0;
 	SetMode(newTool, false);
+
+	// 도구 전환 시 선택 해제 (현재 활성 문서 기준; m_pDoc 은 닫힌 문서일 수 있으므로 사용하지 않음)
+	CFrameWnd* pMainFrame = DYNAMIC_DOWNCAST(CFrameWnd, AfxGetMainWnd());
+	CFrameWnd* pActiveFrame = pMainFrame ? pMainFrame->GetActiveFrame() : nullptr;
+	CM2DrawDoc* pActiveDoc = pActiveFrame ? DYNAMIC_DOWNCAST(CM2DrawDoc, pActiveFrame->GetActiveDocument()) : nullptr;
 	SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
-	if (pSelect)
+	if (pSelect && pActiveDoc)
 	{
-		pSelect->ClearSelection();
+		pSelect->ClearSelection(pActiveDoc);
 	}
 }
 
@@ -552,9 +557,9 @@ void CToolOptionBar::SetMode(ToolType tool, bool editing)
 	}
 	m_bUpdating = false;
 
-	if (m_pDoc && m_selectedIndex >= 0)
+	if (ge::Node* pShape = GetSelectedShape())
 	{
-		SyncSelection(m_pDoc, m_selectedIndex);
+		SyncSelection(m_pDoc, pShape);
 	}
 }
 
@@ -605,12 +610,18 @@ void CToolOptionBar::SetFieldText(UINT id, const CString& text)
 	}
 }
 
-void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
+ge::Node* CToolOptionBar::GetSelectedShape() const
+{
+	return (m_pDoc && m_selectedNodeId) ? m_pDoc->GetDoc().FindById(m_selectedNodeId) : nullptr;
+}
+
+void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, ge::Node* pShape)
 {
 	m_pDoc = pDoc;
-	m_selectedIndex = selectedIndex;
+	m_selectedNodeId = (pDoc && pShape) ? pShape->GetId() : 0;
 
-	if (!pDoc || selectedIndex < 0 || selectedIndex >= static_cast<int>(pDoc->GetShapes().size()))
+	Shape* pBaseShape = GetSelectedShape();
+	if (!pBaseShape)
 	{
 		if (m_bEditing)
 		{
@@ -618,10 +629,6 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 		}
 		return;
 	}
-
-	Shape* pBaseShape = pDoc->GetShapes()[selectedIndex].get();
-	if (!pBaseShape)
-		return;
 
 	PathShape* pPathShape = dynamic_cast<PathShape*>(pBaseShape);
 
@@ -941,9 +948,9 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			pBox->SetSetting(s);
 		}
 
-		if (m_pDoc && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_pDoc->GetShapes().size()))
+		if (GetSelectedShape())
 		{
-			PathShape* pShape = dynamic_cast<PathShape*>(m_pDoc->GetShapes()[m_selectedIndex].get());
+			PathShape* pShape = dynamic_cast<PathShape*>(GetSelectedShape());
 			if (pShape && pShape->GetKind() == ::ShapeKind::Rect)
 			{
 				RectParams* rp = pShape->GetParamRef<RectParams>();
@@ -994,9 +1001,9 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 	{
 		m_bPathClosed = !m_bPathClosed;
 
-		if (m_bEditing && m_pDoc && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_pDoc->GetShapes().size()))
+		if (m_bEditing && GetSelectedShape())
 		{
-			PathShape* pShape = dynamic_cast<PathShape*>(m_pDoc->GetShapes()[m_selectedIndex].get());
+			PathShape* pShape = dynamic_cast<PathShape*>(GetSelectedShape());
 			if (pShape && !pShape->GetPaths().empty())
 			{
 				for (auto& sp : pShape->GetPathsRef())
@@ -1009,7 +1016,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			}
 
 			// 우측 오브젝트 설정 창의 Close Path 체크박스도 즉시 상호 동기화!
-			SyncPropertiesWithSelection(m_selectedIndex, m_pDoc);
+			SyncPropertiesWithSelection(GetSelectedShape(), m_pDoc);
 		}
 		else if (m_pDoc && m_pDoc->GetCurrentPath())
 		{
@@ -1042,11 +1049,13 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		if (pPen && m_pDoc)
 		{
 			pPen->OnDoubleClicked(m_pDoc);
+			// 도구 전환(OnToolChanged)이 선택을 해제하므로 방금 완료된 패스를 먼저 기억
+			ge::Node* pCommitted = m_pDoc->GetPrimarySelection();
 			GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
 			SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
-			if (pSelect && !m_pDoc->GetShapes().empty())
+			if (pSelect && pCommitted)
 			{
-				pSelect->SetSelectedIndex(static_cast<int>(m_pDoc->GetShapes().size()) - 1, m_pDoc);
+				pSelect->SelectNode(pCommitted, m_pDoc);
 			}
 			m_pDoc->UpdateAllViews(nullptr);
 		}
@@ -1107,7 +1116,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 	}
 
 	// (A) 다음 도형 만들기 모드일 때: BaseShapeTool 설정값 갱신
-	if (!m_bEditing || !m_pDoc || m_selectedIndex < 0)
+	if (!m_bEditing || !GetSelectedShape())
 	{
 		BaseShapeTool* pBox = dynamic_cast<BaseShapeTool*>(GetApp()->GetToolManager().GetActiveTool());
 		if (pBox)
@@ -1186,10 +1195,10 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 	}
 
 	// (B) 선택된 도형 수정 모드일 때
-	if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_pDoc->GetShapes().size()))
+	if (!GetSelectedShape())
 		return;
 
-	Shape* pShape = m_pDoc->GetShapes()[m_selectedIndex].get();
+	Shape* pShape = GetSelectedShape();
 	if (!pShape) return;
 
 	PathShape* pPathShape = dynamic_cast<PathShape*>(pShape);
@@ -1219,7 +1228,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Translation(dx, 0.0f));
 			pShape->Invalidate();
 			m_pDoc->UpdateAllViews(nullptr);
-			SyncSelection(m_pDoc, m_selectedIndex);
+			SyncSelection(m_pDoc, GetSelectedShape());
 			return;
 		}
 		float dx = targetPixelX - curOrigin.x;
@@ -1241,7 +1250,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 			pShape->SetTransform(pShape->GetTransform() * D2D1::Matrix3x2F::Translation(0.0f, dy));
 			pShape->Invalidate();
 			m_pDoc->UpdateAllViews(nullptr);
-			SyncSelection(m_pDoc, m_selectedIndex);
+			SyncSelection(m_pDoc, GetSelectedShape());
 			return;
 		}
 		float dy = targetPixelY - curOrigin.y;
@@ -1614,69 +1623,6 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 
 	pShape->Invalidate();
 
-	// 신엔진 ge::Document 에도 변형/파라미터/정점 동기화
-	if (m_pDoc && m_selectedIndex >= 0)
-	{
-		auto* layer = m_pDoc->GetDoc().GetActiveLayer();
-		if (layer && m_selectedIndex < static_cast<int>(layer->GetChildren().size()))
-		{
-			auto* node = dynamic_cast<ge::PathNode*>(layer->GetChildren()[m_selectedIndex].get());
-			if (node && pPathShape)
-			{
-				const auto& mx = pPathShape->GetTransform();
-				node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
-				node->SetKind(static_cast<ge::ShapeKind>(pPathShape->GetKind()));
-
-				// 파라미터 복사
-				std::visit([&node](auto&& arg) {
-					using T = std::decay_t<decltype(arg)>;
-					if constexpr (std::is_same_v<T, RectParams>) {
-						ge::RectParams p; p.rx = arg.rx; p.ry = arg.ry; p.linkRxRy = arg.linkRxRy;
-						node->SetParams(p);
-					} else if constexpr (std::is_same_v<T, TriangleParams>) {
-						ge::TriangleParams p; p.equilateral = arg.equilateral;
-						node->SetParams(p);
-					} else if constexpr (std::is_same_v<T, EllipseParams>) {
-						ge::EllipseParams p; p.linkRxRy = arg.linkRxRy;
-						node->SetParams(p);
-					} else if constexpr (std::is_same_v<T, PolygonParams>) {
-						ge::PolygonParams p; p.sides = arg.sides; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
-						node->SetParams(p);
-					} else if constexpr (std::is_same_v<T, StarParams>) {
-						ge::StarParams p; p.points = arg.points; p.innerRatio = arg.innerRatio; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
-						node->SetParams(p);
-					} else if constexpr (std::is_same_v<T, GearParams>) {
-						ge::GearParams p; p.teeth = arg.teeth; p.depthRatio = arg.depthRatio; p.boreRatio = arg.boreRatio;
-						p.toothWidthRatio = arg.toothWidthRatio; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
-						node->SetParams(p);
-					} else if constexpr (std::is_same_v<T, SpiralParams>) {
-						ge::SpiralParams p; p.turns = arg.turns; p.innerRatio = arg.innerRatio; p.radius = arg.radius; p.cx = arg.cx; p.cy = arg.cy;
-						node->SetParams(p);
-					} else if constexpr (std::is_same_v<T, HeartParams>) {
-						node->SetParams(ge::HeartParams{});
-					}
-				}, pPathShape->GetParams());
-
-				// 서브패스 동기화
-				std::vector<ge::SubPath> gePaths;
-				for (const auto& sp : pPathShape->GetPaths()) {
-					ge::SubPath gsp;
-					gsp.closed = sp.closed;
-					for (const auto& bn : sp.nodes) {
-						ge::BezierNode gbn;
-						gbn.anchor = { bn.anchor.x, bn.anchor.y };
-						gbn.hIn = { bn.hIn.x, bn.hIn.y };
-						gbn.hOut = { bn.hOut.x, bn.hOut.y };
-						gbn.type = static_cast<ge::BezierNode::Type>(bn.type);
-						gsp.nodes.push_back(gbn);
-					}
-					gePaths.push_back(std::move(gsp));
-				}
-				node->SetPaths(gePaths);
-			}
-		}
-	}
-
 	m_pDoc->UpdateAllViews(nullptr);
-	SyncSelection(m_pDoc, m_selectedIndex);
+	SyncSelection(m_pDoc, GetSelectedShape());
 }

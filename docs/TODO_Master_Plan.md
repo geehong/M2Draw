@@ -31,7 +31,7 @@
   - `CM2DrawDoc::DuplicateSelectedObjects()` + **Ctrl+D** 단축키 연결 (검증 수단)
 - [x] 0.2.3 빌드 성공 / 확인 완료: 복제한 도형을 편집해도 원본이 변하지 않는지
 
-### Step 0.2b 단일 모델 전환 (D5 + D6) — ⚠️ 우선순위 상향 제안 (0.3보다 먼저)
+### Step 0.2b 단일 모델 전환 (D5 + D6) — ✅ 완료
 > 이중 모델(`m_shapes` + `ge::Document`)이 확인됨. 이후 모든 기능(그룹, Z-Order, 레이어, 저장, Undo)이
 > 인덱스 대응을 깨뜨리므로, 기존 0.4(선택 단일화)와 0.5.1(`m_shapes` 제거)을 합쳐 먼저 진행한다.
 **1단계 — 모델 하나로 합치기**  — ✅ 완료 (사용자 확인 2026-10-27)
@@ -46,10 +46,17 @@
   - 활성 레이어가 숨김/잠금이면 선택 도구가 상호작용하지 않음 (기존 이름 동기화 꼼수 대체)
   - 레이어 패널: 레이어 전환 시 선택 초기화, 다른 레이어의 도형 클릭 시 그 레이어를 활성화
 
-**2단계 — 인덱스 선택 → 노드 포인터 선택**
-- [ ] 0.2b.2 SelectTool: `m_selectedIndices`(int) → `Document` 선택(`Node*`), 히트테스트를 전체 레이어 대상으로
-- [ ] 0.2b.3 PropertyView / ToolOptionBar / PropertiesWnd / LayerWnd 의 인덱스 기반 접근을 `Node*`로, `SyncDocSelection`·`GetShapes()` 제거
-- [ ] 0.2b.6 빌드 + 전체 회귀 확인 (생성/선택/변형/노드편집/복제/삭제/레이어 패널/다중 레이어)
+**2단계 — 인덱스 선택 → 노드 포인터 선택**  — ✅ 완료 (사용자 확인 2026-10-27)
+- [x] 0.2b.2 SelectTool: 자체 선택 상태(`m_selectedIndices`) 삭제 → `ge::Document::GetSelection()`이 유일한 선택 상태
+  - 히트테스트·마키 선택이 **모든 보이는/잠기지 않은 레이어** 대상, 잠긴 개별 도형도 제외
+  - 다른 레이어 도형을 클릭하면 그 레이어가 활성화 (Inkscape 방식)
+  - API: `SelectNode(Node*, pDoc)`, `ClearSelection(pDoc)`
+  - 스케일/회전이 "핸들을 잡은 도형"에 적용되도록 수정 (기존: 다중 선택 시 인덱스가 가장 작은 도형에 적용되던 문제)
+- [x] 0.2b.3 패널(`CD2DPropertyView`, `CPropertiesWnd`, `CToolOptionBar`): 인덱스 → `NodeId` 보관 + `FindById` 조회 (삭제/새 문서 후 dangling 없음)
+  - `UpdateShapePropertiesSelection(ge::Node*, pDoc)` 등 선택 전달 함수 시그니처 변경
+  - 속성창/옵션바의 "같은 인덱스 노드에 다시 복사" 동기화 블록 삭제 (다른 도형을 덮어쓸 위험)
+  - `SyncDocSelection`, `GetShapes()` 삭제, 복제의 "활성 레이어만" 제한 해제
+- [x] 0.2b.6 빌드 성공 / 확인 완료: 전체 회귀 (생성/선택/변형/노드편집/복제/삭제/레이어 패널/다중 레이어)
 
 ### Step 0.3 LayerNode 필드 가림 제거 + 조상 체인 판정 (D3)
 - [ ] 0.3.1 LayerNode의 `m_bVisible`/`m_bLocked`/`m_opacity` 및 이름을 가리는 메서드 삭제
@@ -58,13 +65,13 @@
 - [ ] 0.3.4 `LayerWnd`의 자식 visible 우회 코드 정리
 - [ ] 0.3.5 빌드 + 숨김/잠금 레이어 도형이 클릭되지 않는지 확인
 
-### Step 0.4 선택 상태 단일화 (D5)  — → Step 0.2b 로 통합
-- [ ] 0.4.1 `SelectTool::m_selectedIndices` → `Document` 선택(`Node*`)으로 바꿈
-- [ ] 0.4.2 `SyncDocSelection` 및 인덱스 기반 사용처(PropertyView, ToolOptionBar, LayerWnd, Doc 삭제) 정리
-- [ ] 0.4.3 빌드 + 다중 선택/마키 선택/레이어 패널 선택 동기화 확인
+### Step 0.4 선택 상태 단일화 (D5)  — ✅ Step 0.2b 로 통합 완료
+- [x] 0.4.1 `SelectTool::m_selectedIndices` → `Document` 선택(`Node*`)으로 바꿈
+- [x] 0.4.2 `SyncDocSelection` 및 인덱스 기반 사용처(PropertyView, ToolOptionBar, LayerWnd, Doc 삭제) 정리
+- [x] 0.4.3 빌드 + 다중 선택/마키 선택/레이어 패널 선택 동기화 확인
 
 ### Step 0.5 구형 잔재 제거 (D6, D15)
-- [ ] 0.5.1 ~~`m_shapes`, `m_currentPath`, 이름 기반 삭제 로직 제거~~ → Step 0.2b 로 통합
+- [x] 0.5.1 ~~`m_shapes`, `m_currentPath`, 이름 기반 삭제 로직 제거~~ → Step 0.2b 로 통합
 - [ ] 0.5.2 `Shape`/`PathShape` using 별칭 정리
 - [ ] 0.5.3 `D2DVectorEngine_old.h`, `backup_toolbar_20261021/` 삭제 (vcxproj 참조 포함)
 - [ ] 0.5.4 빌드 + 삭제 기능(Del, 레이어 휴지통) 확인

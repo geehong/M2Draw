@@ -54,11 +54,10 @@ BOOL CM2DrawDoc::OnNewDocument()
 	return TRUE;
 }
 
-const std::vector<std::unique_ptr<ge::Node>>& CM2DrawDoc::GetShapes() const
+ge::Node* CM2DrawDoc::GetPrimarySelection() const
 {
-	static const std::vector<std::unique_ptr<ge::Node>> s_empty;
-	const ge::LayerNode* pLayer = m_doc.GetActiveLayer();
-	return pLayer ? pLayer->GetChildren() : s_empty;
+	const auto& sel = m_doc.GetSelection();
+	return sel.empty() ? nullptr : sel.front();
 }
 
 
@@ -151,43 +150,13 @@ void CM2DrawDoc::Dump(CDumpContext& dc) const
 
 bool CM2DrawDoc::HasSelectedObjects() const
 {
-	if (!m_doc.GetSelection().empty())
-		return true;
-
-	CM2DrawApp* pApp = dynamic_cast<CM2DrawApp*>(AfxGetApp());
-	if (pApp)
-	{
-		SelectTool* pSelect = pApp->GetToolManager().GetSelectTool();
-		if (pSelect && !pSelect->GetSelectedIndices().empty())
-			return true;
-	}
-	return false;
+	return !m_doc.GetSelection().empty();
 }
 
 bool CM2DrawDoc::DeleteSelectedObjects()
 {
-	// 1. 선택된 노드들 수집
-	std::vector<ge::Node*> targetNodes = m_doc.GetSelection();
-
-	// SelectTool의 선택 인덱스에서도 추가 수집
-	CM2DrawApp* pApp = dynamic_cast<CM2DrawApp*>(AfxGetApp());
-	SelectTool* pSelect = pApp ? pApp->GetToolManager().GetSelectTool() : nullptr;
-	if (pSelect)
-	{
-		auto* pActiveLayer = m_doc.GetActiveLayer();
-		const auto& indices = pSelect->GetSelectedIndices();
-		for (int idx : indices)
-		{
-			if (pActiveLayer && idx >= 0 && idx < static_cast<int>(pActiveLayer->GetChildren().size()))
-			{
-				ge::Node* pNode = pActiveLayer->GetChildren()[idx].get();
-				if (std::find(targetNodes.begin(), targetNodes.end(), pNode) == targetNodes.end())
-				{
-					targetNodes.push_back(pNode);
-				}
-			}
-		}
-	}
+	// 1. 선택된 노드들 수집 (복사본: RemoveNode 가 선택 목록을 수정함)
+	const std::vector<ge::Node*> targetNodes = m_doc.GetSelection();
 
 	if (targetNodes.empty())
 		return false;
@@ -203,11 +172,7 @@ bool CM2DrawDoc::DeleteSelectedObjects()
 
 	// 3. 선택 상태 초기화
 	m_doc.ClearSelection();
-	if (pSelect)
-	{
-		pSelect->ClearSelection();
-	}
-	UpdateShapePropertiesSelection(-1, this);
+	UpdateShapePropertiesSelection(nullptr, this);
 
 	// 6. UI 및 뷰 동기화
 	CString strLog;
@@ -251,13 +216,7 @@ bool CM2DrawDoc::DeleteActiveLayer()
 
 	// 선택 정리
 	m_doc.ClearSelection();
-	CM2DrawApp* pApp = dynamic_cast<CM2DrawApp*>(AfxGetApp());
-	SelectTool* pSelect = pApp ? pApp->GetToolManager().GetSelectTool() : nullptr;
-	if (pSelect)
-	{
-		pSelect->ClearSelection();
-	}
-	UpdateShapePropertiesSelection(-1, this);
+	UpdateShapePropertiesSelection(nullptr, this);
 
 	CString strLog;
 	strLog.Format(_T("[레이어 패널] 레이어 삭제됨: '%s' (하위 도형 %d개 포함)"), (LPCTSTR)layerName, childCount);
@@ -290,36 +249,12 @@ bool CM2DrawDoc::PerformSmartDelete()
 
 bool CM2DrawDoc::DuplicateSelectedObjects()
 {
-	CM2DrawApp* pApp = dynamic_cast<CM2DrawApp*>(AfxGetApp());
-	SelectTool* pSelect = pApp ? pApp->GetToolManager().GetSelectTool() : nullptr;
-
-	// SelectTool 이 아직 활성 레이어 인덱스 기반이므로 활성 레이어 최상위 도형만 허용 (Step 0.2b 2단계에서 해제)
-	auto* pActiveLayer = m_doc.GetActiveLayer();
-	if (!pActiveLayer) return false;
-	for (ge::Node* n : m_doc.GetSelection())
-	{
-		if (!n || n->GetParent() != pActiveLayer)
-		{
-			SetAppStatusText(_T("[도형 복제] 활성 레이어의 최상위 도형만 복제할 수 있습니다."));
-			return false;
-		}
-	}
-
+	// 원본과 같은 부모(레이어) 안에서 바로 위에 복제, 복제본이 새 선택이 됨
 	std::vector<ge::Node*> clones = m_doc.DuplicateSelection();
 	if (clones.empty())
 		return false;
 
-	std::vector<int> cloneIdx;
-	for (ge::Node* n : clones)
-		cloneIdx.push_back(pActiveLayer->IndexOf(n));
-
-	if (pSelect)
-	{
-		auto& indices = pSelect->GetSelectedIndices();
-		indices.clear();
-		indices.insert(cloneIdx.begin(), cloneIdx.end());
-		UpdateShapePropertiesSelection(pSelect->GetSelectedIndex(), this);
-	}
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
 
 	CString strLog;
 	strLog.Format(_T("[도형 복제] %d개 오브젝트 복제 완료"), static_cast<int>(clones.size()));

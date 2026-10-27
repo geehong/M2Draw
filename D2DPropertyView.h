@@ -7,6 +7,7 @@
 #include "M2DrawControl.h"
 
 class CM2DrawDoc;
+namespace ge { class Node; }
 
 // M2DrawControl 기반 다크 테마 D2D 속성 뷰 (오브젝트 속성 & 캔버스 환경설정)
 class CD2DPropertyView : public CWnd
@@ -27,7 +28,7 @@ public:
 	PaneMode GetPaneMode() const { return m_paneMode; }
 
 	// 타깃 도형 설정 및 적용
-	void SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex);
+	void SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape);
 	void ApplyToShape();
 	void ApplyCanvasSettings();
 	void SyncControlsFromData();
@@ -45,8 +46,10 @@ public:
 protected:
 	PaneMode    m_paneMode = MODE_SHAPE;
 	CM2DrawDoc* m_pActiveDoc = nullptr;
-	int         m_selectedShapeIndex = -1;
+	uint64_t    m_selectedNodeId = 0;      // 대상 도형 NodeId (0 = 없음). 포인터 대신 ID 로 보관해 삭제/새 문서 시 dangling 방지
 	bool        m_bUpdating = false;
+
+	ge::Node* GetSelectedShape() const;   // m_selectedNodeId 를 문서에서 조회 (없으면 nullptr)
 
 	// 도형 상태 데이터
 	CString      m_strShapeName;

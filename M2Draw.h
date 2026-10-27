@@ -53,8 +53,11 @@ void LogAppEvent(const CString& strMsg, int tabIndex = 0);
 
 void SetAppStatusText(const CString& strMsg);
 
-void UpdateShapePropertiesSelection(int shapeIndex, CM2DrawDoc* pDoc);
-void SyncOptionBarWithSelection(int shapeIndex, CM2DrawDoc* pDoc);
-void SyncPropertiesWithSelection(int shapeIndex, CM2DrawDoc* pDoc);
+namespace ge { class Node; }
+
+// 선택된 도형(nullptr = 선택 없음)을 속성창 / 옵션바 / 레이어 패널에 반영
+void UpdateShapePropertiesSelection(ge::Node* pShape, CM2DrawDoc* pDoc);
+void SyncOptionBarWithSelection(ge::Node* pShape, CM2DrawDoc* pDoc);
+void SyncPropertiesWithSelection(ge::Node* pShape, CM2DrawDoc* pDoc);
 
 void UpdateOptionBarCreationCoords(float x, float y, float w, float h, bool hasFixedStart);

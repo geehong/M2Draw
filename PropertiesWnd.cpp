@@ -48,7 +48,6 @@ CPropertiesWnd::CPropertiesWnd(CD2DPropertyView::PaneMode mode) noexcept
 	: m_paneMode(mode)
 	, m_wndD2DProp(mode)
 	, m_nComboHeight(0)
-	, m_selectedShapeIndex(-1)
 	, m_pActiveDoc(nullptr)
 {
 }
@@ -276,14 +275,21 @@ void CPropertiesWnd::OnComboSelectChanged()
 	AdjustLayout();
 }
 
-void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
+ge::Node* CPropertiesWnd::GetSelectedShape() const
+{
+	return (m_pActiveDoc && m_selectedNodeId) ? m_pActiveDoc->GetDoc().FindById(m_selectedNodeId) : nullptr;
+}
+
+void CPropertiesWnd::SetSelectedShape(ge::Node* pShape, CM2DrawDoc* pDoc)
 {
 	if (m_wndObjectCombo.GetSafeHwnd() == nullptr)
 		return;
 
+	const uint64_t newId = (pDoc && pShape) ? pShape->GetId() : 0;
+
 	// 이미 동일한 도형이 선택되어 있는 상태에서 수치만 바뀐 경우:
 	// 콤보박스 재구축 및 SetPaneMode(컨트롤 전체 파괴/재생성)를 건너뛰고 초고속 Transform만 동기화!
-	if (m_selectedShapeIndex == shapeIndex && m_pActiveDoc == pDoc && shapeIndex >= 0)
+	if (newId != 0 && m_selectedNodeId == newId && m_pActiveDoc == pDoc)
 	{
 		if (m_wndD2DProp.GetSafeHwnd())
 		{
@@ -292,7 +298,7 @@ void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
 		return;
 	}
 
-	m_selectedShapeIndex = shapeIndex;
+	m_selectedNodeId = newId;
 	m_pActiveDoc = pDoc;
 
 	// 기존 쉐이프 설정 항목(이름에 "설정"이 들어있고 "격자"나 "TEST"가 아닌 항목) 제거
@@ -306,14 +312,13 @@ void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
 		}
 	}
 
-	if (shapeIndex >= 0 && pDoc && shapeIndex < static_cast<int>(pDoc->GetShapes().size()))
+	if (Shape* shape = GetSelectedShape())
 	{
-		Shape* shape = pDoc->GetShapes()[shapeIndex].get();
 		CString strTitle;
 		if (!shape->GetName().empty())
 			strTitle.Format(_T("{%s} 오브젝트 설정"), shape->GetName().c_str());
 		else
-			strTitle.Format(_T("{%s #%d} 오브젝트 설정"), shape->GetShapeTypeName(), shapeIndex + 1);
+			strTitle.Format(_T("{%s} 오브젝트 설정"), shape->GetShapeTypeName());
 
 		int inserted = m_wndObjectCombo.InsertString(1, strTitle);
 		m_wndObjectCombo.SetCurSel(inserted);
@@ -325,7 +330,7 @@ void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
 
 		if (m_wndD2DProp.GetSafeHwnd())
 		{
-			m_wndD2DProp.SetTargetShape(pDoc, shapeIndex);
+			m_wndD2DProp.SetTargetShape(pDoc, shape);
 			m_wndD2DProp.SetPaneMode(CD2DPropertyView::MODE_SHAPE);
 		}
 	}
@@ -333,7 +338,7 @@ void CPropertiesWnd::SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc)
 	{
 		if (m_wndD2DProp.GetSafeHwnd())
 		{
-			m_wndD2DProp.SetTargetShape(nullptr, -1);
+			m_wndD2DProp.SetTargetShape(nullptr, nullptr);
 		}
 
 		if (m_paneMode == CD2DPropertyView::MODE_SHAPE)
@@ -497,21 +502,21 @@ void CPropertiesWnd::InitShapePropList()
 	m_wndPropList.SetVSDotNetLook();
 	m_wndPropList.MarkModifiedProperties();
 
-	if (m_selectedShapeIndex < 0 || !m_pActiveDoc || m_selectedShapeIndex >= static_cast<int>(m_pActiveDoc->GetShapes().size()))
+	if (!GetSelectedShape())
 	{
 		CMFCPropertyGridProperty* pEmptyGroup = new CMFCPropertyGridProperty(_T("선택된 쉐이프 없음"));
 		m_wndPropList.AddProperty(pEmptyGroup);
 		return;
 	}
 
-	Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+	Shape* shape = GetSelectedShape();
 
 	// 타이틀: {쉐이프 이름} 설정
 	CString strGroupTitle;
 	if (!shape->GetName().empty())
 		strGroupTitle.Format(_T("{%s} 설정"), shape->GetName().c_str());
 	else
-		strGroupTitle.Format(_T("{%s #%d} 설정"), shape->GetShapeTypeName(), m_selectedShapeIndex + 1);
+		strGroupTitle.Format(_T("{%s} 설정"), shape->GetShapeTypeName());
 
 	CMFCPropertyGridProperty* pGroupShape = new CMFCPropertyGridProperty(strGroupTitle);
 
@@ -861,9 +866,9 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	// 2. 쉐이프 속성 변경 처리
 	case PROP_SHAPE_NAME:
 	{
-		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		if (GetSelectedShape())
 		{
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			Shape* shape = GetSelectedShape();
 			shape->SetName(val.bstrVal ? val.bstrVal : L"");
 			CString strTitle;
 			strTitle.Format(_T("{%s} 설정"), shape->GetName().c_str());
@@ -881,9 +886,9 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	case PROP_SHAPE_STROKE_W:
 	{
 		val.ChangeType(VT_R8);
-		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		if (GetSelectedShape())
 		{
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			Shape* shape = GetSelectedShape();
 			shape->GetStyleRef().strokeWidth = static_cast<float>(val.dblVal);
 			shape->Invalidate();
 			strLogMsg.Format(_T("[쉐이프 속성] 라인 굵기: %.1f px"), shape->GetStyle().strokeWidth);
@@ -894,9 +899,9 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	case PROP_SHAPE_STROKE_C:
 	{
 		CMFCPropertyGridColorProperty* pColor = dynamic_cast<CMFCPropertyGridColorProperty*>(pProp);
-		if (pColor && m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		if (pColor && GetSelectedShape())
 		{
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			Shape* shape = GetSelectedShape();
 			COLORREF c = pColor->GetColor();
 			shape->GetStyleRef().stroke = D2D1::ColorF(
 				GetRValue(c) / 255.0f,
@@ -912,9 +917,9 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	}
 	case PROP_SHAPE_DASH:
 	{
-		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		if (GetSelectedShape())
 		{
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			Shape* shape = GetSelectedShape();
 			CString strDash = val.bstrVal;
 			if (strDash.Find(_T("대시-점선")) >= 0)
 				shape->GetStyleRef().dashStyle = D2D1_DASH_STYLE_DASH_DOT;
@@ -933,9 +938,9 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	}
 	case PROP_SHAPE_FILL_TYP:
 	{
-		if (m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		if (GetSelectedShape())
 		{
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			Shape* shape = GetSelectedShape();
 			CString strFillType = val.bstrVal;
 			if (strFillType.Find(_T("단색")) >= 0)
 				shape->GetStyleRef().fillType = FillType::Solid;
@@ -953,9 +958,9 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 	case PROP_SHAPE_FILL_CLR:
 	{
 		CMFCPropertyGridColorProperty* pColor = dynamic_cast<CMFCPropertyGridColorProperty*>(pProp);
-		if (pColor && m_pActiveDoc && m_selectedShapeIndex >= 0 && m_selectedShapeIndex < static_cast<int>(m_pActiveDoc->GetShapes().size()))
+		if (pColor && GetSelectedShape())
 		{
-			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
+			Shape* shape = GetSelectedShape();
 			COLORREF c = pColor->GetColor();
 			shape->GetStyleRef().fill = D2D1::ColorF(
 				GetRValue(c) / 255.0f,

@@ -32,10 +32,8 @@ public:
 	const ge::Document&             GetDoc() const       { return m_doc; }
 	std::unique_ptr<ge::PathNode>&  GetCurrentPathNode() { return m_currentPathNode; }
 
-	// 활성 레이어의 최상위 도형 목록 (읽기 전용 뷰).
-	// 인덱스 기반 도구/패널 호환용 -> Step 0.2b 2단계에서 Node* 선택으로 대체 예정.
-	// 도형 추가/삭제는 반드시 ge::Document API(AddShape/RemoveNode)를 사용.
-	const std::vector<std::unique_ptr<ge::Node>>& GetShapes() const;
+	// 선택의 단일 출처는 ge::Document::GetSelection(). 대표(첫 번째) 선택 노드, 없으면 nullptr
+	ge::Node* GetPrimarySelection() const;
 
 	// 펜 도구가 작성 중인 패스 (문서에 아직 등록되지 않은 임시 도형)
 	std::unique_ptr<PathShape>          m_currentPath;

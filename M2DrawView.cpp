@@ -354,11 +354,13 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 		bool switchSelect = pActiveTool->OnDoubleClicked(pDoc);
 		if (switchSelect)
 		{
+			// 도구 전환(OnToolChanged)이 선택을 해제하므로 방금 완료된 도형을 먼저 기억
+			ge::Node* pCommitted = pDoc ? pDoc->GetPrimarySelection() : nullptr;
 			GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
 			SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
-			if (pSelect && pDoc && !pDoc->GetShapes().empty())
+			if (pSelect && pCommitted)
 			{
-				pSelect->SetSelectedIndex(static_cast<int>(pDoc->GetShapes().size()) - 1, pDoc);
+				pSelect->SelectNode(pCommitted, pDoc);
 			}
 			Invalidate(FALSE);
 			return;
@@ -709,11 +711,13 @@ void CM2DrawView::OnRButtonUp(UINT /* nFlags */, CPoint point)
 		bool switchSelect = pActiveTool->OnRightClicked(pDoc);
 		if (switchSelect)
 		{
+			// 도구 전환(OnToolChanged)이 선택을 해제하므로 방금 완료된 도형을 먼저 기억
+			ge::Node* pCommitted = pDoc ? pDoc->GetPrimarySelection() : nullptr;
 			GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
 			SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
-			if (pSelect && pDoc && !pDoc->GetShapes().empty())
+			if (pSelect && pCommitted)
 			{
-				pSelect->SetSelectedIndex(static_cast<int>(pDoc->GetShapes().size()) - 1, pDoc);
+				pSelect->SelectNode(pCommitted, pDoc);
 			}
 			Invalidate(FALSE);
 			return;

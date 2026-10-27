@@ -121,8 +121,9 @@ static void CommitPenPath(CM2DrawDoc* pDoc)
 	path->SetName(pDoc->GetDoc().GenerateNodeName(ge::ShapeKind::Path));
 	path->SetKind(ge::ShapeKind::Path);
 	path->Invalidate();
-	pDoc->GetDoc().AddShape(std::move(path));
+	ge::Node* pAdded = pDoc->GetDoc().AddShape(std::move(path));
 	path = nullptr;
+	if (pAdded) pDoc->GetDoc().SetSelection({ pAdded });
 }
 void PenTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
 {

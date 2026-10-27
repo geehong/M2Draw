@@ -119,7 +119,7 @@ public:
 	void SetMode(ToolType tool, bool editing);
 
 	// 선택된 도형/문서 상태로부터 옵션바 수치 실시간 동기화
-	void SyncSelection(CM2DrawDoc* pDoc, int selectedIndex);
+	void SyncSelection(CM2DrawDoc* pDoc, ge::Node* pShape);
 
 	// 도형 생성(만들기) 중 마우스 이동에 따른 실시간 좌표/크기 동기화
 	void SyncCreationCoordinates(float x, float y, float w, float h, bool hasFixedStart);
@@ -156,7 +156,8 @@ private:
 	bool        m_bUpdating = false;
 	bool        m_bAttached = false;
 	CM2DrawDoc* m_pDoc = nullptr;
-	int         m_selectedIndex = -1;
+	uint64_t    m_selectedNodeId = 0;       // 대상 도형 NodeId (0 = 없음)
+	ge::Node*   GetSelectedShape() const;
 
 	// 비율 링크 및 정삼각형/RxRy 링크 토글 상태
 	bool        m_bLinkRatio = true;

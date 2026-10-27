@@ -179,17 +179,16 @@ public:
 	void OnUp(const ToolEvent& e) override;
 	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
 
-	int GetSelectedIndex() const { return m_selectedIndices.empty() ? -1 : *m_selectedIndices.begin(); }
-	void SetSelectedIndex(int index, CM2DrawDoc* pDoc = nullptr);
-	const std::set<int>& GetSelectedIndices() const { return m_selectedIndices; }
-	std::set<int>& GetSelectedIndices() { return m_selectedIndices; }
-	void ClearSelection() { m_selectedIndices.clear(); }
+	// 선택 상태의 단일 출처는 ge::Document::GetSelection() (SelectTool 은 별도 선택 상태를 갖지 않음)
+	// 단일 선택 (nullptr = 해제). 노드가 속한 레이어를 활성화하고 속성창/옵션바/레이어 패널에 반영
+	void SelectNode(ge::Node* node, CM2DrawDoc* pDoc);
+	// 문서 선택만 해제 (패널 갱신은 호출 측 책임)
+	void ClearSelection(CM2DrawDoc* pDoc);
 
 	Handle GetActiveHandle() const { return m_handle; }
 	void SetActiveHandle(Handle h) { m_handle = h; }
 
 private:
-	std::set<int> m_selectedIndices;
 	Mode   m_mode = Mode::None;
 	Handle m_handle = Handle::None;
 	Handle m_hoverHandle = Handle::None;
@@ -197,21 +196,22 @@ private:
 	D2D1_POINT_2F m_dragStartWorld = { 0.0f, 0.0f };
 	D2D1_POINT_2F m_dragCurrentWorld = { 0.0f, 0.0f };
 	D2D1::Matrix3x2F m_initialXf = D2D1::Matrix3x2F::Identity();
-	std::map<int, D2D1::Matrix3x2F> m_initialXfs; // 다중 선택 이동을 위한 도형별 초기 변환 행렬
+	std::map<ge::Node*, D2D1::Matrix3x2F> m_initialXfs; // 다중 선택 이동을 위한 도형별 초기 변환 행렬 (드래그 동안만 유효)
 	D2D1_RECT_F   m_initialLocalBounds = { 0.0f, 0.0f, 0.0f, 0.0f };
+	ge::Node*     m_xfTarget = nullptr;   // 스케일/회전 핸들을 잡은 도형 (드래그 동안만 유효)
 
-	// 노드(앵커/핸들) 편집 상태 (열린 패스: 직선, 곡선 등)
-	int            m_editShapeIdx = -1;
+	// 노드(앵커/핸들) 편집 상태 (열린 패스: 직선, 곡선 등) — 드래그 동안만 유효
+	PathShape*     m_editShape = nullptr;
 	HitResult      m_editHit;
 	bool           m_hoverIsNode = false;
-	int            m_hoverShapeIdx = -1; // 스트로크/면 위에 마우스가 올라간 도형 인덱스
+	bool           m_hoverOnShape = false; // 스트로크/면 위에 마우스가 올라가 있는지
 
 	static bool IsOpenPath(Shape* shape);
 	void ApplyNodeEdit(PathShape* shape, const ToolEvent& e);
 
 	Handle HitHandle(D2D1_POINT_2F screenPt, const D2D1_POINT_2F handles[9], float tolPx) const;
 	bool GetHandleScreenPositions(Shape* shape, const ViewportTransform& view, ID2D1Factory* f, D2D1_POINT_2F outHandles[9], D2D1_RECT_F* outLocalBounds = nullptr) const;
-	void ApplyMove(const std::vector<std::unique_ptr<Shape>>& shapes);
+	void ApplyMove(const std::vector<ge::Node*>& selection);
 	void ApplyScale(Shape* shape);
 	void ApplyRotate(Shape* shape);
 };
@@ -227,7 +227,7 @@ protected:
 	bool                           m_hasHover = false;
 	std::unique_ptr<PathShape>     m_previewShape; // 구형 미리보기 도형
 	std::unique_ptr<ge::PathNode>  m_previewNode;  // 신엔진 미리보기 노드
-	int                            m_lastCommittedIndex = -1; // 방금 완료된 도형 인덱스 (대기 상태에서 앵커 표시)
+	ge::NodeId                     m_lastCommittedId = 0;     // 방금 완료된 도형 NodeId (대기 상태에서 앵커 표시)
 
 public:
 	void SetSetting(const ToolCreationSetting& s) { m_setting = s; }

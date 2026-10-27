@@ -4,6 +4,7 @@
 #include "D2DPropertyView.h"
 
 class CM2DrawDoc;
+namespace ge { class Node; }
 
 class CPropertiesToolBar : public CMFCToolBar
 {
@@ -26,7 +27,7 @@ public:
 	CPropertiesWnd(CD2DPropertyView::PaneMode mode = CD2DPropertyView::MODE_SHAPE) noexcept;
 
 	void AdjustLayout();
-	void SetSelectedShape(int shapeIndex, CM2DrawDoc* pDoc);
+	void SetSelectedShape(ge::Node* pShape, CM2DrawDoc* pDoc);
 	CD2DPropertyView::PaneMode GetPaneMode() const { return m_paneMode; }
 	CD2DPropertyView& GetD2DPropView() { return m_wndD2DProp; }
 
@@ -45,8 +46,9 @@ protected:
 	CMFCPropertyGridCtrl m_wndPropList;
 	CD2DPropertyView m_wndD2DProp;
 
-	int m_selectedShapeIndex = -1;
+	uint64_t m_selectedNodeId = 0;          // 대상 도형 NodeId (0 = 없음)
 	CM2DrawDoc* m_pActiveDoc = nullptr;
+	ge::Node* GetSelectedShape() const;
 
 public:
 	virtual ~CPropertiesWnd();
