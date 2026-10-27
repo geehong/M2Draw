@@ -150,7 +150,7 @@ bool SelectTool::GetHandleScreenPositions(ge::Node* shape, const ViewportTransfo
 	}
 
 	D2D1_POINT_2F localHandles[9];
-	ge::Node::GetLocalHandlePoints(b, localHandles);
+	ge::Transformer::GetLocalHandlePoints(b, localHandles);
 
 	for (int i = 0; i < 9; ++i)
 	{
@@ -434,7 +434,8 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 	{
 		auto it = m_initialXfs.find(n);
 		D2D1::Matrix3x2F baseInitXf = (it != m_initialXfs.end()) ? it->second : static_cast<D2D1::Matrix3x2F>(n->GetTransform());
-		n->ApplyTranslation(D2D1::Point2F(dx, dy), baseInitXf);
+		n->SetTransform(ge::Transformer::Translate(D2D1::Point2F(dx, dy), baseInitXf));
+		n->Invalidate();
 	}
 }
 
@@ -442,14 +443,21 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 void SelectTool::ApplyScale(ge::Node* shape)
 {
 	if (!shape) return;
-	shape->ScaleByHandle(static_cast<int>(m_handle), m_dragCurrentWorld, m_initialLocalBounds, m_initialXf);
+	auto newXf = ge::Transformer::ScaleByHandle(static_cast<int>(m_handle), m_dragCurrentWorld, m_initialLocalBounds, m_initialXf);
+	if (newXf)
+	{
+		shape->SetTransform(*newXf);
+		shape->Invalidate();
+	}
 }
 
 // 엔진에 회전 변형 위임!
 void SelectTool::ApplyRotate(ge::Node* shape)
 {
 	if (!shape) return;
-	shape->RotateAboutCenter(m_dragStartWorld, m_dragCurrentWorld, m_initialLocalBounds, m_initialXf);
+	auto newXf = ge::Transformer::RotateAboutCenter(m_dragStartWorld, m_dragCurrentWorld, m_initialLocalBounds, m_initialXf);
+	shape->SetTransform(newXf);
+	shape->Invalidate();
 }
 
 void SelectTool::OnUp(const ToolEvent& e)
@@ -689,8 +697,11 @@ void BaseShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* bru
 		ID2D1Factory* pFactory = nullptr;
 		rt->GetFactory(&pFactory);
 
-		// Shape 본체 그리기 (엔진의 Fill, Stroke, Dash 렌더링 호출)
-		m_previewShape->Draw(rt, brush, pFactory, view);
+		ge::D2DRenderer renderer;
+		if (renderer.Initialize(rt, pFactory))
+		{
+			renderer.DrawNode(*m_previewShape, ge::Matrix2D::Identity(), view);
+		}
 
 		if (pFactory)
 		{
@@ -1101,7 +1112,11 @@ void BoxShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brus
 		else if (m_previewShape)
 		{
 			// (1) 도형 본체 미리보기 렌더링 (엔진 기하학)
-			m_previewShape->Draw(rt, brush, pFactory, view);
+			ge::D2DRenderer renderer;
+			if (renderer.Initialize(rt, pFactory))
+			{
+				renderer.DrawNode(*m_previewShape, ge::Matrix2D::Identity(), view);
+			}
 		}
 
 		if (pFactory) pFactory->Release();
@@ -1750,7 +1765,11 @@ void MultiPointShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrus
 	{
 		ID2D1Factory* pFactory = nullptr;
 		rt->GetFactory(&pFactory);
-		m_previewShape->Draw(rt, brush, pFactory, view);
+		ge::D2DRenderer renderer;
+		if (renderer.Initialize(rt, pFactory))
+		{
+			renderer.DrawNode(*m_previewShape, ge::Matrix2D::Identity(), view);
+		}
 		if (pFactory) pFactory->Release();
 
 		const auto& nodes = m_previewShape->GetPaths().back().nodes;

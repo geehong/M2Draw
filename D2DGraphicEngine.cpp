@@ -114,19 +114,6 @@ Matrix2D Node::GetWorldTransform() const
 	return xf;
 }
 
-void Node::Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, ID2D1Factory* f, const Viewport& view)
-{
-	if (!rt) return;
-	D2DRenderer renderer;
-	if (!f) {
-		Microsoft::WRL::ComPtr<ID2D1Factory> rtFactory;
-		rt->GetFactory(&rtFactory);
-		f = rtFactory.Get();
-	}
-	renderer.Initialize(rt, f);
-	renderer.DrawNode(*this, Matrix2D::Identity(), view);
-}
-
 // ---- PathNode ---------------------------------------------------------------
 std::unique_ptr<Node> PathNode::Clone() const
 {
@@ -198,6 +185,8 @@ void PathNode::MoveNodeOrHandle(HitPart part, int sp, int ni, Vec2 worldPt, bool
 		break; }
 	default: return;
 	}
+	m_kind = ShapeKind::Path;
+	m_params = std::monostate{};
 	Invalidate();
 }
 
@@ -225,6 +214,8 @@ int PathNode::InsertNodeOnSegment(int sp, int seg, float t)
 	b.hIn  = { q2.x - p3.x, q2.y - p3.y };
 	const int at = seg + 1;
 	s.nodes.insert(s.nodes.begin() + at, nn);
+	m_kind = ShapeKind::Path;
+	m_params = std::monostate{};
 	Invalidate();
 	return at;
 }
@@ -236,6 +227,8 @@ bool PathNode::RemoveNode(int sp, int ni)
 	if (ni < 0 || ni >= (int)nodes.size()) return false;
 	nodes.erase(nodes.begin() + ni);
 	if (nodes.empty()) m_paths.erase(m_paths.begin() + sp);
+	m_kind = ShapeKind::Path;
+	m_params = std::monostate{};
 	Invalidate();
 	return true;
 }
@@ -544,14 +537,66 @@ std::unique_ptr<Node> Document::RemoveNode(Node* node)
 
 void Document::ArrangeSelection(ZOrder order)
 {
+	if (m_selection.empty()) return;
+
+	// 부모별로 선택 노드들을 그룹화
+	std::unordered_map<GroupNode*, std::vector<Node*>> groupedByParent;
 	for (Node* n : m_selection) {
-		GroupNode* p = n->GetParent();
-		if (!p) continue;
+		if (n && n->GetParent()) {
+			groupedByParent[n->GetParent()].push_back(n);
+		}
+	}
+
+	for (auto& [parent, nodes] : groupedByParent) {
+		if (!parent || nodes.empty()) continue;
+
+		// 인덱스 순 정렬 (0 = 맨 아래, N-1 = 맨 위)
+		std::sort(nodes.begin(), nodes.end(), [&](Node* a, Node* b) {
+			return parent->IndexOf(a) < parent->IndexOf(b);
+		});
+
+		auto isNodeSelected = [&](Node* n) {
+			return std::find(nodes.begin(), nodes.end(), n) != nodes.end();
+		};
+
 		switch (order) {
-		case ZOrder::Front:    p->BringToFront(n); break;
-		case ZOrder::Back:     p->SendToBack(n); break;
-		case ZOrder::Forward:  p->BringForward(n); break;
-		case ZOrder::Backward: p->SendBackward(n); break;
+		case ZOrder::Front:
+			// Front: 아래에 있던 것부터 순서대로 Front로 보내면 원래 상대 순서 유지
+			for (Node* n : nodes) {
+				parent->BringToFront(n);
+			}
+			break;
+		case ZOrder::Back:
+			// Back: 위에 있던 것부터 순서대로 Back으로 보내면 원래 상대 순서 유지
+			for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
+				parent->SendToBack(*it);
+			}
+			break;
+		case ZOrder::Forward:
+			// Forward: 맨 위(인덱스 큰 쪽)부터 처리. 단 바로 위 이웃도 선택된 상태면 swap하지 않음
+			for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
+				Node* n = *it;
+				int idx = parent->IndexOf(n);
+				if (idx >= 0 && idx + 1 < (int)parent->GetChildren().size()) {
+					Node* nextNeighbor = parent->GetChildren()[idx + 1].get();
+					if (!isNodeSelected(nextNeighbor)) {
+						parent->BringForward(n);
+					}
+				}
+			}
+			break;
+		case ZOrder::Backward:
+			// Backward: 맨 아래(인덱스 작은 쪽)부터 처리. 단 바로 아래 이웃도 선택된 상태면 swap하지 않음
+			for (Node* n : nodes) {
+				int idx = parent->IndexOf(n);
+				if (idx > 0) {
+					Node* prevNeighbor = parent->GetChildren()[idx - 1].get();
+					if (!isNodeSelected(prevNeighbor)) {
+						parent->SendBackward(n);
+					}
+				}
+			}
+			break;
 		}
 	}
 }
@@ -604,12 +649,14 @@ void Document::UngroupSelection()
 		GroupNode* parent = g->GetParent();
 		int at = parent->IndexOf(g);
 		const Matrix2D gx = g->GetTransform();
+		const float groupOpacity = g->GetOpacity();
 		std::vector<Node*> kids;
 		for (const auto& c : g->GetChildren()) kids.push_back(c.get());
 		auto owned = parent->RemoveChild(g);
 		for (Node* k : kids) {
 			auto o = g->RemoveChild(k);
 			o->SetTransform(o->GetTransform() * gx);
+			o->SetOpacity(o->GetOpacity() * groupOpacity);
 			Node* added = parent->AddChild(std::move(o), at++);
 			result.push_back(added);
 		}
@@ -811,7 +858,9 @@ void D2DRenderer::DrawDocument(Document& doc, const Viewport& view)
 
 		const bool needLayer = (layer->GetOpacity() < 0.999f) || layer->IsClippingMask();
 		if (needLayer && m_rt) {
-			D2D1_LAYER_PARAMETERS params = layer->GetD2DLayerParameters();
+			D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters();
+			params.opacity = layer->GetOpacity();
+			params.contentBounds = D2D1::InfiniteRect();
 			m_rt->PushLayer(params, nullptr);
 		}
 

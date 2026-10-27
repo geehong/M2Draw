@@ -1,21 +1,26 @@
 #pragma once
 // ============================================================================
-// D2DGraphicEngine.h  -  M2Draw 2D 그래픽 엔진 (뼈대)
+// D2DGraphicEngine.h  -  M2Draw 2D 그래픽 엔진
 //
 //  [계층 구조]
-//   1. Math      : Vec2 / Rect2 / Matrix2D            (D2D 비의존)
+//   1. Math      : Vec2 / Rect2 / Matrix2D
 //   2. Model     : Node -> PathNode / GroupNode -> LayerNode, Document (Scene Graph)
-//   3. Renderer  : IRenderer -> D2DRenderer           (D2D 의존은 여기에만)
-//   4. HitTester : 클릭 판정
-//   5. Command   : Undo / Redo
+//   3. Command   : Undo / Redo
+//   4. D2D 백엔드: PathOp, D2DRenderer, HitTester   (Direct2D 의존은 여기에만)
 //
-//  - 기존 D2DVectorEngine.h 와 공존하도록 모두 namespace ge 안에 정의.
-//  - 변수명은 기존 벡터 엔진(anchor, hIn, hOut, m_xf, m_style, m_dirty ...)을 따름.
-//  - 순서: 배열 인덱스 0 = 최하단, 마지막 = 최상단 (기존과 동일).
+//  [D2D 비의존 모델]
+//   - 1~3 은 Direct2D 없이 컴파일된다. GE_NO_D2D 를 정의하고 포함하면 D2D 상호 변환
+//     편의 멤버(D2D1_* 변환 생성자/연산자/오버로드)와 4번 백엔드가 제외된다.
+//     (GeModelPureCheck.cpp 가 이를 빌드 시 검증. SVG/HTML Exporter 는 이 순수 모델만 사용)
+//   - 변환 편의 멤버는 데이터 멤버를 추가하지 않으므로 두 모드의 클래스 레이아웃은 동일하다.
+//
+//  - 순서: 배열 인덱스 0 = 최하단, 마지막 = 최상단.
 // ============================================================================
 
+#ifndef GE_NO_D2D
 #include <d2d1_1.h>
 #include <wrl/client.h>
+#endif
 #include <vector>
 #include <memory>
 #include <string>
@@ -29,7 +34,9 @@
 
 namespace ge {
 
+#ifndef GE_NO_D2D
 using Microsoft::WRL::ComPtr;
+#endif
 
 // ============================================================================
 // 1. Math
@@ -40,13 +47,14 @@ struct Vec2 {
 
 	Vec2() = default;
 	Vec2(float _x, float _y) : x(_x), y(_y) {}
-	Vec2(const D2D1_POINT_2F& p) : x(p.x), y(p.y) {}
 
+#ifndef GE_NO_D2D
+	Vec2(const D2D1_POINT_2F& p) : x(p.x), y(p.y) {}
 	operator D2D1_POINT_2F() const { return D2D1::Point2F(x, y); }
 	Vec2& operator=(const D2D1_POINT_2F& p) { x = p.x; y = p.y; return *this; }
-
 	D2D1_POINT_2F ToD2D() const { return D2D1::Point2F(x, y); }
 	static Vec2 FromD2D(D2D1_POINT_2F p) { return { p.x, p.y }; }
+#endif
 };
 
 struct Rect2 {
@@ -60,13 +68,14 @@ struct Rect2 {
 
 	Rect2() = default;
 	Rect2(float l, float t, float r, float b) : left(l), top(t), right(r), bottom(b) {}
-	Rect2(const D2D1_RECT_F& r) : left(r.left), top(r.top), right(r.right), bottom(r.bottom) {}
 
+#ifndef GE_NO_D2D
+	Rect2(const D2D1_RECT_F& r) : left(r.left), top(r.top), right(r.right), bottom(r.bottom) {}
 	operator D2D1_RECT_F() const { return D2D1::RectF(left, top, right, bottom); }
 	Rect2& operator=(const D2D1_RECT_F& r) { left = r.left; top = r.top; right = r.right; bottom = r.bottom; return *this; }
-
 	D2D1_RECT_F ToD2D() const { return D2D1::RectF(left, top, right, bottom); }
 	static Rect2 FromD2D(D2D1_RECT_F r) { return { r.left, r.top, r.right, r.bottom }; }
+#endif
 };
 
 // D2D1::Matrix3x2F 와 동일한 레이아웃/곱셈 순서: (P * A) * B
@@ -79,17 +88,6 @@ struct Matrix2D {
 	Matrix2D() : m11(1), m12(0), m21(0), m22(1), dx(0), dy(0) {}
 	Matrix2D(float f11, float f12, float f21, float f22, float f31, float f32)
 		: m11(f11), m12(f12), m21(f21), m22(f22), dx(f31), dy(f32) {}
-	Matrix2D(const D2D1_MATRIX_3X2_F& m)
-		: m11(m._11), m12(m._12), m21(m._21), m22(m._22), dx(m._31), dy(m._32) {}
-
-	operator D2D1_MATRIX_3X2_F() const { return ToD2D(); }
-	operator D2D1::Matrix3x2F() const {
-		return *reinterpret_cast<const D2D1::Matrix3x2F*>(&ToD2D());
-	}
-	Matrix2D& operator=(const D2D1_MATRIX_3X2_F& m) {
-		m11 = m._11; m12 = m._12; m21 = m._21; m22 = m._22; dx = m._31; dy = m._32;
-		return *this;
-	}
 
 	static Matrix2D Identity() { return {}; }
 	static Matrix2D Translation(float x, float y);
@@ -97,17 +95,26 @@ struct Matrix2D {
 	static Matrix2D Rotation(float degree, Vec2 center = {});
 
 	Matrix2D operator*(const Matrix2D& rhs) const;
+	bool     Invert();                           // 실패 시 false
+	Vec2     TransformPoint(Vec2 p) const;
+	Rect2    TransformRect(const Rect2& r) const; // AABB 반환
+
+#ifndef GE_NO_D2D
+	Matrix2D(const D2D1_MATRIX_3X2_F& m)
+		: m11(m._11), m12(m._12), m21(m._21), m22(m._22), dx(m._31), dy(m._32) {}
+	operator D2D1_MATRIX_3X2_F() const { return ToD2D(); }
+	operator D2D1::Matrix3x2F() const { return D2D1::Matrix3x2F(m11, m12, m21, m22, dx, dy); }
+	Matrix2D& operator=(const D2D1_MATRIX_3X2_F& m) {
+		m11 = m._11; m12 = m._12; m21 = m._21; m22 = m._22; dx = m._31; dy = m._32;
+		return *this;
+	}
 	Matrix2D operator*(const D2D1_MATRIX_3X2_F& rhs) const {
 		return (*this) * Matrix2D::FromD2D(rhs);
 	}
-	bool     Invert();                           // 실패 시 false
-	Vec2     TransformPoint(Vec2 p) const;
 	D2D1_POINT_2F TransformPoint(D2D1_POINT_2F p) const {
 		Vec2 r = TransformPoint(Vec2(p.x, p.y));
 		return D2D1::Point2F(r.x, r.y);
 	}
-	Rect2    TransformRect(const Rect2& r) const; // AABB 반환
-
 	D2D1_MATRIX_3X2_F ToD2D() const {
 		D2D1_MATRIX_3X2_F m;
 		m._11 = m11; m._12 = m12;
@@ -118,11 +125,14 @@ struct Matrix2D {
 	static Matrix2D FromD2D(const D2D1_MATRIX_3X2_F& m) {
 		return { m._11, m._12, m._21, m._22, m._31, m._32 };
 	}
+#endif
 };
 
+#ifndef GE_NO_D2D
 inline Matrix2D operator*(const D2D1_MATRIX_3X2_F& lhs, const Matrix2D& rhs) {
 	return Matrix2D::FromD2D(lhs) * rhs;
 }
+#endif
 
 // 뷰포트 (기존 ViewportTransform 대응)
 struct Viewport {
@@ -132,6 +142,7 @@ struct Viewport {
 	Vec2 ScreenToWorld(Vec2 screenPt) const;
 	Vec2 WorldToScreen(Vec2 worldPt) const;
 
+#ifndef GE_NO_D2D
 	D2D1_POINT_2F ScreenToWorld(D2D1_POINT_2F screenPt) const {
 		Vec2 res = ScreenToWorld(Vec2{ screenPt.x, screenPt.y });
 		return res.ToD2D();
@@ -140,6 +151,7 @@ struct Viewport {
 		Vec2 res = WorldToScreen(Vec2{ worldPt.x, worldPt.y });
 		return res.ToD2D();
 	}
+#endif
 };
 
 // ============================================================================
@@ -150,43 +162,49 @@ struct Color {
 
 	Color() = default;
 	Color(float _r, float _g, float _b, float _a = 1.0f) : r(_r), g(_g), b(_b), a(_a) {}
-	Color(const D2D1_COLOR_F& c) : r(c.r), g(c.g), b(c.b), a(c.a) {}
+	static Color FromD2D(const Color& c) { return c; }
 
+#ifndef GE_NO_D2D
+	Color(const D2D1_COLOR_F& c) : r(c.r), g(c.g), b(c.b), a(c.a) {}
 	operator D2D1_COLOR_F() const { return D2D1::ColorF(r, g, b, a); }
 	Color& operator=(const D2D1_COLOR_F& c) { r = c.r; g = c.g; b = c.b; a = c.a; return *this; }
-
 	D2D1_COLOR_F ToD2D() const { return D2D1::ColorF(r, g, b, a); }
 	static Color FromD2D(const D2D1_COLOR_F& c) { return { c.r, c.g, c.b, c.a }; }
-	static Color FromD2D(const Color& c) { return c; }
+#endif
 };
 
 enum class FillType : uint8_t { None = 0, Solid = 1, Pattern = 2 };
-enum class DashStyle : uint8_t { Solid = 0, Dash, Dot, DashDot, DashDotDot };
+enum class DashStyle : uint8_t { Solid = 0, Dash, Dot, DashDot, DashDotDot };   // 값은 D2D1_DASH_STYLE 과 동일
 enum class FillMode  : uint8_t { Alternate = 0, Winding };
 
+#ifndef GE_NO_D2D
 inline DashStyle FromD2D(D2D1_DASH_STYLE ds) {
 	return static_cast<DashStyle>(ds);
 }
 inline D2D1_DASH_STYLE ToD2D(DashStyle ds) {
 	return static_cast<D2D1_DASH_STYLE>(ds);
 }
+#endif
 
 struct DashStyleWrapper {
 	DashStyle value = DashStyle::Solid;
 
 	DashStyleWrapper() = default;
 	DashStyleWrapper(DashStyle s) : value(s) {}
-	DashStyleWrapper(D2D1_DASH_STYLE s) : value(static_cast<DashStyle>(s)) {}
 
-	operator D2D1_DASH_STYLE() const { return static_cast<D2D1_DASH_STYLE>(value); }
 	explicit operator DashStyle() const { return value; }
 	DashStyle ToDashStyle() const { return value; }
 	DashStyleWrapper& operator=(DashStyle s) { value = s; return *this; }
-	DashStyleWrapper& operator=(D2D1_DASH_STYLE s) { value = static_cast<DashStyle>(s); return *this; }
 	bool operator==(DashStyle s) const { return value == s; }
-	bool operator==(D2D1_DASH_STYLE s) const { return static_cast<D2D1_DASH_STYLE>(value) == s; }
 	bool operator!=(DashStyle s) const { return value != s; }
+
+#ifndef GE_NO_D2D
+	DashStyleWrapper(D2D1_DASH_STYLE s) : value(static_cast<DashStyle>(s)) {}
+	operator D2D1_DASH_STYLE() const { return static_cast<D2D1_DASH_STYLE>(value); }
+	DashStyleWrapper& operator=(D2D1_DASH_STYLE s) { value = static_cast<DashStyle>(s); return *this; }
+	bool operator==(D2D1_DASH_STYLE s) const { return static_cast<D2D1_DASH_STYLE>(value) == s; }
 	bool operator!=(D2D1_DASH_STYLE s) const { return static_cast<D2D1_DASH_STYLE>(value) != s; }
+#endif
 };
 
 struct Style {
@@ -333,6 +351,7 @@ public:
 
 	// 로컬 바운딩 박스 (자신의 m_xf 적용 전)
 	virtual bool GetLocalBounds(Rect2& out) = 0;
+#ifndef GE_NO_D2D
 	virtual bool GetLocalBounds(ID2D1Factory* f, D2D1_RECT_F& outBounds) {
 		Rect2 r;
 		if (GetLocalBounds(r)) {
@@ -341,6 +360,7 @@ public:
 		}
 		return false;
 	}
+#endif
 
 	// 계층 구조
 	NodeId            GetId() const          { return m_id; }
@@ -386,111 +406,6 @@ public:
 
 	virtual const wchar_t* GetShapeTypeName() const { return L"쉐이프"; }
 
-	void ApplyTranslation(D2D1_POINT_2F deltaWorld, const D2D1::Matrix3x2F& initialXf) {
-		m_xf = Matrix2D::FromD2D(initialXf) * Matrix2D::Translation(deltaWorld.x, deltaWorld.y);
-		Invalidate();
-	}
-
-	void ScaleByHandle(int handleIdx, D2D1_POINT_2F curWorld, const D2D1_RECT_F& initialLocalBounds, const D2D1::Matrix3x2F& initialXf) {
-		Matrix2D invInitial = Matrix2D::FromD2D(initialXf);
-		if (!invInitial.Invert()) return;
-
-		Vec2 curLocal = invInitial.TransformPoint(Vec2(curWorld.x, curWorld.y));
-		float origW = initialLocalBounds.right - initialLocalBounds.left;
-		float origH = initialLocalBounds.bottom - initialLocalBounds.top;
-		if (origW <= 0.001f || origH <= 0.001f) return;
-
-		Vec2 anchorLocal = { 0.0f, 0.0f };
-		float sx = 1.0f;
-		float sy = 1.0f;
-
-		switch (handleIdx) {
-		case 5: // BR -> 고정점 TL
-			anchorLocal = { initialLocalBounds.left, initialLocalBounds.top };
-			sx = (curLocal.x - anchorLocal.x) / origW;
-			sy = (curLocal.y - anchorLocal.y) / origH;
-			break;
-		case 1: // TL -> 고정점 BR
-			anchorLocal = { initialLocalBounds.right, initialLocalBounds.bottom };
-			sx = (anchorLocal.x - curLocal.x) / origW;
-			sy = (anchorLocal.y - curLocal.y) / origH;
-			break;
-		case 3: // TR -> 고정점 BL
-			anchorLocal = { initialLocalBounds.left, initialLocalBounds.bottom };
-			sx = (curLocal.x - anchorLocal.x) / origW;
-			sy = (anchorLocal.y - curLocal.y) / origH;
-			break;
-		case 7: // BL -> 고정점 TR
-			anchorLocal = { initialLocalBounds.right, initialLocalBounds.top };
-			sx = (anchorLocal.x - curLocal.x) / origW;
-			sy = (curLocal.y - anchorLocal.y) / origH;
-			break;
-		case 4: // R -> 고정점 L
-			anchorLocal = { initialLocalBounds.left, (initialLocalBounds.top + initialLocalBounds.bottom) * 0.5f };
-			sx = (curLocal.x - anchorLocal.x) / origW;
-			sy = 1.0f;
-			break;
-		case 8: // L -> 고정점 R
-			anchorLocal = { initialLocalBounds.right, (initialLocalBounds.top + initialLocalBounds.bottom) * 0.5f };
-			sx = (anchorLocal.x - curLocal.x) / origW;
-			sy = 1.0f;
-			break;
-		case 6: // B -> 고정점 T
-			anchorLocal = { (initialLocalBounds.left + initialLocalBounds.right) * 0.5f, initialLocalBounds.top };
-			sx = 1.0f;
-			sy = (curLocal.y - anchorLocal.y) / origH;
-			break;
-		case 2: // T -> 고정점 B
-			anchorLocal = { (initialLocalBounds.left + initialLocalBounds.right) * 0.5f, initialLocalBounds.bottom };
-			sx = 1.0f;
-			sy = (anchorLocal.y - curLocal.y) / origH;
-			break;
-		default:
-			return;
-		}
-
-		if (std::abs(sx) < 0.01f) sx = 0.01f;
-		if (std::abs(sy) < 0.01f) sy = 0.01f;
-
-		Matrix2D scaleMat = Matrix2D::Scale(sx, sy, anchorLocal);
-		m_xf = scaleMat * Matrix2D::FromD2D(initialXf);
-		Invalidate();
-	}
-
-	void RotateAboutCenter(D2D1_POINT_2F startWorld, D2D1_POINT_2F curWorld, const D2D1_RECT_F& initialLocalBounds, const D2D1::Matrix3x2F& initialXf) {
-		Vec2 centerLocal = {
-			(initialLocalBounds.left + initialLocalBounds.right) * 0.5f,
-			(initialLocalBounds.top + initialLocalBounds.bottom) * 0.5f
-		};
-		Matrix2D initXf = Matrix2D::FromD2D(initialXf);
-		Vec2 centerWorld = initXf.TransformPoint(centerLocal);
-
-		float angleStart = std::atan2(startWorld.y - centerWorld.y, startWorld.x - centerWorld.x);
-		float angleCur   = std::atan2(curWorld.y - centerWorld.y, curWorld.x - centerWorld.x);
-		float angleDeg   = (angleCur - angleStart) * (180.0f / 3.14159265f);
-
-		m_xf = initXf * Matrix2D::Rotation(angleDeg, centerWorld);
-		Invalidate();
-	}
-
-	static void GetLocalHandlePoints(const D2D1_RECT_F& b, D2D1_POINT_2F outHandles[9]) {
-		float midX = (b.left + b.right) * 0.5f;
-		float midY = (b.top + b.bottom) * 0.5f;
-
-		outHandles[0] = D2D1::Point2F(b.left,  b.top);
-		outHandles[1] = D2D1::Point2F(midX,    b.top);
-		outHandles[2] = D2D1::Point2F(b.right, b.top);
-		outHandles[3] = D2D1::Point2F(b.right, midY);
-		outHandles[4] = D2D1::Point2F(b.right, b.bottom);
-		outHandles[5] = D2D1::Point2F(midX,    b.bottom);
-		outHandles[6] = D2D1::Point2F(b.left,  b.bottom);
-		outHandles[7] = D2D1::Point2F(b.left,  midY);
-		outHandles[8] = D2D1::Point2F(midX,    b.top - 20.0f);
-	}
-
-	// 렌더링 호환용 Draw
-	void Draw(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, ID2D1Factory* f, const Viewport& view);
-
 protected:
 	// Clone 규약: 복제본은 문서 식별 정보(id/parent/version)를 갖지 않음 -> 문서 삽입 시 AssignIds 로 새 ID 발급
 	void CopyNodePropsFrom(const Node& o) {
@@ -528,13 +443,17 @@ public:
 	std::vector<SubPath>&       GetPathsRef()    { Invalidate(); return m_paths; }
 	void SetPaths(const std::vector<SubPath>& v) { m_paths = v; Invalidate(); }
 	void AddAnchor(Vec2 localPt, bool forceNewSubPath = false);
+#ifndef GE_NO_D2D
 	void AddAnchor(D2D1_POINT_2F localPt, bool forceNewSubPath = false) {
 		AddAnchor(Vec2{ localPt.x, localPt.y }, forceNewSubPath);
 	}
+#endif
 
 	// 파라메트릭 도형 종류 및 설정
-	ShapeKind GetKind() const { return m_kind; }
-	void SetKind(ShapeKind k) { m_kind = k; }
+	ShapeKind GetShapeKind() const { return m_kind; }
+	ShapeKind GetKind() const      { return m_kind; } // 하위 호환용
+	void SetKind(ShapeKind k)      { m_kind = k; }
+	void SetShapeKind(ShapeKind k) { m_kind = k; }
 
 	const ShapeParams& GetParams() const { return m_params; }
 	ShapeParams&       GetParamsRef()    { return m_params; }
@@ -549,11 +468,13 @@ public:
 	// ---- 노드 편집 API ----
 	// 앵커/핸들 이동 (worldPt 는 월드 좌표)
 	void MoveNodeOrHandle(HitPart part, int subPathIdx, int nodeIdx, Vec2 worldPt, bool breakTangent = false);
+#ifndef GE_NO_D2D
 	void MoveNodeOrHandle(HitPart part, int subPathIdx, int nodeIdx, D2D1_POINT_2F worldPt, bool breakTangent = false) {
 		MoveNodeOrHandle(part, subPathIdx, nodeIdx, Vec2(worldPt.x, worldPt.y), breakTangent);
 	}
 
 	HitResult HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, const Viewport& view, ID2D1Factory* f);
+#endif
 	// 세그먼트를 t(0~1) 위치에서 분할(De Casteljau)해 노드 삽입. 새 노드 인덱스 반환, 실패 시 -1
 	int  InsertNodeOnSegment(int subPathIdx, int segIdx, float t);
 	// 노드 삭제 (서브패스가 비면 서브패스도 삭제)
@@ -672,6 +593,7 @@ public:
     static Vec2 LocalToScreen(Vec2 localPt, const Matrix2D& worldXf, const Viewport& view);
     static std::optional<Vec2> ScreenToLocal(Vec2 screenPt, const Matrix2D& worldXf, const Viewport& view);
 
+#ifndef GE_NO_D2D
     static D2D1_POINT_2F LocalToScreen(D2D1_POINT_2F localPt, const Matrix2D& worldXf, const Viewport& view) {
         Vec2 r = LocalToScreen(Vec2{ localPt.x, localPt.y }, worldXf, view);
         return r.ToD2D();
@@ -690,6 +612,7 @@ public:
         if (!r.has_value()) return std::nullopt;
         return r->ToD2D();
     }
+#endif
 };
 
 // 도형 변형 (선택 툴 / 속성창 / 메뉴 공용).
@@ -698,9 +621,11 @@ class Transformer {
 public:
     // 1. 평행 이동
     static Matrix2D Translate(Vec2 deltaWorld, const Matrix2D& initialXf);
+#ifndef GE_NO_D2D
     static Matrix2D Translate(D2D1_POINT_2F deltaWorld, const D2D1_MATRIX_3X2_F& initialXf) {
         return Translate({ deltaWorld.x, deltaWorld.y }, Matrix2D::FromD2D(initialXf));
     }
+#endif
 
     // 2. 바운딩 박스 8개 핸들 기준 스케일
     //    handleIdx: 1=TL, 2=T, 3=TR, 4=R, 5=BR, 6=B, 7=BL, 8=L
@@ -708,6 +633,7 @@ public:
     static std::optional<Matrix2D> ScaleByHandle(int handleIdx, Vec2 curWorld,
                                                  const Rect2& initialLocalBounds,
                                                  const Matrix2D& initialXf);
+#ifndef GE_NO_D2D
     static std::optional<Matrix2D> ScaleByHandle(int handleIdx, D2D1_POINT_2F curWorld,
                                                  const D2D1_RECT_F& initialLocalBounds,
                                                  const D2D1_MATRIX_3X2_F& initialXf) {
@@ -715,11 +641,13 @@ public:
                              Rect2::FromD2D(initialLocalBounds),
                              Matrix2D::FromD2D(initialXf));
     }
+#endif
 
     // 3. 중심점 기준 회전
     static Matrix2D RotateAboutCenter(Vec2 startWorld, Vec2 curWorld,
                                       const Rect2& initialLocalBounds,
                                       const Matrix2D& initialXf);
+#ifndef GE_NO_D2D
     static Matrix2D RotateAboutCenter(D2D1_POINT_2F startWorld, D2D1_POINT_2F curWorld,
                                       const D2D1_RECT_F& initialLocalBounds,
                                       const D2D1_MATRIX_3X2_F& initialXf) {
@@ -727,16 +655,20 @@ public:
                                  Rect2::FromD2D(initialLocalBounds),
                                  Matrix2D::FromD2D(initialXf));
     }
+#endif
 
     // 4. 로컬 바운딩 박스 기준 핸들 9개 좌표 (0~7: TL,T,TR,R,BR,B,BL,L / 8: 회전 핸들)
     static void GetLocalHandlePoints(const Rect2& b, Vec2 outHandles[9]);
+#ifndef GE_NO_D2D
     static void GetLocalHandlePoints(const D2D1_RECT_F& b, D2D1_POINT_2F outHandles[9]) {
         Vec2 handles[9];
         GetLocalHandlePoints(Rect2::FromD2D(b), handles);
         for (int i = 0; i < 9; ++i) outHandles[i] = handles[i].ToD2D();
     }
+#endif
 };
 
+#ifndef GE_NO_D2D
 // ============================================================================
 // 2.6 Path Operations / Pathfinder (불린 연산: 합치기 / 빼기 / 교차 / 제외)
 // ============================================================================
@@ -812,6 +744,7 @@ public:
 								 // 히트된 노드가 속한 '레이어 바로 아래' 최상위 노드 (그룹 단위 선택용)
 								 static Node* FindSelectable(Node* hit);
 };
+#endif
 
 // ============================================================================
 // 5. Command (Undo / Redo)

@@ -235,7 +235,14 @@ void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, fl
 		const auto& path = pDoc->GetCurrentPath();
 
 		// 기존 패스 본체 실시간 렌더링
-		path->Draw(rt, brush, nullptr, view);
+		ID2D1Factory* pFactory = nullptr;
+		rt->GetFactory(&pFactory);
+		ge::D2DRenderer renderer;
+		if (renderer.Initialize(rt, pFactory))
+		{
+			renderer.DrawNode(*path, ge::Matrix2D::Identity(), view);
+		}
+		if (pFactory) pFactory->Release();
 
 		// 모든 앵커 및 핸들 제어선 시각화
 		D2D1_POINT_2F lastAnchorLocal = { 0.0f, 0.0f };

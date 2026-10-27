@@ -28,12 +28,4 @@ std::unique_ptr<Node> LayerNode::Clone() const
 	return copy;
 }
 
-D2D1_LAYER_PARAMETERS LayerNode::GetD2DLayerParameters() const
-{
-	D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters();
-	params.opacity = m_opacity;
-	params.contentBounds = D2D1::InfiniteRect();
-	return params;
-}
-
 } // namespace ge

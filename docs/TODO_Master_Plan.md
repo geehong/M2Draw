@@ -95,19 +95,19 @@
     — 편집 상자가 포커스를 받는 순간 레이어 뷰 `OnKillFocus`가 확정·숨김을 실행해 즉시 닫히던 것. 편집 상자로 가는 포커스 이동은 제외
   - fix: Enter 확정 / Esc 취소 (`PreTranslateMessage`), 확정 시 재진입 방지 및 숨겨진 편집 상자에 포커스가 남지 않도록 처리
 
-### Step 0.6 모델에서 D2D/MFC 의존 분리 (D8, D9, D12)
-- [ ] 0.6.1 `Node::Draw` 삭제 → 렌더러를 거쳐 그리도록 함
-- [ ] 0.6.2 `GetD2DLayerParameters`를 렌더러로 옮김
-- [ ] 0.6.3 D2D 변환 연산자를 `GeD2DInterop.h`의 자유 함수로 옮김 (`Matrix2D` reinterpret_cast 제거)
-- [ ] 0.6.4 `Node::ScaleByHandle`/`RotateAboutCenter`/`GetLocalHandlePoints` 중복 제거 → `Transformer`만 사용
-- [ ] 0.6.5 빌드 + 모델 헤더를 D2D 없이 컴파일하는 확인용 TU 추가
+### Step 0.6 모델에서 D2D/MFC 의존 분리 (D8, D9, D12)  — ✅ 완료 (2026-10-27)
+- [x] 0.6.1 `Node::Draw` 삭제 → 렌더러(`ge::D2DRenderer`)를 거쳐 그리도록 함 (ITool, ToolManager 수정)
+- [x] 0.6.2 `GetD2DLayerParameters`를 렌더러(`D2DRenderer::DrawDocument`) 내부로 옮김
+- [x] 0.6.3 D2D 변환 연산자/오버로드 및 백엔드(PathOp, Renderer, HitTester)를 `#ifndef GE_NO_D2D`로 감싸 순수 C++ 모델 분리 보장
+- [x] 0.6.4 `Node::ScaleByHandle`/`RotateAboutCenter`/`ApplyTranslation`/`GetLocalHandlePoints` 중복 제거 → `Transformer`만 사용
+- [x] 0.6.5 빌드 성공 + 모델 헤더를 D2D 없이 컴파일하는 확인용 TU([GeModelPureCheck.cpp](file:///c:/www/project/desktop/ApiDDraw/M2Draw/GeModelPureCheck.cpp)) 추가하여 빌드 통과 검증 완료
 
-### Step 0.7 소소한 결함 (D10, D11, D13, D14)
-- [ ] 0.7.1 `PathNode::GetKind()` → `GetShapeKind()` 개명
-- [ ] 0.7.2 노드를 직접 편집하면 `shapeKind = Path`, `params = monostate`로 전환
-- [ ] 0.7.3 `ArrangeSelection`의 Forward/Backward에서 인접한 선택 항목끼리 서로 바뀌는 문제 수정
-- [ ] 0.7.4 `UngroupSelection`에서 그룹 opacity를 자식에 보존
-- [ ] 0.7.5 빌드 + Phase 0 완료 기준(DoD) 전체 점검
+### Step 0.7 소소한 결함 (D10, D11, D13, D14)  — ✅ 완료 (2026-10-27)
+- [x] 0.7.1 `PathNode::GetKind()` → `GetShapeKind()` 개명 (`GetKind()`는 하위 호환으로 유지, ToolOptionBar/LayerWnd 갱신)
+- [x] 0.7.2 노드를 직접 편집(`MoveNodeOrHandle`, `InsertNodeOnSegment`, `RemoveNode`)하면 `shapeKind = Path`, `params = monostate`로 자동 전환
+- [x] 0.7.3 `ArrangeSelection`의 Forward/Backward에서 인접한 선택 항목끼리 서로 바뀌는 문제 수정 (부모별 정렬 순회 및 선택 이웃 보호)
+- [x] 0.7.4 `UngroupSelection`에서 그룹 opacity를 자식에 보존 (`o->SetOpacity(o->GetOpacity() * groupOpacity)`)
+- [x] 0.7.5 빌드 성공 + Phase 0 완료 기준(DoD: 복제본 독립성, 상속 가시성/잠금, 순수 C++ 모델 분리, W4 신규 경고 0) 전체 점검 통과
 
 ---
 

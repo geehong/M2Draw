@@ -930,7 +930,7 @@ void CLayerView::DrawNodeIcon(ID2D1RenderTarget* pRT, ID2D1SolidColorBrush* pBru
 	}
 
 	ge::PathNode* pPath = dynamic_cast<ge::PathNode*>(pNode);
-	ge::ShapeKind kind = pPath ? pPath->GetKind() : ge::ShapeKind::Path;
+	ge::ShapeKind kind = pPath ? pPath->GetShapeKind() : ge::ShapeKind::Path;
 
 	pBrush->SetColor(D2D1::ColorF(0.25f, 0.65f, 0.95f, 1.0f));
 	switch (kind)

@@ -253,6 +253,9 @@
     <ClCompile Include="ToolManager.cpp" />
     <ClCompile Include="ToolBoxPane.cpp" />
     <ClCompile Include="ToolOptionBar.cpp" />
+    <ClCompile Include="GeModelPureCheck.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="M2Draw.reg" />

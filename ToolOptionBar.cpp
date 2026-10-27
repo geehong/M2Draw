@@ -636,7 +636,7 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, ge::Node* pShape)
 	ToolType shapeTool = ToolType::Select;
 	if (pPathShape)
 	{
-		switch (pPathShape->GetKind())
+		switch (pPathShape->GetShapeKind())
 		{
 		case ::ShapeKind::Path:     shapeTool = ToolType::Pen;      break;
 		case ::ShapeKind::Rect:     shapeTool = ToolType::Rect;     break;

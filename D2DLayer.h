@@ -17,9 +17,6 @@ public:
 	bool  IsClippingMask() const noexcept     { return m_bClippingMask; }
 	void  SetClippingMask(bool mask) noexcept { m_bClippingMask = mask; }
 
-	// Direct2D 하드웨어 레이어 파라미터 계산
-	D2D1_LAYER_PARAMETERS GetD2DLayerParameters() const;
-
 private:
 	bool           m_bClippingMask = false;
 };
