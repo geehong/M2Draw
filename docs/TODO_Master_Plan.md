@@ -34,11 +34,21 @@
 ### Step 0.2b 단일 모델 전환 (D5 + D6) — ⚠️ 우선순위 상향 제안 (0.3보다 먼저)
 > 이중 모델(`m_shapes` + `ge::Document`)이 확인됨. 이후 모든 기능(그룹, Z-Order, 레이어, 저장, Undo)이
 > 인덱스 대응을 깨뜨리므로, 기존 0.4(선택 단일화)와 0.5.1(`m_shapes` 제거)을 합쳐 먼저 진행한다.
-- [ ] 0.2b.1 생성 도구(BoxShapeTool, MultiPointShapeTool, PenTool)가 `ge::Document`에만 추가하도록 변경
-- [ ] 0.2b.2 SelectTool: `m_selectedIndices`(int) → `Document` 선택(`Node*`), 히트테스트·이동·스케일·회전·노드편집을 `ge` 노드로
-- [ ] 0.2b.3 PropertyView / ToolOptionBar / PropertiesWnd / LayerWnd 의 인덱스 기반 접근을 `Node*`로
-- [ ] 0.2b.4 `SyncShapeToGeDoc`, `SyncDocSelection`, `SyncPenPathToGeDoc`, 이중 렌더링 루프, 이름 기반 삭제 제거
-- [ ] 0.2b.5 `m_shapes`, `m_currentPath`, `GetShapes()` 삭제
+**1단계 — 모델 하나로 합치기**  — ✅ 완료 (사용자 확인 2026-10-27)
+- [x] 0.2b.1 생성 도구가 `ge::Document`에만 추가하도록 변경
+  - `BaseShapeTool::CommitShape`: 미리보기 도형(이미 `ge::PathNode`)을 그대로 `AddShape` (필드별 복사·이중 등록 제거)
+  - 펜 도구: `SyncPenPathToGeDoc` + `push_back` → `CommitPenPath` (작성 중 패스를 문서로 이동)
+- [x] 0.2b.4 동기화 코드 제거: `SyncShapeToGeDoc`, `SyncPenPathToGeDoc`, 캔버스 이중 렌더링 루프, 이름 기반 삭제, LayerWnd 이름 기반 가시성 동기화
+- [x] 0.2b.5 `m_shapes` 삭제 → `GetShapes()`는 **활성 레이어 자식 목록의 읽기 전용 뷰**로 변경
+  - `m_currentPath`는 "펜 작성 중 임시 패스"로 유지 (문서 모델 아님)
+- [x] 부수 수정
+  - `GetPathsRef()`/`GetStyleRef()`가 지오메트리 캐시를 무효화 (기존엔 구형 그리기가 캐시 없이 매번 재생성해 누락이 가려졌음). 읽기 전용 사용처는 `GetPaths()`/`GetStyle()`로
+  - 활성 레이어가 숨김/잠금이면 선택 도구가 상호작용하지 않음 (기존 이름 동기화 꼼수 대체)
+  - 레이어 패널: 레이어 전환 시 선택 초기화, 다른 레이어의 도형 클릭 시 그 레이어를 활성화
+
+**2단계 — 인덱스 선택 → 노드 포인터 선택**
+- [ ] 0.2b.2 SelectTool: `m_selectedIndices`(int) → `Document` 선택(`Node*`), 히트테스트를 전체 레이어 대상으로
+- [ ] 0.2b.3 PropertyView / ToolOptionBar / PropertiesWnd / LayerWnd 의 인덱스 기반 접근을 `Node*`로, `SyncDocSelection`·`GetShapes()` 제거
 - [ ] 0.2b.6 빌드 + 전체 회귀 확인 (생성/선택/변형/노드편집/복제/삭제/레이어 패널/다중 레이어)
 
 ### Step 0.3 LayerNode 필드 가림 제거 + 조상 체인 판정 (D3)

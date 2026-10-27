@@ -644,7 +644,7 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, int selectedIndex)
 		}
 	}
 
-	if (shapeTool == ToolType::Pen && pPathShape && !pPathShape->GetPathsRef().empty())
+	if (shapeTool == ToolType::Pen && pPathShape && !pPathShape->GetPaths().empty())
 	{
 		m_bPathClosed = pPathShape->GetPathsRef()[0].closed;
 	}
@@ -997,7 +997,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		if (m_bEditing && m_pDoc && m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_pDoc->GetShapes().size()))
 		{
 			PathShape* pShape = dynamic_cast<PathShape*>(m_pDoc->GetShapes()[m_selectedIndex].get());
-			if (pShape && !pShape->GetPathsRef().empty())
+			if (pShape && !pShape->GetPaths().empty())
 			{
 				for (auto& sp : pShape->GetPathsRef())
 				{
@@ -1659,7 +1659,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 
 				// 서브패스 동기화
 				std::vector<ge::SubPath> gePaths;
-				for (const auto& sp : pPathShape->GetPathsRef()) {
+				for (const auto& sp : pPathShape->GetPaths()) {
 					ge::SubPath gsp;
 					gsp.closed = sp.closed;
 					for (const auto& bn : sp.nodes) {

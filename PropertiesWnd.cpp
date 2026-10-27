@@ -528,7 +528,7 @@ void CPropertiesWnd::InitShapePropList()
 	// 2. 라인 굵기 (D2D 실시간 지원, 1 ~ 50 px)
 	CMFCPropertyGridProperty* pPropWidth = new CMFCPropertyGridProperty(
 		_T("라인 굵기 (px)"),
-		(_variant_t)(long)shape->GetStyleRef().strokeWidth,
+		(_variant_t)(long)shape->GetStyle().strokeWidth,
 		_T("선(외곽선)의 굵기를 설정합니다.")
 	);
 	pPropWidth->EnableSpinControl(TRUE, 1, 50);
@@ -537,9 +537,9 @@ void CPropertiesWnd::InitShapePropList()
 
 	// 3. 라인 색상 (COLORREF 변환 및 알파 반영)
 	COLORREF clrStroke = RGB(
-		(BYTE)(shape->GetStyleRef().stroke.r * 255.0f),
-		(BYTE)(shape->GetStyleRef().stroke.g * 255.0f),
-		(BYTE)(shape->GetStyleRef().stroke.b * 255.0f)
+		(BYTE)(shape->GetStyle().stroke.r * 255.0f),
+		(BYTE)(shape->GetStyle().stroke.g * 255.0f),
+		(BYTE)(shape->GetStyle().stroke.b * 255.0f)
 	);
 	CMFCPropertyGridColorProperty* pPropClrStroke = new CMFCPropertyGridColorProperty(
 		_T("라인 색상"),
@@ -563,7 +563,7 @@ void CPropertiesWnd::InitShapePropList()
 	pPropDash->AddOption(_T("대시-점선 (DashDot)"));
 	pPropDash->AllowEdit(FALSE);
 
-	switch (shape->GetStyleRef().dashStyle)
+	switch (shape->GetStyle().dashStyle)
 	{
 	case D2D1_DASH_STYLE_DASH:      pPropDash->SetValue(_T("대시선 (Dash)")); break;
 	case D2D1_DASH_STYLE_DOT:       pPropDash->SetValue(_T("점선 (Dot)")); break;
@@ -589,7 +589,7 @@ void CPropertiesWnd::InitShapePropList()
 	pPropFillType->AddOption(_T("무늬 / 패턴 (Pattern)"));
 	pPropFillType->AllowEdit(FALSE);
 
-	switch (shape->GetStyleRef().fillType)
+	switch (shape->GetStyle().fillType)
 	{
 	case FillType::Solid:   pPropFillType->SetValue(_T("단색 채움 (Solid)")); break;
 	case FillType::Pattern: pPropFillType->SetValue(_T("무늬 / 패턴 (Pattern)")); break;
@@ -600,9 +600,9 @@ void CPropertiesWnd::InitShapePropList()
 
 	// 채움 색상
 	COLORREF clrFill = RGB(
-		(BYTE)(shape->GetStyleRef().fill.r * 255.0f),
-		(BYTE)(shape->GetStyleRef().fill.g * 255.0f),
-		(BYTE)(shape->GetStyleRef().fill.b * 255.0f)
+		(BYTE)(shape->GetStyle().fill.r * 255.0f),
+		(BYTE)(shape->GetStyle().fill.g * 255.0f),
+		(BYTE)(shape->GetStyle().fill.b * 255.0f)
 	);
 	CMFCPropertyGridColorProperty* pPropClrFill = new CMFCPropertyGridColorProperty(
 		_T("채움 색상"),
@@ -886,7 +886,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			shape->GetStyleRef().strokeWidth = static_cast<float>(val.dblVal);
 			shape->Invalidate();
-			strLogMsg.Format(_T("[쉐이프 속성] 라인 굵기: %.1f px"), shape->GetStyleRef().strokeWidth);
+			strLogMsg.Format(_T("[쉐이프 속성] 라인 굵기: %.1f px"), shape->GetStyle().strokeWidth);
 			LogAppEvent(strLogMsg);
 		}
 		break;
@@ -964,7 +964,7 @@ LRESULT CPropertiesWnd::OnPropertyChanged(WPARAM /*wParam*/, LPARAM lParam)
 				1.0f
 			);
 			// 사용자가 채움 색을 선택했는데 채움 유형이 '투명'이었다면 자동으로 '단색 채움'으로 활성화
-			if (shape->GetStyleRef().fillType == FillType::None)
+			if (shape->GetStyle().fillType == FillType::None)
 			{
 				shape->GetStyleRef().fillType = FillType::Solid;
 			}

@@ -32,10 +32,13 @@ public:
 	const ge::Document&             GetDoc() const       { return m_doc; }
 	std::unique_ptr<ge::PathNode>&  GetCurrentPathNode() { return m_currentPathNode; }
 
-	// --- 구형 엔진 호환 필드 (단계적 이관 진행 중 유지) ---
-	std::vector<std::unique_ptr<Shape>> m_shapes;
+	// 활성 레이어의 최상위 도형 목록 (읽기 전용 뷰).
+	// 인덱스 기반 도구/패널 호환용 -> Step 0.2b 2단계에서 Node* 선택으로 대체 예정.
+	// 도형 추가/삭제는 반드시 ge::Document API(AddShape/RemoveNode)를 사용.
+	const std::vector<std::unique_ptr<ge::Node>>& GetShapes() const;
+
+	// 펜 도구가 작성 중인 패스 (문서에 아직 등록되지 않은 임시 도형)
 	std::unique_ptr<PathShape>          m_currentPath;
-	std::vector<std::unique_ptr<Shape>>& GetShapes()      { return m_shapes; }
 	std::unique_ptr<PathShape>&          GetCurrentPath() { return m_currentPath; }
 
 	// --- 스마트 삭제 연동 기능 (키보드 Del 키 & 레이어 패널 휴지통 공용) ---

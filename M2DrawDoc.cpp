@@ -47,12 +47,18 @@ BOOL CM2DrawDoc::OnNewDocument()
 	if (!CDocument::OnNewDocument())
 		return FALSE;
 
-	m_shapes.clear();
 	m_currentPath.reset();
 	m_doc = ge::Document();
 	m_currentPathNode.reset();
 
 	return TRUE;
+}
+
+const std::vector<std::unique_ptr<ge::Node>>& CM2DrawDoc::GetShapes() const
+{
+	static const std::vector<std::unique_ptr<ge::Node>> s_empty;
+	const ge::LayerNode* pLayer = m_doc.GetActiveLayer();
+	return pLayer ? pLayer->GetChildren() : s_empty;
 }
 
 
@@ -172,14 +178,6 @@ bool CM2DrawDoc::DeleteSelectedObjects()
 		const auto& indices = pSelect->GetSelectedIndices();
 		for (int idx : indices)
 		{
-			if (idx >= 0 && idx < static_cast<int>(m_shapes.size()) && m_shapes[idx])
-			{
-				ge::Node* pNode = m_shapes[idx].get();
-				if (std::find(targetNodes.begin(), targetNodes.end(), pNode) == targetNodes.end())
-				{
-					targetNodes.push_back(pNode);
-				}
-			}
 			if (pActiveLayer && idx >= 0 && idx < static_cast<int>(pActiveLayer->GetChildren().size()))
 			{
 				ge::Node* pNode = pActiveLayer->GetChildren()[idx].get();
@@ -194,17 +192,7 @@ bool CM2DrawDoc::DeleteSelectedObjects()
 	if (targetNodes.empty())
 		return false;
 
-	// 2. 삭제 대상의 이름 보존 (이름 기준 동기화용)
-	std::vector<std::wstring> targetNames;
-	for (auto* n : targetNodes)
-	{
-		if (n && !n->GetName().empty())
-		{
-			targetNames.push_back(n->GetName());
-		}
-	}
-
-	// 3. m_doc (신형 씬그래프)에서 노드 제거
+	// 2. 문서에서 노드 제거 (소유권 반환 -> 즉시 해제)
 	for (auto* n : targetNodes)
 	{
 		if (n)
@@ -213,41 +201,7 @@ bool CM2DrawDoc::DeleteSelectedObjects()
 		}
 	}
 
-	// 4. m_shapes (구형 브릿지 벡터)에서 동시 제거
-	for (auto it = m_shapes.begin(); it != m_shapes.end(); )
-	{
-		bool bFound = false;
-		for (auto* n : targetNodes)
-		{
-			if (it->get() == n)
-			{
-				bFound = true;
-				break;
-			}
-		}
-		if (!bFound)
-		{
-			for (const auto& name : targetNames)
-			{
-				if ((*it)->GetName() == name)
-				{
-					bFound = true;
-					break;
-				}
-			}
-		}
-
-		if (bFound)
-		{
-			it = m_shapes.erase(it);
-		}
-		else
-		{
-			++it;
-		}
-	}
-
-	// 5. 선택 상태 초기화
+	// 3. 선택 상태 초기화
 	m_doc.ClearSelection();
 	if (pSelect)
 	{
@@ -289,47 +243,11 @@ bool CM2DrawDoc::DeleteActiveLayer()
 
 	CString layerName = pActive->GetName().c_str();
 
-	// 레이어에 속한 자식들의 이름 및 포인터 수집
-	std::vector<ge::Node*> childNodes;
-	std::vector<std::wstring> childNames;
-	for (const auto& child : pActive->GetChildren())
-	{
-		if (child)
-		{
-			childNodes.push_back(child.get());
-			if (!child->GetName().empty())
-				childNames.push_back(child->GetName());
-		}
-	}
+	const int childCount = static_cast<int>(pActive->GetChildren().size());
 
-	// m_doc에서 레이어 제거
+	// m_doc에서 레이어 제거 (하위 도형 포함)
 	if (!m_doc.RemoveLayer(pActive))
 		return false;
-
-	// m_shapes에서 해당 레이어 자식 도형들도 제거
-	for (auto it = m_shapes.begin(); it != m_shapes.end(); )
-	{
-		bool bFound = false;
-		for (auto* n : childNodes)
-		{
-			if (it->get() == n) { bFound = true; break; }
-		}
-		if (!bFound)
-		{
-			for (const auto& name : childNames)
-			{
-				if ((*it)->GetName() == name)
-				{
-					bFound = true;
-					break;
-				}
-			}
-		}
-		if (bFound)
-			it = m_shapes.erase(it);
-		else
-			++it;
-	}
 
 	// 선택 정리
 	m_doc.ClearSelection();
@@ -342,7 +260,7 @@ bool CM2DrawDoc::DeleteActiveLayer()
 	UpdateShapePropertiesSelection(-1, this);
 
 	CString strLog;
-	strLog.Format(_T("[레이어 패널] 레이어 삭제됨: '%s' (하위 도형 %d개 포함)"), (LPCTSTR)layerName, static_cast<int>(childNodes.size()));
+	strLog.Format(_T("[레이어 패널] 레이어 삭제됨: '%s' (하위 도형 %d개 포함)"), (LPCTSTR)layerName, childCount);
 	LogAppEvent(strLog);
 	SetAppStatusText(strLog);
 
@@ -375,14 +293,9 @@ bool CM2DrawDoc::DuplicateSelectedObjects()
 	CM2DrawApp* pApp = dynamic_cast<CM2DrawApp*>(AfxGetApp());
 	SelectTool* pSelect = pApp ? pApp->GetToolManager().GetSelectTool() : nullptr;
 
-	// [임시] 구형 m_shapes[i] <-> 활성 레이어 children[i] 인덱스 대응을 유지해야 함
-	// (SelectTool / LayerWnd / SyncShapeToGeDoc 가 이 대응에 의존. 단일 모델 전환 시 제거)
+	// SelectTool 이 아직 활성 레이어 인덱스 기반이므로 활성 레이어 최상위 도형만 허용 (Step 0.2b 2단계에서 해제)
 	auto* pActiveLayer = m_doc.GetActiveLayer();
-	if (!pActiveLayer || pActiveLayer->GetChildren().size() != m_shapes.size())
-	{
-		SetAppStatusText(_T("[도형 복제] 활성 레이어와 도형 목록이 일치하지 않아 복제할 수 없습니다."));
-		return false;
-	}
+	if (!pActiveLayer) return false;
 	for (ge::Node* n : m_doc.GetSelection())
 	{
 		if (!n || n->GetParent() != pActiveLayer)
@@ -396,17 +309,9 @@ bool CM2DrawDoc::DuplicateSelectedObjects()
 	if (clones.empty())
 		return false;
 
-	// 복제본은 항상 원본 바로 위(index+1)에 있으므로, 인덱스 오름차순으로 m_shapes 에도 같은 위치에 삽입
 	std::vector<int> cloneIdx;
 	for (ge::Node* n : clones)
 		cloneIdx.push_back(pActiveLayer->IndexOf(n));
-	std::sort(cloneIdx.begin(), cloneIdx.end());
-	for (int k : cloneIdx)
-	{
-		auto legacy = m_shapes[k - 1]->Clone();
-		legacy->SetName(pActiveLayer->GetChildren()[k]->GetName());
-		m_shapes.insert(m_shapes.begin() + k, std::move(legacy));
-	}
 
 	if (pSelect)
 	{

@@ -24,7 +24,7 @@ void PenTool::OnDown(const ToolEvent& e)
 	m_state = State::Pressed;
 
 	// 패스 폐합 검사 (첫 앵커와 8px 이내인지 비교)
-	if (!m_needNewSubPath && !currentPath->GetPathsRef().empty() && !currentPath->GetPathsRef().back().closed && currentPath->GetPathsRef().back().nodes.size() >= 3)
+	if (!m_needNewSubPath && !currentPath->GetPaths().empty() && !currentPath->GetPathsRef().back().closed && currentPath->GetPathsRef().back().nodes.size() >= 3)
 	{
 		auto& sp = currentPath->GetPathsRef().back();
 		D2D1_POINT_2F firstScreenPt = CoordinateSpace::LocalToScreen(sp.nodes[0].anchor, currentPath->GetTransform(), e.view);
@@ -62,7 +62,7 @@ void PenTool::OnMove(const ToolEvent& e)
 	if (!e.pDoc) return;
 
 	auto& currentPath = e.pDoc->GetCurrentPath();
-	if (!currentPath || currentPath->GetPathsRef().empty()) return;
+	if (!currentPath || currentPath->GetPaths().empty()) return;
 	auto& sp = currentPath->GetPathsRef().back();
 	if (sp.nodes.empty()) return;
 
@@ -113,40 +113,17 @@ void PenTool::OnUp(const ToolEvent& e)
 	}
 }
 
-static void SyncPenPathToGeDoc(CM2DrawDoc* pDoc, const std::unique_ptr<PathShape>& path)
+// 작성 중인 펜 패스를 문서 활성 레이어에 등록 (소유권 이동, 단일 모델)
+static void CommitPenPath(CM2DrawDoc* pDoc)
 {
-	if (!pDoc || !path) return;
-	auto node = std::make_unique<ge::PathNode>();
-	node->SetName(pDoc->GetDoc().GenerateNodeName(ge::ShapeKind::Path));
-	if (path) path->SetName(node->GetName());
-	node->SetKind(ge::ShapeKind::Path);
-	std::vector<ge::SubPath> gePaths;
-	for (const auto& sp : path->GetPathsRef()) {
-		ge::SubPath gsp;
-		gsp.closed = sp.closed;
-		for (const auto& bn : sp.nodes) {
-			ge::BezierNode gbn;
-			gbn.anchor = { bn.anchor.x, bn.anchor.y };
-			gbn.hIn = { bn.hIn.x, bn.hIn.y };
-			gbn.hOut = { bn.hOut.x, bn.hOut.y };
-			gbn.type = static_cast<ge::BezierNode::Type>(bn.type);
-			gsp.nodes.push_back(gbn);
-		}
-		gePaths.push_back(std::move(gsp));
-	}
-	node->SetPaths(gePaths);
-	const auto& mx = path->GetTransform();
-	node->SetTransform({ mx._11, mx._12, mx._21, mx._22, mx._31, mx._32 });
-	ge::Style st;
-	st.fillType = static_cast<ge::FillType>(path->GetStyleRef().fillType);
-	st.fill = ge::Color::FromD2D(path->GetStyleRef().fill);
-	st.stroke = ge::Color::FromD2D(path->GetStyleRef().stroke);
-	st.strokeWidth = path->GetStyleRef().strokeWidth;
-	st.dashStyle = static_cast<ge::DashStyle>(path->GetStyleRef().dashStyle);
-	node->SetStyle(st);
-	pDoc->GetDoc().AddShape(std::move(node));
+	auto& path = pDoc->GetCurrentPath();
+	if (!path) return;
+	path->SetName(pDoc->GetDoc().GenerateNodeName(ge::ShapeKind::Path));
+	path->SetKind(ge::ShapeKind::Path);
+	path->Invalidate();
+	pDoc->GetDoc().AddShape(std::move(path));
+	path = nullptr;
 }
-
 void PenTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
 {
 	if (!pDoc) return;
@@ -154,12 +131,11 @@ void PenTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
 	if (nChar == VK_RETURN)
 	{
 		// Enter 키: 현재 열린 패스 완료 후 문서 도형 목록에 보관
-		if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPathsRef().empty())
+		if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPaths().empty())
 		{
 			m_state = State::Idle;
 			m_needNewSubPath = true;
-			SyncPenPathToGeDoc(pDoc, pDoc->GetCurrentPath());
-			pDoc->GetShapes().push_back(std::move(pDoc->GetCurrentPath()));
+			CommitPenPath(pDoc);
 			pDoc->GetCurrentPath() = nullptr;
 			LogAppEvent(_T("[펜 도구] 패스 작성 완료 (Enter)"));
 		}
@@ -183,7 +159,7 @@ bool PenTool::OnDoubleClicked(CM2DrawDoc* pDoc)
 {
 	if (!pDoc) return true;
 
-	if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPathsRef().empty())
+	if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPaths().empty())
 	{
 		auto& nodes = pDoc->GetCurrentPath()->GetPathsRef().back().nodes;
 
@@ -205,8 +181,7 @@ bool PenTool::OnDoubleClicked(CM2DrawDoc* pDoc)
 			m_state = State::Idle;
 			m_needNewSubPath = true;
 			pDoc->GetCurrentPath()->Invalidate();
-			SyncPenPathToGeDoc(pDoc, pDoc->GetCurrentPath());
-			pDoc->GetShapes().push_back(std::move(pDoc->GetCurrentPath()));
+			CommitPenPath(pDoc);
 			pDoc->GetCurrentPath() = nullptr;
 			LogAppEvent(_T("[펜 도구] 패스 작성 완료 (더블클릭 -> 선택 도구 전환)"));
 		}
@@ -225,7 +200,7 @@ bool PenTool::OnRightClicked(CM2DrawDoc* pDoc)
 {
 	if (!pDoc) return true;
 
-	if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPathsRef().empty())
+	if (pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPaths().empty())
 	{
 		auto& nodes = pDoc->GetCurrentPath()->GetPathsRef().back().nodes;
 		if (nodes.size() >= 2)
@@ -233,8 +208,7 @@ bool PenTool::OnRightClicked(CM2DrawDoc* pDoc)
 			m_state = State::Idle;
 			m_needNewSubPath = true;
 			pDoc->GetCurrentPath()->Invalidate();
-			SyncPenPathToGeDoc(pDoc, pDoc->GetCurrentPath());
-			pDoc->GetShapes().push_back(std::move(pDoc->GetCurrentPath()));
+			CommitPenPath(pDoc);
 			pDoc->GetCurrentPath() = nullptr;
 			LogAppEvent(_T("[펜 도구] 패스 작성 완료 (우클릭 -> 선택 도구 전환)"));
 		}
@@ -255,7 +229,7 @@ void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, fl
 	ViewportTransform view = { zoom, pan };
 
 	// 1. 패스가 이미 시작된 상태인 경우
-	if (pDoc && pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPathsRef().empty())
+	if (pDoc && pDoc->GetCurrentPath() && !pDoc->GetCurrentPath()->GetPaths().empty())
 	{
 		const auto& path = pDoc->GetCurrentPath();
 
@@ -268,7 +242,7 @@ void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, fl
 		bool hasLastOut = false;
 		bool hasNodes = false;
 
-		for (const auto& sp : path->GetPathsRef())
+		for (const auto& sp : path->GetPaths())
 		{
 			for (const auto& node : sp.nodes)
 			{

@@ -335,7 +335,8 @@ public:
 	void SetTransform(const Matrix2D& v)     { m_xf = v; }
 
 	const Style& GetStyle() const            { return m_style; }
-	Style&       GetStyleRef()               { return m_style; }
+	// 수정용 접근자: 호출 시 지오메트리 캐시 무효화 (fillType/fillMode 가 지오메트리에 영향). 읽기는 GetStyle() 사용
+	Style&       GetStyleRef()               { Invalidate(); return m_style; }
 	void SetStyle(const Style& v)            { m_style = v; Invalidate(); }
 
 	bool IsVisible() const                   { return m_visible; }
@@ -495,7 +496,8 @@ public:
 	using Node::GetLocalBounds;
 
 	const std::vector<SubPath>& GetPaths() const { return m_paths; }
-	std::vector<SubPath>&       GetPathsRef()    { return m_paths; }
+	// 수정용 접근자: 호출 시 지오메트리 캐시 무효화. 읽기는 GetPaths() 사용
+	std::vector<SubPath>&       GetPathsRef()    { Invalidate(); return m_paths; }
 	void SetPaths(const std::vector<SubPath>& v) { m_paths = v; Invalidate(); }
 	void AddAnchor(Vec2 localPt, bool forceNewSubPath = false);
 	void AddAnchor(D2D1_POINT_2F localPt, bool forceNewSubPath = false) {

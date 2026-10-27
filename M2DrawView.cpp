@@ -627,19 +627,9 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 		m_ptPan
 	);
 
-	// 1. 신형 엔진 Document 씬 그래프 렌더링
+	// 1. 문서 씬 그래프 렌더링 (단일 모델)
 	ge::Viewport view = { m_fZoom, { m_ptPan.x, m_ptPan.y } };
 	m_renderer.DrawDocument(pDoc->GetDoc(), view);
-
-	// 1-1. 기존 엔진 저장 도형 렌더링 (도구 마이그레이션 완료 전까지 병행 렌더링)
-	ViewportTransform vt = { m_fZoom, m_ptPan };
-	for (const auto& sp : pDoc->GetShapes())
-	{
-		if (sp)
-		{
-			sp->Draw(m_pRenderTarget, m_pSolidBrush, m_pD2DFactory, vt);
-		}
-	}
 
 	// 2. 활성 도구의 오버레이(작성 중인 선, 사각형, 펜 핸들 등) 렌더링
 	ITool* pActiveTool = GetApp()->GetToolManager().GetActiveTool();

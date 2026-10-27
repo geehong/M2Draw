@@ -122,20 +122,20 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, int shapeIndex)
 		m_strShapeType = shape->GetShapeTypeName();
 		m_strShapeName = shape->GetName().empty() ? m_strShapeType : CString(shape->GetName().c_str());
 
-		m_bFillEnabled = (shape->GetStyleRef().fillType != FillType::None);
-		m_fillColor = shape->GetStyleRef().fill;
+		m_bFillEnabled = (shape->GetStyle().fillType != FillType::None);
+		m_fillColor = shape->GetStyle().fill;
 		RGBtoHSL(m_fillColor, m_fFillHue, m_fFillSat, m_fFillLight);
 
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
 		if (pxPerUnit <= 0.0f) pxPerUnit = 1.0f;
-		m_fStrokeWidth = shape->GetStyleRef().strokeWidth / pxPerUnit;
-		m_strokeColor = shape->GetStyleRef().stroke;
+		m_fStrokeWidth = shape->GetStyle().strokeWidth / pxPerUnit;
+		m_strokeColor = shape->GetStyle().stroke;
 		RGBtoHSL(m_strokeColor, m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
 
 		m_fOpacity = (m_colorTarget == 0 ? m_fillColor.a : m_strokeColor.a) * 100.0f;
 
-		switch (shape->GetStyleRef().dashStyle)
+		switch (shape->GetStyle().dashStyle)
 		{
 		case D2D1_DASH_STYLE_DASH:      m_selectedDash = 1; break;
 		case D2D1_DASH_STYLE_DOT:       m_selectedDash = 2; break;
@@ -197,11 +197,11 @@ void CD2DPropertyView::ApplyToShape()
 			if (node)
 			{
 				ge::Style st;
-				st.fillType = static_cast<ge::FillType>(shape->GetStyleRef().fillType);
-				st.fill = ge::Color::FromD2D(shape->GetStyleRef().fill);
-				st.stroke = ge::Color::FromD2D(shape->GetStyleRef().stroke);
-				st.strokeWidth = shape->GetStyleRef().strokeWidth;
-				st.dashStyle = static_cast<ge::DashStyle>(shape->GetStyleRef().dashStyle);
+				st.fillType = static_cast<ge::FillType>(shape->GetStyle().fillType);
+				st.fill = ge::Color::FromD2D(shape->GetStyle().fill);
+				st.stroke = ge::Color::FromD2D(shape->GetStyle().stroke);
+				st.strokeWidth = shape->GetStyle().strokeWidth;
+				st.dashStyle = static_cast<ge::DashStyle>(shape->GetStyle().dashStyle);
 				node->SetStyle(st);
 			}
 		}
@@ -897,7 +897,7 @@ void CD2DPropertyView::SyncControlsFromData()
 			Shape* shape = m_pActiveDoc->GetShapes()[m_selectedShapeIndex].get();
 			if (shape)
 			{
-				m_fStrokeWidth = shape->GetStyleRef().strokeWidth / pxPerUnit;
+				m_fStrokeWidth = shape->GetStyle().strokeWidth / pxPerUnit;
 			}
 		}
 

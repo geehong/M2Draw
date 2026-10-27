@@ -809,20 +809,6 @@ void CLayerView::RefreshLayers()
 			CM2DrawDoc* pActiveDoc = GetDocSafe();
 			if (pActiveDoc)
 			{
-				// 레이어에 속한 자식들의 대응 Shape 가시성도 동기화
-				for (const auto& child : layer->GetChildren())
-				{
-					if (child)
-					{
-						for (auto& sp : pActiveDoc->GetShapes())
-						{
-							if (sp && sp->GetName() == child->GetName())
-							{
-								sp->SetVisible(bChecked && child->IsVisible());
-							}
-						}
-					}
-				}
 				pActiveDoc->UpdateAllViews(nullptr);
 			}
 			CString strLog;
@@ -872,19 +858,11 @@ void CLayerView::RefreshLayers()
 			});
 
 			rowChild.chkVisible = std::make_shared<M2DrawCheckBox>(L"", child->IsVisible());
-			rowChild.chkVisible->SetOnChanged([this, child, layer](M2DrawCheckBox*, bool bChecked) {
+			rowChild.chkVisible->SetOnChanged([this, child](M2DrawCheckBox*, bool bChecked) {
 				child->SetVisible(bChecked);
 				CM2DrawDoc* pActiveDoc = GetDocSafe();
 				if (pActiveDoc)
 				{
-					// 대응하는 구형 Shape 도 동기화하여 뷰포트에서 완전히 숨겨지도록 처리
-					for (auto& sp : pActiveDoc->GetShapes())
-					{
-						if (sp && sp->GetName() == child->GetName())
-						{
-							sp->SetVisible(bChecked && layer->IsVisible());
-						}
-					}
 					pActiveDoc->UpdateAllViews(nullptr);
 				}
 				CString strLog;
@@ -1246,6 +1224,10 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 						{
 							doc.SetActiveLayer(static_cast<int>(i));
 							doc.ClearSelection();
+							// SelectTool 선택은 활성 레이어 기준 인덱스이므로 레이어 전환 시 초기화
+							SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool();
+							if (pSelect) pSelect->ClearSelection();
+							UpdateShapePropertiesSelection(-1, pDoc);
 							break;
 						}
 					}
@@ -1255,11 +1237,25 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 				}
 				else
 				{
-					pDoc->GetDoc().SetSelection({ row.pNode });
+					auto& doc = pDoc->GetDoc();
+					auto* pLayer = row.pNode->GetParent();
+
+					// 다른 레이어의 도형이면 그 레이어를 활성화 (SelectTool 인덱스는 활성 레이어 기준)
+					if (pLayer && pLayer != doc.GetActiveLayer())
+					{
+						for (size_t i = 0; i < doc.GetLayers().size(); ++i)
+						{
+							if (doc.GetLayers()[i].get() == pLayer)
+							{
+								doc.SetActiveLayer(static_cast<int>(i));
+								break;
+							}
+						}
+					}
+					doc.SetSelection({ row.pNode });
 
 					int shapeIdx = -1;
-					auto* pLayer = row.pNode->GetParent();
-					if (pLayer)
+					if (pLayer && pLayer == doc.GetActiveLayer())
 					{
 						int childIdx = pLayer->IndexOf(row.pNode);
 						if (childIdx >= 0 && childIdx < static_cast<int>(pDoc->GetShapes().size()))
