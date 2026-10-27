@@ -13,13 +13,6 @@ public:
 	NodeKind Kind() const override { return NodeKind::Layer; }
 	std::unique_ptr<Node> Clone() const override;
 	void Accept(INodeVisitor& visitor) override;
-
-	// 클리핑 마스크 지원 플래그
-	bool  IsClippingMask() const noexcept     { return m_bClippingMask; }
-	void  SetClippingMask(bool mask) noexcept { m_bClippingMask = mask; ChangeTracker::Bump(); }
-
-private:
-	bool           m_bClippingMask = false;
 };
 
 } // namespace ge

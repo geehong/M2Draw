@@ -264,10 +264,6 @@ void SvgWriter::Visit(LayerNode& node) {
 
 		m_output += std::string(" m2:locked=\"") + (node.IsLocked() ? "true" : "false") + "\"";
 		m_output += std::string(" m2:visible=\"") + (node.IsVisible() ? "true" : "false") + "\"";
-
-		if (node.IsClippingMask()) {
-			m_output += " m2:clipMask=\"true\"";
-		}
 	}
 
 	if (!node.IsVisible()) {

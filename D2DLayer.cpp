@@ -24,7 +24,6 @@ std::unique_ptr<Node> LayerNode::Clone() const
 {
 	auto copy = std::make_unique<LayerNode>(m_name);
 	copy->CopyNodePropsFrom(*this);
-	copy->m_bClippingMask = m_bClippingMask;
 
 	for (const auto& child : m_children) {
 		if (child) {

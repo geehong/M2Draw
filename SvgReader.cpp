@@ -354,9 +354,6 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 					LayerNode* layer = outDoc.AddLayer(label);
 					outDoc.RestoreNodeId(*layer, ParseNodeId(attrs));
 					ApplyCommonState(*layer, attrs);
-					if (attrs.count(L"m2:clipMask") && attrs[L"m2:clipMask"] == L"true") {
-						layer->SetClippingMask(true);
-					}
 					if (attrs.count(L"opacity")) {
 						layer->SetOpacity(std::wcstof(attrs[L"opacity"].c_str(), nullptr));
 					}

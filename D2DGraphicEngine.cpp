@@ -960,7 +960,7 @@ void D2DRenderer::DrawDocument(Document& doc, const Viewport& view)
 	for (auto& layer : doc.GetLayers()) {
 		if (!layer->IsVisible()) continue;
 
-		const bool needLayer = (layer->GetOpacity() < 0.999f) || layer->IsClippingMask();
+		const bool needLayer = layer->GetOpacity() < 0.999f;   // 레이어 불투명도 합성 전용 (클리핑은 2.4 의 GroupNode::clipPath 로 구현)
 		if (needLayer && m_rt) {
 			D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters();
 			params.opacity = layer->GetOpacity();

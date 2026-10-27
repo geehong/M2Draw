@@ -228,7 +228,7 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(undoable([&] { d.originMode = CanvasOriginMode::BottomLeft; }), L"원점 모드 변경이 기록되지 않음");
 		LayerNode* nl = nullptr;
 		GE_CHECK(undoable([&] { nl = d.AddLayer(L"Layer X"); }), L"AddLayer 가 카운터를 올리지 않음");
-		GE_CHECK(undoable([&] { nl->SetClippingMask(true); }), L"SetClippingMask 가 카운터를 올리지 않음");
+		GE_CHECK(undoable([&] { nl->SetOpacity(0.6f); }), L"레이어 SetOpacity 가 카운터를 올리지 않음");
 		GE_CHECK(undoable([&] { d.MoveLayer(nl, 0); }), L"MoveLayer 가 카운터를 올리지 않음");
 
 		// 7-4. 같은 값을 다시 설정하면 카운터는 올라가도 내용이 같으므로 기록하지 않음
@@ -352,6 +352,22 @@ bool RunPureModelVerification(std::wstring* failure)
 		um2.Reset(dst);
 		dst.ImportNodes({ readGroup });
 		GE_CHECK(um2.CommitChange(L"가져오기", dst), L"ImportNodes 가 변경 카운터를 올리지 않음");
+	}
+
+	// ---- 9. 레이어 클리핑 마스크 플래그 제거 후 구버전 파일 호환 (2.0.6) ----------------------------
+	{
+		const std::string oldSvg =
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:m2=\"https://m2draw/ns\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\" "
+			"width=\"100\" height=\"100\" viewBox=\"0 0 100 100\" m2:version=\"2.0\">\n"
+			"  <g id=\"layer_1\" inkscape:groupmode=\"layer\" inkscape:label=\"Old\" m2:clipMask=\"true\" opacity=\"0.5\">\n"
+			"    <path d=\"M 0 0 L 10 10\" />\n"
+			"  </g>\n"
+			"</svg>\n";
+		Document oldDoc;
+		GE_CHECK(reader.ReadFromString(oldSvg, oldDoc), L"m2:clipMask 가 있는 구버전 파일을 읽지 못함");
+		GE_CHECK(oldDoc.GetLayers().size() == 1 && oldDoc.GetLayers()[0]->GetOpacity() == 0.5f && CountPaths(oldDoc) == 1, L"구버전 파일의 레이어 내용이 보존되지 않음");
+		SvgWriter w2;
+		GE_CHECK(w2.WriteString(oldDoc).find("clipMask") == std::string::npos, L"저장 시 제거된 m2:clipMask 가 다시 출력됨");
 	}
 
 #undef GE_CHECK
