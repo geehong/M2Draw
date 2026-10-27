@@ -6,19 +6,35 @@
 
 namespace ge {
 
-namespace {
-std::string Serialize(Document& doc) {
-	SvgWriter writer;
-	return writer.WriteString(doc);
-}
-} // namespace
-
 std::vector<uint64_t> UndoManager::SelectionIds(const Document& doc) {
 	std::vector<uint64_t> ids;
 	for (const auto* node : doc.GetSelection()) {
 		if (node) ids.push_back(node->GetId());
 	}
 	return ids;
+}
+
+UndoManager::DocMeta UndoManager::CaptureMeta(const Document& doc) {
+	return DocMeta{
+		doc.width, doc.height,
+		doc.backgroundColor.r, doc.backgroundColor.g, doc.backgroundColor.b, doc.backgroundColor.a,
+		doc.canvasColor.r, doc.canvasColor.g, doc.canvasColor.b, doc.canvasColor.a,
+		static_cast<float>(doc.originMode)
+	};
+}
+
+std::string UndoManager::SerializeDoc(Document& doc) {
+	++m_serializeCount;
+	SvgWriter writer;
+	// Snapshot: 이미지는 리소스 참조 ID 만 기록 (Undo 스택 50개에 이미지 데이터가 중복 보관되지 않도록)
+	return writer.WriteString(doc, SvgWriteOptions(SvgWriteMode::Snapshot));
+}
+
+void UndoManager::SetBaseline(Document& doc, std::string svg) {
+	m_baselineSvg = std::move(svg);
+	m_baselineCounter = ChangeTracker::Value();
+	m_baselineMeta = CaptureMeta(doc);
+	m_hasBaseline = true;
 }
 
 void UndoManager::Trim(std::vector<DocumentSnapshot>& stack) const {
@@ -30,8 +46,7 @@ void UndoManager::Trim(std::vector<DocumentSnapshot>& stack) const {
 void UndoManager::Reset(Document& doc) {
 	m_undoStack.clear();
 	m_redoStack.clear();
-	m_baselineSvg = Serialize(doc);
-	m_hasBaseline = true;
+	SetBaseline(doc, SerializeDoc(doc));
 }
 
 bool UndoManager::RestoreSnapshot(const DocumentSnapshot& snapshot, Document& doc) {
@@ -42,6 +57,7 @@ bool UndoManager::RestoreSnapshot(const DocumentSnapshot& snapshot, Document& do
 		return false;
 	}
 	doc = std::move(restored);
+	ChangeTracker::Bump();   // 문서가 통째로 교체됨
 
 	const int layerCount = static_cast<int>(doc.GetLayers().size());
 	doc.SetActiveLayer(layerCount > 0 ? (std::min)((std::max)(snapshot.activeLayer, 0), layerCount - 1) : 0);
@@ -57,13 +73,20 @@ bool UndoManager::RestoreSnapshot(const DocumentSnapshot& snapshot, Document& do
 }
 
 bool UndoManager::CommitChange(const std::wstring& actionName, Document& doc) {
-	std::string current = Serialize(doc);
+	// 빠른 경로: 모델 변경 카운터와 문서 메타가 기준 시점과 같으면 아무것도 바뀌지 않음 -> 직렬화 생략
+	if (m_hasBaseline && m_baselineCounter == ChangeTracker::Value() && m_baselineMeta == CaptureMeta(doc)) {
+		return false;
+	}
+
+	std::string current = SerializeDoc(doc);
 	if (!m_hasBaseline) {
-		m_baselineSvg = std::move(current);
-		m_hasBaseline = true;
+		SetBaseline(doc, std::move(current));
 		return false;
 	}
 	if (current == m_baselineSvg) {
+		// 카운터만 올라가고 내용은 같음(같은 값으로 setter 호출 등): 기준 시점만 갱신해 다음 호출의 직렬화를 피함
+		m_baselineCounter = ChangeTracker::Value();
+		m_baselineMeta = CaptureMeta(doc);
 		return false;
 	}
 
@@ -79,7 +102,7 @@ bool UndoManager::CommitChange(const std::wstring& actionName, Document& doc) {
 	Trim(m_undoStack);
 	m_redoStack.clear();
 
-	m_baselineSvg = std::move(current);
+	SetBaseline(doc, std::move(current));
 	return true;
 }
 
@@ -90,7 +113,7 @@ bool UndoManager::Undo(Document& doc) {
 
 	// Redo 항목: 현재 상태 + 같은 선택/활성 레이어 힌트
 	DocumentSnapshot redoEntry;
-	redoEntry.svgData = Serialize(doc);
+	redoEntry.svgData = SerializeDoc(doc);
 	redoEntry.selectionIds = target.selectionIds;
 	redoEntry.activeLayer = target.activeLayer;
 	redoEntry.actionName = target.actionName;
@@ -102,7 +125,8 @@ bool UndoManager::Undo(Document& doc) {
 	m_redoStack.push_back(std::move(redoEntry));
 	Trim(m_redoStack);
 	m_undoStack.pop_back();
-	m_baselineSvg = Serialize(doc);
+	// 복원 결과를 새 기준으로 삼음 (재직렬화해야 Reader 가 정규화한 형태와 이후 비교가 일치)
+	SetBaseline(doc, SerializeDoc(doc));
 	return true;
 }
 
@@ -112,7 +136,7 @@ bool UndoManager::Redo(Document& doc) {
 	const DocumentSnapshot& target = m_redoStack.back();
 
 	DocumentSnapshot undoEntry;
-	undoEntry.svgData = Serialize(doc);
+	undoEntry.svgData = SerializeDoc(doc);
 	undoEntry.selectionIds = target.selectionIds;
 	undoEntry.activeLayer = target.activeLayer;
 	undoEntry.actionName = target.actionName;
@@ -124,7 +148,7 @@ bool UndoManager::Redo(Document& doc) {
 	m_undoStack.push_back(std::move(undoEntry));
 	Trim(m_undoStack);
 	m_redoStack.pop_back();
-	m_baselineSvg = Serialize(doc);
+	SetBaseline(doc, SerializeDoc(doc));
 	return true;
 }
 

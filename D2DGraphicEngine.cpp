@@ -317,6 +317,7 @@ bool GroupNode::GetLocalBounds(Rect2& out)
 Node* GroupNode::AddChild(std::unique_ptr<Node> child, int index)
 {
 	if (!child) return nullptr;
+	ChangeTracker::Bump();
 	child->m_parent = this;
 	Node* raw = child.get();
 	if (index < 0 || index >= static_cast<int>(m_children.size()))
@@ -328,6 +329,7 @@ Node* GroupNode::AddChild(std::unique_ptr<Node> child, int index)
 
 std::unique_ptr<Node> GroupNode::RemoveChild(Node* child)
 {
+	ChangeTracker::Bump();
 	int i = IndexOf(child);
 	if (i < 0) return nullptr;
 	auto owned = std::move(m_children[i]);
@@ -345,6 +347,7 @@ int GroupNode::IndexOf(const Node* child) const
 
 void GroupNode::BringToFront(Node* child)
 {
+	ChangeTracker::Bump();
 	int i = IndexOf(child);
 	if (i < 0 || i == static_cast<int>(m_children.size()) - 1) return;
 	std::rotate(m_children.begin() + i, m_children.begin() + i + 1, m_children.end());
@@ -352,6 +355,7 @@ void GroupNode::BringToFront(Node* child)
 
 void GroupNode::SendToBack(Node* child)
 {
+	ChangeTracker::Bump();
 	int i = IndexOf(child);
 	if (i <= 0) return;
 	std::rotate(m_children.begin(), m_children.begin() + i, m_children.begin() + i + 1);
@@ -359,6 +363,7 @@ void GroupNode::SendToBack(Node* child)
 
 void GroupNode::BringForward(Node* child)
 {
+	ChangeTracker::Bump();
 	int i = IndexOf(child);
 	if (i < 0 || i + 1 >= static_cast<int>(m_children.size())) return;
 	std::swap(m_children[i], m_children[i + 1]);
@@ -366,6 +371,7 @@ void GroupNode::BringForward(Node* child)
 
 void GroupNode::SendBackward(Node* child)
 {
+	ChangeTracker::Bump();
 	int i = IndexOf(child);
 	if (i <= 0) return;
 	std::swap(m_children[i], m_children[i - 1]);
@@ -379,6 +385,7 @@ Document::Document()
 
 void Document::Clear(bool addDefaultLayer)
 {
+	ChangeTracker::Bump();
 	m_selection.clear();
 	m_layers.clear();
 	m_activeLayer = 0;
@@ -390,6 +397,7 @@ void Document::Clear(bool addDefaultLayer)
 
 LayerNode* Document::AddLayer(const std::wstring& name, int index)
 {
+	ChangeTracker::Bump();
 	auto layer = std::make_unique<LayerNode>();
 	layer->m_id = IssueId();
 	layer->SetName(name);
@@ -406,6 +414,7 @@ bool Document::RemoveLayer(LayerNode* layer)
 	if (m_layers.size() <= 1) return false;   // 최소 1개 유지
 	for (size_t i = 0; i < m_layers.size(); ++i) {
 		if (m_layers[i].get() != layer) continue;
+		ChangeTracker::Bump();
 		m_layers.erase(m_layers.begin() + i);
 		if (m_activeLayer >= static_cast<int>(m_layers.size()))
 			m_activeLayer = static_cast<int>(m_layers.size()) - 1;
@@ -420,6 +429,7 @@ void Document::MoveLayer(LayerNode* layer, int newIndex)
 	int from = -1;
 	for (int i = 0; i < (int)m_layers.size(); ++i) if (m_layers[i].get() == layer) from = i;
 	if (from < 0) return;
+	ChangeTracker::Bump();
 	LayerNode* active = GetActiveLayer();
 	newIndex = (std::max)(0, (std::min)(newIndex, (int)m_layers.size() - 1));
 	auto owned = std::move(m_layers[from]);
@@ -530,7 +540,7 @@ std::wstring Document::GenerateLayerName() const
 
 void Document::AssignIds(Node& node)
 {
-	if (node.m_id == 0) node.m_id = IssueId();
+	if (node.m_id == 0) { node.m_id = IssueId(); ChangeTracker::Bump(); }
 	if (node.Kind() != NodeKind::Path)
 		for (const auto& c : static_cast<GroupNode&>(node).GetChildren()) AssignIds(*c);
 }
@@ -539,11 +549,13 @@ void Document::RestoreNodeId(Node& node, NodeId id)
 {
 	if (id == 0) return;
 	node.m_id = id;
+	ChangeTracker::Bump();
 	if (id > m_nextId) m_nextId = id;
 }
 
 void Document::EnsureUniqueIds()
 {
+	ChangeTracker::Bump();
 	std::unordered_set<NodeId> used;
 	std::function<void(Node&)> walk = [&](Node& n) {
 		if (n.m_id == 0 || !used.insert(n.m_id).second) {

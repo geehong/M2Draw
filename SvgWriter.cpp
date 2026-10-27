@@ -163,8 +163,13 @@ std::string BuildNodeTypes(const PathNode& path) {
 
 // 기본값이 아닌 공통 상태(보이기/잠금/혼합 모드)를 속성 문자열로 출력.
 // 레이어는 기존 형식(항상 locked/visible 출력)을 유지하므로 includeVisibleLocked=false 로 호출
-std::string BuildCommonState(const Node& n, bool includeVisibleLocked) {
+std::string BuildCommonState(const Node& n, bool includeVisibleLocked, bool meta) {
 	std::string s;
+	if (!meta) {
+		// Clean: m2:* 없이 표준 속성(display:none)만. 잠금/혼합 모드는 표준 SVG 에 대응이 없어 생략
+		if (includeVisibleLocked && !n.IsVisible()) s += " style=\"display:none\"";
+		return s;
+	}
 	if (includeVisibleLocked) {
 		if (!n.IsVisible()) s += " m2:visible=\"false\" style=\"display:none\"";
 		if (n.IsLocked())   s += " m2:locked=\"true\"";
@@ -185,30 +190,39 @@ void SvgWriter::AppendIndent() {
 	}
 }
 
-std::string SvgWriter::WriteString(Document& doc) {
+std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options) {
+	m_options = options;
 	m_output.clear();
 	m_indent = 0;
 
 	// XML 선언 및 SVG 루트 시작
 	m_output += "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
 	m_output += "<svg xmlns=\"http://www.w3.org/2000/svg\"\n";
-	m_output += "     xmlns:m2=\"https://m2draw/ns\"\n";
-	m_output += "     xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"\n";
-	m_output += "     xmlns:sodipodi=\"http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd\"\n";
-	m_output += "     width=\"" + FormatFloat(doc.width) + "\" height=\"" + FormatFloat(doc.height) + "\"\n";
-	m_output += "     viewBox=\"0 0 " + FormatFloat(doc.width) + " " + FormatFloat(doc.height) + "\"\n";
-	m_output += "     m2:backgroundColor=\"" + ColorToHex(doc.backgroundColor) + "\"\n";
-	if (doc.backgroundColor.a < 0.999f) {
-		m_output += "     m2:backgroundOpacity=\"" + FormatFloat(doc.backgroundColor.a) + "\"\n";
+	if (Meta()) {
+		m_output += "     xmlns:m2=\"https://m2draw/ns\"\n";
+		m_output += "     xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"\n";
+		m_output += "     xmlns:sodipodi=\"http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd\"\n";
 	}
-	m_output += "     m2:canvasColor=\"" + ColorToHex(doc.canvasColor) + "\"\n";
-	m_output += std::string("     m2:originMode=\"") + (doc.originMode == CanvasOriginMode::BottomLeft ? "bottomLeft" : "topLeft") + "\"\n";
-	m_output += "     m2:version=\"2.0\">\n";
+	m_output += "     width=\"" + FormatFloat(doc.width) + "\" height=\"" + FormatFloat(doc.height) + "\"\n";
+	m_output += "     viewBox=\"0 0 " + FormatFloat(doc.width) + " " + FormatFloat(doc.height) + "\"";
+	if (Meta()) {
+		m_output += "\n";
+		m_output += "     m2:backgroundColor=\"" + ColorToHex(doc.backgroundColor) + "\"\n";
+		if (doc.backgroundColor.a < 0.999f) {
+			m_output += "     m2:backgroundOpacity=\"" + FormatFloat(doc.backgroundColor.a) + "\"\n";
+		}
+		m_output += "     m2:canvasColor=\"" + ColorToHex(doc.canvasColor) + "\"\n";
+		m_output += std::string("     m2:originMode=\"") + (doc.originMode == CanvasOriginMode::BottomLeft ? "bottomLeft" : "topLeft") + "\"\n";
+		m_output += "     m2:version=\"2.0\"";
+	}
+	m_output += ">\n";
 
 	++m_indent;
 
-	AppendIndent();
-	m_output += "<sodipodi:namedview id=\"namedview_canvas\" pagecolor=\"" + ColorToHex(doc.backgroundColor) + "\" />\n";
+	if (Meta()) {
+		AppendIndent();
+		m_output += "<sodipodi:namedview id=\"namedview_canvas\" pagecolor=\"" + ColorToHex(doc.backgroundColor) + "\" />\n";
+	}
 
 	// 레이어 순회
 	for (const auto& layer : doc.GetLayers()) {
@@ -223,8 +237,8 @@ std::string SvgWriter::WriteString(Document& doc) {
 	return m_output;
 }
 
-bool SvgWriter::WriteToFile(Document& doc, const std::wstring& filePath) {
-	std::string content = WriteString(doc);
+bool SvgWriter::WriteToFile(Document& doc, const std::wstring& filePath, const SvgWriteOptions& options) {
+	std::string content = WriteString(doc, options);
 	FILE* fp = nullptr;
 	errno_t err = _wfopen_s(&fp, filePath.c_str(), L"wb");
 	if (err != 0 || !fp) {
@@ -239,18 +253,21 @@ bool SvgWriter::WriteToFile(Document& doc, const std::wstring& filePath) {
 void SvgWriter::Visit(LayerNode& node) {
 	AppendIndent();
 	m_output += "<g id=\"layer_" + std::to_string(node.GetId()) + "\"";
-	m_output += " inkscape:groupmode=\"layer\"";
 
-	std::string utfName = WideToUtf8(node.GetName());
-	if (!utfName.empty()) {
-		m_output += " inkscape:label=\"" + EscapeXml(utfName) + "\"";
-	}
+	if (Meta()) {
+		m_output += " inkscape:groupmode=\"layer\"";
 
-	m_output += std::string(" m2:locked=\"") + (node.IsLocked() ? "true" : "false") + "\"";
-	m_output += std::string(" m2:visible=\"") + (node.IsVisible() ? "true" : "false") + "\"";
+		std::string utfName = WideToUtf8(node.GetName());
+		if (!utfName.empty()) {
+			m_output += " inkscape:label=\"" + EscapeXml(utfName) + "\"";
+		}
 
-	if (node.IsClippingMask()) {
-		m_output += " m2:clipMask=\"true\"";
+		m_output += std::string(" m2:locked=\"") + (node.IsLocked() ? "true" : "false") + "\"";
+		m_output += std::string(" m2:visible=\"") + (node.IsVisible() ? "true" : "false") + "\"";
+
+		if (node.IsClippingMask()) {
+			m_output += " m2:clipMask=\"true\"";
+		}
 	}
 
 	if (!node.IsVisible()) {
@@ -260,7 +277,7 @@ void SvgWriter::Visit(LayerNode& node) {
 	if (node.GetOpacity() < 0.999f) {
 		m_output += " opacity=\"" + FormatFloat(node.GetOpacity()) + "\"";
 	}
-	m_output += BuildCommonState(node, false);
+	m_output += BuildCommonState(node, false, Meta());
 
 	m_output += ">\n";
 
@@ -280,15 +297,17 @@ void SvgWriter::Visit(GroupNode& node) {
 	AppendIndent();
 	m_output += "<g id=\"group_" + std::to_string(node.GetId()) + "\"";
 
-	std::string utfName = WideToUtf8(node.GetName());
-	if (!utfName.empty()) {
-		m_output += " m2:name=\"" + EscapeXml(utfName) + "\"";
+	if (Meta()) {
+		std::string utfName = WideToUtf8(node.GetName());
+		if (!utfName.empty()) {
+			m_output += " m2:name=\"" + EscapeXml(utfName) + "\"";
+		}
 	}
 
 	if (node.GetOpacity() < 0.999f) {
 		m_output += " opacity=\"" + FormatFloat(node.GetOpacity()) + "\"";
 	}
-	m_output += BuildCommonState(node, true);
+	m_output += BuildCommonState(node, true, Meta());
 
 	const Matrix2D& xf = node.GetTransform();
 	if (!IsIdentity(xf)) {
@@ -316,9 +335,11 @@ void SvgWriter::Visit(PathNode& node) {
 	AppendIndent();
 	m_output += "<path id=\"path_" + std::to_string(node.GetId()) + "\"";
 
-	std::string utfName = WideToUtf8(node.GetName());
-	if (!utfName.empty()) {
-		m_output += " m2:name=\"" + EscapeXml(utfName) + "\"";
+	if (Meta()) {
+		std::string utfName = WideToUtf8(node.GetName());
+		if (!utfName.empty()) {
+			m_output += " m2:name=\"" + EscapeXml(utfName) + "\"";
+		}
 	}
 
 	// 패스 데이터 d
@@ -373,7 +394,7 @@ void SvgWriter::Visit(PathNode& node) {
 	if (node.GetOpacity() < 0.999f) {
 		m_output += " opacity=\"" + FormatFloat(node.GetOpacity()) + "\"";
 	}
-	m_output += BuildCommonState(node, true);
+	m_output += BuildCommonState(node, true, Meta());
 
 	const Matrix2D& xf = node.GetTransform();
 	if (!IsIdentity(xf)) {
@@ -381,6 +402,12 @@ void SvgWriter::Visit(PathNode& node) {
 			FormatFloat(xf.m11) + " " + FormatFloat(xf.m12) + " " +
 			FormatFloat(xf.m21) + " " + FormatFloat(xf.m22) + " " +
 			FormatFloat(xf.dx) + " " + FormatFloat(xf.dy) + ")\"";
+	}
+
+	// Clean(순수 SVG) 은 여기서 종료: 파라메트릭/노드 타입 메타데이터는 M2 전용
+	if (!Meta()) {
+		m_output += " />\n";
+		return;
 	}
 
 	// 파라메트릭 도형 메타데이터

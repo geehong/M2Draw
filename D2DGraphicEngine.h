@@ -345,6 +345,16 @@ struct HitResult {
 class Document;
 class INodeVisitor;
 
+// 모델 변경 카운터: 직렬화 결과에 영향을 주는 모든 수정(setter, 비const 접근자, 계층/순서 변경)이 올린다.
+// UndoManager::CommitChange 는 카운터가 기준 시점과 같으면 문서 직렬화를 통째로 건너뜀 (큰 문서/이미지 대비).
+// 문서 구분 없는 프로세스 전역 값이므로 다른 문서의 편집으로 올라가도 "불필요한 직렬화"만 생길 뿐 안전함.
+// 새 수정 함수를 추가할 때는 반드시 Bump() 를 호출할 것 (누락하면 Undo 가 그 변경을 놓침).
+struct ChangeTracker {
+	static uint64_t& Counter() { static uint64_t c = 0; return c; }
+	static void Bump()         { ++Counter(); }
+	static uint64_t Value()    { return Counter(); }
+};
+
 // ---- 모든 씬 노드의 기반 클래스 ---------------------------------------------
 class GroupNode;
 
@@ -375,11 +385,11 @@ public:
 
 	// getter / setter
 	const std::wstring& GetName() const      { return m_name; }
-	void SetName(const std::wstring& v)      { m_name = v; }
+	void SetName(const std::wstring& v)      { m_name = v; ChangeTracker::Bump(); }
 
 	const Matrix2D& GetTransform() const     { return m_xf; }
-	// 변환은 로컬 지오메트리와 무관하므로 지오메트리 캐시를 무효화하지 않음
-	void SetTransform(const Matrix2D& v)     { m_xf = v; }
+	// 변환은 로컬 지오메트리와 무관하므로 지오메트리 캐시를 무효화하지 않음 (변경 카운터는 올림)
+	void SetTransform(const Matrix2D& v)     { m_xf = v; ChangeTracker::Bump(); }
 
 	const Style& GetStyle() const            { return m_style; }
 	// 수정용 접근자: 호출 시 지오메트리 캐시 무효화 (fillType/fillMode 가 지오메트리에 영향). 읽기는 GetStyle() 사용
@@ -387,19 +397,19 @@ public:
 	void SetStyle(const Style& v)            { m_style = v; Invalidate(); }
 
 	bool IsVisible() const                   { return m_visible; }
-	void SetVisible(bool v)                  { m_visible = v; }
+	void SetVisible(bool v)                  { m_visible = v; ChangeTracker::Bump(); }
 	bool IsLocked() const                    { return m_locked; }
-	void SetLocked(bool v)                   { m_locked = v; }
+	void SetLocked(bool v)                   { m_locked = v; ChangeTracker::Bump(); }
 	float GetOpacity() const                 { return m_opacity; }   // 0.0 ~ 1.0
-	void SetOpacity(float v)                 { m_opacity = (std::max)(0.0f, (std::min)(1.0f, v)); }
+	void SetOpacity(float v)                 { m_opacity = (std::max)(0.0f, (std::min)(1.0f, v)); ChangeTracker::Bump(); }
 	LayerBlendMode GetBlendMode() const      { return m_blendMode; }
-	void SetBlendMode(LayerBlendMode m)      { m_blendMode = m; }
+	void SetBlendMode(LayerBlendMode m)      { m_blendMode = m; ChangeTracker::Bump(); }
 
 	// 자신 + 조상(그룹/레이어) 체인까지 고려한 최종 가시성/잠금
 	bool IsEffectivelyVisible() const;
 	bool IsEffectivelyLocked() const;
 
-	void Invalidate()                        { m_dirty = true; m_version = NextVersion(); }
+	void Invalidate()                        { m_dirty = true; m_version = NextVersion(); ChangeTracker::Bump(); }
 	bool IsDirty() const                     { return m_dirty; }
 
 	// 부모 체인을 곱한 월드 변환 (자신 포함)
@@ -464,18 +474,19 @@ public:
 	// 파라메트릭 도형 종류 및 설정
 	ShapeKind GetShapeKind() const { return m_kind; }
 	ShapeKind GetKind() const      { return m_kind; } // 하위 호환용
-	void SetKind(ShapeKind k)      { m_kind = k; }
-	void SetShapeKind(ShapeKind k) { m_kind = k; }
+	void SetKind(ShapeKind k)      { m_kind = k; ChangeTracker::Bump(); }
+	void SetShapeKind(ShapeKind k) { m_kind = k; ChangeTracker::Bump(); }
 
 	const ShapeParams& GetParams() const { return m_params; }
-	ShapeParams&       GetParamsRef()    { return m_params; }
-	void SetParams(const ShapeParams& p) { m_params = p; }
+	// 수정용 접근자: 호출 시 변경 카운터를 올림 (수정 여부를 알 수 없으므로 보수적으로). 읽기는 GetParams()/GetParam() 사용
+	ShapeParams&       GetParamsRef()    { ChangeTracker::Bump(); return m_params; }
+	void SetParams(const ShapeParams& p) { m_params = p; ChangeTracker::Bump(); }
 
 	template<typename T>
 	const T* GetParam() const { return std::get_if<T>(&m_params); }
 
 	template<typename T>
-	T* GetParamRef() { return std::get_if<T>(&m_params); }
+	T* GetParamRef() { ChangeTracker::Bump(); return std::get_if<T>(&m_params); }
 
 	// ---- 노드 편집 API ----
 	// 앵커/핸들 이동 (worldPt 는 월드 좌표)

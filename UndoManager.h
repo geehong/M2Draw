@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <array>
 #include <cstdint>
 
 namespace ge {
@@ -45,8 +46,18 @@ public:
 	const std::wstring& GetLastUndoActionName() const;
 	const std::wstring& GetLastRedoActionName() const;
 
+	// 진단/검증용: 지금까지 문서를 실제로 직렬화한 횟수 (변경 카운터가 같을 때는 늘어나지 않아야 함)
+	size_t GetSerializeCount() const { return m_serializeCount; }
+
 private:
 	static std::vector<uint64_t> SelectionIds(const Document& doc);
+	// 변경 카운터로 잡히지 않는 Document 공개 필드(크기/배경/캔버스색/원점) 요약
+	using DocMeta = std::array<float, 11>;
+	static DocMeta CaptureMeta(const Document& doc);
+	// 문서 직렬화 (Snapshot 모드) + 직렬화 횟수 집계
+	std::string SerializeDoc(Document& doc);
+	// 현재 문서 상태를 기준 시점으로 기록 (직렬화 결과 + 변경 카운터 + 메타)
+	void SetBaseline(Document& doc, std::string svg);
 	static bool RestoreSnapshot(const DocumentSnapshot& snapshot, Document& doc);
 	void Trim(std::vector<DocumentSnapshot>& stack) const;
 
@@ -54,6 +65,9 @@ private:
 	std::vector<DocumentSnapshot> m_redoStack;
 	std::string                   m_baselineSvg;      // 마지막으로 확정된 문서 상태
 	bool                          m_hasBaseline = false;
+	uint64_t                      m_baselineCounter = 0;   // 기준 확정 시점의 ChangeTracker 값
+	DocMeta                       m_baselineMeta{};
+	size_t                        m_serializeCount = 0;
 	size_t                        m_maxHistory = 50;
 };
 
