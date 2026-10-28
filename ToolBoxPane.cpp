@@ -4,26 +4,35 @@
 #include "MainFrm.h"
 #include "M2DrawDoc.h"
 
-// 그룹/그룹 해제는 도구가 아니라 동작: 플라이아웃 그룹의 항목으로 ToolType::Action* 를 사용하고, 선택하면 명령을 실행한다
+// 그룹/순서/불리언 등은 도구가 아니라 동작: 플라이아웃 그룹의 항목으로 ToolType::Action* 를 사용하고, 선택하면 명령을 실행한다
 static bool IsActionType(ToolType t)
 {
 	return t == ToolType::ActionGroup || t == ToolType::ActionUngroup || t == ToolType::ActionToFront ||
-	       t == ToolType::ActionForward || t == ToolType::ActionBackward || t == ToolType::ActionToBack;
+	       t == ToolType::ActionForward || t == ToolType::ActionBackward || t == ToolType::ActionToBack ||
+	       t == ToolType::ActionBooleanUnion || t == ToolType::ActionBooleanSubtract ||
+	       t == ToolType::ActionBooleanIntersect || t == ToolType::ActionBooleanExclude ||
+	       t == ToolType::ActionBooleanTrim;
 }
 static UINT CommandOfType(ToolType t)
 {
 	switch (t)
 	{
-	case ToolType::ActionGroup:    return ID_OBJECT_GROUP;
-	case ToolType::ActionUngroup:  return ID_OBJECT_UNGROUP;
-	case ToolType::ActionToFront:  return ID_OBJECT_FRONT;
-	case ToolType::ActionForward:  return ID_OBJECT_FORWARD;
-	case ToolType::ActionBackward: return ID_OBJECT_BACKWARD;
-	case ToolType::ActionToBack:   return ID_OBJECT_BACK;
-	default:                       return 0;
+	case ToolType::ActionGroup:           return ID_OBJECT_GROUP;
+	case ToolType::ActionUngroup:         return ID_OBJECT_UNGROUP;
+	case ToolType::ActionToFront:         return ID_OBJECT_FRONT;
+	case ToolType::ActionForward:         return ID_OBJECT_FORWARD;
+	case ToolType::ActionBackward:        return ID_OBJECT_BACKWARD;
+	case ToolType::ActionToBack:          return ID_OBJECT_BACK;
+	case ToolType::ActionBooleanUnion:    return ID_BOOLEAN_UNION;
+	case ToolType::ActionBooleanSubtract: return ID_BOOLEAN_SUBTRACT;
+	case ToolType::ActionBooleanIntersect:return ID_BOOLEAN_INTERSECT;
+	case ToolType::ActionBooleanExclude:  return ID_BOOLEAN_EXCLUDE;
+	case ToolType::ActionBooleanTrim:     return ID_BOOLEAN_TRIM;
+	default:                              return 0;
 	}
 }
 static bool IsArrangeCommand(UINT id) { return id >= ID_OBJECT_FRONT && id <= ID_OBJECT_BACK; }
+static bool IsBooleanCommand(UINT id) { return id >= ID_BOOLEAN_UNION && id <= ID_BOOLEAN_TRIM; }
 static const wchar_t* GetFlyoutToolName(ToolType t);
 
 #ifdef _DEBUG
@@ -74,9 +83,11 @@ CToolBoxPane::CToolBoxPane() noexcept
 		{ ToolType::Gradient,    L"그라디언트 (D)",  L'D', CRect() },
 		{ ToolType::ZoomIn,      L"돋보기 (확대 Z / 축소 X)", L'Z', CRect() },   // 확대/축소 플라이아웃 그룹
 		// 동작 버튼 그룹 (도구가 아님): 그룹화 / 그룹 해제. 도구 묶음과 간격을 둠
-		{ ToolType::ActionGroup,   L"그룹 / 그룹 해제",          0, CRect(), {}, 12 },
+		{ ToolType::ActionGroup,        L"그룹 / 그룹 해제",          0, CRect(), {}, 12 },
 		// 순서(Z-order) 동작 그룹: 맨 앞으로 / 앞으로 / 뒤로 / 맨 뒤로
-		{ ToolType::ActionToFront, L"순서",                       0, CRect(), {}, 0 }
+		{ ToolType::ActionToFront,      L"순서",                       0, CRect(), {}, 0 },
+		// 불리언(패스파인더) 연산 그룹: 합치기 / 빼기 / 교차 / 제외 / 트림
+		{ ToolType::ActionBooleanUnion, L"불리언 (패스파인더)",        0, CRect(), {}, 0 }
 	};
 
 	// 사각형 그룹: 사각형 / 삼각형 (마지막 선택은 앱 설정에 저장)
@@ -124,6 +135,14 @@ CToolBoxPane::CToolBoxPane() noexcept
 			// 순서 동작 그룹 (마지막에 쓴 동작이 대표)
 			btn.subTools = { ToolType::ActionToFront, ToolType::ActionForward, ToolType::ActionBackward, ToolType::ActionToBack };
 			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("ArrangeActionTool"), static_cast<int>(ToolType::ActionToFront));
+			for (ToolType st : btn.subTools)
+				if (saved == static_cast<int>(st)) { btn.type = st; break; }
+		}
+		else if (btn.type == ToolType::ActionBooleanUnion)
+		{
+			// 불리언 동작 그룹: 합치기 / 빼기 / 교차 / 제외 / 트림
+			btn.subTools = { ToolType::ActionBooleanUnion, ToolType::ActionBooleanSubtract, ToolType::ActionBooleanIntersect, ToolType::ActionBooleanExclude, ToolType::ActionBooleanTrim };
+			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("BooleanActionTool"), static_cast<int>(ToolType::ActionBooleanUnion));
 			for (ToolType st : btn.subTools)
 				if (saved == static_cast<int>(st)) { btn.type = st; break; }
 		}
@@ -872,6 +891,16 @@ void CToolBoxPane::OnLButtonDown(UINT nFlags, CPoint point)
 
 		if (!m_buttons[i].subTools.empty())
 		{
+			// 불리언 버튼을 클릭한 경우 상단 서브도구 툴바를 즉시 불리언 연산자 모음으로 전환
+			if (m_buttons[i].type == ToolType::ActionBooleanUnion ||
+				(!m_buttons[i].subTools.empty() && m_buttons[i].subTools[0] == ToolType::ActionBooleanUnion))
+			{
+				if (CMainFrame* pMain = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd()))
+				{
+					pMain->UpdateSubToolBar(ToolType::ActionBooleanUnion);
+				}
+			}
+
 			// 그룹 버튼: 짧게 클릭하면 대표 도구 선택, 길게 누르거나 우하단 삼각 영역이면 플라이아웃 펼침
 			m_pressIndex = static_cast<int>(i);
 			SetCapture();
@@ -945,16 +974,29 @@ void CToolBoxPane::OnLButtonUp(UINT nFlags, CPoint point)
 			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("GroupActionTool"), static_cast<int>(chosen));
 		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionToFront)
 			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("ArrangeActionTool"), static_cast<int>(chosen));
+		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionBooleanUnion)
+			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("BooleanActionTool"), static_cast<int>(chosen));
 
 		if (IsActionType(chosen))
 		{
-			// 동작: 활성일 때만 실행 (오브젝트 메뉴와 같은 명령 경로 -> 활성 문서가 처리). 활성 도구는 바꾸지 않음
-			const UINT cmd = CommandOfType(chosen);
-			if (IsCommandEnabled(cmd))
+			// 불리언 동작인 경우, 바로 실행하지 않고 상단 서브도구 툴바에 연산자들을 펼쳐 사용자가 선택할 수 있도록 함
+			if (IsBooleanCommand(CommandOfType(chosen)))
 			{
-				if (CWnd* pMain = AfxGetMainWnd())
-					pMain->SendMessage(WM_COMMAND, MAKEWPARAM(cmd, 0), 0);
-				m_enabledMask = ComputeEnabledMask();
+				if (CMainFrame* pMain = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd()))
+				{
+					pMain->UpdateSubToolBar(ToolType::ActionBooleanUnion);
+				}
+			}
+			else
+			{
+				// 그룹/순서 등 즉각 적용 동작: 활성일 때만 실행 (오브젝트 메뉴와 같은 명령 경로 -> 활성 문서가 처리)
+				const UINT cmd = CommandOfType(chosen);
+				if (IsCommandEnabled(cmd))
+				{
+					if (CWnd* pMain = AfxGetMainWnd())
+						pMain->SendMessage(WM_COMMAND, MAKEWPARAM(cmd, 0), 0);
+					m_enabledMask = ComputeEnabledMask();
+				}
 			}
 		}
 		else
@@ -1013,6 +1055,7 @@ UINT CToolBoxPane::ComputeEnabledMask() const
 		if (pDoc->CanGroup())   mask |= 1;
 		if (pDoc->CanUngroup()) mask |= 2;
 		if (pDoc->CanArrange()) mask |= 4;
+		if (pDoc->CanBoolean()) mask |= 8;
 	}
 	return mask;
 }
@@ -1022,6 +1065,7 @@ bool CToolBoxPane::IsCommandEnabled(UINT commandId) const
 	if (commandId == ID_OBJECT_GROUP)   return (m_enabledMask & 1) != 0;
 	if (commandId == ID_OBJECT_UNGROUP) return (m_enabledMask & 2) != 0;
 	if (IsArrangeCommand(commandId))    return (m_enabledMask & 4) != 0;
+	if (IsBooleanCommand(commandId))    return (m_enabledMask & 8) != 0;
 	return true;
 }
 
@@ -1071,6 +1115,51 @@ void CToolBoxPane::DrawActionIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 		rt->DrawLine(D2D1::Point2F(ax + 3.5f, y1 + dir * 3.5f), D2D1::Point2F(ax, y1), brush, 1.6f);
 		if (extreme)
 			rt->DrawLine(D2D1::Point2F(ax - 4.0f, y1 - dir * 1.5f), D2D1::Point2F(ax + 4.0f, y1 - dir * 1.5f), brush, 1.6f);
+		return;
+	}
+
+	if (IsBooleanCommand(commandId))
+	{
+		brush->SetColor(col);
+		const D2D1_ELLIPSE c1 = D2D1::Ellipse(D2D1::Point2F(cx - 3.5f, cy), 6.5f, 6.5f);
+		const D2D1_ELLIPSE c2 = D2D1::Ellipse(D2D1::Point2F(cx + 3.5f, cy), 6.5f, 6.5f);
+
+		// 채움 영역
+		brush->SetColor(D2D1::ColorF(col.r, col.g, col.b, 0.25f));
+		if (commandId == ID_BOOLEAN_UNION)
+		{
+			rt->FillEllipse(c1, brush);
+			rt->FillEllipse(c2, brush);
+		}
+		else if (commandId == ID_BOOLEAN_SUBTRACT)
+		{
+			rt->FillEllipse(c1, brush);
+		}
+		else if (commandId == ID_BOOLEAN_INTERSECT)
+		{
+			// 교차 영역 느낌: 중심 작은 타원
+			rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 2.5f, 5.0f), brush);
+		}
+		else if (commandId == ID_BOOLEAN_EXCLUDE)
+		{
+			rt->FillEllipse(c1, brush);
+			rt->FillEllipse(c2, brush);
+		}
+		else if (commandId == ID_BOOLEAN_TRIM)
+		{
+			rt->FillEllipse(c1, brush);
+			rt->FillEllipse(c2, brush);
+		}
+
+		// 외곽선
+		brush->SetColor(col);
+		rt->DrawEllipse(c1, brush, 1.3f);
+		rt->DrawEllipse(c2, brush, 1.3f);
+		if (commandId == ID_BOOLEAN_TRIM)
+		{
+			// 트림 분할선 표시
+			rt->DrawLine(D2D1::Point2F(cx, cy - 8.0f), D2D1::Point2F(cx, cy + 8.0f), brush, 1.5f);
+		}
 		return;
 	}
 
@@ -1182,6 +1271,11 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	case ToolType::ActionForward:  return L"앞으로 (Ctrl+])";
 	case ToolType::ActionBackward: return L"뒤로 (Ctrl+[)";
 	case ToolType::ActionToBack:   return L"맨 뒤로 (Ctrl+Shift+[)";
+	case ToolType::ActionBooleanUnion:     return L"합치기 (Ctrl+Shift+U)";
+	case ToolType::ActionBooleanSubtract:  return L"빼기 (Ctrl+Shift+S)";
+	case ToolType::ActionBooleanIntersect: return L"교차 (Ctrl+Shift+I)";
+	case ToolType::ActionBooleanExclude:   return L"제외 (Ctrl+Shift+X)";
+	case ToolType::ActionBooleanTrim:      return L"트림 / 분할 (Ctrl+Shift+T)";
 	default:                 return L"";
 	}
 }
@@ -1346,6 +1440,22 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color, bool
 		dc.SelectObject(pPrev);
 		dc.Rectangle(c.x - 6, c.y - 6, c.x - 1, c.y - 1);
 		dc.Rectangle(c.x + 2, c.y + 2, c.x + 7, c.y + 7);
+		break;
+	}
+	case ToolType::ActionBooleanUnion:
+	case ToolType::ActionBooleanSubtract:
+	case ToolType::ActionBooleanIntersect:
+	case ToolType::ActionBooleanExclude:
+	case ToolType::ActionBooleanTrim:
+	{
+		// 겹친 두 원
+		dc.Ellipse(c.x - 9, c.y - 6, c.x + 3, c.y + 6);
+		dc.Ellipse(c.x - 3, c.y - 6, c.x + 9, c.y + 6);
+		if (t == ToolType::ActionBooleanTrim)
+		{
+			dc.MoveTo(c.x, c.y - 7);
+			dc.LineTo(c.x, c.y + 7);
+		}
 		break;
 	}
 	case ToolType::Triangle:

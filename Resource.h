@@ -1,6 +1,6 @@
-癤�//{{NO_DEPENDENCIES}}
-// Microsoft Visual C++에서 생성한 포함 파일입니다.
-// M2Draw.rc에서 사용
+//{{NO_DEPENDENCIES}}
+// Microsoft Visual C++???? ?????? ???? ????????.
+// M2Draw.rc???? ???
 //
 #define IDD_ABOUTBOX				100
 #define IDP_OLE_INIT_FAILED			100
@@ -66,6 +66,7 @@
 #define IDR_OUTPUT_POPUP			182
 #define IDR_PROPERTIES				183
 #define IDB_PROPERTIES_HC			184
+#define IDB_SUBTOOLS				185
 #define IDS_BUILD_TAB				300
 #define IDS_DEBUG_TAB				301
 #define IDS_FIND_TAB				302
@@ -78,8 +79,22 @@
 #define ID_OBJECT_FORWARD  32784
 #define ID_OBJECT_BACKWARD 32785
 #define ID_OBJECT_BACK     32786
+#define ID_BOOLEAN_UNION    32787
+#define ID_BOOLEAN_SUBTRACT 32788
+#define ID_BOOLEAN_INTERSECT 32789
+#define ID_BOOLEAN_EXCLUDE  32790
+#define ID_BOOLEAN_TRIM     32791
+#define ID_TOOL_RECT        32801
+#define ID_TOOL_TRIANGLE    32802
+#define ID_TOOL_POLYGON     32803
+#define ID_TOOL_STAR        32804
+#define ID_TOOL_GEAR        32805
+#define ID_TOOL_SPIRAL      32806
+#define ID_TOOL_HEART       32807
+#define ID_TOOL_ZOOMIN      32808
+#define ID_TOOL_ZOOMOUT     32809
 
-// 다음은 새 개체에 사용할 기본값입니다.
+// ?????? ?? ??u?? ????? ????????.
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS

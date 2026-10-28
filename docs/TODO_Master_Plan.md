@@ -240,18 +240,19 @@
 
 ### Step 2.4 클리핑 마스크
 > 선행: 2.0.2(그룹 선택), 2.0.6(`IsClippingMask` 정리). SVG `clipPath`는 도형의 지오메트리만 사용(채우기/선 무시)함에 유의
-- [ ] 2.4.1 `GroupNode::m_clipPath` (마스크로 사용할 자식 노드 지정) 모델 필드 추가
-- [ ] 2.4.2 렌더러에서 마스크 도형의 지오메트리를 추출하여 `PushLayer(layerParams)` geometricMask 적용
-- [ ] 2.4.3 `SvgWriter`에 `<clipPath id="...">` 및 자식의 `clip-path="url(#...)"` 출력 연결
-- [ ] 2.4.4 메뉴/단축키(Ctrl+7 등)를 통한 클리핑 마스크 생성/해제 구현 및 빌드 검증
-
+> 작업 분할: **세션 1 = 2.4.1~2.4.2 (모델 + 렌더링, 여기서 커밋)**, **세션 2 = 2.4.3~2.4.5 (SVG 저장/읽기, 패널 표시, 메뉴/단축키)**. 한 단계씩 사용자 확인 후 진행
+- [ ] 2.4.1 `GroupNode::m_clipPath` (마스크로 사용할 자식 노드 지정) 모델 필드 추가. 마스크 노드는 그룹의 자식이며 `Clone`/Undo 스냅샷/`ImportNodes` 에서 참조가 유지되어야 함. 자체 검증 추가
+- [ ] 2.4.2 렌더러에서 마스크 도형의 지오메트리를 추출하여 `PushLayer(layerParams)` geometricMask 적용 (마스크 도형 자체는 그리지 않음, 채우기/선 무시, 그룹 월드 변환 반영). 화면 캡처로 검증
+- [ ] 2.4.3 `SvgWriter`/`SvgReader`: `<clipPath id="...">` 및 `clip-path="url(#...)"` 출력과 읽기 왕복 (Clean 옵션에서도 표준 SVG 로 유지)
+- [ ] 2.4.4 **레이어/오브젝트 패널 표시**: 클리핑 그룹 행에 클립 아이콘, 마스크 도형 행은 밑줄 + 마스크 아이콘(눈 아이콘을 꺼도 오리기 효과는 유지), 행 메뉴/아이콘 클릭으로 마스크 해제. 패널 드래그 이동(2.7.2b)과 연동: 그룹 안으로 넣으면 마스크 적용, 밖으로 빼면 해제 (마스크 도형 자체를 밖으로 빼면 마스크 해제)
+- [ ] 2.4.5 메뉴/단축키(Ctrl+7 만들기, Ctrl+Alt+7 해제)를 통한 클리핑 마스크 생성/해제 구현 (선택 중 맨 위 도형이 마스크, 나머지는 클립 그룹으로 묶음) 및 빌드 검증
 ### Step 2.5 불리언 연산 완성
-- [ ] 2.5.1 선택된 두 개 이상의 노드로부터 월드 변환이 적용된 `ID2D1Geometry` 추출
-- [ ] 2.5.2 `CombineWithGeometry` 연동 (Union, Exclude/Subtract, Intersect, XOR)
-- [ ] 2.5.3 `ID2D1SimplifiedGeometrySink` 구현체를 통해 추출된 세그먼트를 `SubPath`/`BezierNode`로 변환
-- [ ] 2.5.4 기존 도형 삭제 및 신규 단일 `PathNode` 교체 커맨드 연동
-- [ ] 2.5.5 빌드 확인 및 다양한 도형 간 불리언 연산 결과 검증
-- [ ] 2.5.6 결과 규칙 명시: 결과 `PathNode`는 도형 종류/파라미터를 잃음(`ShapeKind::Path`), 스타일은 첫 번째(최하단) 도형 기준, 구멍이 있는 결과는 `fillMode`(Winding/Alternate)를 맞게 지정, 변환 허용오차(flattening tolerance) 설정
+- [x] 2.5.1 선택된 두 개 이상의 노드로부터 월드 변환이 적용된 `ID2D1Geometry` 추출 (`PathOp::BuildGeometry`, `PathOp::BuildWorldGeometry`)
+- [x] 2.5.2 `CombineWithGeometry` 연동 (Union, Exclude/Subtract, Intersect, XOR)
+- [x] 2.5.3 `ID2D1SimplifiedGeometrySink` 구현체를 통해 추출된 세그먼트를 `SubPath`/`BezierNode`로 변환 (`SubPathGeometrySink`, `PathOp::ExtractSubPaths`)
+- [x] 2.5.4 기존 도형 삭제 및 신규 단일 `PathNode` 교체 커맨드 연동 (`Document::BooleanOperation`, `CM2DrawDoc::PerformBooleanOperation`, 메뉴/단축키)
+- [x] 2.5.5 빌드 확인 및 다양한 도형 간 불리언 연산 결과 검증 (사용자 확인 완료 및 상단 툴바/사이드메뉴 불리언 연동 완료)
+- [x] 2.5.6 결과 규칙 명시: 결과 `PathNode`는 도형 종류/파라미터를 잃음(`ShapeKind::Path`), 스타일은 첫 번째(최하단) 도형 기준, 구멍이 있는 결과는 `fillMode`(Winding/Alternate)를 맞게 지정, 변환 허용오차(flattening tolerance) 설정
 - [ ] 2.5.7 Divide(분할)는 D2D 에 없음 → 반복 `CombineWithGeometry`(교집합/차집합 조합)로 구현하거나 범위에서 제외 (Step 5.6 과 같은 문제)
 
 ### Step 2.6 패스 연산 (Simplify, Outline, Offset, Join/Split, Reverse)

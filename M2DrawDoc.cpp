@@ -11,6 +11,7 @@
 #endif
 
 #include "M2DrawDoc.h"
+#include "M2DrawView.h"
 #include "MainFrm.h"
 #include "ITool.h"
 #include "SvgWriter.h"
@@ -39,6 +40,8 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_UNGROUP, &CM2DrawDoc::OnUpdateObjectUngroup)
 	ON_COMMAND_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnObjectArrange)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnUpdateObjectArrange)
+	ON_COMMAND_RANGE(ID_BOOLEAN_UNION, ID_BOOLEAN_TRIM, &CM2DrawDoc::OnBooleanOperation)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_BOOLEAN_UNION, ID_BOOLEAN_TRIM, &CM2DrawDoc::OnUpdateBooleanOperation)
 END_MESSAGE_MAP()
 
 
@@ -614,3 +617,70 @@ void CM2DrawDoc::OnObjectArrange(UINT nID)
 }
 
 void CM2DrawDoc::OnUpdateObjectArrange(CCmdUI* pCmdUI) { pCmdUI->Enable(CanArrange()); }
+
+// ---------------------------------------------------------------------------
+// 불리언 연산 / 패스파인더
+// ---------------------------------------------------------------------------
+bool CM2DrawDoc::PerformBooleanOperation(ge::BooleanMode mode)
+{
+	if (!CanBoolean())
+		return false;
+
+	ID2D1Factory* pFactory = nullptr;
+	POSITION pos = GetFirstViewPosition();
+	if (pos) {
+		CView* pView = GetNextView(pos);
+		if (pView && pView->IsKindOf(RUNTIME_CLASS(CM2DrawView))) {
+			pFactory = static_cast<CM2DrawView*>(pView)->GetD2DFactory();
+		}
+	}
+	if (!pFactory)
+		return false;
+
+	ge::PathNode* result = m_doc.BooleanOperation(mode, pFactory);
+	if (!result)
+		return false;
+
+	UpdateShapePropertiesSelection(result, this);
+
+	const wchar_t* label = L"불리언 연산";
+	switch (mode) {
+	case ge::BooleanMode::Union:     label = L"패스 합치기"; break;
+	case ge::BooleanMode::Subtract:  label = L"패스 빼기"; break;
+	case ge::BooleanMode::Intersect: label = L"패스 교차"; break;
+	case ge::BooleanMode::Exclude:   label = L"패스 제외"; break;
+	}
+
+	CString strLog;
+	strLog.Format(_T("[%s] '%s' 생성 완료"), label, result->GetName().c_str());
+	LogAppEvent(strLog);
+	SetAppStatusText(strLog);
+
+	CommitUndoPoint(label);
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame))) {
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	}
+	return true;
+}
+
+void CM2DrawDoc::OnBooleanOperation(UINT nID)
+{
+	switch (nID) {
+	case ID_BOOLEAN_UNION:     PerformBooleanOperation(ge::BooleanMode::Union);     break;
+	case ID_BOOLEAN_SUBTRACT:  PerformBooleanOperation(ge::BooleanMode::Subtract);  break;
+	case ID_BOOLEAN_INTERSECT: PerformBooleanOperation(ge::BooleanMode::Intersect); break;
+	case ID_BOOLEAN_EXCLUDE:   PerformBooleanOperation(ge::BooleanMode::Exclude);   break;
+	case ID_BOOLEAN_TRIM:
+		AfxMessageBox(_T("트림/분할 기능은 다음 단계에서 추가될 예정입니다."), MB_ICONINFORMATION);
+		break;
+	}
+}
+
+void CM2DrawDoc::OnUpdateBooleanOperation(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(CanBoolean());
+}
+

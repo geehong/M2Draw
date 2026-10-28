@@ -741,6 +741,96 @@ bool Document::CanUngroupSelection() const
 	return false;
 }
 
+bool Document::CanBooleanOperation() const
+{
+	int pathCount = 0;
+	for (const Node* n : m_selection) {
+		if (n && n->Kind() == NodeKind::Path && n->GetParent()) {
+			++pathCount;
+		}
+	}
+	return pathCount >= 2;
+}
+
+#ifndef GE_NO_D2D
+PathNode* Document::BooleanOperation(BooleanMode mode, ID2D1Factory* factory)
+{
+	if (!factory || !CanBooleanOperation()) return nullptr;
+
+	// 1) 대상 PathNode 수집 (부모가 있고 유효한 PathNode)
+	std::vector<PathNode*> paths;
+	for (Node* n : m_selection) {
+		if (n && n->Kind() == NodeKind::Path && n->GetParent()) {
+			paths.push_back(static_cast<PathNode*>(n));
+		}
+	}
+	if (paths.size() < 2) return nullptr;
+
+	// 2) 문서 Z-순서(레이어 -> 자식 인덱스 경로)로 정렬: 최하단(0) -> 최상단(N-1)
+	struct OrderHelper {
+		static std::vector<int> GetKey(Node* n, const std::vector<std::unique_ptr<LayerNode>>& layers) {
+			std::vector<int> key;
+			Node* c = n;
+			while (c->GetParent()) { key.push_back(c->GetParent()->IndexOf(c)); c = c->GetParent(); }
+			int layerIdx = 0;
+			for (size_t i = 0; i < layers.size(); ++i) if (layers[i].get() == c) layerIdx = static_cast<int>(i);
+			key.push_back(layerIdx);
+			std::reverse(key.begin(), key.end());
+			return key;
+		}
+	};
+	std::stable_sort(paths.begin(), paths.end(), [&](PathNode* a, PathNode* b) {
+		return OrderHelper::GetKey(a, m_layers) < OrderHelper::GetKey(b, m_layers);
+	});
+
+	// 최하단 도형(paths[0])이 스타일 기준
+	// 연산 순차 적용: acc = Combine(paths[0], paths[1]), acc = Combine(acc, paths[2]), ...
+	std::unique_ptr<PathNode> acc = PathOp::Combine(*paths[0], *paths[1], mode, factory);
+	if (!acc) return nullptr;
+
+	for (size_t i = 2; i < paths.size(); ++i) {
+		acc = PathOp::Combine(*acc, *paths[i], mode, factory);
+		if (!acc) return nullptr;
+	}
+
+	// 3) 새 PathNode 는 최하단 도형이 있던 부모와 위치에 삽입
+	PathNode* baseNode = paths[0];
+	GroupNode* targetParent = baseNode->GetParent();
+	int insertIndex = targetParent->IndexOf(baseNode);
+
+	// ID 발급 및 이름 생성
+	acc->m_id = this->IssueId();
+	acc->SetName(this->GenerateNodeName(ShapeKind::Path));
+
+	// 월드 좌표계로 생성된 결과를 대상 부모의 로컬 좌표계로 역변환
+	Matrix2D parentInv = targetParent->GetWorldTransform();
+	if (parentInv.Invert()) {
+		acc->SetTransform(parentInv);
+	} else {
+		acc->SetTransform(Matrix2D::Identity());
+	}
+
+	// 4) 원본 도형들 문서에서 제거
+	for (PathNode* p : paths) {
+		GroupNode* pParent = p->GetParent();
+		if (pParent) {
+			pParent->RemoveChild(p);
+		}
+	}
+
+	// 5) 새 도형 삽입 및 선택 갱신
+	// insertIndex 범위 보정
+	if (insertIndex < 0 || insertIndex > static_cast<int>(targetParent->GetChildren().size())) {
+		insertIndex = static_cast<int>(targetParent->GetChildren().size());
+	}
+	Node* inserted = targetParent->AddChild(std::move(acc), insertIndex);
+	PathNode* resultPath = static_cast<PathNode*>(inserted);
+
+	m_selection = std::vector<Node*>{ resultPath };
+	return resultPath;
+}
+#endif
+
 GroupNode* Document::GroupSelection()
 {
 	// 1) 대상 정리: 레이어/부모 없는 노드 제외, 조상이 함께 선택된 노드는 조상 그룹에 이미 포함되므로 제외
@@ -1015,10 +1105,175 @@ void Transformer::GetLocalHandlePoints(const Rect2& b, Vec2 out[9])
 // ============================================================================
 // 2.6 Path Operations / Pathfinder (불린 연산 뼈대 구현)
 // ============================================================================
-std::unique_ptr<PathNode> PathOp::Combine(const PathNode& a, const PathNode& b,
-                                         BooleanMode mode, ID2D1Factory* factory)
+ComPtr<ID2D1PathGeometry> PathOp::BuildGeometry(const PathNode& node, ID2D1Factory* factory)
 {
 	if (!factory) return nullptr;
+	ComPtr<ID2D1PathGeometry> geo;
+	if (FAILED(factory->CreatePathGeometry(&geo))) return nullptr;
+	ComPtr<ID2D1GeometrySink> sink;
+	if (FAILED(geo->Open(&sink))) return nullptr;
+	sink->SetFillMode(node.GetStyle().fillMode == FillMode::Winding ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE);
+
+	auto pt = [](Vec2 v) { return D2D1::Point2F(v.x, v.y); };
+	auto seg = [&](const BezierNode& a, const BezierNode& b) {
+		if (!a.HasOut() && !b.HasIn())
+			sink->AddLine(pt(b.anchor));
+		else
+			sink->AddBezier(D2D1::BezierSegment(pt(a.AbsOut()), pt(b.AbsIn()), pt(b.anchor)));
+	};
+	for (const SubPath& sp : node.GetPaths()) {
+		const auto& n = sp.nodes;
+		if (n.empty()) continue;
+		sink->BeginFigure(pt(n[0].anchor), D2D1_FIGURE_BEGIN_FILLED);
+		for (size_t i = 1; i < n.size(); ++i) seg(n[i - 1], n[i]);
+		if (sp.closed && n.size() > 1) seg(n.back(), n[0]);
+		sink->EndFigure(sp.closed ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN);
+	}
+	if (FAILED(sink->Close())) return nullptr;
+	return geo;
+}
+
+ComPtr<ID2D1Geometry> PathOp::BuildWorldGeometry(const PathNode& node, ID2D1Factory* factory)
+{
+	if (!factory) return nullptr;
+	ComPtr<ID2D1PathGeometry> localGeo = BuildGeometry(node, factory);
+	if (!localGeo) return nullptr;
+
+	const Matrix2D worldXf = node.GetWorldTransform();
+	if (worldXf.IsIdentity()) {
+		return localGeo;
+	}
+
+	D2D1_MATRIX_3X2_F d2dXf = worldXf.ToD2D();
+	ComPtr<ID2D1TransformedGeometry> transformedGeo;
+	if (FAILED(factory->CreateTransformedGeometry(localGeo.Get(), &d2dXf, &transformedGeo))) {
+		return localGeo;
+	}
+	return transformedGeo;
+}
+
+// ID2D1SimplifiedGeometrySink 구현체: D2D 지오메트리 데이터를 SubPath/BezierNode 목록으로 복원
+class SubPathGeometrySink : public ID2D1SimplifiedGeometrySink {
+public:
+	SubPathGeometrySink(std::vector<SubPath>& outPaths, D2D1_FILL_MODE* outFillMode)
+		: m_paths(outPaths), m_pFillMode(outFillMode), m_refCount(1) {}
+
+	// IUnknown
+	IFACEMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
+		if (!ppv) return E_POINTER;
+		if (riid == __uuidof(IUnknown) || riid == __uuidof(ID2D1SimplifiedGeometrySink)) {
+			*ppv = static_cast<ID2D1SimplifiedGeometrySink*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*ppv = nullptr;
+		return E_NOINTERFACE;
+	}
+	IFACEMETHODIMP_(ULONG) AddRef() override { return InterlockedIncrement(&m_refCount); }
+	IFACEMETHODIMP_(ULONG) Release() override {
+		ULONG r = InterlockedDecrement(&m_refCount);
+		if (r == 0) delete this;
+		return r;
+	}
+
+	// ID2D1SimplifiedGeometrySink
+	IFACEMETHODIMP_(void) SetFillMode(D2D1_FILL_MODE fillMode) override {
+		if (m_pFillMode) *m_pFillMode = fillMode;
+	}
+	IFACEMETHODIMP_(void) SetSegmentFlags(D2D1_PATH_SEGMENT /*vertexFlags*/) override {}
+
+	IFACEMETHODIMP_(void) BeginFigure(D2D1_POINT_2F startPoint, D2D1_FIGURE_BEGIN /*figureBegin*/) override {
+		m_paths.emplace_back();
+		m_currentPath = &m_paths.back();
+		m_currentPath->closed = false;
+
+		BezierNode startNode;
+		startNode.anchor = { startPoint.x, startPoint.y };
+		startNode.hIn = { 0.0f, 0.0f };
+		startNode.hOut = { 0.0f, 0.0f };
+		startNode.type = BezierNode::Type::Corner;
+		m_currentPath->nodes.push_back(startNode);
+	}
+
+	IFACEMETHODIMP_(void) AddLines(const D2D1_POINT_2F* points, UINT32 pointsCount) override {
+		if (!m_currentPath || !points || pointsCount == 0) return;
+		for (UINT32 i = 0; i < pointsCount; ++i) {
+			BezierNode node;
+			node.anchor = { points[i].x, points[i].y };
+			node.hIn = { 0.0f, 0.0f };
+			node.hOut = { 0.0f, 0.0f };
+			node.type = BezierNode::Type::Corner;
+			m_currentPath->nodes.push_back(node);
+		}
+	}
+
+	IFACEMETHODIMP_(void) AddBeziers(const D2D1_BEZIER_SEGMENT* beziers, UINT32 beziersCount) override {
+		if (!m_currentPath || !beziers || beziersCount == 0) return;
+		for (UINT32 i = 0; i < beziersCount; ++i) {
+			const auto& seg = beziers[i];
+			// 이전 노드의 hOut 은 seg.point1 과 이전 anchor 의 상대 벡터
+			if (!m_currentPath->nodes.empty()) {
+				auto& prev = m_currentPath->nodes.back();
+				prev.hOut = { seg.point1.x - prev.anchor.x, seg.point1.y - prev.anchor.y };
+			}
+			BezierNode node;
+			node.anchor = { seg.point3.x, seg.point3.y };
+			// seg.point2 는 새 anchor 기준 상대 벡터
+			node.hIn = { seg.point2.x - node.anchor.x, seg.point2.y - node.anchor.y };
+			node.hOut = { 0.0f, 0.0f };
+			node.type = BezierNode::Type::Corner;
+			m_currentPath->nodes.push_back(node);
+		}
+	}
+
+	IFACEMETHODIMP_(void) EndFigure(D2D1_FIGURE_END figureEnd) override {
+		if (!m_currentPath) return;
+		m_currentPath->closed = (figureEnd == D2D1_FIGURE_END_CLOSED);
+		// 폐곡선이고 마지막 정점이 시작점과 완전히 일치하면 병합
+		if (m_currentPath->closed && m_currentPath->nodes.size() > 1) {
+			const auto& first = m_currentPath->nodes.front();
+			const auto& last = m_currentPath->nodes.back();
+			float dx = first.anchor.x - last.anchor.x;
+			float dy = first.anchor.y - last.anchor.y;
+			if ((dx * dx + dy * dy) < 0.0001f) {
+				m_currentPath->nodes.front().hIn = last.hIn;
+				m_currentPath->nodes.pop_back();
+			}
+		}
+		m_currentPath = nullptr;
+	}
+
+	IFACEMETHODIMP Close() override { return S_OK; }
+
+private:
+	std::vector<SubPath>& m_paths;
+	D2D1_FILL_MODE*       m_pFillMode = nullptr;
+	SubPath*              m_currentPath = nullptr;
+	LONG                  m_refCount = 1;
+};
+
+bool PathOp::ExtractSubPaths(ID2D1Geometry* geometry, std::vector<SubPath>& outPaths,
+                            D2D1_FILL_MODE* outFillMode, float flatteningTolerance)
+{
+	if (!geometry) return false;
+	outPaths.clear();
+
+	ComPtr<SubPathGeometrySink> sink = new SubPathGeometrySink(outPaths, outFillMode);
+	// ID2D1Geometry::Simplify 를 통해 선 및 베지에 커브 세그먼트로 분해 수신
+	HRESULT hr = geometry->Simplify(D2D1_GEOMETRY_SIMPLIFICATION_OPTION_CUBICS_AND_LINES,
+	                                nullptr, flatteningTolerance, sink.Get());
+	return SUCCEEDED(hr);
+}
+
+std::unique_ptr<PathNode> PathOp::Combine(const PathNode& a, const PathNode& b,
+                                         BooleanMode mode, ID2D1Factory* factory,
+                                         float flatteningTolerance)
+{
+	if (!factory) return nullptr;
+
+	ComPtr<ID2D1Geometry> geoA = BuildWorldGeometry(a, factory);
+	ComPtr<ID2D1Geometry> geoB = BuildWorldGeometry(b, factory);
+	if (!geoA || !geoB) return nullptr;
 
 	// D2D1_COMBINE_MODE 매핑
 	D2D1_COMBINE_MODE d2dMode = D2D1_COMBINE_MODE_UNION;
@@ -1029,10 +1284,34 @@ std::unique_ptr<PathNode> PathOp::Combine(const PathNode& a, const PathNode& b,
 	case BooleanMode::Exclude:   d2dMode = D2D1_COMBINE_MODE_XOR; break;
 	}
 
-	// 뼈대 인터페이스: 향후 D2D 지오메트리 CombineWithGeometry 및 간이 패스 추출 연결 슬롯
+	ComPtr<ID2D1PathGeometry> combinedGeo;
+	if (FAILED(factory->CreatePathGeometry(&combinedGeo))) return nullptr;
+
+	ComPtr<ID2D1GeometrySink> sink;
+	if (FAILED(combinedGeo->Open(&sink))) return nullptr;
+
+	// D2D CombineWithGeometry 실행
+	HRESULT hr = geoA->CombineWithGeometry(geoB.Get(), d2dMode, nullptr, flatteningTolerance, sink.Get());
+	if (FAILED(hr)) return nullptr;
+	if (FAILED(sink->Close())) return nullptr;
+
+	// 추출된 지오메트리로부터 SubPath/BezierNode 복원
+	std::vector<SubPath> subPaths;
+	D2D1_FILL_MODE d2dFillMode = D2D1_FILL_MODE_ALTERNATE;
+	if (!ExtractSubPaths(combinedGeo.Get(), subPaths, &d2dFillMode, flatteningTolerance) || subPaths.empty()) {
+		// 불리언 연산 결과 빈 도형(예: 교집합이 없는 경우)이면 nullptr 반환
+		return nullptr;
+	}
+
 	auto result = std::make_unique<PathNode>();
 	result->SetName(L"Combined Path");
-	result->SetStyle(a.GetStyle());
+	// 스타일은 첫 번째(최하단) 도형 스타일 승계
+	Style combinedStyle = a.GetStyle();
+	combinedStyle.fillMode = (d2dFillMode == D2D1_FILL_MODE_WINDING) ? FillMode::Winding : FillMode::Alternate;
+	result->SetStyle(combinedStyle);
+	result->SetPaths(std::move(subPaths));
+	// 월드 지오메트리 기준으로 추출되었으므로 로컬 트랜스폼은 항등 변환
+	result->SetTransform(Matrix2D::Identity());
 	return result;
 }
 
@@ -1288,31 +1567,7 @@ ID2D1Geometry* D2DRenderer::GetGeometry(PathNode& node)
 
 ComPtr<ID2D1PathGeometry> D2DRenderer::BuildGeometry(const PathNode& node)
 {
-	ComPtr<ID2D1PathGeometry> geo;
-	if (!m_factory || FAILED(m_factory->CreatePathGeometry(&geo))) return nullptr;
-	ComPtr<ID2D1GeometrySink> sink;
-	if (FAILED(geo->Open(&sink))) return nullptr;
-	sink->SetFillMode(node.GetStyle().fillMode == FillMode::Winding ? D2D1_FILL_MODE_WINDING : D2D1_FILL_MODE_ALTERNATE);
-
-	auto pt = [](Vec2 v) { return D2D1::Point2F(v.x, v.y); };
-	auto seg = [&](const BezierNode& a, const BezierNode& b) {
-		if (!a.HasOut() && !b.HasIn())
-			sink->AddLine(pt(b.anchor));
-		else
-			sink->AddBezier(D2D1::BezierSegment(pt(a.AbsOut()), pt(b.AbsIn()), pt(b.anchor)));
-	};
-	for (const SubPath& sp : node.GetPaths()) {
-		const auto& n = sp.nodes;
-		if (n.empty()) continue;
-		// SVG 규칙: 열린 서브패스도 채우기 대상 (채우기는 시작점과 끝점을 이은 것으로 계산, 선은 열린 채로 그림).
-		// 채우기 여부는 렌더러가 fill.type 으로 결정하므로 지오메트리는 스타일과 무관하게 항상 FILLED
-		sink->BeginFigure(pt(n[0].anchor), D2D1_FIGURE_BEGIN_FILLED);
-		for (size_t i = 1; i < n.size(); ++i) seg(n[i - 1], n[i]);
-		if (sp.closed && n.size() > 1) seg(n.back(), n[0]);
-		sink->EndFigure(sp.closed ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN);
-	}
-	if (FAILED(sink->Close())) return nullptr;
-	return geo;
+	return PathOp::BuildGeometry(node, m_factory);
 }
 
 // ============================================================================

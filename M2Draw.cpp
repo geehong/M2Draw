@@ -284,6 +284,7 @@ void UpdateShapePropertiesSelection(ge::Node* pShape, CM2DrawDoc* pDoc)
 		pMainFrame->GetPropertiesWnd().SetSelectedShape(pShape, pDoc);
 		pMainFrame->GetOptionBar().SyncSelection(pDoc, pShape);
 		pMainFrame->GetLayerWnd().SetDocument(pDoc);
+		pMainFrame->UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
 	}
 }
 

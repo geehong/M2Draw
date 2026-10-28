@@ -95,6 +95,9 @@ struct Matrix2D {
 		: m11(f11), m12(f12), m21(f21), m22(f22), dx(f31), dy(f32) {}
 
 	static Matrix2D Identity() { return {}; }
+	bool IsIdentity() const {
+		return m11 == 1.0f && m12 == 0.0f && m21 == 0.0f && m22 == 1.0f && dx == 0.0f && dy == 0.0f;
+	}
 	static Matrix2D Translation(float x, float y);
 	static Matrix2D Scale(float sx, float sy, Vec2 center = {});
 	static Matrix2D Rotation(float degree, Vec2 center = {});
@@ -468,6 +471,14 @@ inline bool BlendModeFromCssName(const std::string& css, LayerBlendMode& out) {
 	return false;
 }
 
+// 불린 연산 모드 (합치기 / 빼기 / 교차 / 제외)
+enum class BooleanMode {
+	Union = 0,     // 합집합 (D2D1_COMBINE_MODE_UNION)
+	Intersect,     // 교집합 (D2D1_COMBINE_MODE_INTERSECT)
+	Subtract,      // 차집합 / 빼기 (D2D1_COMBINE_MODE_EXCLUDE: A에서 B 빼기)
+	Exclude        // 배타적 논리합 / 겹친 곳 제외 (D2D1_COMBINE_MODE_XOR)
+};
+
 // 파라메트릭 도형 종류 (구엔진과 1:1 호환 및 확장 지원)
 enum class ShapeKind {
 	Path = 0,
@@ -759,6 +770,10 @@ public:
 	bool       CanGroupSelection() const;     // 그룹화 가능한 선택(2개 이상)인지
 	bool       CanUngroupSelection() const;   // 선택에 그룹이 있는지
 	bool       CanArrangeSelection() const;   // 순서(Z-order)를 바꿀 수 있는 선택(레이어 제외, 부모가 있는 노드)이 있는지
+	bool       CanBooleanOperation() const;   // 불리언 연산 가능한 선택 (2개 이상의 PathNode 또는 변환 가능한 도형)
+#ifndef GE_NO_D2D
+	PathNode*  BooleanOperation(BooleanMode mode, ID2D1Factory* factory);
+#endif
 
 	// 복제 (Ctrl+D): 선택 항목을 같은 부모의 원본 바로 위에 복제, 새 ID/이름 발급 후 복제본을 선택
 	std::vector<Node*> DuplicateSelection();
@@ -907,17 +922,23 @@ public:
 // ============================================================================
 class PathOp {
 public:
-	enum class BooleanMode {
-		Union = 0,     // 합집합 (D2D1_COMBINE_MODE_UNION)
-		Intersect,     // 교집합 (D2D1_COMBINE_MODE_INTERSECT)
-		Subtract,      // 차집합 / 빼기 (D2D1_COMBINE_MODE_EXCLUDE: A에서 B 빼기)
-		Exclude        // 배타적 논리합 / 겹친 곳 제외 (D2D1_COMBINE_MODE_XOR)
-	};
+
+	// PathNode 로부터 D2D PathGeometry 생성 (로컬 좌표계)
+	static ComPtr<ID2D1PathGeometry> BuildGeometry(const PathNode& node, ID2D1Factory* factory);
+
+	// PathNode 로부터 월드 변환이 적용된 ID2D1Geometry 생성 (ID2D1TransformedGeometry)
+	static ComPtr<ID2D1Geometry> BuildWorldGeometry(const PathNode& node, ID2D1Factory* factory);
+
+	// ID2D1Geometry 로부터 SubPath 목록 추출 (SimplifiedGeometrySink 사용)
+	static bool ExtractSubPaths(ID2D1Geometry* geometry, std::vector<SubPath>& outPaths,
+	                            D2D1_FILL_MODE* outFillMode = nullptr,
+	                            float flatteningTolerance = D2D1_DEFAULT_FLATTENING_TOLERANCE);
 
 	// 두 PathNode의 지오메트리를 불린 연산하여 결과 정점을 담은 새 PathNode를 생성해 반환
 	// 실패하거나 겹치지 않는 경우 nullopt 또는 nullptr 반환
 	static std::unique_ptr<PathNode> Combine(const PathNode& a, const PathNode& b,
-	                                         BooleanMode mode, ID2D1Factory* factory);
+	                                         BooleanMode mode, ID2D1Factory* factory,
+	                                         float flatteningTolerance = D2D1_DEFAULT_FLATTENING_TOLERANCE);
 };
 
 // ============================================================================

@@ -4,8 +4,9 @@
 #include "ToolBoxPane.h"
 #include "ToolOptionBar.h"
 #include "LayerWnd.h"
+#include "ToolManager.h"
 
-class CMainFrame : public CMDIFrameWndEx
+class CMainFrame : public CMDIFrameWndEx, public IToolChangeListener
 {
 	DECLARE_DYNAMIC(CMainFrame)
 public:
@@ -14,6 +15,10 @@ public:
 public:
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	virtual BOOL LoadFrame(UINT nIDResource, DWORD dwDefaultStyle = WS_OVERLAPPEDWINDOW | FWS_ADDTOTITLE, CWnd* pParentWnd = nullptr, CCreateContext* pContext = nullptr);
+
+	// IToolChangeListener 구현
+	void OnToolChanged(ToolType newTool) override;
+	void UpdateSubToolBar(ToolType curTool);
 
 public:
 	virtual ~CMainFrame();
@@ -25,6 +30,7 @@ public:
 protected:  // 컨트롤 모음이 포함된 멤버입니다.
 	CMFCMenuBar       m_wndMenuBar;
 	CMFCToolBar       m_wndToolBar;
+	CMFCToolBar       m_wndSubToolBar;
 	CToolOptionBar    m_wndOptionBar;
 	CMFCStatusBar     m_wndStatusBar;
 	CMFCToolBarImages m_UserImages;
@@ -58,12 +64,15 @@ public:
 // 생성된 메시지 맵 함수
 protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
+	afx_msg void OnDestroy();
 	afx_msg void OnWindowManager();
 	afx_msg void OnViewCustomize();
 	afx_msg LRESULT OnToolbarCreateNew(WPARAM wp, LPARAM lp);
 	afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
 	afx_msg void OnOptionBarCommit(UINT nID);
 	afx_msg void OnUpdateOptionBar(CCmdUI* pCmdUI);
+	afx_msg void OnSubToolCommand(UINT nID);
+	afx_msg void OnUpdateSubToolCommand(CCmdUI* pCmdUI);
 	DECLARE_MESSAGE_MAP()
 
 	BOOL CreateDockingWindows();

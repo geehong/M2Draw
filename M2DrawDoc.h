@@ -59,6 +59,10 @@ public:
 	bool CanArrange() const { return m_doc.CanArrangeSelection(); }
 	bool ArrangeSelectedObjects(ge::Document::ZOrder order);
 
+	// --- 불리언 연산 / 패스파인더 (오브젝트 메뉴 / 패스파인더 단축키) ---
+	bool CanBoolean() const { return m_doc.CanBooleanOperation(); }
+	bool PerformBooleanOperation(ge::BooleanMode mode);
+
 	// --- Undo / Redo (Ctrl+Z / Ctrl+Y) ---
 	ge::UndoManager& GetUndoManager() { return m_undoMgr; }
 	// 편집이 끝난 지점에서 호출: 마지막 확정 상태와 달라졌으면 Undo 이력에 기록하고 수정 표시를 켬 (true = 변경됨)
@@ -76,6 +80,8 @@ public:
 	afx_msg void OnUpdateObjectUngroup(CCmdUI* pCmdUI);
 	afx_msg void OnObjectArrange(UINT nID);
 	afx_msg void OnUpdateObjectArrange(CCmdUI* pCmdUI);
+	afx_msg void OnBooleanOperation(UINT nID);
+	afx_msg void OnUpdateBooleanOperation(CCmdUI* pCmdUI);
 
 private:
 	ge::UndoManager m_undoMgr;

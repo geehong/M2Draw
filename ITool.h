@@ -83,7 +83,12 @@ enum class ToolType
 	ActionToFront,   // 순서: 맨 앞으로
 	ActionForward,   // 앞으로
 	ActionBackward,  // 뒤로
-	ActionToBack     // 맨 뒤로
+	ActionToBack,    // 맨 뒤로
+	ActionBooleanUnion,     // 불리언: 합치기
+	ActionBooleanSubtract,  // 불리언: 빼기
+	ActionBooleanIntersect, // 불리언: 교차
+	ActionBooleanExclude,   // 불리언: 제외
+	ActionBooleanTrim       // 불리언: 트림/분할
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)

@@ -23,12 +23,15 @@ const UINT uiLastUserToolBarId = uiFirstUserToolBarId + iMaxUserToolbars - 1;
 
 BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_WM_CREATE()
+	ON_WM_DESTROY()
 	ON_COMMAND(ID_WINDOW_MANAGER, &CMainFrame::OnWindowManager)
 	ON_COMMAND(ID_VIEW_CUSTOMIZE, &CMainFrame::OnViewCustomize)
 	ON_REGISTERED_MESSAGE(AFX_WM_CREATETOOLBAR, &CMainFrame::OnToolbarCreateNew)
 	ON_WM_SETTINGCHANGE()
 	ON_COMMAND_RANGE(ID_OPT_FIRST, ID_OPT_LAST, &CMainFrame::OnOptionBarCommit)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_OPT_LABEL, ID_OPT_LAST, &CMainFrame::OnUpdateOptionBar)
+	ON_COMMAND_RANGE(ID_TOOL_RECT, ID_TOOL_ZOOMOUT, &CMainFrame::OnSubToolCommand)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOL_RECT, ID_TOOL_ZOOMOUT, &CMainFrame::OnUpdateSubToolCommand)
 END_MESSAGE_MAP()
 
 static UINT indicators[] =
@@ -106,6 +109,15 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	}
 	m_wndOptionBar.SetWindowText(_T("도구 옵션"));
 
+	// 상단 서브도구 툴바 (윈도우 비트맵 리소스 IDB_SUBTOOLS 기반 표준 CMFCToolBar)
+	if (!m_wndSubToolBar.CreateEx(this, TBSTYLE_FLAT, WS_CHILD | WS_VISIBLE | CBRS_TOP | CBRS_TOOLTIPS | CBRS_FLYBY | CBRS_SIZE_DYNAMIC, CRect(1, 1, 1, 1), AFX_IDW_CONTROLBAR_FIRST + 61))
+	{
+		TRACE0("서브도구 모음을 만들지 못했습니다.\n");
+		return -1;
+	}
+	m_wndSubToolBar.SetWindowText(_T("서브 도구"));
+	m_wndSubToolBar.LoadBitmap(IDB_SUBTOOLS, 0, 0, TRUE /* 잠금 */);
+
 	if (!m_wndStatusBar.Create(this))
 	{
 		TRACE0("상태 표시줄을 만들지 못했습니다.\n");
@@ -116,12 +128,18 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	// TODO: 도구 모음 및 메뉴 모음을 도킹할 수 없게 하려면 이 다섯 줄을 삭제하십시오.
 	m_wndMenuBar.EnableDocking(CBRS_ALIGN_ANY);
 	m_wndToolBar.EnableDocking(CBRS_ALIGN_ANY);
+	m_wndSubToolBar.EnableDocking(CBRS_ALIGN_TOP | CBRS_ALIGN_BOTTOM);
 	m_wndOptionBar.EnableDocking(CBRS_ALIGN_TOP | CBRS_ALIGN_BOTTOM); // 세로 도킹 금지
 	EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndMenuBar);
 	DockPane(&m_wndToolBar);
+	DockPaneLeftOf(&m_wndSubToolBar, &m_wndToolBar);
 	DockPane(&m_wndOptionBar);
 	m_wndOptionBar.Attach();
+
+	// 도구 변경 리스너 등록 및 초기 서브도구 툴바 구성
+	GetApp()->GetToolManager().AddListener(this);
+	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
 
 
 	// Visual Studio 2005 스타일 도킹 창 동작을 활성화합니다.
@@ -403,4 +421,144 @@ CM2DrawDoc* CMainFrame::GetActiveM2DrawDoc()
 	}
 	return nullptr;
 }
+
+void CMainFrame::OnDestroy()
+{
+	GetApp()->GetToolManager().RemoveListener(this);
+	CMDIFrameWndEx::OnDestroy();
+}
+
+void CMainFrame::OnToolChanged(ToolType newTool)
+{
+	UpdateSubToolBar(newTool);
+}
+
+void CMainFrame::UpdateSubToolBar(ToolType curTool)
+{
+	if (!m_wndSubToolBar.GetSafeHwnd())
+		return;
+
+	m_wndSubToolBar.RemoveAllButtons();
+
+	// 다중 선택 등으로 불리언 연산이 가능한 상태인지 확인
+	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
+	const bool bCanBoolean = pDoc && pDoc->CanBoolean();
+
+	// 도구별 서브도구 버튼 목록 구성
+	std::vector<UINT> btnIds;
+	if (bCanBoolean || curTool == ToolType::ActionBooleanUnion || curTool == ToolType::ActionBooleanSubtract ||
+		curTool == ToolType::ActionBooleanIntersect || curTool == ToolType::ActionBooleanExclude || curTool == ToolType::ActionBooleanTrim)
+	{
+		// 다중 선택 시 자동으로 상단에 불리언 연산자 아이콘 표시
+		btnIds = { ID_BOOLEAN_UNION, ID_BOOLEAN_SUBTRACT, ID_BOOLEAN_INTERSECT, ID_BOOLEAN_EXCLUDE, ID_BOOLEAN_TRIM };
+	}
+	else
+	{
+		switch (curTool)
+		{
+		case ToolType::Rect:
+		case ToolType::Triangle:
+			btnIds = { ID_TOOL_RECT, ID_TOOL_TRIANGLE };
+			break;
+		case ToolType::Polygon:
+		case ToolType::Star:
+		case ToolType::Gear:
+		case ToolType::Spiral:
+		case ToolType::Heart:
+			btnIds = { ID_TOOL_POLYGON, ID_TOOL_STAR, ID_TOOL_GEAR, ID_TOOL_SPIRAL, ID_TOOL_HEART };
+			break;
+		case ToolType::ZoomIn:
+		case ToolType::ZoomOut:
+			btnIds = { ID_TOOL_ZOOMIN, ID_TOOL_ZOOMOUT };
+			break;
+		case ToolType::ActionGroup:
+		case ToolType::ActionUngroup:
+			btnIds = { ID_OBJECT_GROUP, ID_OBJECT_UNGROUP };
+			break;
+		case ToolType::ActionToFront:
+		case ToolType::ActionForward:
+		case ToolType::ActionBackward:
+		case ToolType::ActionToBack:
+			btnIds = { ID_OBJECT_FRONT, ID_OBJECT_FORWARD, ID_OBJECT_BACKWARD, ID_OBJECT_BACK };
+			break;
+		default:
+			// 기본: 도형 생성 서브도구
+			btnIds = { ID_TOOL_RECT, ID_TOOL_TRIANGLE, ID_TOOL_POLYGON, ID_TOOL_STAR, ID_TOOL_GEAR, ID_TOOL_SPIRAL, ID_TOOL_HEART };
+			break;
+		}
+	}
+
+	for (UINT id : btnIds)
+	{
+		int imgIdx = -1;
+		switch (id)
+		{
+		case ID_TOOL_RECT:          imgIdx = 0; break;
+		case ID_TOOL_TRIANGLE:      imgIdx = 1; break;
+		case ID_TOOL_POLYGON:       imgIdx = 2; break;
+		case ID_TOOL_STAR:          imgIdx = 3; break;
+		case ID_TOOL_GEAR:          imgIdx = 4; break;
+		case ID_TOOL_SPIRAL:        imgIdx = 5; break;
+		case ID_TOOL_HEART:         imgIdx = 6; break;
+		case ID_TOOL_ZOOMIN:        imgIdx = 7; break;
+		case ID_TOOL_ZOOMOUT:       imgIdx = 8; break;
+		case ID_OBJECT_GROUP:       imgIdx = 9; break;
+		case ID_OBJECT_UNGROUP:     imgIdx = 10; break;
+		case ID_BOOLEAN_UNION:      imgIdx = 11; break;
+		case ID_BOOLEAN_SUBTRACT:   imgIdx = 12; break;
+		case ID_BOOLEAN_INTERSECT:  imgIdx = 13; break;
+		case ID_BOOLEAN_EXCLUDE:    imgIdx = 14; break;
+		case ID_BOOLEAN_TRIM:       imgIdx = 15; break;
+		default: break;
+		}
+
+		CMFCToolBarButton btn(id, imgIdx);
+		m_wndSubToolBar.InsertButton(btn);
+	}
+
+	m_wndSubToolBar.AdjustLayout();
+	m_wndSubToolBar.Invalidate();
+}
+
+void CMainFrame::OnSubToolCommand(UINT nID)
+{
+	ToolType targetTool = ToolType::Select;
+	switch (nID)
+	{
+	case ID_TOOL_RECT:     targetTool = ToolType::Rect; break;
+	case ID_TOOL_TRIANGLE: targetTool = ToolType::Triangle; break;
+	case ID_TOOL_POLYGON:  targetTool = ToolType::Polygon; break;
+	case ID_TOOL_STAR:     targetTool = ToolType::Star; break;
+	case ID_TOOL_GEAR:     targetTool = ToolType::Gear; break;
+	case ID_TOOL_SPIRAL:   targetTool = ToolType::Spiral; break;
+	case ID_TOOL_HEART:    targetTool = ToolType::Heart; break;
+	case ID_TOOL_ZOOMIN:   targetTool = ToolType::ZoomIn; break;
+	case ID_TOOL_ZOOMOUT:  targetTool = ToolType::ZoomOut; break;
+	default: return;
+	}
+
+	GetApp()->GetToolManager().SetActiveTool(targetTool);
+}
+
+void CMainFrame::OnUpdateSubToolCommand(CCmdUI* pCmdUI)
+{
+	ToolType active = GetApp()->GetToolManager().GetActiveType();
+	bool isCur = false;
+	switch (pCmdUI->m_nID)
+	{
+	case ID_TOOL_RECT:     isCur = (active == ToolType::Rect); break;
+	case ID_TOOL_TRIANGLE: isCur = (active == ToolType::Triangle); break;
+	case ID_TOOL_POLYGON:  isCur = (active == ToolType::Polygon); break;
+	case ID_TOOL_STAR:     isCur = (active == ToolType::Star); break;
+	case ID_TOOL_GEAR:     isCur = (active == ToolType::Gear); break;
+	case ID_TOOL_SPIRAL:   isCur = (active == ToolType::Spiral); break;
+	case ID_TOOL_HEART:    isCur = (active == ToolType::Heart); break;
+	case ID_TOOL_ZOOMIN:   isCur = (active == ToolType::ZoomIn); break;
+	case ID_TOOL_ZOOMOUT:  isCur = (active == ToolType::ZoomOut); break;
+	default: break;
+	}
+	pCmdUI->Enable(TRUE);
+	pCmdUI->SetCheck(isCur ? 1 : 0);
+}
+
 
