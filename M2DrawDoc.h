@@ -75,6 +75,7 @@ public:
 	bool CanReversePath() const   { return m_doc.CanReversePath(); }
 	bool CanJoinPaths() const     { return m_doc.CanJoinPaths(); }
 	bool OutlineStroke(float widthOverride = -1.0f);
+	bool SmoothPath(float tolerance);
 	bool SimplifyPath(float tolerance = 2.0f);
 	bool ReversePath();
 	bool JoinPaths();

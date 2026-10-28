@@ -801,6 +801,7 @@ public:
 	bool       CanJoinPaths() const;
 #ifndef GE_NO_D2D
 	std::vector<PathNode*> OutlineStrokeSelection(ID2D1Factory* factory, float widthOverride = -1.0f);   // widthOverride > 0: 선 두께를 이 값으로 확장
+	std::vector<PathNode*> SmoothSelection(float tolerance);
 	std::vector<PathNode*> SimplifySelection(float tolerance = 2.0f);
 	std::vector<PathNode*> ReversePathSelection();
 	PathNode*              JoinSelection();
@@ -979,6 +980,9 @@ public:
 
 	// 2) 패스 단순화: RDP 알고리즘으로 과도한 정점 제거
 	static bool Simplify(PathNode& node, float tolerance = 2.0f);
+
+	// 2b) 부드럽게: 정점을 줄인 뒤(RDP) 남은 점을 지나는 부드러운 베지에 곡선(Catmull-Rom)으로 변환. 각진 꺾은선/자유곡선을 곡선화
+	static bool Smooth(PathNode& node, float tolerance = 1.0f);
 
 	// 3) 패스 방향 반전: 서브패스 정점 순서 및 핸들 반전
 	static void ReversePath(PathNode& node);

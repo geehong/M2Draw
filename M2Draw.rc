@@ -501,6 +501,90 @@ BEGIN
 END
 STRINGTABLE
 BEGIN
+    ID_TOOL_RECT             "사각형을 그립니다.
+사각형"
+    ID_TOOL_TRIANGLE         "삼각형을 그립니다.
+삼각형"
+    ID_TOOL_POLYGON          "정다각형을 그립니다.
+정다각형"
+    ID_TOOL_POLYLINE         "클릭으로 꼭짓점을 찍어 열린 꺾은선을 그립니다. 더블클릭/우클릭으로 완성합니다.
+열린 다각형 (폴리라인)"
+    ID_TOOL_STAR             "별을 그립니다.
+별"
+    ID_TOOL_GEAR             "톱니바퀴를 그립니다.
+톱니바퀴"
+    ID_TOOL_SPIRAL           "나선을 그립니다.
+나선"
+    ID_TOOL_HEART            "하트를 그립니다.
+하트"
+    ID_TOOL_ZOOMIN           "확대 도구로 전환합니다.
+확대"
+    ID_TOOL_ZOOMOUT          "축소 도구로 전환합니다.
+축소"
+    ID_OBJECT_GROUP          "선택한 오브젝트를 그룹으로 묶습니다.
+그룹"
+    ID_OBJECT_UNGROUP        "선택한 그룹을 해제합니다.
+그룹 해제"
+    ID_OBJECT_FRONT          "선택한 오브젝트를 맨 앞으로 보냅니다.
+맨 앞으로"
+    ID_OBJECT_FORWARD        "선택한 오브젝트를 한 단계 앞으로 보냅니다.
+앞으로"
+    ID_OBJECT_BACKWARD       "선택한 오브젝트를 한 단계 뒤로 보냅니다.
+뒤로"
+    ID_OBJECT_BACK           "선택한 오브젝트를 맨 뒤로 보냅니다.
+맨 뒤로"
+    ID_BOOLEAN_UNION         "선택한 도형을 하나로 합칩니다.
+합치기 (Union)"
+    ID_BOOLEAN_SUBTRACT      "아래 도형에서 위 도형 영역을 뺍니다.
+빼기 (Subtract)"
+    ID_BOOLEAN_INTERSECT     "겹치는 영역만 남깁니다.
+교차 (Intersect)"
+    ID_BOOLEAN_EXCLUDE       "겹치는 영역을 제외하고 남깁니다.
+제외 (Exclude)"
+    ID_BOOLEAN_TRIM          "위 도형으로 아래 도형을 잘라냅니다.
+자르기 (Trim)"
+    ID_OBJECT_CLIP_MASK      "맨 위 도형 모양으로 나머지를 오려 보이게 합니다.
+클리핑 마스크 만들기"
+    ID_OBJECT_RELEASE_MASK   "클리핑 마스크를 해제합니다.
+클리핑 마스크 해제"
+    ID_PATH_OUTLINE          "선을 면(닫힌 패스)으로 변환합니다.
+외곽선 확장"
+    ID_PATH_SIMPLIFY         "정점을 줄여 패스를 단순화합니다.
+단순화"
+    ID_PATH_REVERSE          "패스의 방향을 뒤집습니다.
+방향 반전"
+    ID_PATH_JOIN             "끝점이 가까운 패스를 하나로 결합합니다.
+패스 결합"
+    ID_SUB_OUTLINE           "선을 면(닫힌 패스)으로 변환합니다. 두께를 입력한 뒤 적용하세요.
+외곽선 확장"
+    ID_SUB_SMOOTH            "각진 점을 지나는 부드러운 곡선으로 바꿉니다. 허용 오차를 입력한 뒤 적용하세요.\n부드럽게 (곡선화)"
+    ID_SUB_SIMPLIFY          "정점을 줄여 패스를 단순화합니다. 허용 오차를 입력한 뒤 적용하세요.
+단순화"
+    ID_SUB_APPLY             "입력한 값으로 적용합니다.
+적용"
+    ID_SUB_CANCEL            "적용하지 않고 취소합니다.
+취소"
+    ID_SUB_VALUE             "값을 입력하세요.
+값"
+    ID_ALIGN_LEFT            "선택한 오브젝트를 왼쪽 기준으로 정렬합니다.
+왼쪽 정렬"
+    ID_ALIGN_CENTERH         "선택한 오브젝트를 가로 가운데로 정렬합니다.
+가로 가운데 정렬"
+    ID_ALIGN_RIGHT           "선택한 오브젝트를 오른쪽 기준으로 정렬합니다.
+오른쪽 정렬"
+    ID_ALIGN_TOP             "선택한 오브젝트를 위쪽 기준으로 정렬합니다.
+위쪽 정렬"
+    ID_ALIGN_CENTERV         "선택한 오브젝트를 세로 가운데로 정렬합니다.
+세로 가운데 정렬"
+    ID_ALIGN_BOTTOM          "선택한 오브젝트를 아래쪽 기준으로 정렬합니다.
+아래쪽 정렬"
+    ID_DISTRIBUTE_H          "3개 이상 선택한 오브젝트의 가로 간격을 균등하게 맞춥니다.
+가로 균등 분배"
+    ID_DISTRIBUTE_V          "3개 이상 선택한 오브젝트의 세로 간격을 균등하게 맞춥니다.
+세로 균등 분배"
+END
+STRINGTABLE
+BEGIN
     ID_FILE_NEW             "새 문서를 만듭니다.\n새로 만들기"
     ID_FILE_OPEN            "기존 문서를 엽니다.\n열기"
     ID_FILE_CLOSE           "활성 문서를 닫습니다.\n닫기"

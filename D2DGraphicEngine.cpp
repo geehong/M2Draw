@@ -1073,6 +1073,19 @@ std::vector<PathNode*> Document::OutlineStrokeSelection(ID2D1Factory* factory, f
 	return results;
 }
 
+std::vector<PathNode*> Document::SmoothSelection(float tolerance)
+{
+	std::vector<PathNode*> results;
+	for (Node* n : m_selection) {
+		if (n && n->Kind() == NodeKind::Path) {
+			PathNode* p = static_cast<PathNode*>(n);
+			if (PathOp::Smooth(*p, tolerance)) results.push_back(p);
+		}
+	}
+	if (!results.empty()) ChangeTracker::Bump();
+	return results;
+}
+
 std::vector<PathNode*> Document::SimplifySelection(float tolerance)
 {
 	std::vector<PathNode*> results;
@@ -1697,6 +1710,45 @@ bool PathOp::Simplify(PathNode& node, float tolerance)
 		}
 	}
 
+	if (modified) {
+		node.SetPaths(std::move(paths));
+		node.SetShapeKind(ShapeKind::Path);
+	}
+	return modified;
+}
+
+// 2b) 부드럽게: 점 줄이기(RDP) + Catmull-Rom 핸들 부여
+bool PathOp::Smooth(PathNode& node, float tolerance)
+{
+	if (tolerance > 0.0f) Simplify(node, tolerance);
+
+	auto paths = node.GetPaths();
+	bool modified = false;
+	for (auto& sp : paths) {
+		const int n = static_cast<int>(sp.nodes.size());
+		if (n < 2) continue;
+		for (int i = 0; i < n; ++i) {
+			const bool hasPrev = (i > 0) || (sp.closed && n > 2);
+			const bool hasNext = (i < n - 1) || (sp.closed && n > 2);
+			const Vec2 a = sp.nodes[i].anchor;
+			const Vec2 pr = hasPrev ? sp.nodes[(i + n - 1) % n].anchor : a;
+			const Vec2 nx = hasNext ? sp.nodes[(i + 1) % n].anchor : a;
+			BezierNode& bn = sp.nodes[i];
+			if (hasPrev && hasNext) {
+				const Vec2 d{ (nx.x - pr.x) / 6.0f, (nx.y - pr.y) / 6.0f };
+				bn.hOut = d;
+				bn.hIn = Vec2{ -d.x, -d.y };
+			} else if (hasNext) {
+				bn.hIn = Vec2{};
+				bn.hOut = Vec2{ (nx.x - a.x) / 3.0f, (nx.y - a.y) / 3.0f };
+			} else {
+				bn.hOut = Vec2{};
+				bn.hIn = Vec2{ (pr.x - a.x) / 3.0f, (pr.y - a.y) / 3.0f };
+			}
+			bn.type = BezierNode::Type::Smooth;
+		}
+		modified = true;
+	}
 	if (modified) {
 		node.SetPaths(std::move(paths));
 		node.SetShapeKind(ShapeKind::Path);

@@ -34,7 +34,10 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_COMMAND(ID_TOOL_POLYLINE, &CMainFrame::OnSubPolyline)
 	ON_COMMAND(ID_SUB_OUTLINE, &CMainFrame::OnSubOutline)
 	ON_COMMAND(ID_SUB_SIMPLIFY, &CMainFrame::OnSubSimplify)
+	ON_COMMAND(ID_SUB_SMOOTH, &CMainFrame::OnSubSmooth)
 	ON_COMMAND(ID_SUB_APPLY, &CMainFrame::OnSubApply)
+	ON_COMMAND(ID_SUB_VALUE, &CMainFrame::OnSubApply)   // 입력창에서 Enter = 적용
+	ON_UPDATE_COMMAND_UI(ID_SUB_VALUE, &CMainFrame::OnUpdateSubValue)
 	ON_COMMAND(ID_SUB_CANCEL, &CMainFrame::OnSubCancel)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOL_RECT, ID_TOOL_ZOOMOUT, &CMainFrame::OnUpdateSubToolCommand)
 END_MESSAGE_MAP()
@@ -488,7 +491,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		if (pDoc && pDoc->GetDoc().GetSelection().size() >= 2)
 			btnIds.insert(btnIds.end(), { ID_ALIGN_LEFT, ID_ALIGN_CENTERH, ID_ALIGN_RIGHT, ID_ALIGN_TOP, ID_ALIGN_CENTERV, ID_ALIGN_BOTTOM, ID_DISTRIBUTE_H, ID_DISTRIBUTE_V });
 		if (bIsPathSelected || curTool == ToolType::Pen)
-			btnIds.insert(btnIds.end(), { ID_SUB_OUTLINE, ID_SUB_SIMPLIFY, ID_PATH_REVERSE, ID_PATH_JOIN });
+			btnIds.insert(btnIds.end(), { ID_SUB_OUTLINE, ID_SUB_SIMPLIFY, ID_SUB_SMOOTH, ID_PATH_REVERSE, ID_PATH_JOIN });
 	}
 
 	if (btnIds.empty())
@@ -558,6 +561,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_PATH_REVERSE:       imgIdx = 20; break;
 		case ID_PATH_JOIN:          imgIdx = 21; break;
 		case ID_TOOL_POLYLINE:      imgIdx = 22; break;
+		case ID_SUB_SMOOTH:         imgIdx = 31; break;
 		case ID_ALIGN_LEFT:         imgIdx = 23; break;
 		case ID_ALIGN_CENTERH:      imgIdx = 24; break;
 		case ID_ALIGN_RIGHT:        imgIdx = 25; break;
@@ -650,6 +654,12 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 	m_wndSubToolBar.Invalidate();
 }
 
+// 명령 핸들러가 없는 툴바 버튼(입력창)은 MFC 가 자동으로 비활성화하므로 항상 활성으로 표시
+void CMainFrame::OnUpdateSubValue(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(TRUE);
+}
+
 void CMainFrame::OnSubOutline()
 {
 	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
@@ -671,6 +681,15 @@ void CMainFrame::OnSubSimplify()
 	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
 }
 
+void CMainFrame::OnSubSmooth()
+{
+	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
+	if (!pDoc || !pDoc->CanSimplify()) return;
+	m_subInputMode = SubInputMode::Smooth;
+	m_subInputValue = 1.0f;   // 점 줄이기 허용 오차(px): 작을수록 원래 점을 많이 남기고 곡선만 부드럽게
+	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+}
+
 void CMainFrame::OnSubApply()
 {
 	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
@@ -688,6 +707,7 @@ void CMainFrame::OnSubApply()
 	{
 		if (mode == SubInputMode::Outline) pDoc->OutlineStroke(v);
 		else if (mode == SubInputMode::Simplify) pDoc->SimplifyPath(v);
+		else if (mode == SubInputMode::Smooth) pDoc->SmoothPath(v);
 	}
 	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
 }

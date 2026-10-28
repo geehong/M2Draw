@@ -781,6 +781,19 @@ bool CM2DrawDoc::OutlineStroke(float widthOverride)
 	return true;
 }
 
+bool CM2DrawDoc::SmoothPath(float tolerance)
+{
+	if (!CanSimplify()) return false;
+
+	auto results = m_doc.SmoothSelection(tolerance);
+	if (results.empty()) return false;
+
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+	CommitUndoPoint(L"패스 부드럽게");
+	UpdateAllViews(nullptr);
+	return true;
+}
+
 bool CM2DrawDoc::SimplifyPath(float tolerance)
 {
 	if (!CanSimplify()) return false;
