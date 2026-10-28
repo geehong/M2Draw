@@ -1017,6 +1017,21 @@ void CD2DPropertyView::InitControls()
 		m_chkItalic->SetOnChanged([this](M2DrawCheckBox*, bool b) { ApplyTextProps([b](ge::TextNode& t) { t.SetItalic(b); }); });
 		m_pCurrentPanel->AddChild(m_chkItalic);
 
+		m_chkTextArea = std::make_shared<M2DrawCheckBox>(L"Wrap", false);
+		m_chkTextArea->SetOnChanged([this](M2DrawCheckBox*, bool b) {
+			ApplyTextProps([b](ge::TextNode& t) {
+				if (b) t.SetBoxWidth((std::max)(80.0f, t.MeasuredWidth()));   // 현재 폭을 상자 폭으로
+				else t.SetBoxWidth(0.0f);
+			});
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_chkTextArea);
+
+		m_spinTextBoxW = std::make_shared<M2DrawNumericInput>(10.0, 10000.0, 200.0, 5.0);
+		m_spinTextBoxW->SetSuffix(L" px");
+		m_spinTextBoxW->SetOnChanged([this](M2DrawNumericInput*, double v) { ApplyTextProps([v](ge::TextNode& t) { if (t.IsAreaText()) t.SetBoxWidth(static_cast<float>(v)); }); });
+		m_pCurrentPanel->AddChild(m_spinTextBoxW);
+
 		m_spinFontSize = std::make_shared<M2DrawNumericInput>(1.0, 2000.0, 24.0, 1.0);
 		m_spinFontSize->SetSuffix(L" px");
 		m_spinFontSize->SetOnChanged([this](M2DrawNumericInput*, double v) { ApplyTextProps([v](ge::TextNode& t) { t.SetFontSize(static_cast<float>(v)); }); });
@@ -1584,6 +1599,8 @@ void CD2DPropertyView::SyncControlsFromData()
 			if (m_spinFontSize) m_spinFontSize->SetValue(tn->GetFontSize(), false);
 			if (m_chkBold) m_chkBold->SetChecked(tn->IsBold());
 			if (m_chkItalic) m_chkItalic->SetChecked(tn->IsItalic());
+			if (m_chkTextArea) m_chkTextArea->SetChecked(tn->IsAreaText());
+			if (m_spinTextBoxW) m_spinTextBoxW->SetValue(tn->IsAreaText() ? tn->GetBoxWidth() : 200.0, false);
 			if (m_cboTextAlign) m_cboTextAlign->SetCurSel(static_cast<int>(tn->GetAlign()), false);
 			m_bUpdating = prevUpdating;
 		}
@@ -1937,6 +1954,8 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			if (m_cboTextAlign)  m_cboTextAlign->SetVisible(isText);
 			if (m_chkBold)       m_chkBold->SetVisible(isText);
 			if (m_chkItalic)     m_chkItalic->SetVisible(isText);
+			if (m_chkTextArea)   m_chkTextArea->SetVisible(isText);
+			if (m_spinTextBoxW)  m_spinTextBoxW->SetVisible(isText && dynamic_cast<ge::TextNode*>(GetSelectedShape()) && static_cast<ge::TextNode*>(GetSelectedShape())->IsAreaText());
 			if (isText)
 			{
 				const float halfTW = (contentW - 6.0f) * 0.5f;
@@ -1948,6 +1967,9 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 				if (m_chkBold)      m_chkBold->SetBounds(left, y, left + halfTW, y + 20.0f);
 				if (m_chkItalic)    m_chkItalic->SetBounds(left + halfTW + 6.0f, y, right, y + 20.0f);
 				y += 26.0f;
+				if (m_chkTextArea)  m_chkTextArea->SetBounds(left, y, left + halfTW, y + 24.0f);
+				if (m_spinTextBoxW && m_spinTextBoxW->IsVisible()) m_spinTextBoxW->SetBounds(left + halfTW + 6.0f, y, right, y + 24.0f);
+				y += 30.0f;
 			}
 		}
 

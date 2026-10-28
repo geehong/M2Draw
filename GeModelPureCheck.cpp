@@ -1285,6 +1285,44 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(clean.find("m2:") == std::string::npos && clean.find("clip-path=\"url(#frame_clip_") != std::string::npos, L"Clean 프레임 출력이 틀림");
 	}
 
+	// ---- 25. 영역 텍스트 (3.2.1/3.5.2): 상자 폭, 자동 줄바꿈 출력, 원본 문자열 왕복 ------------------------
+	{
+		Document d;
+		auto tn = std::make_unique<TextNode>();
+		tn->SetText(L"aaaa bbbb cccc dddd eeee ffff gggg hhhh");
+		tn->SetFontSize(20.0f);
+		tn->SetBoxWidth(100.0f);
+		tn->SetTransform(Matrix2D::Translation(10.0f, 20.0f));
+		TextNode* t0 = static_cast<TextNode*>(d.AddShape(std::move(tn)));
+		GE_CHECK(t0->IsAreaText() && t0->GetBoxWidth() == 100.0f, L"영역 텍스트 상자 폭 설정이 틀림");
+		Rect2 b;
+		GE_CHECK(t0->GetLocalBounds(b) && b.left == 0.0f && b.right == 100.0f, L"영역 텍스트 경계는 상자 폭이어야 함");
+
+		SvgWriter aw;
+		const std::string svg = aw.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(svg.find("m2:boxW=") != std::string::npos && svg.find("<tspan") != std::string::npos, L"영역 텍스트가 줄바꿈된 <tspan> 으로 출력되지 않음 (DirectWrite 줄바꿈)");
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"영역 텍스트 SVG 읽기 실패");
+		auto* t1 = static_cast<TextNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+		GE_CHECK(t1->Kind() == NodeKind::Text && t1->IsAreaText() && t1->GetBoxWidth() == 100.0f, L"영역 텍스트 폭 왕복이 틀림");
+		GE_CHECK(t1->GetText() == L"aaaa bbbb cccc dddd eeee ffff gggg hhhh", L"영역 텍스트 원본 문자열(줄바꿈 전)이 복원되지 않음");
+		const Vec2 o = t1->GetWorldTransform().TransformPoint(Vec2{ 0.0f, 0.0f });
+		GE_CHECK(std::abs(o.x - 10.0f) < 1e-3f && std::abs(o.y - 20.0f) < 1e-3f, L"영역 텍스트 위치 왕복이 틀림");
+
+		// 가운데 정렬 영역 텍스트도 위치 보존
+		t0->SetAlign(TextAlign::Center);
+		const std::string svg2 = aw.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		Document back2;
+		GE_CHECK(reader.ReadFromString(svg2, back2), L"가운데 정렬 영역 텍스트 읽기 실패");
+		auto* t2 = static_cast<TextNode*>(back2.GetLayers()[0]->GetChildren()[0].get());
+		const Vec2 o2 = t2->GetWorldTransform().TransformPoint(Vec2{ 0.0f, 0.0f });
+		GE_CHECK(t2->GetAlign() == TextAlign::Center && std::abs(o2.x - 10.0f) < 1e-3f, L"가운데 정렬 영역 텍스트 위치(상자 왼쪽)가 틀림");
+
+		// Clean 출력은 메타 없이 줄바꿈된 tspan 만
+		const std::string clean = aw.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("m2:") == std::string::npos && clean.find("<tspan") != std::string::npos, L"Clean 영역 텍스트 출력이 틀림");
+	}
+
 #undef GE_CHECK
 
 	return true;

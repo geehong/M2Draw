@@ -472,7 +472,40 @@ bool EditTextDialog(CWnd* parent, std::wstring& text)
 
 void TextTool::OnDown(const ToolEvent& e)
 {
+	m_drag = true;
+	m_startW = m_curW = e.worldPt;
+	m_startS = m_curS = e.screenPt;
+}
+
+void TextTool::OnMove(const ToolEvent& e)
+{
+	if (!m_drag) return;
+	m_curW = e.worldPt;
+	m_curS = e.screenPt;
+}
+
+void TextTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float, D2D1_POINT_2F, CM2DrawDoc*)
+{
+	if (!m_drag || !rt || !brush) return;
+	if (abs(m_curS.x - m_startS.x) < 6 && abs(m_curS.y - m_startS.y) < 6) return;   // 클릭(점 텍스트)은 미리보기 없음
+	const D2D1_RECT_F rc = D2D1::RectF(static_cast<float>((std::min)(m_startS.x, m_curS.x)), static_cast<float>((std::min)(m_startS.y, m_curS.y)),
+		static_cast<float>((std::max)(m_startS.x, m_curS.x)), static_cast<float>((std::max)(m_startS.y, m_curS.y)));
+	brush->SetColor(D2D1::ColorF(0.20f, 0.45f, 0.85f, 1.0f));
+	rt->DrawRectangle(rc, brush, 1.0f);
+}
+
+void TextTool::OnUp(const ToolEvent& e)
+{
+	if (!m_drag) return;
+	m_drag = false;
+	m_curW = e.worldPt;
 	if (!e.pDoc) return;
+
+	// 일정 거리 이상 끌었으면 영역 텍스트 (폭 = 드래그 폭), 아니면 클릭 위치의 점 텍스트
+	const bool area = abs(e.screenPt.x - m_startS.x) >= 6 && abs(e.screenPt.y - m_startS.y) >= 6;
+	const float ax = (std::min)(m_startW.x, m_curW.x), ay = (std::min)(m_startW.y, m_curW.y);
+	const float aw = std::fabs(m_curW.x - m_startW.x);
+
 	TextEditProps props;
 	// 마지막으로 쓴 글꼴/크기를 기억해 연속 입력이 편하게 (앱 설정)
 	props.family = (LPCTSTR)AfxGetApp()->GetProfileString(_T("Text"), _T("Family"), _T("Segoe UI"));
@@ -482,20 +515,22 @@ void TextTool::OnDown(const ToolEvent& e)
 	AfxGetApp()->WriteProfileInt(_T("Text"), _T("Size"), static_cast<int>(props.size));
 
 	auto tn = std::make_unique<ge::TextNode>();
-	tn->SetTransform(ge::Matrix2D::Translation(e.worldPt.x, e.worldPt.y));
+	tn->SetTransform(ge::Matrix2D::Translation(area ? ax : m_startW.x, area ? ay : m_startW.y));
 	tn->SetText(props.text);
 	tn->SetFontFamily(props.family);
 	tn->SetFontSize(props.size);
 	tn->SetBold(props.bold);
 	tn->SetItalic(props.italic);
 	tn->SetAlign(static_cast<ge::TextAlign>((std::max)(0, (std::min)(2, props.align))));
+	if (area) tn->SetBoxWidth(aw);
+	ge::PathOp::MeasureText(*tn);   // 속성창 W/H 가 만들자마자 정확하도록 바로 측정
 	tn->SetName(L"텍스트");
 	ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(tn));
 	if (!added) return;
 	e.pDoc->GetDoc().SetSelection({ added });
 	e.pDoc->SetModifiedFlag(TRUE);
-	e.pDoc->CommitUndoPoint(L"텍스트 추가");
-	LogAppEvent(_T("[텍스트 도구] 텍스트 추가"));
+	e.pDoc->CommitUndoPoint(area ? L"영역 텍스트 추가" : L"텍스트 추가");
+	LogAppEvent(area ? _T("[텍스트 도구] 영역 텍스트 추가") : _T("[텍스트 도구] 텍스트 추가"));
 
 	CM2DrawDoc* pDoc = e.pDoc;
 	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);

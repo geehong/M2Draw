@@ -128,6 +128,8 @@ Matrix2D Node::GetWorldTransform() const
 }
 
 // ---- PathNode ---------------------------------------------------------------
+static bool BuildTextLayout(const TextNode& t, ComPtr<IDWriteTextLayout>& layout, float& w, float& h, float& x0);   // 아래(렌더러 부근)에 정의
+
 // ---------------- ImageNode ----------------
 std::unique_ptr<Node> ImageNode::Clone() const
 {
@@ -169,6 +171,7 @@ int TextNode::LineCount() const
 
 float TextNode::MeasuredWidth() const
 {
+	if (m_boxW > 0.0f) return m_boxW;   // 영역 텍스트는 상자 폭
 	if (m_mw > 0.0f) return m_mw;
 	size_t longest = 0, cur = 0;   // 렌더 전 추정: 글자 수 x 글꼴 크기 x 0.6 (전각 문자는 1.0)
 	float w = 0.0f, best = 0.0f;
@@ -188,7 +191,7 @@ float TextNode::MeasuredHeight() const
 bool TextNode::GetLocalBounds(Rect2& out)
 {
 	const float w = MeasuredWidth(), h = MeasuredHeight();
-	const float left = (m_align == TextAlign::Center) ? -w * 0.5f : (m_align == TextAlign::Right) ? -w : 0.0f;
+	const float left = IsAreaText() ? 0.0f : (m_align == TextAlign::Center) ? -w * 0.5f : (m_align == TextAlign::Right) ? -w : 0.0f;
 	out = Rect2{ left, 0.0f, left + w, h };
 	return true;
 }
@@ -1924,48 +1927,50 @@ private:
 void PathOp::MeasureText(TextNode& text)
 {
 	if (text.GetText().empty()) return;
-	ComPtr<IDWriteFactory> dw;
-	if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dw.GetAddressOf())))) return;
-	ComPtr<IDWriteTextFormat> fmt;
-	if (FAILED(dw->CreateTextFormat(text.GetFontFamily().c_str(), nullptr,
-		text.IsBold() ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
-		text.IsItalic() ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
-		DWRITE_FONT_STRETCH_NORMAL, text.GetFontSize(), L"ko-kr", &fmt))) return;
-	fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, text.GetFontSize() * TextNode::kLineHeightRatio, text.GetFontSize() * TextNode::kAscentRatio);
-	fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+	ComPtr<IDWriteTextLayout> layout;
+	float w = 0, h = 0, x0 = 0;
+	if (BuildTextLayout(text, layout, w, h, x0)) text.SetMeasured(w, h);
+}
+
+std::vector<std::wstring> PathOp::WrapLines(const TextNode& text)
+{
+	std::vector<std::wstring> lines;
 	const std::wstring& txt = text.GetText();
 	ComPtr<IDWriteTextLayout> layout;
-	if (FAILED(dw->CreateTextLayout(txt.c_str(), static_cast<UINT32>(txt.size()), fmt.Get(), 100000.0f, 100000.0f, &layout))) return;
-	DWRITE_TEXT_METRICS tm{};
-	layout->GetMetrics(&tm);
-	text.SetMeasured((std::max)(tm.widthIncludingTrailingWhitespace, 1.0f), (std::max)(tm.height, 1.0f));
+	float w = 0, h = 0, x0 = 0;
+	if (!txt.empty() && BuildTextLayout(text, layout, w, h, x0)) {
+		UINT32 count = 0;
+		layout->GetLineMetrics(nullptr, 0, &count);
+		std::vector<DWRITE_LINE_METRICS> lm(count);
+		if (count > 0 && SUCCEEDED(layout->GetLineMetrics(lm.data(), count, &count))) {
+			size_t pos = 0;
+			for (UINT32 i = 0; i < count && pos <= txt.size(); ++i) {
+				std::wstring ln = txt.substr(pos, lm[i].length);
+				pos += lm[i].length;
+				while (!ln.empty() && (ln.back() == L'\n' || ln.back() == L'\r' || ln.back() == L' ')) ln.pop_back();
+				lines.push_back(ln);
+			}
+			return lines;
+		}
+	}
+	// 대체: 개행 기준
+	size_t p = 0;
+	while (p <= txt.size()) {
+		size_t e = txt.find(L'\n', p);
+		if (e == std::wstring::npos) e = txt.size();
+		lines.push_back(txt.substr(p, e - p));
+		p = e + 1;
+		if (e == txt.size()) break;
+	}
+	return lines;
 }
 
 std::unique_ptr<PathNode> PathOp::TextToPath(const TextNode& text, ID2D1Factory* factory)
 {
 	if (!factory || text.GetText().empty()) return nullptr;
-
-	ComPtr<IDWriteFactory> dw;
-	if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dw.GetAddressOf())))) return nullptr;
-	ComPtr<IDWriteTextFormat> fmt;
-	if (FAILED(dw->CreateTextFormat(text.GetFontFamily().c_str(), nullptr,
-		text.IsBold() ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
-		text.IsItalic() ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
-		DWRITE_FONT_STRETCH_NORMAL, text.GetFontSize(), L"ko-kr", &fmt))) return nullptr;
-	fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, text.GetFontSize() * TextNode::kLineHeightRatio, text.GetFontSize() * TextNode::kAscentRatio);
-	fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-
-	const std::wstring& txt = text.GetText();
 	ComPtr<IDWriteTextLayout> layout;
-	if (FAILED(dw->CreateTextLayout(txt.c_str(), static_cast<UINT32>(txt.size()), fmt.Get(), 100000.0f, 100000.0f, &layout))) return nullptr;
-	DWRITE_TEXT_METRICS tm{};
-	layout->GetMetrics(&tm);
-	const float w = (std::max)(tm.widthIncludingTrailingWhitespace, 1.0f);
-	if (text.GetAlign() != TextAlign::Left) {
-		layout->SetMaxWidth(w);
-		layout->SetTextAlignment(text.GetAlign() == TextAlign::Center ? DWRITE_TEXT_ALIGNMENT_CENTER : DWRITE_TEXT_ALIGNMENT_TRAILING);
-	}
-	const float x0 = (text.GetAlign() == TextAlign::Center) ? -w * 0.5f : (text.GetAlign() == TextAlign::Right) ? -w : 0.0f;
+	float w = 0, h = 0, x0 = 0;
+	if (!BuildTextLayout(text, layout, w, h, x0)) return nullptr;
 
 	ComPtr<GlyphOutlineCollector> collector;
 	collector.Attach(new GlyphOutlineCollector(factory, x0));
@@ -2208,57 +2213,63 @@ void D2DRenderer::DrawImageNode(ImageNode& node, const Matrix2D& worldXf, const 
 	m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
 }
 
+// 텍스트 레이아웃 공통 빌더 (그리기/측정/윤곽선/줄바꿈 공용). w,h = 상자 크기, x0 = 레이아웃을 그릴 왼쪽 시작 위치(로컬)
+static bool BuildTextLayout(const TextNode& t, ComPtr<IDWriteTextLayout>& layout, float& w, float& h, float& x0)
+{
+	static ComPtr<IDWriteFactory> s_dw;
+	if (!s_dw && FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(s_dw.GetAddressOf())))) return false;
+	ComPtr<IDWriteTextFormat> fmt;
+	if (FAILED(s_dw->CreateTextFormat(t.GetFontFamily().c_str(), nullptr,
+		t.IsBold() ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+		t.IsItalic() ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+		DWRITE_FONT_STRETCH_NORMAL, t.GetFontSize(), L"ko-kr", &fmt))) return false;
+	fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, t.GetFontSize() * TextNode::kLineHeightRatio, t.GetFontSize() * TextNode::kAscentRatio);
+	const bool area = t.IsAreaText();
+	fmt->SetWordWrapping(area ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+
+	const std::wstring& txt = t.GetText();
+	if (FAILED(s_dw->CreateTextLayout(txt.c_str(), static_cast<UINT32>(txt.size()), fmt.Get(), area ? t.GetBoxWidth() : 100000.0f, 100000.0f, &layout))) return false;
+	DWRITE_TEXT_METRICS tm{};
+	layout->GetMetrics(&tm);
+	const DWRITE_TEXT_ALIGNMENT al = t.GetAlign() == TextAlign::Center ? DWRITE_TEXT_ALIGNMENT_CENTER
+		: t.GetAlign() == TextAlign::Right ? DWRITE_TEXT_ALIGNMENT_TRAILING : DWRITE_TEXT_ALIGNMENT_LEADING;
+	h = (std::max)(tm.height, 1.0f);
+	if (area) {
+		// 영역 텍스트: 상자 폭 안에서 정렬, 원점은 상자 왼쪽 위
+		w = t.GetBoxWidth();
+		x0 = 0.0f;
+		layout->SetTextAlignment(al);
+	} else {
+		// 점 텍스트: 가운데/오른쪽은 각 줄을 가장 긴 줄의 폭 안에서 정렬하고, 기준점이 그 폭의 가운데/오른쪽 끝에 오게 함
+		w = (std::max)(tm.widthIncludingTrailingWhitespace, 1.0f);
+		x0 = (t.GetAlign() == TextAlign::Center) ? -w * 0.5f : (t.GetAlign() == TextAlign::Right) ? -w : 0.0f;
+		if (t.GetAlign() != TextAlign::Left) { layout->SetMaxWidth(w); layout->SetTextAlignment(al); }
+	}
+	return true;
+}
+
 void D2DRenderer::DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Viewport& view)
 {
 	if (!m_rt || !m_brush || node.GetText().empty()) return;
 
-	static ComPtr<IDWriteFactory> s_dw;
-	if (!s_dw && FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(s_dw.GetAddressOf())))) return;
-
-	// 레이아웃 캐시: 노드 버전은 프로세스 전역에서 유일하고 글자/글꼴이 바뀔 때만 바뀐다 (이동/크기 조절은 버전 불변).
-	// 매 프레임 포맷/레이아웃을 새로 만들면 크기 조절처럼 자주 다시 그리는 동안 버벅거리므로 재사용
-	struct TextCache { ComPtr<IDWriteTextLayout> layout; float w = 0, h = 0; };
+	// 레이아웃 캐시: 노드 버전은 프로세스 전역에서 유일하고 글자/글꼴/상자 폭이 바뀔 때만 바뀐다 (이동/크기 조절은 버전 불변).
+	struct TextCache { ComPtr<IDWriteTextLayout> layout; float w = 0, h = 0, x0 = 0; };
 	static std::unordered_map<uint32_t, TextCache> s_cache;
 	auto hit = s_cache.find(node.GetVersion());
 	if (hit == s_cache.end()) {
-		ComPtr<IDWriteTextFormat> fmt;
-		if (FAILED(s_dw->CreateTextFormat(node.GetFontFamily().c_str(), nullptr,
-			node.IsBold() ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
-			node.IsItalic() ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
-			DWRITE_FONT_STRETCH_NORMAL, node.GetFontSize(), L"ko-kr", &fmt))) return;
-		fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, node.GetFontSize() * TextNode::kLineHeightRatio, node.GetFontSize() * TextNode::kAscentRatio);
-		fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-
-		const std::wstring& txt = node.GetText();
 		TextCache entry;
-		if (FAILED(s_dw->CreateTextLayout(txt.c_str(), static_cast<UINT32>(txt.size()), fmt.Get(), 100000.0f, 100000.0f, &entry.layout))) return;
-		DWRITE_TEXT_METRICS tm{};
-		entry.layout->GetMetrics(&tm);
-		entry.w = (std::max)(tm.widthIncludingTrailingWhitespace, 1.0f);
-		entry.h = (std::max)(tm.height, 1.0f);
-		// 가운데/오른쪽 정렬: 각 줄을 가장 긴 줄의 폭 안에서 정렬 (SVG text-anchor 와 같은 모양)
-		if (node.GetAlign() != TextAlign::Left) {
-			entry.layout->SetMaxWidth(entry.w);
-			entry.layout->SetTextAlignment(node.GetAlign() == TextAlign::Center ? DWRITE_TEXT_ALIGNMENT_CENTER : DWRITE_TEXT_ALIGNMENT_TRAILING);
-		}
+		if (!BuildTextLayout(node, entry.layout, entry.w, entry.h, entry.x0)) return;
 		if (s_cache.size() > 512) s_cache.clear();
 		hit = s_cache.emplace(node.GetVersion(), std::move(entry)).first;
 	}
 	IDWriteTextLayout* layout = hit->second.layout.Get();
 	if (node.MeasuredWidth() != hit->second.w || node.MeasuredHeight() != hit->second.h) node.SetMeasured(hit->second.w, hit->second.h);
-	DWRITE_TEXT_METRICS tm{};
-	tm.widthIncludingTrailingWhitespace = hit->second.w;
-
-	// 정렬 기준점(로컬 원점)에 맞춰 왼쪽 시작 위치 결정
-	float x0 = 0.0f;
-	if (node.GetAlign() == TextAlign::Center) x0 = -tm.widthIncludingTrailingWhitespace * 0.5f;
-	else if (node.GetAlign() == TextAlign::Right) x0 = -tm.widthIncludingTrailingWhitespace;
 
 	const Style& st = node.GetStyle();
 	const Color col = (st.fill.type == PaintType::None) ? Color(0, 0, 0, 0) : st.fill.color;
 	m_brush->SetColor(D2D1::ColorF(col.r, col.g, col.b, col.a));
 	m_rt->SetTransform((worldXf * view.ToMatrix()).ToD2D());
-	m_rt->DrawTextLayout(D2D1::Point2F(x0, 0.0f), layout, m_brush.Get());
+	m_rt->DrawTextLayout(D2D1::Point2F(hit->second.x0, 0.0f), layout, m_brush.Get());
 	m_rt->SetTransform(D2D1::Matrix3x2F::Identity());   // 이후 그리기(눈금자/가이드)가 이 변환을 물려받지 않도록 복원
 }
 

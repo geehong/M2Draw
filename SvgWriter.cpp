@@ -557,7 +557,18 @@ void SvgWriter::Visit(TextNode& node) {
 		if (!utfName.empty()) m_output += " m2:name=\"" + EscapeXml(utfName) + "\"";
 	}
 	const float size = node.GetFontSize();
-	m_output += " x=\"0\" y=\"" + FormatFloat(size * TextNode::kAscentRatio) + "\"";
+	// 영역 텍스트: 정렬 기준 x 는 상자 안(왼쪽 0 / 가운데 boxW/2 / 오른쪽 boxW), 점 텍스트는 0
+	const bool area = node.IsAreaText();
+	const float anchorX = !area ? 0.0f : node.GetAlign() == TextAlign::Center ? node.GetBoxWidth() * 0.5f : node.GetAlign() == TextAlign::Right ? node.GetBoxWidth() : 0.0f;
+	const std::string axs = FormatFloat(anchorX);
+	if (area && Meta()) {
+		// 원본 문자열(자동 줄바꿈 전)을 보관: 읽을 때 이것으로 복원 (개행은 &#10; 로 보존)
+		std::string raw = EscapeXml(WideToUtf8(node.GetText()));
+		std::string enc;
+		for (char c : raw) { if (c == '\n') enc += "&#10;"; else enc += c; }
+		m_output += " m2:boxW=\"" + FormatFloat(node.GetBoxWidth()) + "\" m2:text=\"" + enc + "\"";
+	}
+	m_output += " x=\"" + axs + "\" y=\"" + FormatFloat(size * TextNode::kAscentRatio) + "\"";
 	m_output += " font-family=\"" + EscapeXml(WideToUtf8(node.GetFontFamily())) + "\" font-size=\"" + FormatFloat(size) + "\"";
 	if (node.IsBold()) m_output += " font-weight=\"bold\"";
 	if (node.IsItalic()) m_output += " font-style=\"italic\"";
@@ -581,19 +592,25 @@ void SvgWriter::Visit(TextNode& node) {
 	}
 	m_output += " xml:space=\"preserve\">";
 
-	// 여러 줄은 <tspan x dy> 로 (첫 줄은 본문)
-	const std::string utf = WideToUtf8(node.GetText());
-	size_t pos = 0;
-	bool first = true;
-	while (pos <= utf.size()) {
-		size_t nl = utf.find('\n', pos);
-		if (nl == std::string::npos) nl = utf.size();
-		const std::string line = EscapeXml(utf.substr(pos, nl - pos));
-		if (first) m_output += line;
-		else m_output += "<tspan x=\"0\" dy=\"" + FormatFloat(size * TextNode::kLineHeightRatio) + "\">" + line + "</tspan>";
-		first = false;
-		pos = nl + 1;
-		if (nl == utf.size()) break;
+	// 여러 줄은 <tspan x dy> 로 (첫 줄은 본문). 영역 텍스트는 자동 줄바꿈 결과(줄 단위)로 출력해 SVG 뷰어에서도 같은 줄 나눔
+	std::vector<std::string> lines;
+	if (area) {
+		for (const auto& l : PathOp::WrapLines(node)) lines.push_back(WideToUtf8(l));
+	} else {
+		const std::string utf = WideToUtf8(node.GetText());
+		size_t pos = 0;
+		while (pos <= utf.size()) {
+			size_t nl = utf.find('\n', pos);
+			if (nl == std::string::npos) nl = utf.size();
+			lines.push_back(utf.substr(pos, nl - pos));
+			pos = nl + 1;
+			if (nl == utf.size()) break;
+		}
+	}
+	for (size_t i = 0; i < lines.size(); ++i) {
+		const std::string line = EscapeXml(lines[i]);
+		if (i == 0) m_output += line;
+		else m_output += "<tspan x=\"" + axs + "\" dy=\"" + FormatFloat(size * TextNode::kLineHeightRatio) + "\">" + line + "</tspan>";
 	}
 	m_output += "</text>\n";
 }

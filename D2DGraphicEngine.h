@@ -677,6 +677,11 @@ public:
 	void SetItalic(bool v)                    { m_italic = v; m_mw = m_mh = 0.0f; Invalidate(); }
 	TextAlign GetAlign() const                { return m_align; }
 	void SetAlign(TextAlign v)                { m_align = v; Invalidate(); }
+	// 영역 텍스트(Area Text): 폭이 정해진 상자 안에서 자동 줄바꿈. 0 이면 점 텍스트(Point Text). 영역 텍스트의 로컬 원점은 상자의 왼쪽 위,
+	// 정렬(왼쪽/가운데/오른쪽)은 상자 폭 안에서 적용된다.
+	float GetBoxWidth() const                 { return m_boxW; }
+	bool  IsAreaText() const                  { return m_boxW > 0.0f; }
+	void  SetBoxWidth(float v)                { m_boxW = v > 1.0f ? v : 0.0f; m_mw = m_mh = 0.0f; Invalidate(); }
 
 	// 렌더러가 잰 크기 (변경 카운터를 올리지 않음: 화면 갱신의 부산물)
 	void SetMeasured(float w, float h)        { m_mw = w; m_mh = h; }
@@ -691,6 +696,7 @@ private:
 	bool         m_bold = false;
 	bool         m_italic = false;
 	TextAlign    m_align = TextAlign::Left;
+	float        m_boxW = 0.0f;
 	float        m_mw = 0.0f, m_mh = 0.0f;   // 측정값 (0 = 아직 안 잼)
 };
 
@@ -1108,6 +1114,9 @@ public:
 
 	// 이미지 바이트의 원본 픽셀 크기 (WIC). 실패하면 false
 	static bool DecodeImageInfo(const std::vector<uint8_t>& bytes, int& w, int& h);
+
+	// 영역 텍스트의 자동 줄바꿈 결과 (줄 단위 문자열, 끝 공백/개행 제거). 점 텍스트는 \n 기준 줄
+	static std::vector<std::wstring> WrapLines(const TextNode& text);
 
 	// 텍스트 크기를 DirectWrite 로 즉시 재서 노드에 기록 (속성창에서 글꼴/크기를 바꾼 직후 W/H 를 바로 갱신하기 위함)
 	static void MeasureText(TextNode& text);

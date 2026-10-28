@@ -682,6 +682,8 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 
 	// 외부 SVG 지원: <style> CSS 규칙, 그룹 표현 속성 상속 스택, viewBox 스케일
 	TextNode* curText = nullptr;   // 읽는 중인 <text>
+	std::wstring curTextRaw;        // m2:text (영역 텍스트의 원본 문자열). 있으면 </text> 에서 자식 텍스트 대신 사용
+	bool curTextHasRaw = false;
 	bool inStyleElem = false;
 	std::wstring styleText;
 	std::vector<CssRule> cssRules;
@@ -866,8 +868,16 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 				if (attrs.count(L"opacity")) tn->SetOpacity(std::wcstof(attrs[L"opacity"].c_str(), nullptr));
 
 				// x/y(기준선) -> 상자 위쪽. 요소의 transform 보다 먼저 적용
-				const float x = attrs.count(L"x") ? ParseLength(attrs[L"x"], 0.0f) : 0.0f;
+				float x = attrs.count(L"x") ? ParseLength(attrs[L"x"], 0.0f) : 0.0f;
 				const float y = attrs.count(L"y") ? ParseLength(attrs[L"y"], 0.0f) : 0.0f;
+				curTextHasRaw = false;
+				if (attrs.count(L"m2:boxW")) {
+					// 영역 텍스트: x 는 정렬 기준점이므로 상자 왼쪽 x 로 환산
+					const float bw = ParseLength(attrs[L"m2:boxW"], 0.0f);
+					tn->SetBoxWidth(bw);
+					if (tn->GetAlign() == TextAlign::Center) x -= bw * 0.5f; else if (tn->GetAlign() == TextAlign::Right) x -= bw;
+					if (attrs.count(L"m2:text")) { curTextRaw = attrs[L"m2:text"]; curTextHasRaw = true; }
+				}
 				Matrix2D xf = Matrix2D::Translation(x, y - size * TextNode::kAscentRatio);
 				if (attrs.count(L"transform")) xf = xf * ParseTransformMatrix(attrs[L"transform"]);
 				tn->SetTransform(xf);
@@ -1218,7 +1228,12 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 			pReader->GetLocalName(&localName, &nameLen);
 			if (localName) {
 				std::wstring elemName(localName, nameLen);
-				if (elemName == L"text" && curText) {
+				if (elemName == L"text" && curText && curTextHasRaw) {
+					curText->SetText(curTextRaw);   // 영역 텍스트: 저장된 원본 문자열 복원 (줄바꿈은 다시 계산)
+					curTextHasRaw = false;
+					curText = nullptr;
+				}
+				else if (elemName == L"text" && curText) {
 					std::wstring tx = curText->GetText();
 					while (!tx.empty() && (tx.back() == L' ' || tx.back() == L'\n')) tx.pop_back();
 					curText->SetText(tx);

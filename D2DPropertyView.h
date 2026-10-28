@@ -154,6 +154,8 @@ protected:
 	std::shared_ptr<M2DrawComboBox>     m_cboTextAlign;
 	std::shared_ptr<M2DrawCheckBox>     m_chkBold;
 	std::shared_ptr<M2DrawCheckBox>     m_chkItalic;
+	std::shared_ptr<M2DrawCheckBox>     m_chkTextArea;     // 영역 텍스트(자동 줄바꿈) 사용
+	std::shared_ptr<M2DrawNumericInput> m_spinTextBoxW;    // 영역 텍스트 상자 폭
 	void ApplyTextProps(const std::function<void(ge::TextNode&)>& fn);
 
 	// 이미지 전용 (Transform 바로 위)

@@ -89,8 +89,17 @@ public:
 	wchar_t GetShortcut() const override { return L'T'; }
 	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_IBEAM); }
 
-	// 캔버스를 클릭하면 그 위치에 텍스트를 만들고 (입력 대화상자) 선택 도구로 돌아감
+	// 클릭: 그 위치에 점 텍스트, 드래그: 드래그한 폭의 영역 텍스트(자동 줄바꿈). 입력 대화상자 후 선택 도구로 돌아감
 	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	bool HasActiveShape() const override { return m_drag; }
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+private:
+	bool          m_drag = false;
+	D2D1_POINT_2F m_startW{}, m_curW{};
+	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
 };
 
 class PaintBucketTool : public ITool
