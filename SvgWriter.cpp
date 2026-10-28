@@ -536,7 +536,8 @@ void SvgWriter::Visit(ImageNode& node) {
 		std::string utfName = WideToUtf8(node.GetName());
 		if (!utfName.empty()) m_output += " m2:name=\"" + EscapeXml(utfName) + "\"";
 	}
-	m_output += " x=\"0\" y=\"0\" width=\"" + FormatFloat(node.GetWidth()) + "\" height=\"" + FormatFloat(node.GetHeight()) + "\" preserveAspectRatio=\"none\"";
+	m_output += " x=\"0\" y=\"0\" width=\"" + FormatFloat(node.GetWidth()) + "\" height=\"" + FormatFloat(node.GetHeight()) + "\" preserveAspectRatio=\"" +
+		std::string(node.GetFit() == ImageFit::Fit ? "xMidYMid meet" : node.GetFit() == ImageFit::Fill ? "xMidYMid slice" : "none") + "\"";
 	if (node.GetOpacity() < 0.999f) m_output += " opacity=\"" + FormatFloat(node.GetOpacity()) + "\"";
 	m_output += BuildCommonState(node, true, Meta());
 	m_output += BuildCssStyle(node);

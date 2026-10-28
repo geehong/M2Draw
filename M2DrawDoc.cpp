@@ -812,29 +812,35 @@ bool CM2DrawDoc::ConvertTextToPath()
 
 void CM2DrawDoc::OnTextToPath() { ConvertTextToPath(); }
 
-// 이미지 파일을 읽어 문서 중앙에(문서 크기의 60% 이내로 맞춰) ImageNode 로 추가
-void CM2DrawDoc::OnFilePlaceImage()
+// 이미지 파일을 읽어 ImageData 로 (실패하면 메시지 후 nullptr)
+static std::shared_ptr<ge::ImageData> LoadImageFile(const CString& path)
 {
-	CFileDialog dlg(TRUE, nullptr, nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
-		_T("이미지 파일 (*.png;*.jpg;*.jpeg;*.gif;*.bmp)|*.png;*.jpg;*.jpeg;*.gif;*.bmp|모든 파일 (*.*)|*.*||"));
-	if (dlg.DoModal() != IDOK) return;
-
 	auto data = std::make_shared<ge::ImageData>();
 	{
 		CFile f;
-		if (!f.Open(dlg.GetPathName(), CFile::modeRead | CFile::shareDenyWrite)) { AfxMessageBox(_T("이미지 파일을 열 수 없습니다.")); return; }
+		if (!f.Open(path, CFile::modeRead | CFile::shareDenyWrite)) { AfxMessageBox(_T("이미지 파일을 열 수 없습니다.")); return nullptr; }
 		const ULONGLONG len = f.GetLength();
-		if (len == 0 || len > 256ull * 1024 * 1024) { AfxMessageBox(_T("이미지 파일 크기가 올바르지 않습니다.")); return; }
+		if (len == 0 || len > 256ull * 1024 * 1024) { AfxMessageBox(_T("이미지 파일 크기가 올바르지 않습니다.")); return nullptr; }
 		data->bytes.resize(static_cast<size_t>(len));
 		f.Read(data->bytes.data(), static_cast<UINT>(len));
 	}
 	int pw = 0, ph = 0;
-	if (!ge::PathOp::DecodeImageInfo(data->bytes, pw, ph)) { AfxMessageBox(_T("지원하지 않는 이미지 형식이거나 손상된 파일입니다.")); return; }
+	if (!ge::PathOp::DecodeImageInfo(data->bytes, pw, ph)) { AfxMessageBox(_T("지원하지 않는 이미지 형식이거나 손상된 파일입니다.")); return nullptr; }
 	data->pixelW = pw; data->pixelH = ph;
-	CString ext = dlg.GetFileExt(); ext.MakeLower();
+	CString ext = path.Mid(path.ReverseFind(_T('.')) + 1); ext.MakeLower();
 	data->mime = (ext == _T("jpg") || ext == _T("jpeg")) ? "image/jpeg" : ext == _T("gif") ? "image/gif" : ext == _T("bmp") ? "image/bmp" : "image/png";
+	return data;
+}
 
-	float w = static_cast<float>(pw), h = static_cast<float>(ph);
+static const TCHAR* kImageFilter = _T("이미지 파일 (*.png;*.jpg;*.jpeg;*.gif;*.bmp)|*.png;*.jpg;*.jpeg;*.gif;*.bmp|모든 파일 (*.*)|*.*||");
+
+// 이미지 파일을 문서 중앙에(문서 크기의 60% 이내로 맞춰) ImageNode 로 추가
+bool CM2DrawDoc::PlaceImageFile(const CString& path)
+{
+	auto data = LoadImageFile(path);
+	if (!data) return false;
+
+	float w = static_cast<float>(data->pixelW), h = static_cast<float>(data->pixelH);
 	const float maxW = m_doc.width * 0.6f, maxH = m_doc.height * 0.6f;
 	const float sc = (std::min)(1.0f, (std::min)(maxW / w, maxH / h));
 	w *= sc; h *= sc;
@@ -842,10 +848,14 @@ void CM2DrawDoc::OnFilePlaceImage()
 	auto im = std::make_unique<ge::ImageNode>();
 	im->SetData(data);
 	im->SetSize(w, h);
-	im->SetName((LPCTSTR)dlg.GetFileTitle());
+	const int slash = (std::max)(path.ReverseFind(_T('\\')), path.ReverseFind(_T('/')));
+	CString title = path.Mid(slash + 1);
+	const int dot = title.ReverseFind(_T('.'));
+	if (dot > 0) title = title.Left(dot);
+	im->SetName((LPCTSTR)title);
 	im->SetTransform(ge::Matrix2D::Translation((m_doc.width - w) * 0.5f, (m_doc.height - h) * 0.5f));
 	ge::Node* added = m_doc.AddShape(std::move(im));
-	if (!added) return;
+	if (!added) return false;
 	m_doc.SetSelection({ added });
 	SetModifiedFlag(TRUE);
 	CommitUndoPoint(L"이미지 가져오기");
@@ -855,6 +865,33 @@ void CM2DrawDoc::OnFilePlaceImage()
 	CWnd* pMainWnd = AfxGetMainWnd();
 	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
 		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+void CM2DrawDoc::OnFilePlaceImage()
+{
+	CFileDialog dlg(TRUE, nullptr, nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY, kImageFilter);
+	if (dlg.DoModal() != IDOK) return;
+	PlaceImageFile(dlg.GetPathName());
+}
+
+// 선택된 이미지의 데이터만 교체: 위치/폭/맞춤은 유지하고 높이는 새 이미지 비율로 맞춤
+bool CM2DrawDoc::ReplaceSelectedImage()
+{
+	auto* im = dynamic_cast<ge::ImageNode*>(GetPrimarySelection());
+	if (!im) return false;
+	CFileDialog dlg(TRUE, nullptr, nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY, kImageFilter);
+	if (dlg.DoModal() != IDOK) return false;
+	auto data = LoadImageFile(dlg.GetPathName());
+	if (!data) return false;
+	im->SetData(data);
+	if (data->pixelW > 0) im->SetSize(im->GetWidth(), im->GetWidth() * static_cast<float>(data->pixelH) / static_cast<float>(data->pixelW));
+	SetModifiedFlag(TRUE);
+	CommitUndoPoint(L"이미지 교체");
+	LogAppEvent(_T("[이미지] 이미지 교체 완료"));
+	UpdateShapePropertiesSelection(im, this);
+	UpdateAllViews(nullptr);
+	return true;
 }
 void CM2DrawDoc::OnUpdateTextToPath(CCmdUI* pCmdUI) { pCmdUI->Enable(CanConvertTextToPath()); }
 

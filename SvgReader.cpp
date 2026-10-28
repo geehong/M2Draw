@@ -810,6 +810,14 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 						if (w <= 0.0f) w = data->pixelW > 0 ? static_cast<float>(data->pixelW) : 100.0f;
 						if (h <= 0.0f) h = data->pixelH > 0 ? static_cast<float>(data->pixelH) : 100.0f;
 						im->SetSize(w, h);
+						if (attrs.count(L"preserveAspectRatio")) {
+							const std::wstring& par = attrs[L"preserveAspectRatio"];
+							if (par.find(L"slice") != std::wstring::npos) im->SetFit(ImageFit::Fill);
+							else if (par.find(L"none") != std::wstring::npos) im->SetFit(ImageFit::Stretch);
+							else im->SetFit(ImageFit::Fit);   // 속성이 있으면 기본값은 meet
+						} else {
+							im->SetFit(ImageFit::Fit);   // SVG 기본 preserveAspectRatio = xMidYMid meet
+						}
 						im->SetData(data);
 						if (attrs.count(L"opacity")) im->SetOpacity(std::wcstof(attrs[L"opacity"].c_str(), nullptr));
 						const float x = attrs.count(L"x") ? ParseLength(attrs[L"x"], 0.0f) : 0.0f;

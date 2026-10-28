@@ -1218,6 +1218,20 @@ bool RunPureModelVerification(std::wstring* failure)
 			GE_CHECK(found->GetData() && found->GetData()->bytes == im->GetData()->bytes, L"왕복 후 이미지 바이트가 달라짐");
 		}
 
+		// objectFit 왕복: <image> 에 preserveAspectRatio 가 없으면 SVG 기본값(meet = Fit)
+		GE_CHECK(im->GetFit() == ImageFit::Fit, L"preserveAspectRatio 없는 <image> 는 Fit(meet) 이어야 함");
+		im->SetFit(ImageFit::Fill);
+		{
+			const std::string o2 = iw.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+			GE_CHECK(o2.find("xMidYMid slice") != std::string::npos, L"Fill 이 slice 로 출력되지 않음");
+			Document b2;
+			GE_CHECK(reader.ReadFromString(o2, b2), L"Fill 이미지 SVG 읽기 실패");
+			GE_CHECK(static_cast<ImageNode*>(b2.GetLayers()[0]->GetChildren()[0].get())->GetFit() == ImageFit::Fill, L"Fill 왕복이 틀림");
+			im->SetFit(ImageFit::Stretch);
+			const std::string o3 = iw.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+			GE_CHECK(o3.find("preserveAspectRatio=\"none\"") != std::string::npos, L"Stretch 가 none 으로 출력되지 않음");
+		}
+
 		// Undo: 스냅샷으로 복원해도 이미지가 남아야 함
 		UndoManager um;
 		um.Reset(d);

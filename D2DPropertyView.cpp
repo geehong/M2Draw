@@ -302,6 +302,23 @@ bool CD2DPropertyView::IsGroupSelected() const
 	return n && n->Kind() == ge::NodeKind::Group;
 }
 
+bool CD2DPropertyView::IsImageSelected() const
+{
+	ge::Node* n = GetSelectedShape();
+	return n && n->Kind() == ge::NodeKind::Image;
+}
+
+void CD2DPropertyView::ApplyImageProps(const std::function<void(ge::ImageNode&)>& fn)
+{
+	if (m_bUpdating || !m_pActiveDoc) return;
+	auto* im = dynamic_cast<ge::ImageNode*>(GetSelectedShape());
+	if (!im) return;
+	fn(*im);
+	m_pActiveDoc->UpdateAllViews(nullptr);
+	UpdateShapePropertiesLight(im, m_pActiveDoc);   // W/H 갱신
+	SafeInvalidate(FALSE);
+}
+
 bool CD2DPropertyView::IsTextSelected() const
 {
 	ge::Node* n = GetSelectedShape();
@@ -1020,6 +1037,39 @@ void CD2DPropertyView::InitControls()
 		m_cboTextAlign->AddItem(L"Center");
 		m_cboTextAlign->AddItem(L"Right");
 		m_cboTextAlign->SetCurSel(0, false);
+		// 이미지 속성 (이미지가 선택되었을 때만 표시)
+		m_lblImage = std::make_shared<M2DrawLabel>(L"● Image (Fit, Ratio, Replace)");
+		m_pCurrentPanel->AddChild(m_lblImage);
+		m_lblImageInfo = std::make_shared<M2DrawLabel>(L"");
+		m_pCurrentPanel->AddChild(m_lblImageInfo);
+
+		m_btnImageRatio = std::make_shared<M2DrawButton>(L"Original Ratio");
+		m_btnImageRatio->SetOnClick([this](M2DrawButton*) {
+			ApplyImageProps([](ge::ImageNode& im) {
+				if (im.GetData() && im.GetData()->pixelW > 0 && im.GetData()->pixelH > 0)
+					im.SetSize(im.GetWidth(), im.GetWidth() * static_cast<float>(im.GetData()->pixelH) / static_cast<float>(im.GetData()->pixelW));
+			});
+		});
+		m_pCurrentPanel->AddChild(m_btnImageRatio);
+
+		m_btnImageReplace = std::make_shared<M2DrawButton>(L"Replace...");
+		m_btnImageReplace->SetOnClick([this](M2DrawButton*) {
+			if (m_pActiveDoc) { m_pActiveDoc->ReplaceSelectedImage(); SafeInvalidate(FALSE); }
+		});
+		m_pCurrentPanel->AddChild(m_btnImageReplace);
+
+		m_cboImageFit = std::make_shared<M2DrawComboBox>();
+		m_cboImageFit->SetItemHeight(20.0f);
+		m_cboImageFit->AddItem(L"Stretch");
+		m_cboImageFit->AddItem(L"Fit (contain)");
+		m_cboImageFit->AddItem(L"Fill (cover)");
+		m_cboImageFit->SetCurSel(0, false);
+		m_cboImageFit->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 2) return;
+			ApplyImageProps([sel](ge::ImageNode& im) { im.SetFit(static_cast<ge::ImageFit>(sel)); });
+		});
+		m_pCurrentPanel->AddChild(m_cboImageFit);
+
 		m_cboTextAlign->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
 			if (sel < 0 || sel > 2) return;
 			ApplyTextProps([sel](ge::TextNode& t) { t.SetAlign(static_cast<ge::TextAlign>(sel)); });
@@ -1495,6 +1545,27 @@ void CD2DPropertyView::SyncControlsFromData()
 		if (m_cboBlend && IsGroupSelected())
 			m_cboBlend->SetCurSel(static_cast<int>(GetSelectedShape()->GetBlendMode()), false);
 
+		// 이미지: 원본 크기/형식 표시와 맞춤 콤보 동기화
+		if (auto* im = dynamic_cast<ge::ImageNode*>(GetSelectedShape()))
+		{
+			const bool prevUpdating = m_bUpdating;
+			m_bUpdating = true;
+			if (m_cboImageFit) m_cboImageFit->SetCurSel(static_cast<int>(im->GetFit()), false);
+			if (m_lblImageInfo)
+			{
+				CString info;
+				if (im->GetData())
+				{
+					CString mime(im->GetData()->mime.c_str());
+					mime.Replace(_T("image/"), _T(""));
+					info.Format(_T("Original %d x %d px  (%s, %.0f KB)"), im->GetData()->pixelW, im->GetData()->pixelH, (LPCTSTR)mime.MakeUpper(),
+						im->GetData()->bytes.size() / 1024.0);
+				}
+				m_lblImageInfo->SetText((LPCTSTR)info);
+			}
+			m_bUpdating = prevUpdating;
+		}
+
 		// 텍스트: 컨트롤 값을 노드 현재 값으로 맞춤 (콜백 억제)
 		if (auto* tn = dynamic_cast<ge::TextNode*>(GetSelectedShape()))
 		{
@@ -1877,6 +1948,26 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 				if (m_chkBold)      m_chkBold->SetBounds(left, y, left + halfTW, y + 20.0f);
 				if (m_chkItalic)    m_chkItalic->SetBounds(left + halfTW + 6.0f, y, right, y + 20.0f);
 				y += 26.0f;
+			}
+		}
+
+		// 이미지 속성: Transform 바로 위 (이미지가 선택된 경우만)
+		{
+			const bool isImage = IsImageSelected();
+			if (m_lblImage)         m_lblImage->SetVisible(isImage);
+			if (m_lblImageInfo)     m_lblImageInfo->SetVisible(isImage);
+			if (m_cboImageFit)      m_cboImageFit->SetVisible(isImage);
+			if (m_btnImageRatio)    m_btnImageRatio->SetVisible(isImage);
+			if (m_btnImageReplace)  m_btnImageReplace->SetVisible(isImage);
+			if (isImage)
+			{
+				const float halfIW = (contentW - 6.0f) * 0.5f;
+				if (m_lblImage)      { m_lblImage->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+				if (m_lblImageInfo)  { m_lblImageInfo->SetBounds(left, y, right, y + 18.0f); y += 22.0f; }
+				if (m_cboImageFit)   { m_cboImageFit->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+				if (m_btnImageRatio)   m_btnImageRatio->SetBounds(left, y, left + halfIW, y + 24.0f);
+				if (m_btnImageReplace) m_btnImageReplace->SetBounds(left + halfIW + 6.0f, y, right, y + 24.0f);
+				y += 30.0f;
 			}
 		}
 

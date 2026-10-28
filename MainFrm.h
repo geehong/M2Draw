@@ -78,6 +78,7 @@ protected:
 	afx_msg void OnOptionBarCommit(UINT nID);
 	afx_msg void OnUpdateOptionBar(CCmdUI* pCmdUI);
 	afx_msg void OnSubToolCommand(UINT nID);
+	afx_msg void OnDropFiles(HDROP hDropInfo);
 	afx_msg void OnSubPolyline();
 	afx_msg void OnUpdateSubValue(CCmdUI* pCmdUI);
 	afx_msg void OnSubOutline();

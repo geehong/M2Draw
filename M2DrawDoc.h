@@ -78,6 +78,8 @@ public:
 	bool SmoothPath(float tolerance);
 	bool ConvertTextToPath();
 	afx_msg void OnFilePlaceImage();
+	bool PlaceImageFile(const CString& path);          // 이미지 파일을 문서 중앙에 배치 (메뉴/드래그 앤 드롭 공용)
+	bool ReplaceSelectedImage();                       // 선택된 이미지의 내용을 다른 파일로 교체 (크기/위치/맞춤 유지)
 	bool CanConvertTextToPath() const { return m_doc.CanConvertTextToPath(); }
 	bool SimplifyPath(float tolerance = 2.0f);
 	bool ReversePath();

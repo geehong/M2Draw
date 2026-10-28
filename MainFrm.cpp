@@ -32,6 +32,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_OPT_LABEL, ID_OPT_LAST, &CMainFrame::OnUpdateOptionBar)
 	ON_COMMAND_RANGE(ID_TOOL_RECT, ID_TOOL_ZOOMOUT, &CMainFrame::OnSubToolCommand)
 	ON_COMMAND(ID_TOOL_POLYLINE, &CMainFrame::OnSubPolyline)
+	ON_WM_DROPFILES()
 	ON_COMMAND(ID_SUB_OUTLINE, &CMainFrame::OnSubOutline)
 	ON_COMMAND(ID_SUB_SIMPLIFY, &CMainFrame::OnSubSimplify)
 	ON_COMMAND(ID_SUB_SMOOTH, &CMainFrame::OnSubSmooth)
@@ -726,6 +727,31 @@ void CMainFrame::OnSubCancel()
 {
 	m_subInputMode = SubInputMode::None;
 	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+}
+
+// 이미지 파일을 놓으면 활성 문서에 가져오기, 그 외 파일(SVG 등)은 기본 동작(문서 열기)
+void CMainFrame::OnDropFiles(HDROP hDropInfo)
+{
+	const UINT count = ::DragQueryFile(hDropInfo, 0xFFFFFFFF, nullptr, 0);
+	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
+	bool allImages = pDoc && count > 0;
+	std::vector<CString> files;
+	for (UINT i = 0; i < count; ++i)
+	{
+		TCHAR path[MAX_PATH] = {};
+		::DragQueryFile(hDropInfo, i, path, MAX_PATH);
+		CString p(path), ext = p.Mid(p.ReverseFind(_T('.')) + 1);
+		ext.MakeLower();
+		if (!(ext == _T("png") || ext == _T("jpg") || ext == _T("jpeg") || ext == _T("gif") || ext == _T("bmp"))) allImages = false;
+		files.push_back(p);
+	}
+	if (allImages)
+	{
+		::DragFinish(hDropInfo);
+		for (const CString& f : files) pDoc->PlaceImageFile(f);
+		return;
+	}
+	CMDIFrameWndEx::OnDropFiles(hDropInfo);
 }
 
 void CMainFrame::OnSubPolyline()

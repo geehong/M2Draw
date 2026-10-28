@@ -703,7 +703,10 @@ struct ImageData {
 	int                  pixelW = 0, pixelH = 0;   // 원본 픽셀 크기 (모르면 0)
 };
 
-// 로컬 좌표 (0,0)~(W,H) 를 채우는 이미지 (비율 유지 없이 늘림 = preserveAspectRatio="none")
+// 맞춤 방식 (CSS object-fit / SVG preserveAspectRatio): Stretch = none, Fit = xMidYMid meet (전체가 보이게), Fill = xMidYMid slice (상자를 가득 채우고 넘치는 부분은 잘림)
+enum class ImageFit : uint8_t { Stretch, Fit, Fill };
+
+// 로컬 좌표 (0,0)~(W,H) 상자에 이미지를 맞춰 그림
 class ImageNode : public Node {
 public:
 	ImageNode() { m_style.fill.type = PaintType::None; m_style.stroke.width = 0.0f; }
@@ -720,8 +723,11 @@ public:
 	float GetWidth() const  { return m_w; }
 	float GetHeight() const { return m_h; }
 	void  SetSize(float w, float h) { m_w = (std::max)(1.0f, w); m_h = (std::max)(1.0f, h); Invalidate(); }
+	ImageFit GetFit() const { return m_fit; }
+	void  SetFit(ImageFit f) { m_fit = f; Invalidate(); }
 
 private:
+	ImageFit m_fit = ImageFit::Stretch;
 	std::shared_ptr<const ImageData> m_data;
 	float m_w = 100.0f, m_h = 100.0f;
 };

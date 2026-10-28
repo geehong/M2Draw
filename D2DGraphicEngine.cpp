@@ -2186,8 +2186,25 @@ void D2DRenderer::DrawImageNode(ImageNode& node, const Matrix2D& worldXf, const 
 	}
 	if (!it->second.bitmap) return;   // 디코딩 실패: 아무것도 그리지 않음
 
+	// 맞춤: Stretch 는 상자를 그대로 채움, Fit 은 비율 유지로 전체가 들어가게(여백), Fill 은 비율 유지로 상자를 채우고 원본의 넘치는 부분을 잘라냄
+	ID2D1Bitmap* bmp = it->second.bitmap.Get();
+	const D2D1_SIZE_F sz = bmp->GetSize();
+	const float W = node.GetWidth(), H = node.GetHeight();
+	D2D1_RECT_F dst = D2D1::RectF(0.0f, 0.0f, W, H);
+	D2D1_RECT_F src = D2D1::RectF(0.0f, 0.0f, sz.width, sz.height);
+	if (sz.width > 0.0f && sz.height > 0.0f) {
+		if (node.GetFit() == ImageFit::Fit) {
+			const float s = (std::min)(W / sz.width, H / sz.height);
+			const float dw = sz.width * s, dh = sz.height * s;
+			dst = D2D1::RectF((W - dw) * 0.5f, (H - dh) * 0.5f, (W + dw) * 0.5f, (H + dh) * 0.5f);
+		} else if (node.GetFit() == ImageFit::Fill) {
+			const float s = (std::max)(W / sz.width, H / sz.height);
+			const float sw = W / s, sh = H / s;
+			src = D2D1::RectF((sz.width - sw) * 0.5f, (sz.height - sh) * 0.5f, (sz.width + sw) * 0.5f, (sz.height + sh) * 0.5f);
+		}
+	}
 	m_rt->SetTransform((worldXf * view.ToMatrix()).ToD2D());
-	m_rt->DrawBitmap(it->second.bitmap.Get(), D2D1::RectF(0.0f, 0.0f, node.GetWidth(), node.GetHeight()), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+	m_rt->DrawBitmap(bmp, dst, 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, src);
 	m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
 }
 
