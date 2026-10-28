@@ -303,22 +303,22 @@
 ### Step 3.1 TextNode 모델 + DirectWrite 렌더 & 속성창 UI
 > 선행: 2.0.1(좌표계). Y 반전 뷰포트 아래에서는 텍스트가 거울상이 됨. 모델은 확장 가능하게 `vector<TextRun>`(런별 스타일)로 두고 1차는 단일 런만 UI 노출. 글꼴 폴백 스택(font-family 목록) 속성 포함 (출력 PC 에 글꼴이 없을 때 대비)
 - [x] 3.1.1 `NodeKind::Text` 및 `TextNode` 클래스 구현 (문자열, 글꼴, 크기, 굵기, 정렬, Point/Area 모드) — (완료 2026-10-28) `NodeKind::Text`/`TextNode`(문자열, 글꼴, 크기, 굵기, 기울임, 정렬, 여러 줄). Point 모드만, Area(상자) 모드는 미구현
-- [ ] 3.1.2 DirectWrite(`IDWriteFactory`, `IDWriteTextFormat`, `IDWriteTextLayout`) 렌더러 캐시 파이프라인 구축 — (부분) 그릴 때마다 `IDWriteTextFormat/TextLayout` 생성 후 측정값을 노드에 캐시. 레이아웃/포맷 캐시 파이프라인은 미구현
-- [ ] 3.1.3 변환 행렬(`m_xf`)과 결합된 텍스트 렌더링 및 히트테스트 바운딩 박스 구현 — (부분) 변환 행렬과 함께 렌더링, 선택 도구 히트(글자 상자). 측정 전에는 추정 경계
-- [ ] 3.1.4 **`PropertyView` 텍스트 패널 모드/섹션 구현**: — (미착수) 텍스트 속성창 섹션 없음 — 글꼴/크기/굵기/정렬은 현재 모델과 SVG 로만 지정 가능 — (2026-10-28 대체 구현) 속성창 섹션 대신 텍스트 입력 대화상자에서 내용·글꼴·크기·굵게·기울임·정렬 편집(생성 시, 더블클릭 시). 채우기 색은 기존 속성창 Fill 로 편집. 전용 속성창 섹션은 미구현
+- [x] 3.1.2 DirectWrite(`IDWriteFactory`, `IDWriteTextFormat`, `IDWriteTextLayout`) 렌더러 캐시 파이프라인 구축 — (완료 2026-10-28) 공통 `BuildTextLayout`(그리기/측정/윤곽선/줄바꿈 공용), 노드 버전 키의 레이아웃 캐시(이동/크기 조절 중 재계산 없음)
+- [x] 3.1.3 변환 행렬(`m_xf`)과 결합된 텍스트 렌더링 및 히트테스트 바운딩 박스 구현 — (완료) 변환과 함께 렌더링, 선택 도구 글자 상자 히트, 렌더/속성 변경 직후 즉시 측정(`PathOp::MeasureText`)
+- [ ] 3.1.4 **`PropertyView` 텍스트 패널 모드/섹션 구현**: — (부분 2026-10-28) 속성창 Transform 위 텍스트 섹션: 글꼴 콤보(고정 목록 15종 + 현재 글꼴), 크기, Bold, Italic, 정렬(좌/가운데/우), Wrap(Point↔Area) + 상자 폭 — 실시간 반영. 미구현: 시스템 글꼴 열거, 밑줄, 양쪽 정렬, 자간/줄간격
   - 글꼴 패밀리 콤보박스 (시스템 글꼴 열거)
   - 폰트 크기, 굵기(Bold/Regular), 기울임(Italic), 밑줄 토글
   - 정렬 (좌/가운데/우/양쪽 정렬)
   - 자간(Letter Spacing) 및 줄간격(Line Spacing) 슬라이더/스핀
   - Point Text ↔ Area Box Text 모드 전환 토글
-- [ ] 3.1.5 빌드 확인 및 화면 출력 및 속성창 변경 검증
+- [x] 3.1.5 빌드 확인 및 화면 출력 및 속성창 변경 검증 — (완료) 앱에서 텍스트 생성/표시, 속성창 글꼴·크기·Italic·Wrap 변경이 캔버스와 Transform W/H 에 즉시 반영되는 것 확인
 
 ### Step 3.2 TextTool (인라인 편집, IME)
 - [x] 3.2.1 캔버스 클릭 시 Point Text 생성, 드래그 시 Area Box Text 생성 — (부분) 캔버스 클릭 -> 입력 대화상자 -> Point Text 생성. 드래그 Area Text 는 미구현 — (완료 2026-10-28) 텍스트 도구: 클릭 = 점 텍스트, 드래그 = 영역 텍스트(상자 폭 안에서 자동 줄바꿈, 정렬은 상자 안). 속성창에 Wrap 체크 + 상자 폭 입력
 - [ ] 3.2.2 **1차 구현은 편집용 네이티브 컨트롤(RichEdit/멀티라인 EDIT)을 캔버스 위에 오버레이**하고 확정 시 `TextNode`에 반영 (IME 조합을 직접 그린 편집기에서 완벽히 처리하는 것은 위험도가 매우 높음). 직접 그리는 캐럿/선택 편집기와 TSF 지원은 후속 개선으로 분리 — (대체) 캔버스 오버레이 대신 모달 입력 대화상자(표준 EDIT, 여러 줄)로 1차 구현. 선택된 텍스트 더블클릭으로 재편집
 - [ ] 3.2.3 한글 및 동아시아 IME 조합 문자 완벽 처리(`WM_IME_COMPOSITION`, `WM_IME_CHAR`) — (부분) 표준 EDIT 컨트롤이라 한글 IME 조합은 OS 가 처리. 앱에서 직접 입력해 보는 확인은 하지 않음
 - [ ] 3.2.4 편집 완료(ESC 또는 외곽 클릭) 시 텍스트 커밋 및 Undo 스냅샷 기록
-- [ ] 3.2.5 빌드 확인 및 한글/영문 입력 테스트
+- [x] 3.2.5 빌드 확인 및 한글/영문 입력 테스트 — (완료) 텍스트 도구 입력 대화상자에서 한글/영문 입력 후 화면 표시 확인 (사용자 확인 포함)
 
 ### Step 3.3 텍스트 → 윤곽선 변환 (Convert to Curves)
 - [x] 3.3.1 `IDWriteFontFace::GetGlyphRunOutline` 인터페이스를 통한 벡터 윤곽선 기하학 추출 — (완료) `PathOp::TextToPath`: IDWriteTextRenderer 로 글리프 런 수집 + `GetGlyphRunOutline`
@@ -331,12 +331,12 @@
 - [x] 3.4.2 `ImageNode` 구현: 리소스 참조, 로컬 바운드, `objectFit` 옵션 — (부분) `ImageNode`: 로컬 (0,0)~(W,H) 에 늘려 그림(preserveAspectRatio="none"). objectFit(Fit/Fill/Stretch) 옵션은 미구현 — (완료 2026-10-28 추가) `ImageFit`(Stretch/Fit/Fill) = SVG preserveAspectRatio none/meet/slice. 렌더링은 원본 영역 자르기(slice)로 처리. 앱에서 세 방식 렌더링 확인, 자체 검증 23 에 왕복 포함. (이미지 노드 상자 = W x H)
 - [x] 3.4.3 WIC(Windows Imaging Component)를 이용한 이미지 로딩 및 `ID2D1Bitmap` 렌더링 — (완료) WIC(`CreateDecoderFromStream` + 32bppPBGRA 변환) -> `ID2D1Bitmap`, 렌더 타깃별 캐시. PNG/JPEG 앱 렌더링 확인
 - [x] 3.4.4 **`PropertyView` 이미지 패널 모드/섹션 구현**: 원본 크기 표시, 맞춤 모드(Fit/Fill/Stretch) 콤보, 이미지 교체 버튼 — (미착수) 이미지 속성창 섹션(원본 크기, 맞춤 모드, 교체) 없음 — (완료) 속성창 Transform 위에 Image 섹션: 원본 크기/형식/용량 표시, 맞춤 콤보(Stretch/Fit/Fill), "Original Ratio"(폭 기준 원본 비율), "Replace..."(다른 파일로 교체, 폭/위치/맞춤 유지)
-- [ ] 3.4.5 이미지 불러오기(메뉴/드래그 앤 드롭) 도구 연동 — (부분) 파일 > 이미지 가져오기(Ctrl+Shift+I): 대화상자로 PNG/JPG/GIF/BMP 선택, 문서 60% 이내로 맞춰 중앙 배치. 드래그 앤 드롭은 미구현. 대화상자 경로는 자동 테스트하지 못함 — (2026-10-28 추가) 이미지 파일(PNG/JPG/GIF/BMP)을 창에 드래그 앤 드롭하면 가져오기(문서 중앙 배치), 그 외 파일은 기존대로 문서 열기. 드롭은 자동 테스트하지 못해 직접 확인 필요
-- [ ] 3.4.6 빌드 확인 및 이미지 이동/스케일/회전 및 속성창 검증 — (부분) SVG 왕복·Undo·복제는 자체 검증 23, PNG/JPEG/회전/투명도 렌더링은 앱에서 확인. 이미지 이동/스케일/회전 조작과 속성창은 직접 확인 안 함
+- [x] 3.4.5 이미지 불러오기(메뉴/드래그 앤 드롭) 도구 연동 — (완료) 파일 > 이미지 가져오기(Ctrl+Shift+I) + 창으로 이미지 파일 드래그 앤 드롭(문서 60% 이내, 중앙 배치). 드래그 앤 드롭은 사용자 확인
+- [x] 3.4.6 빌드 확인 및 이미지 이동/스케일/회전 및 속성창 검증 — (완료) 자체 검증 23(왕복/복제/Undo/맞춤), PNG/JPEG/회전/투명도/맞춤 3종 렌더링 확인, 이미지 속성창(원본 크기/맞춤/비율/교체) 동작 (사용자 확인 포함)
 
 
 ### Step 3.5 텍스트/이미지 SVG 출력
-- [ ] 3.5.1 `SvgWriter`에 `TextNode` 직렬화 연동 (`<text>`, `<tspan>`, 글꼴 속성 매핑) — (부분 완료) `<text>`/`<tspan>` 쓰기·읽기 왕복(자체 검증 22, 외부 SVG `<text>` 읽기 포함). 폰트 스택/웹폰트/윤곽선 변환 옵션은 3.5.5 에서
+- [x] 3.5.1 `SvgWriter`에 `TextNode` 직렬화 연동 (`<text>`, `<tspan>`, 글꼴 속성 매핑) — (완료) `<text>`/`<tspan>` 왕복(자체 검증 22, 25), 글꼴 스택, 영역 텍스트, 텍스트 윤곽선 출력(3.5.5)
 - [x] 3.5.2 Area Text의 줄바꿈 계산 결과를 다중 `<tspan>` 또는 윤곽선 출력으로 지원 — (완료) 영역 텍스트는 DirectWrite 줄바꿈 결과를 `<tspan>` 으로 출력(Clean 도 동일 줄 나눔). File/Snapshot 은 m2:boxW + m2:text(원본 문자열)로 왕복
 - [x] 3.5.3 `ImageNode`를 `<image href="data:image/png;base64,...">` 인라인 또는 상대 경로로 직렬화 — (완료) `<image xlink:href="data:...;base64,...">` 출력/읽기 (외부 파일 참조는 읽지 않음). 루트에 xmlns:xlink 선언
 - [x] 3.5.4 빌드 확인 및 브라우저에서 텍스트/이미지가 포함된 SVG 파일 렌더링 검증 — (완료 2026-10-28) Clean 내보내기 결과를 Edge(headless)로 렌더링해 확인: 텍스트(글꼴 스택/영역 줄바꿈/윤곽선), PNG/JPEG(회전·투명도), 이미지 맞춤 3종, 프레임 클립, 클리핑 마스크, 외부 SVG(CSS/호/상대 곡선/변환) 모두 앱 화면과 같게 표시. 확인용 샘플은 환경변수 M2_EXPORT_SAMPLES 로 자체 검증이 생성
