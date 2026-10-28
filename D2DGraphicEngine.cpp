@@ -476,6 +476,12 @@ std::wstring Document::GenerateNodeName(ShapeKind kind) const
 		break;
 	}
 
+	return GenerateNameWithPrefix(prefix);
+}
+
+// "<prefix><N>" 형식의 이름 중 문서 전체에서 N 이 가장 큰 값 + 1 로 새 이름 생성 (rect1, group2 ...)
+std::wstring Document::GenerateNameWithPrefix(const std::wstring& prefix) const
+{
 	// 문서 내 모든 레이어의 자식 노드들을 검색하여 기존 번호 최대값 + 1 결정
 	int maxIdx = 0;
 	std::function<void(const Node*)> scanNode = [&](const Node* n) {
@@ -511,6 +517,11 @@ std::wstring Document::GenerateNodeName(ShapeKind kind) const
 	}
 
 	return prefix + std::to_wstring(maxIdx + 1);
+}
+
+std::wstring Document::GenerateGroupName() const
+{
+	return GenerateNameWithPrefix(L"group");
 }
 
 std::wstring Document::GenerateLayerName() const
@@ -675,22 +686,85 @@ bool Document::GetSelectionBounds(Rect2& out) const
 	return any;
 }
 
+// 그룹화 대상(레이어/부모 없는 노드 제외, 조상이 함께 선택된 노드 제외)이 2개 이상인지
+bool Document::CanGroupSelection() const
+{
+	std::vector<const Node*> sel;
+	for (const Node* n : m_selection)
+		if (n && n->GetParent() && n->Kind() != NodeKind::Layer) sel.push_back(n);
+	int count = 0;
+	for (const Node* n : sel) {
+		bool ancestorSelected = false;
+		for (const GroupNode* p = n->GetParent(); p && !ancestorSelected; p = p->GetParent())
+			if (std::find(sel.begin(), sel.end(), static_cast<const Node*>(p)) != sel.end()) ancestorSelected = true;
+		if (!ancestorSelected) ++count;
+	}
+	return count >= 2;
+}
+
+// 선택에 그룹(레이어 제외)이 하나라도 있는지
+bool Document::CanUngroupSelection() const
+{
+	for (const Node* n : m_selection)
+		if (n && n->Kind() == NodeKind::Group && n->GetParent()) return true;
+	return false;
+}
+
 GroupNode* Document::GroupSelection()
 {
+	// 1) 대상 정리: 레이어/부모 없는 노드 제외, 조상이 함께 선택된 노드는 조상 그룹에 이미 포함되므로 제외
 	std::vector<Node*> sel;
-	for (Node* n : m_selection) if (n->GetParent()) sel.push_back(n);
+	for (Node* n : m_selection)
+		if (n && n->GetParent() && n->Kind() != NodeKind::Layer) sel.push_back(n);
+	auto hasSelectedAncestor = [&](Node* n) {
+		for (GroupNode* p = n->GetParent(); p; p = p->GetParent())
+			if (std::find(sel.begin(), sel.end(), p) != sel.end()) return true;
+		return false;
+	};
+	sel.erase(std::remove_if(sel.begin(), sel.end(), hasSelectedAncestor), sel.end());
 	if (sel.size() < 2) return nullptr;
-	GroupNode* parent = sel[0]->GetParent();
-	for (Node* n : sel) if (n->GetParent() != parent) return nullptr;
-	// z-order 유지
-	std::sort(sel.begin(), sel.end(), [&](Node* a, Node* b) { return parent->IndexOf(a) < parent->IndexOf(b); });
-	const int idx = parent->IndexOf(sel.back());
+
+	// 2) 문서 순서(레이어 -> 자식 인덱스 경로)로 정렬: 맨 아래 -> 맨 위. 부모가 서로 달라도(다른 레이어/그룹) 그룹화 가능
+	auto orderKey = [&](Node* n) {
+		std::vector<int> key;
+		Node* c = n;
+		while (c->GetParent()) { key.push_back(c->GetParent()->IndexOf(c)); c = c->GetParent(); }
+		int layerIdx = 0;
+		for (size_t i = 0; i < m_layers.size(); ++i) if (m_layers[i].get() == c) layerIdx = static_cast<int>(i);
+		key.push_back(layerIdx);
+		std::reverse(key.begin(), key.end());
+		return key;
+	};
+	std::stable_sort(sel.begin(), sel.end(), [&](Node* a, Node* b) { return orderKey(a) < orderKey(b); });
+
+	// 3) 새 그룹은 "맨 위 노드가 있던 부모/위치"에 생성 (그 부모에서 빠져나가는 앞쪽 형제 수만큼 인덱스 보정)
+	Node* top = sel.back();
+	GroupNode* parent = top->GetParent();
+	int insertAt = parent->IndexOf(top);
+	for (Node* n : sel)
+		if (n != top && n->GetParent() == parent && parent->IndexOf(n) < parent->IndexOf(top)) --insertAt;
+
+	// 4) 월드 변환을 기억한 채 분리 -> 새 그룹(항등 변환)에 넣고, 부모가 달라져도 화면 위치가 변하지 않게 로컬 변환 보정
+	struct Item { std::unique_ptr<Node> node; Matrix2D world; };
+	std::vector<Item> items;
+	for (Node* n : sel) {
+		Matrix2D w = n->GetWorldTransform();
+		items.push_back({ n->GetParent()->RemoveChild(n), w });
+	}
+
 	auto g = std::make_unique<GroupNode>();
 	g->m_id = IssueId();
-	g->SetName(L"Group");
+	g->SetName(GenerateGroupName());
 	GroupNode* raw = g.get();
-	for (Node* n : sel) raw->AddChild(parent->RemoveChild(n));
-	parent->AddChild(std::move(g), idx - (int)sel.size() + 1);
+	parent->AddChild(std::move(g), insertAt);
+
+	Matrix2D parentInv = raw->GetWorldTransform();   // 새 그룹은 항등 변환이므로 부모 월드 변환과 같음
+	const bool invertible = parentInv.Invert();
+	for (Item& it : items) {
+		if (invertible) it.node->SetTransform(it.world * parentInv);   // local = world * inverse(부모 월드)
+		raw->AddChild(std::move(it.node));
+	}
+
 	m_selection = { raw };
 	return raw;
 }
@@ -938,7 +1012,8 @@ bool D2DRenderer::Initialize(ID2D1RenderTarget* rt, ID2D1Factory* factory)
 {
 	m_rt = rt;
 	m_factory = factory;
-	m_strokeStyleCache.clear();   // 팩터리가 바뀔 수 있으므로 이전 팩터리의 리소스 폐기
+	m_strokeStyleCache.clear();   // 팩터리/렌더 타깃이 바뀔 수 있으므로 이전 리소스 폐기
+	m_gradientCache.clear();
 	m_brush.Reset();
 	if (!m_rt) return false;
 	return SUCCEEDED(m_rt->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1), &m_brush));
@@ -948,6 +1023,7 @@ void D2DRenderer::Shutdown()
 {
 	m_geoCache.clear();
 	m_strokeStyleCache.clear();
+	m_gradientCache.clear();
 	m_brush.Reset();
 	m_rt = nullptr;
 	m_factory = nullptr;
@@ -982,11 +1058,24 @@ void D2DRenderer::DrawNode(Node& node, const Matrix2D& parentXf, const Viewport&
 {
 	if (!node.IsVisible()) return;
 	const Matrix2D worldXf = node.GetTransform() * parentXf;
+
+	// SVG opacity 의미: 도형(채움+선) / 그룹(모든 자식)을 먼저 하나로 합성한 뒤 불투명도를 한 번만 적용.
+	// 자식마다 알파를 곱하면 겹친 부분이 진해지는 문제가 생김. 레이어는 DrawDocument 가 같은 방식으로 처리.
+	const bool needLayer = m_rt && node.Kind() != NodeKind::Layer && node.GetOpacity() < 0.999f;
+	if (needLayer) {
+		D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters();
+		params.opacity = node.GetOpacity();
+		params.contentBounds = D2D1::InfiniteRect();
+		m_rt->PushLayer(params, nullptr);
+	}
+
 	switch (node.Kind()) {
 	case NodeKind::Path:  DrawPath(static_cast<PathNode&>(node), worldXf, view); break;
 	case NodeKind::Group:
 	case NodeKind::Layer: DrawGroup(static_cast<GroupNode&>(node), worldXf, view); break;
 	}
+
+	if (needLayer) m_rt->PopLayer();
 }
 
 void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const Viewport& view)
@@ -1058,25 +1147,91 @@ ID2D1StrokeStyle* D2DRenderer::GetStrokeStyle(const Stroke& stroke)
 	return raw;
 }
 
+bool D2DRenderer::GetFillBounds(PathNode& node, Rect2& out)
+{
+	ID2D1Geometry* geo = GetGeometry(node);
+	if (!geo) return false;
+	D2D1_RECT_F r{};
+	if (FAILED(geo->GetBounds(nullptr, &r))) return false;
+	out = Rect2{ r.left, r.top, r.right, r.bottom };
+	return true;
+}
+
+ID2D1Brush* D2DRenderer::GetGradientBrush(PathNode& node, const Rect2& bounds)
+{
+	const Gradient& g = node.GetStyle().fill.gradient;
+	const float w = bounds.right - bounds.left;
+	const float h = bounds.bottom - bounds.top;
+	if (!m_rt || !g.IsRenderable() || w < 1e-4f || h < 1e-4f) return nullptr;   // 박스가 0 이면 그라디언트 정의 불가
+
+	GradientCache& c = m_gradientCache[node.GetId()];
+	if (c.brush && c.version == node.GetVersion()) return c.brush.Get();
+
+	// 스톱: offset 정렬/범위 제한은 모델이 보장하지 않을 수 있으므로 복사본을 정규화해서 사용
+	Gradient norm = g;
+	norm.NormalizeStops();
+	std::vector<D2D1_GRADIENT_STOP> stops;
+	stops.reserve(norm.stops.size());
+	for (const GradientStop& s : norm.stops)
+		stops.push_back(D2D1::GradientStop(s.offset, D2D1::ColorF(s.color.r, s.color.g, s.color.b, s.color.a)));
+
+	ComPtr<ID2D1GradientStopCollection> coll;
+	if (FAILED(m_rt->CreateGradientStopCollection(stops.data(), static_cast<UINT32>(stops.size()),
+	                                               D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &coll)))
+		return nullptr;
+
+	// 박스 비율 좌표 -> 도형 로컬 좌표 (브러시는 도형을 그리는 로컬 좌표계에서 해석됨)
+	auto toLocal = [&](Vec2 p) { return D2D1::Point2F(bounds.left + p.x * w, bounds.top + p.y * h); };
+
+	ComPtr<ID2D1Brush> brush;
+	if (norm.kind == Gradient::Kind::Linear) {
+		ComPtr<ID2D1LinearGradientBrush> lin;
+		if (FAILED(m_rt->CreateLinearGradientBrush(
+				D2D1::LinearGradientBrushProperties(toLocal(norm.start), toLocal(norm.end)), coll.Get(), &lin)))
+			return nullptr;
+		brush = lin;
+	} else {
+		const D2D1_POINT_2F center = toLocal(norm.start);
+		const D2D1_POINT_2F focus = toLocal(norm.end);
+		ComPtr<ID2D1RadialGradientBrush> rad;
+		if (FAILED(m_rt->CreateRadialGradientBrush(
+				D2D1::RadialGradientBrushProperties(center, D2D1::Point2F(focus.x - center.x, focus.y - center.y),
+				                                    (std::max)(norm.radius, 0.0001f) * w, (std::max)(norm.radius, 0.0001f) * h),
+				coll.Get(), &rad)))
+			return nullptr;
+		brush = rad;
+	}
+
+	c.version = node.GetVersion();
+	c.brush = brush;
+	return c.brush.Get();
+}
+
 void D2DRenderer::DrawPath(PathNode& node, const Matrix2D& worldXf, const Viewport& view)
 {
 	if (!m_rt || !m_brush) return;
 	ID2D1Geometry* geo = GetGeometry(node);
 	if (!geo) return;
 	const Style& st = node.GetStyle();
-	// 레이어 불투명도는 DrawDocument 의 PushLayer 로 합성되므로 여기서는 레이어 아래(자신 + 그룹)만 곱함
-	// (그룹 불투명도의 레이어 합성 전환은 Phase 2 S2)
-	float op = node.GetOpacity();
-	for (const GroupNode* p = node.GetParent(); p && p->Kind() != NodeKind::Layer; p = p->GetParent())
-		op *= p->GetOpacity();
+	// 노드/그룹/레이어 불투명도는 DrawNode/DrawDocument 의 PushLayer 로 합성되므로 여기서는 색상 알파만 사용
+	const float op = 1.0f;
 
 	m_rt->SetTransform(ToD2D(worldXf * view.ToMatrix()));
 
-	// 채우기: Solid. Gradient 는 렌더링이 Step 2.3 이므로 그때까지 첫 스톱 색으로 대체
+	// 채우기: Solid 또는 Gradient. 그라디언트를 만들 수 없는 경우(스톱 2개 미만, 박스 크기 0)는 첫 스톱 색으로 대체
 	Color fillColor;
 	bool doFill = false;
-	if (st.fill.type == PaintType::Solid)         { fillColor = st.fill.color; doFill = true; }
-	else if (st.fill.type == PaintType::Gradient) { fillColor = st.fill.gradient.FallbackColor(); doFill = true; }
+	if (st.fill.type == PaintType::Solid) {
+		fillColor = st.fill.color; doFill = true;
+	} else if (st.fill.type == PaintType::Gradient) {
+		Rect2 bounds{};
+		ID2D1Brush* gb = GetFillBounds(node, bounds) ? GetGradientBrush(node, bounds) : nullptr;
+		if (gb) {
+			m_rt->FillGeometry(geo, gb);
+		} else {
+			fillColor = st.fill.gradient.FallbackColor(); doFill = true;
+		}
+	}
 	if (doFill && fillColor.a > 0.0f) {
 		m_brush->SetColor(ToD2D(fillColor, op));
 		m_rt->FillGeometry(geo, m_brush.Get());
@@ -1118,8 +1273,9 @@ ComPtr<ID2D1PathGeometry> D2DRenderer::BuildGeometry(const PathNode& node)
 	for (const SubPath& sp : node.GetPaths()) {
 		const auto& n = sp.nodes;
 		if (n.empty()) continue;
-		const bool filled = node.GetStyle().fill.type != PaintType::None;
-		sink->BeginFigure(pt(n[0].anchor), (filled && sp.closed) ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
+		// SVG 규칙: 열린 서브패스도 채우기 대상 (채우기는 시작점과 끝점을 이은 것으로 계산, 선은 열린 채로 그림).
+		// 채우기 여부는 렌더러가 fill.type 으로 결정하므로 지오메트리는 스타일과 무관하게 항상 FILLED
+		sink->BeginFigure(pt(n[0].anchor), D2D1_FIGURE_BEGIN_FILLED);
 		for (size_t i = 1; i < n.size(); ++i) seg(n[i - 1], n[i]);
 		if (sp.closed && n.size() > 1) seg(n.back(), n[0]);
 		sink->EndFigure(sp.closed ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN);

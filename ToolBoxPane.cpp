@@ -1,6 +1,18 @@
 #include "pch.h"
 #include "ToolBoxPane.h"
 #include "M2Draw.h"
+#include "MainFrm.h"
+#include "M2DrawDoc.h"
+
+// 그룹/그룹 해제는 도구가 아니라 동작: 플라이아웃 그룹의 항목으로 ToolType::Action* 를 사용하고, 선택하면 명령을 실행한다
+static bool IsActionType(ToolType t) { return t == ToolType::ActionGroup || t == ToolType::ActionUngroup; }
+static UINT CommandOfType(ToolType t)
+{
+	if (t == ToolType::ActionGroup)   return ID_OBJECT_GROUP;
+	if (t == ToolType::ActionUngroup) return ID_OBJECT_UNGROUP;
+	return 0;
+}
+static const wchar_t* GetFlyoutToolName(ToolType t);
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -20,6 +32,7 @@ BEGIN_MESSAGE_MAP(CToolBoxPane, CDockablePane)
 	ON_WM_LBUTTONUP()
 	ON_WM_TIMER()
 	ON_WM_CAPTURECHANGED()
+	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, &CToolBoxPane::OnToolTipText)
 END_MESSAGE_MAP()
 
 BEGIN_MESSAGE_MAP(CToolFlyoutWnd, CWnd)
@@ -46,8 +59,10 @@ CToolBoxPane::CToolBoxPane() noexcept
 		{ ToolType::Polygon,     L"다각형 (G)",      L'G', CRect() },
 		{ ToolType::Text,        L"텍스트 (T)",      L'T', CRect() },
 		{ ToolType::PaintBucket, L"페인트 통 (K)",   L'K', CRect() },
-		{ ToolType::ZoomIn,      L"돋보기 확대 (Z)", L'Z', CRect() },
-		{ ToolType::ZoomOut,     L"돋보기 축소 (X)", L'X', CRect() }
+		{ ToolType::Gradient,    L"그라디언트 (D)",  L'D', CRect() },
+		{ ToolType::ZoomIn,      L"돋보기 (확대 Z / 축소 X)", L'Z', CRect() },   // 확대/축소 플라이아웃 그룹
+		// 동작 버튼 그룹 (도구가 아님): 그룹화 / 그룹 해제. 도구 묶음과 간격을 둠
+		{ ToolType::ActionGroup, L"그룹 / 그룹 해제",          0, CRect(), {}, 12 }
 	};
 
 	// 사각형 그룹: 사각형 / 삼각형 (마지막 선택은 앱 설정에 저장)
@@ -73,6 +88,22 @@ CToolBoxPane::CToolBoxPane() noexcept
 					break;
 				}
 			}
+		}
+		else if (btn.type == ToolType::ZoomIn)
+		{
+			// 돋보기 그룹: 확대 / 축소
+			btn.subTools = { ToolType::ZoomIn, ToolType::ZoomOut };
+			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("ZoomGroupTool"), static_cast<int>(ToolType::ZoomIn));
+			if (saved == static_cast<int>(ToolType::ZoomOut))
+				btn.type = ToolType::ZoomOut;
+		}
+		else if (btn.type == ToolType::ActionGroup)
+		{
+			// 그룹 동작 그룹: 그룹화 / 그룹 해제 (마지막에 쓴 동작이 대표)
+			btn.subTools = { ToolType::ActionGroup, ToolType::ActionUngroup };
+			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("GroupActionTool"), static_cast<int>(ToolType::ActionGroup));
+			if (saved == static_cast<int>(ToolType::ActionUngroup))
+				btn.type = ToolType::ActionUngroup;
 		}
 	}
 }
@@ -107,11 +138,15 @@ int CToolBoxPane::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 	// ToolManager 변경 알림 등록
 	GetApp()->GetToolManager().AddListener(this);
+
+	EnableToolTips(TRUE);
+	SetTimer(kStateTimer, kStateIntervalMs, nullptr);   // 그룹/그룹 해제 버튼 활성 상태 감시
 	return 0;
 }
 
 void CToolBoxPane::OnDestroy()
 {
+	KillTimer(kStateTimer);
 	GetApp()->GetToolManager().RemoveListener(this);
 	CDockablePane::OnDestroy();
 }
@@ -134,6 +169,8 @@ void CToolBoxPane::OnToolChanged(ToolType newTool)
 
 bool CToolBoxPane::IsButtonActive(const ToolButtonItem& btn, ToolType active) const
 {
+	if (IsActionType(btn.type))
+		return false;   // 동작 버튼은 선택 상태가 없음
 	if (btn.type == active)
 		return true;
 	for (ToolType t : btn.subTools)
@@ -288,6 +325,7 @@ HRESULT CToolBoxPane::CreateDeviceResources()
 
 void CToolBoxPane::DiscardDeviceResources()
 {
+	if (m_pDashStyle) { m_pDashStyle->Release(); m_pDashStyle = nullptr; }
 	for (auto& pair : m_iconNormal)
 	{
 		if (pair.second) { pair.second->Release(); }
@@ -329,10 +367,12 @@ void CToolBoxPane::OnSize(UINT nType, int cx, int cy)
 	int left = (cx - btnSize) / 2;
 	if (left < 2) left = 2;
 
+	int top = startY;
 	for (size_t i = 0; i < m_buttons.size(); ++i)
 	{
-		int top = startY + static_cast<int>(i) * (btnSize + margin);
+		top += m_buttons[i].gapBefore;
 		m_buttons[i].rect = CRect(left, top, left + btnSize, top + btnSize);
+		top += btnSize + margin;
 	}
 }
 
@@ -367,8 +407,10 @@ void CToolBoxPane::OnPaint()
 			static_cast<float>(btn.rect.bottom)
 		);
 
+		const bool isAction = IsActionType(btn.type);
+		const bool actionEnabled = isAction && IsCommandEnabled(CommandOfType(btn.type));
 		bool isSelected = IsButtonActive(btn, activeTool);
-		bool isHover = (i == m_hoverIndex);
+		bool isHover = (i == m_hoverIndex) && (!isAction || actionEnabled);
 
 		// 버튼 배경 그리기
 		if (isSelected)
@@ -391,7 +433,10 @@ void CToolBoxPane::OnPaint()
 		}
 
 		// Direct2D 순수 벡터 지오메트리 아이콘 그리기 (DPI 무관 선명도 보장)
-		DrawButtonIcon(m_pRenderTarget, m_pBrush, btn.type, r, isSelected);
+		if (isAction)
+			DrawActionIcon(m_pRenderTarget, m_pBrush, CommandOfType(btn.type), r, actionEnabled);
+		else
+			DrawButtonIcon(m_pRenderTarget, m_pBrush, btn.type, r, isSelected);
 
 		// 서브도구 그룹 표시: 우하단 작은 삼각형
 		if (!btn.subTools.empty() && m_pD2DFactory)
@@ -717,6 +762,32 @@ void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 		}
 		break;
 	}
+	case ToolType::Gradient: // 그라디언트 도구: 가로 그라디언트 사각형 + 시작/끝 핸들
+	{
+		const D2D1_RECT_F gr = D2D1::RectF(cx - 8.5f, cy - 7.0f, cx + 8.5f, cy + 7.0f);
+		ID2D1GradientStopCollection* coll = nullptr;
+		const D2D1_GRADIENT_STOP gs[2] = { D2D1::GradientStop(0.0f, iconColor), D2D1::GradientStop(1.0f, D2D1::ColorF(iconColor.r, iconColor.g, iconColor.b, 0.08f)) };
+		if (SUCCEEDED(rt->CreateGradientStopCollection(gs, 2, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &coll)) && coll)
+		{
+			ID2D1LinearGradientBrush* lin = nullptr;
+			if (SUCCEEDED(rt->CreateLinearGradientBrush(D2D1::LinearGradientBrushProperties(D2D1::Point2F(gr.left, cy), D2D1::Point2F(gr.right, cy)), coll, &lin)) && lin)
+			{
+				rt->FillRectangle(gr, lin);
+				lin->Release();
+			}
+			coll->Release();
+		}
+		brush->SetColor(iconColor);
+		rt->DrawRectangle(gr, brush, 1.4f);
+		// 시작(사각형) -> 끝(원) 핸들
+		brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+		rt->FillRectangle(D2D1::RectF(gr.left - 1.5f, cy - 2.5f, gr.left + 3.5f, cy + 2.5f), brush);
+		rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(gr.right - 1.0f, cy), 2.8f, 2.8f), brush);
+		brush->SetColor(iconColor);
+		rt->DrawRectangle(D2D1::RectF(gr.left - 1.5f, cy - 2.5f, gr.left + 3.5f, cy + 2.5f), brush, 1.2f);
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(gr.right - 1.0f, cy), 2.8f, 2.8f), brush, 1.2f);
+		break;
+	}
 	default:
 		break;
 	}
@@ -846,13 +917,42 @@ void CToolBoxPane::OnLButtonUp(UINT nFlags, CPoint point)
 			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("RectGroupTool"), static_cast<int>(chosen));
 		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::Polygon)
 			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("PolygonGroupTool"), static_cast<int>(chosen));
-		GetApp()->GetToolManager().SetActiveTool(chosen);
+		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ZoomIn)
+			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("ZoomGroupTool"), static_cast<int>(chosen));
+		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionGroup)
+			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("GroupActionTool"), static_cast<int>(chosen));
+
+		if (IsActionType(chosen))
+		{
+			// 동작: 활성일 때만 실행 (오브젝트 메뉴와 같은 명령 경로 -> 활성 문서가 처리). 활성 도구는 바꾸지 않음
+			const UINT cmd = CommandOfType(chosen);
+			if (IsCommandEnabled(cmd))
+			{
+				if (CWnd* pMain = AfxGetMainWnd())
+					pMain->SendMessage(WM_COMMAND, MAKEWPARAM(cmd, 0), 0);
+				m_enabledMask = ComputeEnabledMask();
+			}
+		}
+		else
+		{
+			GetApp()->GetToolManager().SetActiveTool(chosen);
+		}
 	}
 	Invalidate(FALSE);
 }
 
 void CToolBoxPane::OnTimer(UINT_PTR nIDEvent)
 {
+	if (nIDEvent == kStateTimer)
+	{
+		const UINT mask = ComputeEnabledMask();
+		if (mask != m_enabledMask)
+		{
+			m_enabledMask = mask;
+			Invalidate(FALSE);
+		}
+		return;
+	}
 	if (nIDEvent == kFlyoutTimer)
 	{
 		KillTimer(kFlyoutTimer);
@@ -874,6 +974,101 @@ void CToolBoxPane::OnCaptureChanged(CWnd* pWnd)
 		Invalidate(FALSE);
 	}
 	CDockablePane::OnCaptureChanged(pWnd);
+}
+
+// ---------------------------------------------------------------------------
+// 동작 버튼(그룹 / 그룹 해제) + 툴팁
+// ---------------------------------------------------------------------------
+UINT CToolBoxPane::ComputeEnabledMask() const
+{
+	CMainFrame* pMain = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd());
+	CM2DrawDoc* pDoc = pMain ? pMain->GetActiveM2DrawDoc() : nullptr;
+	UINT mask = 0;
+	if (pDoc)
+	{
+		if (pDoc->CanGroup())   mask |= 1;
+		if (pDoc->CanUngroup()) mask |= 2;
+	}
+	return mask;
+}
+
+bool CToolBoxPane::IsCommandEnabled(UINT commandId) const
+{
+	if (commandId == ID_OBJECT_GROUP)   return (m_enabledMask & 1) != 0;
+	if (commandId == ID_OBJECT_UNGROUP) return (m_enabledMask & 2) != 0;
+	return true;
+}
+
+// 그룹: 실선 상자 안에 겹친 두 사각형 / 그룹 해제: 점선 상자 안에 떨어진 두 사각형
+void CToolBoxPane::DrawActionIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, UINT commandId, D2D1_RECT_F r, bool enabled)
+{
+	const float cx = (r.left + r.right) * 0.5f;
+	const float cy = (r.top + r.bottom) * 0.5f;
+	const bool group = (commandId == ID_OBJECT_GROUP);
+	const D2D1_COLOR_F col = enabled ? D2D1::ColorF(0.25f, 0.28f, 0.35f) : D2D1::ColorF(0.70f, 0.72f, 0.77f);
+
+	if (!group && !m_pDashStyle && m_pD2DFactory)
+	{
+		m_pD2DFactory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+			D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_DASH, 0.0f), nullptr, 0, &m_pDashStyle);
+	}
+
+	brush->SetColor(col);
+	const D2D1_RECT_F outer = D2D1::RectF(cx - 11.0f, cy - 10.0f, cx + 11.0f, cy + 10.0f);
+	rt->DrawRoundedRectangle(D2D1::RoundedRect(outer, 2.0f, 2.0f), brush, 1.3f, group ? nullptr : m_pDashStyle);
+
+	D2D1_RECT_F a, b;
+	if (group)
+	{
+		a = D2D1::RectF(cx - 8.0f, cy - 6.0f, cx + 0.5f, cy + 2.0f);
+		b = D2D1::RectF(cx - 1.5f, cy - 1.5f, cx + 7.0f, cy + 6.5f);
+	}
+	else
+	{
+		a = D2D1::RectF(cx - 8.0f, cy - 7.0f, cx - 1.5f, cy - 0.5f);
+		b = D2D1::RectF(cx + 1.5f, cy + 0.5f, cx + 8.0f, cy + 7.0f);
+	}
+	brush->SetColor(D2D1::ColorF(col.r, col.g, col.b, 0.18f));
+	rt->FillRectangle(b, brush);
+	brush->SetColor(col);
+	rt->DrawRectangle(a, brush, 1.4f);
+	rt->DrawRectangle(b, brush, 1.4f);
+}
+
+INT_PTR CToolBoxPane::OnToolHitTest(CPoint point, TOOLINFO* pTI) const
+{
+	for (size_t i = 0; i < m_buttons.size(); ++i)
+	{
+		if (!m_buttons[i].rect.PtInRect(point))
+			continue;
+		if (pTI)
+		{
+			pTI->hwnd = m_hWnd;
+			pTI->uId = static_cast<UINT_PTR>(i + 1);   // OnToolTipText 에서 버튼 인덱스 + 1 로 해석
+			pTI->uFlags &= ~TTF_IDISHWND;
+			pTI->rect = m_buttons[i].rect;
+			pTI->lpszText = LPSTR_TEXTCALLBACK;
+		}
+		return static_cast<INT_PTR>(i + 1);
+	}
+	return -1;
+}
+
+BOOL CToolBoxPane::OnToolTipText(UINT /*id*/, NMHDR* pNMHDR, LRESULT* pResult)
+{
+	TOOLTIPTEXTW* pTTT = reinterpret_cast<TOOLTIPTEXTW*>(pNMHDR);
+	const UINT_PTR idx = pNMHDR->idFrom;
+	if (idx == 0 || idx > m_buttons.size())
+		return FALSE;
+
+	const ToolButtonItem& tipBtn = m_buttons[idx - 1];
+	if (IsActionType(tipBtn.type))
+		m_tipText = CString(GetFlyoutToolName(tipBtn.type)) + _T("   (오른쪽 삼각형/길게 누르기: 다른 동작)");
+	else
+		m_tipText = tipBtn.name;
+	pTTT->lpszText = const_cast<LPWSTR>(static_cast<LPCWSTR>(m_tipText));
+	*pResult = 0;
+	return TRUE;
 }
 
 void CToolBoxPane::OpenFlyout(int buttonIndex)
@@ -912,6 +1107,10 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	case ToolType::Gear:     return L"기어 (Gear)";
 	case ToolType::Spiral:   return L"스파이럴 (Spiral)";
 	case ToolType::Heart:    return L"하트 (Heart)";
+	case ToolType::ZoomIn:   return L"돋보기 확대 (Z)";
+	case ToolType::ZoomOut:  return L"돋보기 축소 (X)";
+	case ToolType::ActionGroup:   return L"그룹 (Ctrl+G)";
+	case ToolType::ActionUngroup: return L"그룹 해제 (Ctrl+Shift+G)";
 	default:                 return L"";
 	}
 }
@@ -995,6 +1194,8 @@ static bool DrawFlyoutPng(CDC& dc, ToolType t, bool active, CRect box, IWICImagi
 		case ToolType::Gear:     fname = active ? L"gear-line_active.png" : L"gear-line.png"; break;
 		case ToolType::Spiral:   fname = active ? L"spiral-line_active.png" : L"spiral-line.png"; break;
 		case ToolType::Heart:    fname = active ? L"heart-line_active.png" : L"heart-line.png"; break;
+		case ToolType::ZoomIn:   fname = active ? L"zoom-in-line_active.png" : L"zoom-in-line.png"; break;
+		case ToolType::ZoomOut:  fname = active ? L"zoom-out-line_active.png" : L"zoom-out-line.png"; break;
 		default: break;
 		}
 
@@ -1043,6 +1244,21 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color, bool
 	case ToolType::Rect:
 		dc.Rectangle(c.x - 7, c.y - 6, c.x + 8, c.y + 7);
 		break;
+	case ToolType::ActionGroup: // 그룹: 실선 상자 안에 겹친 두 사각형
+		dc.Rectangle(c.x - 9, c.y - 8, c.x + 10, c.y + 9);
+		dc.Rectangle(c.x - 6, c.y - 5, c.x + 2, c.y + 3);
+		dc.Rectangle(c.x - 1, c.y - 1, c.x + 7, c.y + 7);
+		break;
+	case ToolType::ActionUngroup: // 그룹 해제: 점선 상자 안에 떨어진 두 사각형
+	{
+		CPen dotted(PS_DOT, 1, color);
+		CPen* pPrev = dc.SelectObject(&dotted);
+		dc.Rectangle(c.x - 9, c.y - 8, c.x + 10, c.y + 9);
+		dc.SelectObject(pPrev);
+		dc.Rectangle(c.x - 6, c.y - 6, c.x - 1, c.y - 1);
+		dc.Rectangle(c.x + 2, c.y + 2, c.x + 7, c.y + 7);
+		break;
+	}
 	case ToolType::Triangle:
 	{
 		CPoint pts[3] = { CPoint(c.x, c.y - 7), CPoint(c.x + 8, c.y + 6), CPoint(c.x - 8, c.y + 6) };

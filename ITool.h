@@ -75,7 +75,11 @@ enum class ToolType
 	Text,       // T (텍스트 도구)
 	PaintBucket,// K (페인트/채우기 도구)
 	ZoomIn,     // Z (확대 도구)
-	ZoomOut     // X (축소 도구)
+	ZoomOut,    // X (축소 도구)
+	Gradient,   // D (그라디언트 도구) - 값은 앱 설정에 저장되는 기존 도구 값이 바뀌지 않도록 맨 끝에 추가
+	// 아래 둘은 도구가 아니라 도구상자의 "동작" 항목(그룹/그룹 해제)을 플라이아웃 그룹에 담기 위한 표시용 값. 활성 도구가 되지 않음
+	ActionGroup,
+	ActionUngroup
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)
@@ -144,7 +148,7 @@ public:
 	ToolType GetType() const override { return ToolType::Select; }
 	const wchar_t* GetName() const override { return L"선택 도구 (Select)"; }
 	wchar_t GetShortcut() const override { return L'V'; }
-	enum class Mode { None, Moving, Scaling, Rotating, EditNode, Marquee };
+	enum class Mode { None, Moving, Scaling, Rotating, EditNode, Marquee, GradientHandle };
 	enum class Handle { None, TL, T, TR, R, BR, B, BL, L, Rotate };
 
 	HCURSOR GetCursor() const override;
@@ -160,7 +164,7 @@ public:
 	// 문서 선택만 해제 (패널 갱신은 호출 측 책임)
 	void ClearSelection(CM2DrawDoc* pDoc);
 	// 진행 중인 드래그/편집 상태 폐기 (문서가 교체되어 노드 포인터가 무효가 된 경우)
-	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; }
+	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; m_gradShape = nullptr; m_gradHandle = GradHandle::None; }
 
 	Handle GetActiveHandle() const { return m_handle; }
 	void SetActiveHandle(Handle h) { m_handle = h; }
@@ -183,6 +187,13 @@ private:
 	bool           m_hoverIsNode = false;
 	bool           m_hoverOnShape = false; // 스트로크/면 위에 마우스가 올라가 있는지
 
+	// 그라디언트 기즈모 (선택된 단일 도형의 그라디언트 시작/끝/중심/초점/반지름 핸들) — 드래그 동안만 유효
+	enum class GradHandle { None, Start, End, Radius };   // 방사형: Start=중심, End=초점
+	GradHandle        m_gradHandle = GradHandle::None;
+	ge::PathNode*     m_gradShape = nullptr;
+	ge::Rect2         m_gradBounds{};                      // 드래그 시작 시점의 지오메트리 경계 (드래그 중 변하지 않음)
+	void ApplyGradientDrag(const ToolEvent& e);
+
 	static bool IsOpenPath(ge::Node* shape);
 	void ApplyNodeEdit(ge::PathNode* shape, const ToolEvent& e);
 
@@ -191,6 +202,52 @@ private:
 	void ApplyMove(const std::vector<ge::Node*>& selection);
 	void ApplyScale(ge::Node* shape);
 	void ApplyRotate(ge::Node* shape);
+};
+
+// ============================================================================
+// 2-2. 그라디언트 도구 (GradientTool) - 일러스트레이터/잉크스케이프식 전통적인 그라디언트 도구
+//  - 도형을 클릭해 선택, 선택된 도형 위(또는 어디서든)에서 드래그하면 시작점 -> 끝점으로 그라디언트를 만들거나 방향을 다시 지정
+//    (선형: 드래그 방향이 그라디언트 방향, 방사형: 드래그 시작점이 중심, 거리가 반지름)
+//  - 기즈모 핸들(시작/끝/반지름/초점)을 드래그해 조정, 축 위를 클릭하면 컬러 스톱 추가,
+//    스톱 점을 드래그하면 위치 이동, Alt+클릭하면 스톱 삭제 (최소 2개 유지)
+//  - 더블클릭: 선택된 도형에 기본 그라디언트 적용(이미 있으면 기본 방향으로 초기화)
+//  - 그룹 안쪽 도형도 직접 집을 수 있음 (선택 도구와 달리 그룹 단위가 아님)
+// ============================================================================
+class GradientTool : public ITool
+{
+public:
+	ToolType GetType() const override { return ToolType::Gradient; }
+	const wchar_t* GetName() const override { return L"그라디언트 도구 (Gradient)"; }
+	wchar_t GetShortcut() const override { return L'D'; }   // G 는 정다각형 도구가 사용 중
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	bool OnDoubleClicked(CM2DrawDoc* pDoc) override;
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+	// 새로 만드는 그라디언트의 종류 (옵션바의 Linear / Radial 토글)
+	ge::Gradient::Kind GetKind() const { return m_kind; }
+	void SetKind(ge::Gradient::Kind k) { m_kind = k; }
+
+	// 진행 중인 드래그 폐기 (문서가 교체되어 노드가 무효가 된 경우)
+	void ResetInteraction() { m_drag = Drag::None; m_shapeId = 0; m_part = 0; m_stop = -1; m_activeStop = -1; }
+
+private:
+	enum class Drag { None, Create, Part, Stop };
+
+	Drag               m_drag = Drag::None;
+	ge::NodeId         m_shapeId = 0;                 // 드래그 대상 도형 (포인터 대신 ID: Undo 로 문서가 바뀌어도 안전)
+	ge::Rect2          m_bounds{};                    // 드래그 시작 시점의 지오메트리 경계
+	int                m_part = 0;                    // Part 드래그: 1=시작/중심, 2=끝/초점, 3=반지름
+	int                m_stop = -1;                   // Stop 드래그 중인 스톱 인덱스
+	int                m_activeStop = -1;             // 마지막으로 조작한 스톱 (오버레이 강조용)
+	D2D1_POINT_2F      m_downScreen{ 0.0f, 0.0f };
+	D2D1_POINT_2F      m_curScreen{ 0.0f, 0.0f };
+	D2D1_POINT_2F      m_axisA{ 0.0f, 0.0f }, m_axisB{ 0.0f, 0.0f };   // 스톱 드래그 중 기즈모 축(화면 좌표)
+	bool               m_moved = false;
+	ge::Gradient::Kind m_kind = ge::Gradient::Kind::Linear;
 };
 
 // ============================================================================

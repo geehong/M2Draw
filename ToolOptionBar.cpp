@@ -333,8 +333,12 @@ CSize CToolOptionBar::CalcFixedLayout(BOOL bStretch, BOOL bHorz)
 
 void CToolOptionBar::OnToolChanged(ToolType newTool)
 {
-	m_selectedNodeId = 0;
+	// 선택 도구 <-> 그라디언트 도구 전환은 선택을 유지 (선택한 도형을 그대로 그라디언트 도구로 편집)
+	const bool keepSelection = (newTool == ToolType::Gradient || m_curTool == ToolType::Gradient) &&
+		(newTool == ToolType::Select || newTool == ToolType::Gradient);
+	if (!keepSelection) m_selectedNodeId = 0;
 	SetMode(newTool, false);
+	if (keepSelection) return;
 
 	// 도구 전환 시 선택 해제 (현재 활성 문서 기준; m_pDoc 은 닫힌 문서일 수 있으므로 사용하지 않음)
 	CFrameWnd* pMainFrame = DYNAMIC_DOWNCAST(CFrameWnd, AfxGetMainWnd());
@@ -353,6 +357,7 @@ CString CToolOptionBar::GetModeLabel(ToolType tool, bool editing)
 	switch (tool)
 	{
 	case ToolType::Select:   return editing ? L"Selection Edit" : L"Selection";
+	case ToolType::Gradient: return L"Gradient";
 	case ToolType::Pen:      name = L"Path";     break;
 	case ToolType::Rect:     name = L"Rect";     break;
 	case ToolType::Ellipse:  name = L"Ellipse";  break;
@@ -529,6 +534,18 @@ void CToolOptionBar::SetMode(ToolType tool, bool editing)
 		AddEdit(ID_OPT_ROT, L"Angle°", 60);
 		break;
 
+	case ToolType::Gradient:
+	{
+		// 그라디언트 도구: 새로 만들 그라디언트의 종류 토글 + 사용법 안내
+		GradientTool* pGrad = dynamic_cast<GradientTool*>(GetApp()->GetToolManager().GetActiveTool());
+		const bool radial = pGrad && pGrad->GetKind() == ge::Gradient::Kind::Radial;
+		AddButton(ID_OPT_GRAD_LINEAR, radial ? L"[  Linear  ]" : L"[● Linear]");
+		AddButton(ID_OPT_GRAD_RADIAL, radial ? L"[● Radial]" : L"[  Radial  ]");
+		InsertSeparator();
+		AddLabel(L"Drag: set direction   Click line: add stop   Alt+click stop: remove   Double-click: default");
+		break;
+	}
+
 	default:
 		break;
 	}
@@ -619,6 +636,14 @@ void CToolOptionBar::SyncSelection(CM2DrawDoc* pDoc, ge::Node* pShape)
 {
 	m_pDoc = pDoc;
 	m_selectedNodeId = (pDoc && pShape) ? pShape->GetId() : 0;
+
+	// 그라디언트 도구는 도형 편집용 옵션(X/Y/W/H 등)으로 모드를 바꾸지 않고 자신의 옵션(Linear/Radial)을 유지
+	if (GetApp()->GetToolManager().GetActiveType() == ToolType::Gradient)
+	{
+		if (m_curTool != ToolType::Gradient || m_bEditing)
+			SetMode(ToolType::Gradient, false);
+		return;
+	}
 
 	ge::Node* pBaseShape = GetSelectedShape();
 	if (!pBaseShape)
@@ -914,6 +939,26 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 
 	// 이 함수는 return 이 많으므로 범위 가드로 어느 경로로 끝나든 편집 결과를 Undo 이력에 기록
 	struct UndoCommitGuard { ~UndoCommitGuard() { CommitActiveDocUndo(L"옵션 변경"); } } undoGuard;
+
+	// 0. 그라디언트 도구의 Linear / Radial 토글: 새로 만들 그라디언트 종류. 선택된 그라디언트 도형이 있으면 같이 변환
+	if (id == ID_OPT_GRAD_LINEAR || id == ID_OPT_GRAD_RADIAL)
+	{
+		const ge::Gradient::Kind kind = (id == ID_OPT_GRAD_RADIAL) ? ge::Gradient::Kind::Radial : ge::Gradient::Kind::Linear;
+		if (GradientTool* pGrad = dynamic_cast<GradientTool*>(GetApp()->GetToolManager().GetActiveTool()))
+			pGrad->SetKind(kind);
+
+		if (ge::PathNode* ps = dynamic_cast<ge::PathNode*>(GetSelectedShape()))
+		{
+			if (ps->GetStyle().fill.type == ge::PaintType::Gradient && ps->GetStyle().fill.gradient.kind != kind)
+			{
+				ps->GetStyleRef().fill.gradient.SetKind(kind);   // 스톱은 유지, 방향/반지름은 종류별 기본값
+				if (m_pDoc) m_pDoc->UpdateAllViews(nullptr);
+				UpdateShapePropertiesSelection(ps, m_pDoc);
+			}
+		}
+		SetMode(m_curTool, m_bEditing);
+		return;
+	}
 
 	// 1. 토글 버튼 이벤트 처리
 	if (id == ID_OPT_LINK_RATIO)

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400">
+    <!-- A: 그룹 불투명도 0.5 - 겹친 부분이 진해지면 안 됨 (파랑이 빨강을 완전히 덮은 뒤 전체가 50%) -->
+    <g opacity="0.5">
+      <path d="M 30 40 L 130 40 L 130 140 L 30 140 Z" fill="#ff0000" stroke="none"/>
+      <path d="M 80 70 L 180 70 L 180 170 L 80 170 Z" fill="#0000ff" stroke="none"/>
+    </g>
+    <!-- B: 도형마다 불투명도 0.5 - 겹친 부분에 빨강이 비쳐 섞여야 함 -->
+    <path d="M 230 40 L 330 40 L 330 140 L 230 140 Z" fill="#ff0000" stroke="none" opacity="0.5"/>
+    <path d="M 280 70 L 380 70 L 380 170 L 280 170 Z" fill="#0000ff" stroke="none" opacity="0.5"/>
+    <!-- C: 채움+선이 있는 도형 하나에 opacity 0.5 - 선 안쪽 절반이 겹쳐 진해지면 안 됨 -->
+    <path d="M 430 40 L 540 40 L 540 140 L 430 140 Z" fill="#00aa00" stroke="#000000" stroke-width="30" opacity="0.5"/>
+    <!-- D: 열린 패스 + 채움 - 시작점과 끝점을 이은 영역이 채워져야 함 (선은 열린 채) -->
+    <path d="M 60 330 C 60 230 180 230 180 330" fill="#ffb000" stroke="#000000" stroke-width="6"/>
+    <!-- E: 채움 없음 열린 패스 (채워지면 안 됨) -->
+    <path d="M 240 330 C 240 230 360 230 360 330" fill="none" stroke="#000000" stroke-width="6"/>
+    <!-- F: 혼합 모드 값은 저장만 (화면 합성은 2.2.6 이후) -->
+    <g style="mix-blend-mode:multiply"><path d="M 430 230 L 540 230 L 540 330 L 430 330 Z" fill="#ff8800" stroke="none"/></g>
+</svg>

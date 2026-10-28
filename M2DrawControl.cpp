@@ -2179,3 +2179,306 @@ bool M2DrawTextInput::OnChar(UINT nChar)
 	if (m_editText.length() < m_maxLength) m_editText.push_back(static_cast<wchar_t>(nChar));
 	return true;
 }
+
+// ============================================================================
+// 13. M2DrawGradientBar 구현
+// ============================================================================
+float M2DrawGradientBar::XToOffset(float x) const
+{
+	const D2D1_RECT_F r = BarRect();
+	const float w = r.right - r.left;
+	if (w < 1.0f) return 0.0f;
+	return (std::max)(0.0f, (std::min)(1.0f, (x - r.left) / w));
+}
+
+void M2DrawGradientBar::ClampSelection()
+{
+	if (m_stops.empty()) { m_selected = -1; return; }
+	m_selected = (std::max)(0, (std::min)(m_selected, static_cast<int>(m_stops.size()) - 1));
+}
+
+void M2DrawGradientBar::SortKeepingSelection()
+{
+	if (m_stops.empty()) return;
+	ClampSelection();
+	// 정렬 후에도 같은 스톱을 가리키도록 (offset, 색)이 같은 스톱을 다시 찾음
+	const ge::GradientStop sel = m_stops[m_selected];
+	ge::Gradient g;
+	g.stops = m_stops;
+	g.NormalizeStops();
+	m_stops = g.stops;
+	for (int i = 0; i < static_cast<int>(m_stops.size()); ++i)
+	{
+		if (m_stops[i].offset == sel.offset && m_stops[i].color == sel.color) { m_selected = i; break; }
+	}
+}
+
+int M2DrawGradientBar::HitMarker(D2D1_POINT_2F pt) const
+{
+	const D2D1_RECT_F bar = BarRect();
+	if (pt.y < bar.bottom - 2.0f || pt.y > m_bounds.bottom) return -1;
+	int best = -1;
+	float bestDist = 9.0f;   // 마커 폭의 절반 + 여유
+	for (int i = 0; i < static_cast<int>(m_stops.size()); ++i)
+	{
+		const float d = std::abs(pt.x - OffsetToX(m_stops[i].offset));
+		// 같은 거리면 선택된 것 우선 (겹친 마커 중 위에 그려진 것)
+		if (d < bestDist || (d == bestDist && i == m_selected)) { bestDist = d; best = i; }
+	}
+	return best;
+}
+
+bool M2DrawGradientBar::AddStopInLargestGap()
+{
+	if (m_stops.empty() || m_stops.size() >= 16) return false;
+	ge::Gradient g;
+	g.stops = m_stops;
+	g.NormalizeStops();
+	// 가장 넓은 간격(양 끝 포함)의 중간에 추가
+	float bestStart = 0.0f, bestEnd = 1.0f, bestSpan = -1.0f;
+	float prev = 0.0f;
+	for (const auto& s : g.stops)
+	{
+		if (s.offset - prev > bestSpan) { bestSpan = s.offset - prev; bestStart = prev; bestEnd = s.offset; }
+		prev = s.offset;
+	}
+	if (1.0f - prev > bestSpan) { bestStart = prev; bestEnd = 1.0f; }
+	const float at = (bestStart + bestEnd) * 0.5f;
+	g.stops.push_back({ at, g.SampleColor(at) });
+	m_stops = g.stops;
+	m_selected = static_cast<int>(m_stops.size()) - 1;
+	SortKeepingSelection();
+	FireChanged(true);
+	return true;
+}
+
+bool M2DrawGradientBar::RemoveSelected()
+{
+	if (m_stops.size() <= 2 || m_selected < 0 || m_selected >= static_cast<int>(m_stops.size())) return false;
+	m_stops.erase(m_stops.begin() + m_selected);
+	ClampSelection();
+	FireChanged(true);
+	return true;
+}
+
+bool M2DrawGradientBar::ReverseStops()
+{
+	if (m_stops.empty()) return false;
+	ClampSelection();
+	const ge::GradientStop sel = m_stops[m_selected];
+	ge::Gradient g;
+	g.stops = m_stops;
+	g.Reverse();
+	m_stops = g.stops;
+	for (int i = 0; i < static_cast<int>(m_stops.size()); ++i)
+		if (std::abs(m_stops[i].offset - (1.0f - sel.offset)) < 1e-5f && m_stops[i].color == sel.color) { m_selected = i; break; }
+	FireChanged(true);
+	return true;
+}
+
+void M2DrawGradientBar::Draw(
+	ID2D1RenderTarget* pRT,
+	ID2D1SolidColorBrush* pBrush,
+	IDWriteFactory* /*pDWFactory*/,
+	IDWriteTextFormat* /*pTextFormat*/)
+{
+	if (!m_bVisible) return;
+	const D2D1_RECT_F bar = BarRect();
+
+	// 체커보드 (알파 확인용)
+	pRT->PushAxisAlignedClip(bar, D2D1_ANTIALIAS_MODE_ALIASED);
+	const float cell = 6.0f;
+	int row = 0;
+	for (float y = bar.top; y < bar.bottom; y += cell, ++row)
+	{
+		int col = 0;
+		for (float x = bar.left; x < bar.right; x += cell, ++col)
+		{
+			const bool dark = ((row + col) % 2) == 0;
+			pBrush->SetColor(dark ? D2D1::ColorF(0.55f, 0.55f, 0.58f, 1.0f) : D2D1::ColorF(0.85f, 0.85f, 0.88f, 1.0f));
+			pRT->FillRectangle(D2D1::RectF(x, y, x + cell, y + cell), pBrush);
+		}
+	}
+
+	// 그라디언트 미리보기 (스톱 offset 순으로 정규화한 복사본)
+	if (m_stops.size() >= 2)
+	{
+		ge::Gradient g;
+		g.stops = m_stops;
+		g.NormalizeStops();
+		std::vector<D2D1_GRADIENT_STOP> gs;
+		for (const auto& s : g.stops) gs.push_back(D2D1::GradientStop(s.offset, D2D1::ColorF(s.color.r, s.color.g, s.color.b, s.color.a)));
+		ID2D1GradientStopCollection* coll = nullptr;
+		if (SUCCEEDED(pRT->CreateGradientStopCollection(gs.data(), static_cast<UINT32>(gs.size()), D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &coll)) && coll)
+		{
+			ID2D1LinearGradientBrush* lin = nullptr;
+			if (SUCCEEDED(pRT->CreateLinearGradientBrush(
+					D2D1::LinearGradientBrushProperties(D2D1::Point2F(bar.left, 0.0f), D2D1::Point2F(bar.right, 0.0f)), coll, &lin)) && lin)
+			{
+				pRT->FillRectangle(bar, lin);
+				lin->Release();
+			}
+			coll->Release();
+		}
+	}
+	pRT->PopAxisAlignedClip();
+
+	pBrush->SetColor(D2D1::ColorF(0.35f, 0.35f, 0.40f, 1.0f));
+	pRT->DrawRectangle(bar, pBrush, 1.0f);
+
+	// 스톱 마커: 선택되지 않은 것을 먼저, 선택된 것을 마지막(맨 위)에 그림
+	auto drawMarker = [&](int i, bool selected) {
+		const float x = OffsetToX(m_stops[i].offset);
+		const float topY = bar.bottom + 1.0f;
+		D2D1_POINT_2F apex = D2D1::Point2F(x, topY);
+		pBrush->SetColor(selected ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f) : D2D1::ColorF(0.78f, 0.78f, 0.82f, 1.0f));
+		pRT->DrawLine(apex, D2D1::Point2F(x - 6.0f, topY + 8.0f), pBrush, 1.5f);
+		pRT->DrawLine(apex, D2D1::Point2F(x + 6.0f, topY + 8.0f), pBrush, 1.5f);
+		const D2D1_RECT_F box = D2D1::RectF(x - 6.0f, topY + 8.0f, x + 6.0f, topY + 20.0f);
+		pBrush->SetColor(D2D1::ColorF(m_stops[i].color.r, m_stops[i].color.g, m_stops[i].color.b, 1.0f));
+		pRT->FillRectangle(box, pBrush);
+		pBrush->SetColor(selected ? D2D1::ColorF(0.10f, 0.55f, 1.0f, 1.0f) : D2D1::ColorF(0.78f, 0.78f, 0.82f, 1.0f));
+		pRT->DrawRectangle(box, pBrush, selected ? 2.0f : 1.0f);
+	};
+	for (int i = 0; i < static_cast<int>(m_stops.size()); ++i)
+		if (i != m_selected) drawMarker(i, false);
+	if (m_selected >= 0 && m_selected < static_cast<int>(m_stops.size())) drawMarker(m_selected, true);
+}
+
+bool M2DrawGradientBar::OnLButtonDown(D2D1_POINT_2F pt)
+{
+	if (!m_bVisible || !m_bEnabled || !HitTest(pt)) return false;
+	const D2D1_RECT_F bar = BarRect();
+
+	const int hit = HitMarker(pt);
+	if (hit >= 0)
+	{
+		m_selected = hit;
+		m_bDragging = true;
+		m_bPressed = true;
+		if (m_onSelected) m_onSelected(this, m_selected);
+		return true;
+	}
+
+	// 바(미리보기) 영역 클릭: 그 위치에 새 스톱 추가 (현재 그라디언트에서 보간한 색)
+	if (pt.y >= bar.top && pt.y <= bar.bottom && m_stops.size() < 16)
+	{
+		const float at = XToOffset(pt.x);
+		ge::Gradient g;
+		g.stops = m_stops;
+		g.NormalizeStops();
+		g.stops.push_back({ at, g.SampleColor(at) });
+		m_stops = g.stops;
+		m_selected = static_cast<int>(m_stops.size()) - 1;
+		SortKeepingSelection();
+		m_bDragging = true;      // 바로 이어서 드래그해 위치 조절 가능
+		m_bPressed = true;
+		if (m_onSelected) m_onSelected(this, m_selected);
+		FireChanged(false);
+		return true;
+	}
+	return false;
+}
+
+bool M2DrawGradientBar::OnMouseMove(D2D1_POINT_2F pt)
+{
+	M2DrawControl::OnMouseMove(pt);
+	if (m_bDragging && m_selected >= 0 && m_selected < static_cast<int>(m_stops.size()))
+	{
+		m_stops[m_selected].offset = XToOffset(pt.x);
+		FireChanged(false);
+		return true;
+	}
+	return m_bHovered;
+}
+
+bool M2DrawGradientBar::OnLButtonUp(D2D1_POINT_2F /*pt*/)
+{
+	if (!m_bDragging) return false;
+	m_bDragging = false;
+	m_bPressed = false;
+	SortKeepingSelection();
+	if (m_onSelected) m_onSelected(this, m_selected);
+	FireChanged(true);
+	return true;
+}
+
+void M2DrawGradientBar::ResetState()
+{
+	m_bDragging = false;
+	M2DrawControl::ResetState();
+}
+
+// ============================================================================
+// 14. M2DrawIconButton 구현
+// ============================================================================
+void M2DrawIconButton::Draw(
+	ID2D1RenderTarget* pRT,
+	ID2D1SolidColorBrush* pBrush,
+	IDWriteFactory* pDWFactory,
+	IDWriteTextFormat* pTextFormat)
+{
+	if (!m_bVisible) return;
+	M2DrawButton::Draw(pRT, pBrush, pDWFactory, pTextFormat);   // 버튼 배경/테두리 (텍스트는 비어 있음)
+
+	const float cx = (m_bounds.left + m_bounds.right) * 0.5f;
+	const float cy = (m_bounds.top + m_bounds.bottom) * 0.5f;
+	const float half = (std::min)(9.0f, (std::min)(GetWidth(), GetHeight()) * 0.5f - 4.0f);
+	const D2D1_RECT_F r = D2D1::RectF(cx - half, cy - half, cx + half, cy + half);
+	const D2D1_COLOR_F outline = D2D1::ColorF(0.92f, 0.92f, 0.96f, 0.9f);
+	const D2D1_COLOR_F solid = D2D1::ColorF(m_iconColor.r, m_iconColor.g, m_iconColor.b, 1.0f);
+
+	switch (m_icon)
+	{
+	case Icon::None:
+		// 채우기 없음: 굵은 X
+		pBrush->SetColor(outline);
+		pRT->DrawLine(D2D1::Point2F(r.left + 1.0f, r.top + 1.0f), D2D1::Point2F(r.right - 1.0f, r.bottom - 1.0f), pBrush, 2.2f);
+		pRT->DrawLine(D2D1::Point2F(r.left + 1.0f, r.bottom - 1.0f), D2D1::Point2F(r.right - 1.0f, r.top + 1.0f), pBrush, 2.2f);
+		break;
+
+	case Icon::Solid:
+		pBrush->SetColor(solid);
+		pRT->FillRectangle(r, pBrush);
+		pBrush->SetColor(outline);
+		pRT->DrawRectangle(r, pBrush, 1.0f);
+		break;
+
+	case Icon::Linear:
+	case Icon::Radial:
+	{
+		ID2D1GradientStopCollection* coll = nullptr;
+		const D2D1_GRADIENT_STOP gs[2] = {
+			D2D1::GradientStop(0.0f, m_icon == Icon::Linear ? solid : D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f)),
+			D2D1::GradientStop(1.0f, m_icon == Icon::Linear ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f) : solid)
+		};
+		if (SUCCEEDED(pRT->CreateGradientStopCollection(gs, 2, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &coll)) && coll)
+		{
+			ID2D1Brush* gb = nullptr;
+			if (m_icon == Icon::Linear)
+			{
+				ID2D1LinearGradientBrush* lin = nullptr;
+				if (SUCCEEDED(pRT->CreateLinearGradientBrush(
+						D2D1::LinearGradientBrushProperties(D2D1::Point2F(r.left, cy), D2D1::Point2F(r.right, cy)), coll, &lin)))
+					gb = lin;
+			}
+			else
+			{
+				ID2D1RadialGradientBrush* rad = nullptr;
+				if (SUCCEEDED(pRT->CreateRadialGradientBrush(
+						D2D1::RadialGradientBrushProperties(D2D1::Point2F(cx, cy), D2D1::Point2F(0.0f, 0.0f), half * 1.25f, half * 1.25f), coll, &rad)))
+					gb = rad;
+			}
+			if (gb)
+			{
+				pRT->FillRectangle(r, gb);
+				gb->Release();
+			}
+			coll->Release();
+		}
+		pBrush->SetColor(outline);
+		pRT->DrawRectangle(r, pBrush, 1.0f);
+		break;
+	}
+	}
+}

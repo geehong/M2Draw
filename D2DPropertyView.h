@@ -44,8 +44,7 @@ public:
 		FILL_NONE = 0,
 		FILL_SOLID = 1,
 		FILL_LINEAR_GRAD = 2,
-		FILL_RADIAL_GRAD = 3,
-		FILL_PATTERN = 4
+		FILL_RADIAL_GRAD = 3
 	};
 
 protected:
@@ -56,6 +55,14 @@ protected:
 
 	ge::Node* GetSelectedShape() const;   // m_selectedNodeId 를 문서에서 조회 (없으면 nullptr)
 	bool IsGroupSelected() const;         // 선택된 노드가 그룹이면 도형용 스타일 UI 대신 그룹 전용 UI 표시
+
+	// --- 그라디언트 편집 (채우기 탭 + Linear/Radial 모드 + 그라디언트 채움 도형일 때만 표시) ---
+	bool IsGradientMode() const;          // 그라디언트 편집 UI 를 보여야 하는지
+	void SetFillMode(FillMode mode);      // None/Solid/Linear/Radial 전환 (선택된 도형에 즉시 반영)
+	void ApplyGradientGeometry();         // 시작/끝/반지름 수치 입력 -> 모델
+	void OnGradientStopsEdited();         // 스톱 바 편집 결과 -> 모델 + 선택 스톱 색 동기화
+	void SetGradientControlsVisible(bool v);
+	int  m_selStop = 0;                   // 선택된 컬러 스톱 (팔레트/색상환/불투명도는 이 스톱의 색을 편집)
 	void ApplyGroupAppearance();          // 그룹 노드 불투명도/혼합 모드를 모델에 반영
 	float LayoutGroupPanel(float left, float right, float contentW, float y);   // 그룹 모드 컨트롤 배치 (끝 y 반환)
 
@@ -112,6 +119,8 @@ protected:
 	std::shared_ptr<M2DrawNumericInput> m_spinTransW;          // W 너비
 	std::shared_ptr<M2DrawNumericInput> m_spinTransH;          // H 높이
 	std::shared_ptr<M2DrawCheckBox>     m_chkAspectLink;       // 비율 고정 🔗
+	std::shared_ptr<M2DrawButton>       m_btnGroup;            // 선택 오브젝트 그룹화 (Ctrl+G)
+	std::shared_ptr<M2DrawButton>       m_btnUngroup;          // 그룹 해제 (Ctrl+Shift+G)
 	std::shared_ptr<M2DrawButton>       m_btnTabFill;
 	std::shared_ptr<M2DrawButton>       m_btnTabStroke;
 	std::vector<std::shared_ptr<M2DrawButton>> m_btnFillModes; // 5 modes
@@ -121,6 +130,18 @@ protected:
 	std::shared_ptr<M2DrawLabel>        m_lblOpacity;          // "Opacity"
 	std::shared_ptr<M2DrawSlider>       m_sliderOpacity;       // Opacity bar
 	std::shared_ptr<M2DrawNumericInput> m_spinOpacity;         // Opacity number input
+	std::shared_ptr<M2DrawGradientBar>  m_gradBar;             // 그라디언트 컬러 스톱 바
+	std::shared_ptr<M2DrawButton>       m_btnStopAdd;          // 스톱 추가
+	std::shared_ptr<M2DrawButton>       m_btnStopRemove;       // 스톱 삭제
+	std::shared_ptr<M2DrawButton>       m_btnStopReverse;      // 방향 반전
+	std::shared_ptr<M2DrawLabel>        m_lblGradStart;        // "Start (X, Y) %" / 방사형 "Center (X, Y) %"
+	std::shared_ptr<M2DrawNumericInput> m_spinGradX1;
+	std::shared_ptr<M2DrawNumericInput> m_spinGradY1;
+	std::shared_ptr<M2DrawLabel>        m_lblGradEnd;          // "End (X, Y) %" / 방사형 "Focus (X, Y) %"
+	std::shared_ptr<M2DrawNumericInput> m_spinGradX2;
+	std::shared_ptr<M2DrawNumericInput> m_spinGradY2;
+	std::shared_ptr<M2DrawLabel>        m_lblGradRadius;       // "Radius %" (방사형 전용)
+	std::shared_ptr<M2DrawNumericInput> m_spinGradR;
 	std::shared_ptr<M2DrawLabel>        m_lblBlend;            // "Blend Mode" (그룹 전용)
 	std::shared_ptr<M2DrawComboBox>     m_cboBlend;            // 혼합 모드 콤보 (그룹 전용)
 	std::shared_ptr<M2DrawLabel>        m_lblStrokeWidth;      // "Stroke Width"

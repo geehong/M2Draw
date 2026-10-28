@@ -47,6 +47,7 @@ public:
 
 private:
 	void AppendIndent();
+	void WriteGradientDefs(Document& doc);
 
 	std::string m_output;
 	int         m_indent = 0;

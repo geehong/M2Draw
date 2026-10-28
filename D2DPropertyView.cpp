@@ -155,6 +155,7 @@ void CD2DPropertyView::SetPaneMode(PaneMode mode)
 {
 	m_paneMode = mode;
 	InitControls();
+	SyncControlsFromData();   // 컨트롤을 새로 만들었으므로 현재 선택/문서 값으로 즉시 채움 (헤더·그라디언트·콤보 등)
 	if (GetSafeHwnd())
 	{
 		CRect rc;
@@ -167,6 +168,132 @@ void CD2DPropertyView::SetPaneMode(PaneMode mode)
 ge::Node* CD2DPropertyView::GetSelectedShape() const
 {
 	return (m_pActiveDoc && m_selectedNodeId) ? m_pActiveDoc->GetDoc().FindById(m_selectedNodeId) : nullptr;
+}
+
+bool CD2DPropertyView::IsGradientMode() const
+{
+	if (m_colorTarget != 0) return false;
+	if (m_fillMode != FILL_LINEAR_GRAD && m_fillMode != FILL_RADIAL_GRAD) return false;
+	const ge::PathNode* ps = dynamic_cast<const ge::PathNode*>(GetSelectedShape());
+	return ps && ps->GetStyle().fill.type == ge::PaintType::Gradient;
+}
+
+void CD2DPropertyView::SetFillMode(FillMode mode)
+{
+	m_fillMode = mode;
+	m_bFillEnabled = (mode != FILL_NONE);
+
+	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(GetSelectedShape());
+	if (ps && m_pActiveDoc)
+	{
+		ge::Style& style = ps->GetStyleRef();
+		switch (mode)
+		{
+		case FILL_NONE:
+			style.fill.type = ge::PaintType::None;
+			break;
+		case FILL_SOLID:
+			// 그라디언트에서 단색으로: 현재 편집 중인 스톱 색을 단색으로 사용
+			style.fill.type = ge::PaintType::Solid;
+			style.fill.color = m_fillColor;
+			break;
+		case FILL_LINEAR_GRAD:
+		case FILL_RADIAL_GRAD:
+		{
+			const ge::Gradient::Kind kind = (mode == FILL_RADIAL_GRAD) ? ge::Gradient::Kind::Radial : ge::Gradient::Kind::Linear;
+			if (style.fill.type != ge::PaintType::Gradient || style.fill.gradient.stops.empty())
+			{
+				// 새 그라디언트: 현재 채움 색 -> 같은 색의 투명 (일반적인 기본 동작)
+				ge::Color from = m_fillColor;
+				if (from.a < 0.01f) from.a = 1.0f;
+				ge::Color to = from;
+				to.a = 0.0f;
+				style.fill.gradient = ge::Gradient::Make(kind, from, to);
+				m_selStop = 0;
+				m_fillColor = from;
+			}
+			else
+			{
+				style.fill.gradient.SetKind(kind);   // 스톱은 유지, 기하는 종류별 기본값으로
+			}
+			style.fill.type = ge::PaintType::Gradient;
+			m_selStop = (std::max)(0, (std::min)(m_selStop, static_cast<int>(style.fill.gradient.stops.size()) - 1));
+			m_fillColor = style.fill.gradient.stops[m_selStop].color;
+			break;
+		}
+		}
+		RGBtoHSL(m_fillColor, m_fFillHue, m_fFillSat, m_fFillLight);
+		if (m_colorTarget == 0) m_fOpacity = m_fillColor.a * 100.0f;
+		m_pActiveDoc->UpdateAllViews(nullptr);
+	}
+
+	SyncControlsFromData();
+	CRect rc;
+	if (GetSafeHwnd()) { GetClientRect(&rc); UpdateLayout(static_cast<float>(rc.Width()), static_cast<float>(rc.Height())); }
+	SafeInvalidate(FALSE);
+}
+
+void CD2DPropertyView::SetGradientControlsVisible(bool v)
+{
+	if (m_gradBar)        m_gradBar->SetVisible(v);
+	if (m_btnStopAdd)     m_btnStopAdd->SetVisible(v);
+	if (m_btnStopRemove)  m_btnStopRemove->SetVisible(v);
+	if (m_btnStopReverse) m_btnStopReverse->SetVisible(v);
+	if (m_lblGradStart)   m_lblGradStart->SetVisible(v);
+	if (m_spinGradX1)     m_spinGradX1->SetVisible(v);
+	if (m_spinGradY1)     m_spinGradY1->SetVisible(v);
+	if (m_lblGradEnd)     m_lblGradEnd->SetVisible(v);
+	if (m_spinGradX2)     m_spinGradX2->SetVisible(v);
+	if (m_spinGradY2)     m_spinGradY2->SetVisible(v);
+	const bool radial = (m_fillMode == FILL_RADIAL_GRAD);
+	if (m_lblGradRadius)  m_lblGradRadius->SetVisible(v && radial);
+	if (m_spinGradR)      m_spinGradR->SetVisible(v && radial);
+}
+
+void CD2DPropertyView::ApplyGradientGeometry()
+{
+	if (m_bUpdating) return;
+	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(GetSelectedShape());
+	if (!ps || !m_pActiveDoc || ps->GetStyle().fill.type != ge::PaintType::Gradient) return;
+
+	ge::Gradient& g = ps->GetStyleRef().fill.gradient;
+	if (m_spinGradX1 && m_spinGradY1)
+		g.start = { static_cast<float>(m_spinGradX1->GetValue()) / 100.0f, static_cast<float>(m_spinGradY1->GetValue()) / 100.0f };
+	if (m_spinGradX2 && m_spinGradY2)
+		g.end = { static_cast<float>(m_spinGradX2->GetValue()) / 100.0f, static_cast<float>(m_spinGradY2->GetValue()) / 100.0f };
+	if (g.kind == ge::Gradient::Kind::Radial && m_spinGradR)
+		g.radius = (std::max)(0.01f, static_cast<float>(m_spinGradR->GetValue()) / 100.0f);
+
+	m_pActiveDoc->UpdateAllViews(nullptr);
+	SafeInvalidate(FALSE);
+}
+
+// 컬러 스톱 바 편집(추가/삭제/이동/반전/선택) 결과를 모델에 반영하고, 선택된 스톱의 색을 색 편집 컨트롤에 동기화
+void CD2DPropertyView::OnGradientStopsEdited()
+{
+	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(GetSelectedShape());
+	if (!ps || !m_gradBar || !m_pActiveDoc) return;
+	if (ps->GetStyle().fill.type != ge::PaintType::Gradient) return;
+
+	const std::vector<ge::GradientStop>& stops = m_gradBar->GetStops();
+	if (stops.empty()) return;
+	m_selStop = m_gradBar->GetSelected();
+	ps->GetStyleRef().fill.gradient.stops = stops;
+
+	m_fillColor = stops[m_selStop].color;
+	RGBtoHSL(m_fillColor, m_fFillHue, m_fFillSat, m_fFillLight);
+	m_fOpacity = m_fillColor.a * 100.0f;
+
+	const bool prev = m_bUpdating;
+	m_bUpdating = true;
+	if (m_palette16)  m_palette16->SetSelectedColor(m_fillColor);
+	if (m_shapeWheel) m_shapeWheel->SetColorHSL(m_fFillHue, m_fFillSat, m_fFillLight);
+	if (m_sliderOpacity) m_sliderOpacity->SetValue(m_fOpacity, false);
+	if (m_spinOpacity)   m_spinOpacity->SetValue(m_fOpacity, false);
+	m_bUpdating = prev;
+
+	m_pActiveDoc->UpdateAllViews(nullptr);
+	SafeInvalidate(FALSE);
 }
 
 bool CD2DPropertyView::IsGroupSelected() const
@@ -202,7 +329,19 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 
 		const ge::Style& st = shape->GetStyle();
 		m_bFillEnabled = (st.fill.type != ge::PaintType::None);
-		m_fillColor = (st.fill.type == ge::PaintType::Gradient) ? st.fill.gradient.FallbackColor() : st.fill.color;
+		if (st.fill.type == ge::PaintType::Gradient)
+		{
+			// 그라디언트: 팔레트/색상환/불투명도는 "선택된 컬러 스톱"의 색을 편집
+			const ge::Gradient& grad = st.fill.gradient;
+			m_fillMode = (grad.kind == ge::Gradient::Kind::Radial) ? FILL_RADIAL_GRAD : FILL_LINEAR_GRAD;
+			m_selStop = grad.stops.empty() ? 0 : (std::max)(0, (std::min)(m_selStop, static_cast<int>(grad.stops.size()) - 1));
+			m_fillColor = grad.stops.empty() ? st.fill.color : grad.stops[m_selStop].color;
+		}
+		else
+		{
+			m_fillMode = (st.fill.type == ge::PaintType::Solid) ? FILL_SOLID : FILL_NONE;
+			m_fillColor = st.fill.color;
+		}
 		RGBtoHSL(m_fillColor, m_fFillHue, m_fFillSat, m_fFillLight);
 
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
@@ -232,6 +371,8 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 		if (shape->Kind() == ge::NodeKind::Group)
 			m_fOpacity = shape->GetOpacity() * 100.0f;
 	}
+	if (!GetSelectedShape())
+		m_selStop = 0;
 	else
 	{
 		m_strShapeName = _T("No Selection");
@@ -271,7 +412,23 @@ void CD2DPropertyView::ApplyToShape()
 	if (shape->Kind() == ge::NodeKind::Group) return;
 
 	ge::Style& style = shape->GetStyleRef();
-	if (m_bFillEnabled)
+	if (style.fill.type == ge::PaintType::Gradient && (m_fillMode == FILL_LINEAR_GRAD || m_fillMode == FILL_RADIAL_GRAD))
+	{
+		// 그라디언트: 팔레트/색상환/불투명도 편집 결과는 선택된 컬러 스톱에 기록 (채움 종류는 SetFillMode 가 관리)
+		auto& stops = style.fill.gradient.stops;
+		if (!stops.empty())
+		{
+			m_selStop = (std::max)(0, (std::min)(m_selStop, static_cast<int>(stops.size()) - 1));
+			stops[m_selStop].color = m_fillColor;
+			// 스톱 바는 모델의 복사본을 들고 있으므로 같이 갱신해야 마커 색 상자/미리보기가 실시간으로 따라감
+			if (m_gradBar)
+			{
+				m_gradBar->SetStops(stops);
+				m_gradBar->SetSelected(m_selStop);
+			}
+		}
+	}
+	else if (m_bFillEnabled)
 	{
 		style.fill.type = ge::PaintType::Solid;
 		style.fill.color = m_fillColor;
@@ -591,6 +748,19 @@ void CD2DPropertyView::InitControls()
 		m_chkAspectLink = std::make_shared<M2DrawCheckBox>(L"🔗 Link Ratio", true);
 		m_pCurrentPanel->AddChild(m_chkAspectLink);
 
+		// 1-1. 그룹화 / 그룹 해제 (선택이 있을 때만 표시, 가능한 경우에만 활성화)
+		m_btnGroup = std::make_shared<M2DrawButton>(L"Group  (Ctrl+G)");
+		m_btnGroup->SetOnClick([this](M2DrawButton* /*pBtn*/) {
+			if (m_pActiveDoc && m_pActiveDoc->GroupSelectedObjects()) SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_btnGroup);
+
+		m_btnUngroup = std::make_shared<M2DrawButton>(L"Ungroup  (Ctrl+Shift+G)");
+		m_btnUngroup->SetOnClick([this](M2DrawButton* /*pBtn*/) {
+			if (m_pActiveDoc && m_pActiveDoc->UngroupSelectedObjects()) SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_btnUngroup);
+
 		// 2. Tabs: [Fill] vs [Stroke]
 		m_btnTabFill = std::make_shared<M2DrawButton>(L"Fill");
 		m_btnTabFill->SetToggleMode(true);
@@ -630,25 +800,65 @@ void CD2DPropertyView::InitControls()
 		});
 		m_pCurrentPanel->AddChild(m_btnTabStroke);
 
-		// 3. Fill Mode Toolbar (5 modes)
-		const wchar_t* modeTitles[] = { L"None", L"Solid", L"Linear", L"Radial", L"Pattern" };
+		// 3. Fill Mode Toolbar (Inkscape 스타일 아이콘 버튼: 없음 / 단색 / 선형 / 방사형). 호버 시 설명 툴팁
+		const M2DrawIconButton::Icon modeIcons[] = {
+			M2DrawIconButton::Icon::None, M2DrawIconButton::Icon::Solid,
+			M2DrawIconButton::Icon::Linear, M2DrawIconButton::Icon::Radial };
+		const wchar_t* modeTips[] = {
+			L"채우기 없음 (None)", L"단색 (Flat color)", L"선형 그라디언트 (Linear gradient)", L"방사형 그라디언트 (Radial gradient)" };
 		m_btnFillModes.clear();
-		for (int i = 0; i < 5; ++i)
+		for (int i = 0; i < 4; ++i)
 		{
-			auto btn = std::make_shared<M2DrawButton>(modeTitles[i]);
+			auto btn = std::make_shared<M2DrawIconButton>(modeIcons[i]);
+			btn->SetTooltip(modeTips[i]);
 			btn->SetToggleMode(true);
 			btn->SetChecked(static_cast<int>(m_fillMode) == i);
 			btn->SetOnClick([this, i](M2DrawButton* /*pBtn*/) {
-				m_fillMode = static_cast<FillMode>(i);
-				m_bFillEnabled = (m_fillMode != FILL_NONE);
-				for (int k = 0; k < 5; ++k)
-					m_btnFillModes[k]->SetChecked(k == i);
-				ApplyToShape();
-				SafeInvalidate(FALSE);
+				SetFillMode(static_cast<FillMode>(i));
 			});
 			m_btnFillModes.push_back(btn);
 			m_pCurrentPanel->AddChild(btn);
 		}
+
+		// 3-1. 그라디언트 편집 (Linear/Radial 모드일 때만 표시): 컬러 스톱 바 + 스톱 버튼 + 시작/끝/반지름 수치
+		m_gradBar = std::make_shared<M2DrawGradientBar>();
+		m_gradBar->SetOnSelected([this](M2DrawGradientBar* /*pBar*/, int /*idx*/) {
+			OnGradientStopsEdited();
+		});
+		m_gradBar->SetOnChanged([this](M2DrawGradientBar* /*pBar*/, bool /*isFinal*/) {
+			OnGradientStopsEdited();
+		});
+		m_pCurrentPanel->AddChild(m_gradBar);
+
+		auto makeStopButton = [this](const wchar_t* title, std::function<void()> action) {
+			auto btn = std::make_shared<M2DrawButton>(title);
+			btn->SetOnClick([action](M2DrawButton* /*pBtn*/) { action(); });
+			m_pCurrentPanel->AddChild(btn);
+			return btn;
+		};
+		m_btnStopAdd = makeStopButton(L"+ Stop", [this] { if (m_gradBar) m_gradBar->AddStopInLargestGap(); SafeInvalidate(FALSE); });
+		m_btnStopRemove = makeStopButton(L"- Stop", [this] { if (m_gradBar) m_gradBar->RemoveSelected(); SafeInvalidate(FALSE); });
+		m_btnStopReverse = makeStopButton(L"Reverse", [this] { if (m_gradBar) m_gradBar->ReverseStops(); SafeInvalidate(FALSE); });
+
+		auto makePercentSpin = [this](double minV, double maxV) {
+			auto spin = std::make_shared<M2DrawNumericInput>(minV, maxV, 0.0, 1.0);
+			spin->SetSuffix(L"%");
+			spin->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double /*val*/) { ApplyGradientGeometry(); });
+			m_pCurrentPanel->AddChild(spin);
+			return spin;
+		};
+		m_lblGradStart = std::make_shared<M2DrawLabel>(L"Start (X, Y) %");
+		m_pCurrentPanel->AddChild(m_lblGradStart);
+		m_spinGradX1 = makePercentSpin(-1000.0, 1000.0);
+		m_spinGradY1 = makePercentSpin(-1000.0, 1000.0);
+		m_lblGradEnd = std::make_shared<M2DrawLabel>(L"End (X, Y) %");
+		m_pCurrentPanel->AddChild(m_lblGradEnd);
+		m_spinGradX2 = makePercentSpin(-1000.0, 1000.0);
+		m_spinGradY2 = makePercentSpin(-1000.0, 1000.0);
+		m_lblGradRadius = std::make_shared<M2DrawLabel>(L"Radius %");
+		m_pCurrentPanel->AddChild(m_lblGradRadius);
+		m_spinGradR = makePercentSpin(1.0, 1000.0);
+		SetGradientControlsVisible(false);
 
 		// 4. Standard 16-Color Palette
 		m_palette16 = std::make_shared<M2DrawColorPalette>();
@@ -1204,14 +1414,19 @@ void CD2DPropertyView::SyncControlsFromData()
 	{
 		if (m_lblShapeHeader)
 		{
+			// 이름은 캐시(m_strShapeName)가 아니라 현재 선택된 노드에서 직접 읽음 (패널 재구성 타이밍에 따라 캐시가 낡을 수 있음)
 			CString str;
+			const ge::Node* hdrNode = GetSelectedShape();
+			CString hdrName = _T("");
+			if (hdrNode)
+				hdrName = hdrNode->GetName().empty() ? CString(hdrNode->GetShapeTypeName()) : CString(hdrNode->GetName().c_str());
 			if (IsGroupSelected())
 			{
-				const ge::GroupNode* grp = static_cast<const ge::GroupNode*>(GetSelectedShape());
-				str.Format(_T("● Group: [%s] (%d objects)"), (LPCTSTR)m_strShapeName, static_cast<int>(grp->GetChildren().size()));
+				const ge::GroupNode* grp = static_cast<const ge::GroupNode*>(hdrNode);
+				str.Format(_T("● Group: [%s] (%d objects)"), (LPCTSTR)hdrName, static_cast<int>(grp->GetChildren().size()));
 			}
-			else if (GetSelectedShape())
-				str.Format(_T("● Shape: [%s]"), (LPCTSTR)m_strShapeName);
+			else if (hdrNode)
+				str.Format(_T("● Shape: [%s]"), (LPCTSTR)hdrName);
 			else
 				str = _T("● No Selection (Preview Mode)");
 			m_lblShapeHeader->SetText((LPCTSTR)str);
@@ -1261,8 +1476,41 @@ void CD2DPropertyView::SyncControlsFromData()
 		if (m_btnTabFill)   m_btnTabFill->SetChecked(m_colorTarget == 0);
 		if (m_btnTabStroke) m_btnTabStroke->SetChecked(m_colorTarget == 1);
 
+		if (m_btnGroup)   m_btnGroup->SetEnabled(m_pActiveDoc && m_pActiveDoc->CanGroup());
+		if (m_btnUngroup) m_btnUngroup->SetEnabled(m_pActiveDoc && m_pActiveDoc->CanUngroup());
+
 		for (int i = 0; i < static_cast<int>(m_btnFillModes.size()); ++i)
 			m_btnFillModes[i]->SetChecked(static_cast<int>(m_fillMode) == i);
+		for (auto& fb : m_btnFillModes)
+		{
+			if (auto ib = std::dynamic_pointer_cast<M2DrawIconButton>(fb))
+				ib->SetIconColor(D2D1::ColorF(m_fillColor.r, m_fillColor.g, m_fillColor.b, 1.0f));
+		}
+
+		// 그라디언트 편집 컨트롤: 모델 값으로 채움 (콜백 없이)
+		if (ge::PathNode* gps = dynamic_cast<ge::PathNode*>(GetSelectedShape()))
+		{
+			if (gps->GetStyle().fill.type == ge::PaintType::Gradient)
+			{
+				const ge::Gradient& g = gps->GetStyle().fill.gradient;
+				const bool radial = (g.kind == ge::Gradient::Kind::Radial);
+				const bool prevUpd = m_bUpdating;
+				m_bUpdating = true;
+				if (m_gradBar)
+				{
+					m_gradBar->SetStops(g.stops);
+					m_gradBar->SetSelected(m_selStop);
+				}
+				if (m_lblGradStart) m_lblGradStart->SetText(radial ? L"Center (X, Y) %" : L"Start (X, Y) %");
+				if (m_lblGradEnd)   m_lblGradEnd->SetText(radial ? L"Focus (X, Y) %" : L"End (X, Y) %");
+				if (m_spinGradX1) m_spinGradX1->SetValue(g.start.x * 100.0, false);
+				if (m_spinGradY1) m_spinGradY1->SetValue(g.start.y * 100.0, false);
+				if (m_spinGradX2) m_spinGradX2->SetValue(g.end.x * 100.0, false);
+				if (m_spinGradY2) m_spinGradY2->SetValue(g.end.y * 100.0, false);
+				if (m_spinGradR)  m_spinGradR->SetValue(g.radius * 100.0, false);
+				m_bUpdating = prevUpd;
+			}
+		}
 
 		D2D1_COLOR_F curActiveClr = (m_colorTarget == 0) ? m_fillColor : m_strokeColor;
 		if (m_palette16) m_palette16->SetSelectedColor(curActiveClr);
@@ -1468,6 +1716,7 @@ float CD2DPropertyView::LayoutGroupPanel(float left, float right, float contentW
 	if (m_cboLineCap)   m_cboLineCap->SetVisible(false);
 	if (m_cboLineJoin)  m_cboLineJoin->SetVisible(false);
 	if (m_chkCloseShape) m_chkCloseShape->SetVisible(false);
+	SetGradientControlsVisible(false);
 
 	// Appearance: 그룹 불투명도 + 혼합 모드
 	if (m_lblOpacity)
@@ -1557,6 +1806,20 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			y += 26.0f;
 		}
 
+		// 그룹화 / 그룹 해제 버튼 (선택이 있을 때만 표시)
+		{
+			const bool hasSelection = m_pActiveDoc && !m_pActiveDoc->GetDoc().GetSelection().empty();
+			if (m_btnGroup)   m_btnGroup->SetVisible(hasSelection);
+			if (m_btnUngroup) m_btnUngroup->SetVisible(hasSelection);
+			if (hasSelection)
+			{
+				const float halfBtn = (contentW - 6.0f) * 0.5f;
+				if (m_btnGroup)   m_btnGroup->SetBounds(left, y, left + halfBtn, y + 24.0f);
+				if (m_btnUngroup) m_btnUngroup->SetBounds(left + halfBtn + 6.0f, y, right, y + 24.0f);
+				y += 30.0f;
+			}
+		}
+
 		// 그룹: 도형용 채우기/선 UI 대신 Appearance(불투명도/혼합 모드)만 표시
 		if (IsGroupSelected())
 		{
@@ -1578,11 +1841,12 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 
 		bool isFill = (m_colorTarget == 0);
 
-		// 3. Fill Mode Toolbar (5 modes)
+		// 3. Fill Mode Toolbar (4 modes: None / Solid / Linear / Radial)
+		const int kFillModeCount = static_cast<int>(m_btnFillModes.size());
 		if (isFill)
 		{
-			float btnW = (contentW - (4.0f * 6.0f)) / 5.0f;
-			for (int i = 0; i < 5; ++i)
+			float btnW = (contentW - ((kFillModeCount - 1) * 6.0f)) / static_cast<float>(kFillModeCount);
+			for (int i = 0; i < kFillModeCount; ++i)
 			{
 				float bx1 = left + i * (btnW + 6.0f);
 				m_btnFillModes[i]->SetVisible(true);
@@ -1592,8 +1856,26 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 		}
 		else
 		{
-			for (int i = 0; i < 5; ++i)
+			for (int i = 0; i < kFillModeCount; ++i)
 				m_btnFillModes[i]->SetVisible(false);
+		}
+
+		// 3-1. 그라디언트 편집: 컬러 스톱 바, 스톱 버튼, 시작/끝(방사형: 중심/초점/반지름) 수치
+		const bool gradUI = isFill && IsGradientMode();
+		SetGradientControlsVisible(gradUI);
+		if (gradUI)
+		{
+			if (m_gradBar)
+			{
+				m_gradBar->SetBounds(left, y, right, y + 42.0f);
+				y += 46.0f;
+			}
+			const float thirdW = (contentW - 12.0f) / 3.0f;
+			if (m_btnStopAdd)     m_btnStopAdd->SetBounds(left, y, left + thirdW, y + 24.0f);
+			if (m_btnStopRemove)  m_btnStopRemove->SetBounds(left + thirdW + 6.0f, y, left + thirdW * 2.0f + 6.0f, y + 24.0f);
+			if (m_btnStopReverse) m_btnStopReverse->SetBounds(left + (thirdW + 6.0f) * 2.0f, y, right, y + 24.0f);
+			y += 32.0f;
+
 		}
 
 		// 4. Standard 16-Color Palette
@@ -1645,6 +1927,27 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			m_spinOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
 		}
 		y += 30.0f;
+
+		// 6-1. 그라디언트 기하 수치 (시작/끝 또는 중심/초점/반지름): 자주 쓰는 스톱 바·팔레트·불투명도 아래에 배치
+		if (gradUI)
+		{
+			const float halfXY = (contentW - 6.0f) * 0.5f;
+			if (m_lblGradStart) { m_lblGradStart->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			if (m_spinGradX1) m_spinGradX1->SetBounds(left, y, left + halfXY, y + 24.0f);
+			if (m_spinGradY1) m_spinGradY1->SetBounds(left + halfXY + 6.0f, y, right, y + 24.0f);
+			y += 30.0f;
+			if (m_lblGradEnd) { m_lblGradEnd->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			if (m_spinGradX2) m_spinGradX2->SetBounds(left, y, left + halfXY, y + 24.0f);
+			if (m_spinGradY2) m_spinGradY2->SetBounds(left + halfXY + 6.0f, y, right, y + 24.0f);
+			y += 30.0f;
+			if (m_fillMode == FILL_RADIAL_GRAD)
+			{
+				if (m_lblGradRadius) { m_lblGradRadius->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+				if (m_spinGradR) m_spinGradR->SetBounds(left, y, left + halfXY, y + 24.0f);
+				y += 30.0f;
+			}
+			y += 4.0f;
+		}
 
 		// 7. Stroke Width & Dash Styles (Stroke Mode only)
 		if (!isFill)
@@ -2074,9 +2377,30 @@ void CD2DPropertyView::OnPaint()
 	if (m_pCurrentPanel)
 	{
 		m_pCurrentPanel->Draw(m_pRenderTarget, m_pBrush, m_pDWriteFactory, m_pTextFormatSmall);
+
+		// 호버 중인 채우기 종류 아이콘 버튼의 설명 툴팁 (버튼 아래에 표시, 뷰 가장자리에서 잘리지 않게 보정)
+		for (auto& fb : m_btnFillModes)
+		{
+			auto ib = std::dynamic_pointer_cast<M2DrawIconButton>(fb);
+			if (!ib || !ib->IsVisible() || !ib->IsHovered() || ib->GetTooltip().empty()) continue;
+			const std::wstring& tip = ib->GetTooltip();
+			const D2D1_RECT_F br = ib->GetBounds();
+			const float tw = static_cast<float>(tip.length()) * 7.0f + 16.0f;
+			float tx = (std::min)(br.left, width - tw - 4.0f);
+			tx = (std::max)(4.0f, tx);
+			const D2D1_RECT_F tr = D2D1::RectF(tx, br.bottom + 4.0f, tx + tw, br.bottom + 26.0f);
+			m_pBrush->SetColor(D2D1::ColorF(0.05f, 0.05f, 0.07f, 0.96f));
+			m_pRenderTarget->FillRoundedRectangle(D2D1::RoundedRect(tr, 4.0f, 4.0f), m_pBrush);
+			m_pBrush->SetColor(D2D1::ColorF(0.45f, 0.45f, 0.52f, 1.0f));
+			m_pRenderTarget->DrawRoundedRectangle(D2D1::RoundedRect(tr, 4.0f, 4.0f), m_pBrush, 1.0f);
+			m_pBrush->SetColor(D2D1::ColorF(0.95f, 0.95f, 0.98f, 1.0f));
+			m_pRenderTarget->DrawText(tip.c_str(), static_cast<UINT32>(tip.length()), m_pTextFormatSmall,
+				D2D1::RectF(tr.left + 8.0f, tr.top, tr.right - 4.0f, tr.bottom), m_pBrush);
+		}
 	}
 
 	HRESULT hr = m_pRenderTarget->EndDraw();
+
 	if (hr == D2DERR_RECREATE_TARGET)
 	{
 		DiscardDeviceResources();

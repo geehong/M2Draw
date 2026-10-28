@@ -26,8 +26,10 @@
 #define ID_OPT_BORE_RATIO      41020  // 기어 중앙 구멍(Bore) 비율 % (5~80)
 #define ID_OPT_TURNS           41021  // 나선 회전 수 (0.5~10.0)
 #define ID_OPT_DRAW_CENTER     41022  // 중심 => 바깥쪽 그리기 토글 [From Center✓] / [From Corner]
+#define ID_OPT_GRAD_LINEAR     41023  // 그라디언트 도구: 선형 선택
+#define ID_OPT_GRAD_RADIAL     41024  // 그라디언트 도구: 방사형 선택
 #define ID_OPT_FIRST           ID_OPT_X
-#define ID_OPT_LAST            ID_OPT_DRAW_CENTER
+#define ID_OPT_LAST            ID_OPT_GRAD_RADIAL
 
 // ----------------------------------------------------------------------------
 // 진하고 선명한 텍스트 라벨 버튼

@@ -549,13 +549,13 @@ bool RunPureModelVerification(std::wstring* failure)
 		const PathNode* rp2 = static_cast<const PathNode*>(d.FindById(plainId));
 		GE_CHECK(rp2 != nullptr && rp2->GetStyle().stroke.cap == LineCap::Square && ClassifyDashArray(rp2->GetStyle().stroke.dashArray, rp2->GetStyle().stroke.width) == DashStyle::Dash, L"Redo 후 스타일이 복원되지 않음");
 
-		// 11-7. Gradient 는 2.3 전까지 첫 스톱 색으로 출력 (모델만 존재해도 직렬화가 깨지지 않음)
+		// 11-7. 그라디언트로 렌더링할 수 없는 경우(스톱 1개)는 첫 스톱 단색으로 출력 (Gradient 정상 출력은 섹션 14)
 		// (Undo/Redo 는 문서를 통째로 교체하므로 이전에 얻은 노드 포인터는 무효 -> ID 로 다시 찾음)
 		PathNode* livePlain = static_cast<PathNode*>(d.FindById(plainId));
 		GE_CHECK(livePlain != nullptr, L"Redo 후 도형을 찾지 못함");
 		Style gs = livePlain->GetStyle();
 		gs.fill.type = PaintType::Gradient;
-		gs.fill.gradient.stops = { { 0.0f, Color(1.0f, 0.0f, 0.0f, 1.0f) }, { 1.0f, Color(0.0f, 0.0f, 1.0f, 1.0f) } };
+		gs.fill.gradient.stops = { { 0.0f, Color(1.0f, 0.0f, 0.0f, 1.0f) } };
 		livePlain->SetStyle(gs);
 		GE_CHECK(w.WriteString(d).find("fill=\"#ff0000\"") != std::string::npos, L"그라디언트 대체 색(첫 스톱)이 출력되지 않음");
 	}
@@ -585,6 +585,266 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(reader.ReadFromString(w.WriteString(d), back), L"그룹 SVG 를 읽지 못함");
 		const Node* rg = back.FindById(g->GetId());
 		GE_CHECK(rg != nullptr && std::abs(rg->GetOpacity() - 0.4f) < 0.001f && rg->GetBlendMode() == LayerBlendMode::Overlay, L"그룹 불투명도/혼합 모드가 왕복 후 달라짐");
+	}
+
+	// ---- 13. mix-blend-mode / display:none 표준 CSS 저장·복원 (2.2.3) ---------------------------------
+	{
+		for (int i = 0; i < kBlendModeCount; ++i) {
+			LayerBlendMode back = LayerBlendMode::Normal;
+			GE_CHECK(BlendModeFromCssName(BlendModeCssName(static_cast<LayerBlendMode>(i)), back) && back == static_cast<LayerBlendMode>(i), L"CSS 혼합 모드 이름 왕복 실패");
+		}
+		LayerBlendMode unchanged = LayerBlendMode::Multiply;
+		GE_CHECK(!BlendModeFromCssName("not-a-mode", unchanged) && unchanged == LayerBlendMode::Multiply, L"알 수 없는 CSS 혼합 모드가 거부되지 않음");
+
+		Document d;
+		auto gu = std::make_unique<GroupNode>();
+		GroupNode* g = static_cast<GroupNode*>(d.AddShape(std::move(gu)));
+		PathNode* p = static_cast<PathNode*>(g->AddChild(MakePath(L"p", 0.0f, 0.0f)));
+		d.AssignIds(*g);
+		g->SetBlendMode(LayerBlendMode::ColorBurn);
+		g->SetVisible(false);
+		p->SetBlendMode(LayerBlendMode::SoftLight);
+		d.GetActiveLayer()->SetBlendMode(LayerBlendMode::Screen);
+
+		SvgWriter w;
+		const std::string full = w.WriteString(d);
+		GE_CHECK(full.find("mix-blend-mode:color-burn") != std::string::npos && full.find("mix-blend-mode:soft-light") != std::string::npos
+			&& full.find("mix-blend-mode:screen") != std::string::npos, L"mix-blend-mode 가 SVG 에 표준 CSS 로 출력되지 않음");
+		GE_CHECK(full.find("display:none;mix-blend-mode:color-burn") != std::string::npos, L"숨김+혼합 모드가 하나의 style 속성으로 합쳐지지 않음");
+
+		// Clean(순수 SVG) 에서도 표준 CSS 는 유지되고 m2: 는 없음. 다시 읽으면 혼합 모드/숨김 복원
+		const std::string clean = w.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("m2:") == std::string::npos && clean.find("mix-blend-mode:color-burn") != std::string::npos, L"Clean 출력의 혼합 모드가 잘못됨");
+		Document back;
+		GE_CHECK(reader.ReadFromString(clean, back), L"Clean SVG(혼합 모드 포함)를 읽지 못함");
+		// Clean 에는 inkscape:groupmode 가 없어 Reader 는 레이어를 일반 그룹으로 읽음(임시 레이어 아래) -> ID 가 아닌 구조로 탐색
+		GE_CHECK(!back.GetLayers().empty() && !back.GetLayers()[0]->GetChildren().empty(), L"Clean SVG 의 최상위 구조가 비어 있음");
+		const GroupNode* layerAsGroup = static_cast<const GroupNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+		GE_CHECK(layerAsGroup->GetBlendMode() == LayerBlendMode::Screen, L"Clean 왕복 후 레이어 혼합 모드가 달라짐");
+		GE_CHECK(!layerAsGroup->GetChildren().empty(), L"Clean SVG 의 그룹이 비어 있음");
+		const GroupNode* rg = static_cast<const GroupNode*>(layerAsGroup->GetChildren()[0].get());
+		GE_CHECK(rg->GetBlendMode() == LayerBlendMode::ColorBurn && !rg->IsVisible(), L"Clean 왕복 후 그룹 혼합 모드/숨김이 달라짐");
+		GE_CHECK(!rg->GetChildren().empty() && rg->GetChildren()[0]->GetBlendMode() == LayerBlendMode::SoftLight, L"Clean 왕복 후 도형 혼합 모드가 달라짐");
+
+		// 전체 형식 왕복도 동일 (m2:blend 와 CSS 가 같이 있어도 충돌 없음)
+		Document back2;
+		GE_CHECK(reader.ReadFromString(full, back2) && w.WriteString(back2) == full, L"혼합 모드가 포함된 SVG 가 재직렬화에서 달라짐");
+
+		// 외부 SVG: m2: 없이 CSS 만 있는 경우
+		const std::string ext =
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\">\n"
+			"  <g style=\"fill:red; mix-blend-mode: multiply ;display:none\">\n"
+			"    <path d=\"M 0 0 L 5 5\" />\n"
+			"  </g>\n"
+			"</svg>\n";
+		Document extDoc;
+		GE_CHECK(reader.ReadFromString(ext, extDoc), L"CSS style 만 있는 외부 SVG 를 읽지 못함");
+		const Node* eg = extDoc.GetLayers()[0]->GetChildren()[0].get();
+		GE_CHECK(eg->GetBlendMode() == LayerBlendMode::Multiply && !eg->IsVisible(), L"외부 SVG 의 style 속성(mix-blend-mode/display)을 해석하지 못함");
+	}
+
+	// ---- 14. 그라디언트: 모델 헬퍼 / SVG(<defs>) 왕복 / Undo (2.3) -----------------------------------
+	{
+		auto near = [](float a, float b) { return std::abs(a - b) < 0.002f; };
+
+		// 14-1. 모델 헬퍼
+		Gradient g = Gradient::Make(Gradient::Kind::Linear, Color(1, 0, 0, 1), Color(0, 0, 1, 1));
+		GE_CHECK(g.IsRenderable() && g.start.x == 0.0f && g.end.x == 1.0f, L"선형 그라디언트 기본값이 틀림");
+		const Color mid = g.SampleColor(0.5f);
+		GE_CHECK(near(mid.r, 0.5f) && near(mid.b, 0.5f), L"그라디언트 중간색 보간이 틀림");
+		GE_CHECK(g.SampleColor(-1.0f).r == 1.0f && g.SampleColor(2.0f).b == 1.0f, L"범위 밖 색은 양 끝 색이어야 함");
+		g.stops.push_back({ 0.25f, Color(0, 1, 0, 1) });
+		g.NormalizeStops();
+		GE_CHECK(g.stops.size() == 3 && near(g.stops[1].offset, 0.25f), L"스톱 정렬이 틀림");
+		g.Reverse();
+		GE_CHECK(near(g.stops[0].offset, 0.0f) && g.stops[0].color.b == 1.0f && near(g.stops[1].offset, 0.75f) && g.stops[2].color.r == 1.0f, L"그라디언트 반전이 틀림");
+		g.SetKind(Gradient::Kind::Radial);
+		GE_CHECK(g.kind == Gradient::Kind::Radial && near(g.start.x, 0.5f) && near(g.radius, 0.5f) && g.stops.size() == 3, L"종류 전환 시 기하는 초기화되고 스톱은 유지되어야 함");
+		Gradient one;
+		one.stops = { { 0.0f, Color(0.2f, 0.4f, 0.6f, 1.0f) } };
+		GE_CHECK(!one.IsRenderable() && near(one.FallbackColor().g, 0.4f), L"스톱 1개 그라디언트의 렌더링 가능 판정/대체 색이 틀림");
+
+		// 14-2. SVG 왕복: 선형(알파 포함 3스톱) + 방사형(초점) + 스톱 1개(단색 대체)
+		Document d;
+		PathNode* lin = static_cast<PathNode*>(d.AddShape(MakePath(L"lin", 0.0f, 0.0f)));
+		PathNode* rad = static_cast<PathNode*>(d.AddShape(MakePath(L"rad", 100.0f, 0.0f)));
+		PathNode* single = static_cast<PathNode*>(d.AddShape(MakePath(L"single", 200.0f, 0.0f)));
+		Style ls = lin->GetStyle();
+		ls.fill.type = PaintType::Gradient;
+		ls.fill.gradient = Gradient::Make(Gradient::Kind::Linear, Color(1, 0, 0, 1), Color(0, 0, 1, 0.5f));
+		ls.fill.gradient.start = { 0.1f, 0.2f }; ls.fill.gradient.end = { 0.9f, 0.8f };
+		ls.fill.gradient.stops.push_back({ 0.4f, Color(0, 1, 0, 1) });
+		ls.fill.gradient.NormalizeStops();
+		lin->SetStyle(ls);
+		Style rs = rad->GetStyle();
+		rs.fill.type = PaintType::Gradient;
+		rs.fill.gradient = Gradient::Make(Gradient::Kind::Radial, Color(1, 1, 0, 1), Color(0, 0, 0, 1));
+		rs.fill.gradient.start = { 0.4f, 0.6f }; rs.fill.gradient.end = { 0.3f, 0.5f }; rs.fill.gradient.radius = 0.35f;
+		rad->SetStyle(rs);
+		Style ss = single->GetStyle();
+		ss.fill.type = PaintType::Gradient;
+		ss.fill.gradient.stops = { { 0.0f, Color(0.2f, 0.4f, 0.6f, 1.0f) } };
+		single->SetStyle(ss);
+
+		SvgWriter w;
+		const std::string svg = w.WriteString(d);
+		GE_CHECK(svg.find("<defs>") != std::string::npos && svg.find("<linearGradient") != std::string::npos && svg.find("<radialGradient") != std::string::npos, L"그라디언트 <defs> 가 출력되지 않음");
+		GE_CHECK(svg.find("fill=\"url(#grad_") != std::string::npos, L"그라디언트 도형이 url(#id) 로 참조하지 않음");
+		GE_CHECK(svg.find("grad_" + std::to_string(single->GetId())) == std::string::npos, L"스톱 1개 그라디언트는 정의를 만들면 안 됨 (단색 대체)");
+		GE_CHECK(svg.find("stop-opacity=\"0.5\"") != std::string::npos, L"스톱 알파가 stop-opacity 로 출력되지 않음");
+
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"그라디언트 SVG 를 읽지 못함");
+		const PathNode* bl = static_cast<const PathNode*>(back.FindById(lin->GetId()));
+		const PathNode* br = static_cast<const PathNode*>(back.FindById(rad->GetId()));
+		const PathNode* bs = static_cast<const PathNode*>(back.FindById(single->GetId()));
+		GE_CHECK(bl && br && bs, L"그라디언트 도형을 ID 로 찾지 못함");
+		const Gradient& lg = bl->GetStyle().fill.gradient;
+		GE_CHECK(bl->GetStyle().fill.type == PaintType::Gradient && lg.kind == Gradient::Kind::Linear && lg.stops.size() == 3, L"선형 그라디언트가 복원되지 않음");
+		GE_CHECK(near(lg.start.x, 0.1f) && near(lg.start.y, 0.2f) && near(lg.end.x, 0.9f) && near(lg.end.y, 0.8f), L"선형 그라디언트 시작/끝점이 달라짐");
+		GE_CHECK(near(lg.stops[1].offset, 0.4f) && near(lg.stops[1].color.g, 1.0f) && near(lg.stops[2].color.a, 0.5f), L"그라디언트 스톱(위치/색/알파)이 달라짐");
+		const Gradient& rg = br->GetStyle().fill.gradient;
+		GE_CHECK(rg.kind == Gradient::Kind::Radial && near(rg.start.x, 0.4f) && near(rg.start.y, 0.6f) && near(rg.end.x, 0.3f) && near(rg.end.y, 0.5f) && near(rg.radius, 0.35f), L"방사형 그라디언트(중심/초점/반지름)가 달라짐");
+		GE_CHECK(bs->GetStyle().fill.type == PaintType::Solid && near(bs->GetStyle().fill.color.g, 0.4f), L"스톱 1개 그라디언트가 단색으로 복원되지 않음");
+		GE_CHECK(w.WriteString(back) == w.WriteString(d) || w.WriteString(back).find("<radialGradient") != std::string::npos, L"그라디언트 재직렬화 실패");
+
+		// Clean 에서도 표준 그라디언트는 유지
+		const std::string clean = w.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("<linearGradient") != std::string::npos && clean.find("m2:") == std::string::npos, L"Clean 출력의 그라디언트가 잘못됨");
+
+		// 14-3. Undo/Redo 로 그라디언트 편집이 왕복됨
+		UndoManager um;
+		um.Reset(d);
+		Style ls2 = lin->GetStyle();
+		ls2.fill.gradient.Reverse();
+		lin->SetStyle(ls2);
+		GE_CHECK(um.CommitChange(L"그라디언트 반전", d), L"그라디언트 편집이 Undo 로 기록되지 않음");
+		const NodeId linId = lin->GetId();
+		GE_CHECK(um.Undo(d), L"그라디언트 Undo 실패");
+		const PathNode* ul = static_cast<const PathNode*>(d.FindById(linId));
+		GE_CHECK(ul && ul->GetStyle().fill.type == PaintType::Gradient && near(ul->GetStyle().fill.gradient.stops[0].color.r, 1.0f), L"Undo 후 그라디언트가 복원되지 않음");
+		GE_CHECK(um.Redo(d), L"그라디언트 Redo 실패");
+		const PathNode* rl = static_cast<const PathNode*>(d.FindById(linId));
+		GE_CHECK(rl && near(rl->GetStyle().fill.gradient.stops[0].color.b, 1.0f) && near(rl->GetStyle().fill.gradient.stops[0].color.a, 0.5f), L"Redo 후 반전된 그라디언트가 복원되지 않음");
+
+		// 14-4. 외부 SVG: 퍼센트 좌표, style 로 지정한 stop-color, userSpaceOnUse(단색 대체), 알 수 없는 참조
+		const std::string ext =
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">\n"
+			"  <defs>\n"
+			"    <linearGradient id=\"a\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"50%\">\n"
+			"      <stop offset=\"0%\" style=\"stop-color:#ff0000;stop-opacity:1\"/>\n"
+			"      <stop offset=\"100%\" style=\"stop-color:#0000ff;stop-opacity:0.25\"/>\n"
+			"    </linearGradient>\n"
+			"    <linearGradient id=\"u\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"50\" y2=\"0\">\n"
+			"      <stop offset=\"0\" stop-color=\"#00ff00\"/><stop offset=\"1\" stop-color=\"#000000\"/>\n"
+			"    </linearGradient>\n"
+			"  </defs>\n"
+			"  <g>\n"
+			"    <path d=\"M 0 0 L 10 10 L 0 10 Z\" fill=\"url(#a)\"/>\n"
+			"    <path d=\"M 0 0 L 10 10 L 0 10 Z\" fill=\"url(#u)\"/>\n"
+			"    <path d=\"M 0 0 L 10 10 L 0 10 Z\" fill=\"url(#missing)\"/>\n"
+			"  </g>\n"
+			"</svg>\n";
+		Document extDoc;
+		GE_CHECK(reader.ReadFromString(ext, extDoc), L"외부 SVG 그라디언트를 읽지 못함");
+		const auto& ek = static_cast<GroupNode*>(extDoc.GetLayers()[0]->GetChildren()[0].get())->GetChildren();
+		GE_CHECK(ek.size() == 3, L"외부 SVG 도형 수가 틀림");
+		const Style& e0 = static_cast<PathNode*>(ek[0].get())->GetStyle();
+		GE_CHECK(e0.fill.type == PaintType::Gradient && near(e0.fill.gradient.end.x, 1.0f) && near(e0.fill.gradient.end.y, 0.5f), L"퍼센트 좌표 그라디언트 해석이 틀림");
+		GE_CHECK(e0.fill.gradient.stops.size() == 2 && near(e0.fill.gradient.stops[1].offset, 1.0f) && near(e0.fill.gradient.stops[1].color.b, 1.0f) && near(e0.fill.gradient.stops[1].color.a, 0.25f), L"style 로 지정한 stop-color/opacity 해석이 틀림");
+		const Style& e1 = static_cast<PathNode*>(ek[1].get())->GetStyle();
+		GE_CHECK(e1.fill.type == PaintType::Solid && near(e1.fill.color.g, 1.0f), L"userSpaceOnUse 그라디언트가 첫 스톱 단색으로 대체되지 않음");
+		GE_CHECK(static_cast<PathNode*>(ek[2].get())->GetStyle().fill.type == PaintType::None, L"알 수 없는 fill 참조가 채움 없음으로 처리되지 않음");
+	}
+
+	// ---- 15. 그룹화 / 그룹 해제 (2.7.1) -----------------------------------------------------------
+	{
+		auto approx = [](Vec2 a, Vec2 b) { return std::abs(a.x - b.x) < 0.001f && std::abs(a.y - b.y) < 0.001f; };
+		auto worldOrigin = [](const Node* n) { return n->GetWorldTransform().TransformPoint(Vec2{ 0.0f, 0.0f }); };
+
+		// 15-1. 같은 레이어: 선택 2개 이상일 때만 가능, 맨 위 노드 자리에 생성, 이름은 group1, group2 ...
+		Document d;
+		Node* a = d.AddShape(MakePath(L"a", 0.0f, 0.0f));
+		Node* b = d.AddShape(MakePath(L"b", 10.0f, 0.0f));
+		Node* c = d.AddShape(MakePath(L"c", 20.0f, 0.0f));
+		Node* e = d.AddShape(MakePath(L"e", 30.0f, 0.0f));
+		LayerNode* layer = d.GetActiveLayer();
+		d.SetSelection({ a });
+		GE_CHECK(!d.CanGroupSelection() && d.GroupSelection() == nullptr, L"선택 1개는 그룹화되면 안 됨");
+		d.SetSelection({ a, c });
+		GE_CHECK(d.CanGroupSelection() && !d.CanUngroupSelection(), L"선택 2개는 그룹화 가능해야 하고 해제 대상은 없어야 함");
+		const Vec2 aW = worldOrigin(a), cW = worldOrigin(c);
+		GroupNode* g1 = d.GroupSelection();
+		GE_CHECK(g1 != nullptr && g1->GetName() == L"group1", L"첫 그룹 이름이 group1 이 아님");
+		GE_CHECK(g1->GetChildren().size() == 2 && g1->GetChildren()[0].get() == a && g1->GetChildren()[1].get() == c, L"그룹 자식 순서(z-order)가 유지되지 않음");
+		// a,b,c,e -> b, [a,c], e : 그룹은 맨 위 노드(c)가 있던 자리, 나머지 노드 순서 유지
+		GE_CHECK(layer->GetChildren().size() == 3 && layer->GetChildren()[0].get() == b && layer->GetChildren()[1].get() == g1 && layer->GetChildren()[2].get() == e, L"그룹이 맨 위 노드 자리에 만들어지지 않음");
+		GE_CHECK(d.GetSelection().size() == 1 && d.GetSelection()[0] == g1, L"그룹화 후 그룹이 선택되어야 함");
+		GE_CHECK(approx(worldOrigin(a), aW) && approx(worldOrigin(c), cW), L"그룹화 후 월드 위치가 바뀜");
+		d.SetSelection({ b, e });
+		GroupNode* g2 = d.GroupSelection();
+		GE_CHECK(g2 != nullptr && g2->GetName() == L"group2", L"두 번째 그룹 이름이 group2 가 아님");
+
+		// 15-2. 서로 다른 레이어: 맨 위 노드의 레이어에 생성, 월드 위치 유지
+		Document d2;
+		Node* low = d2.AddShape(MakePath(L"low", 5.0f, 5.0f));
+		LayerNode* upper = d2.AddLayer(L"Upper");
+		d2.SetActiveLayer(1);
+		Node* high = d2.AddShape(MakePath(L"high", 50.0f, 50.0f));
+		GE_CHECK(low->GetParent() != high->GetParent(), L"테스트 전제: 서로 다른 레이어");
+		d2.SetSelection({ low, high });
+		const Vec2 lowW = worldOrigin(low), highW = worldOrigin(high);
+		GroupNode* cross = d2.GroupSelection();
+		GE_CHECK(cross != nullptr && cross->GetParent() == upper, L"다른 레이어 노드들의 그룹이 맨 위 레이어에 만들어지지 않음");
+		GE_CHECK(d2.GetLayers()[0]->GetChildren().empty(), L"그룹화한 노드가 원래 레이어에 남아 있음");
+		GE_CHECK(approx(worldOrigin(low), lowW) && approx(worldOrigin(high), highW), L"레이어를 넘어 그룹화한 뒤 월드 위치가 바뀜");
+
+		// 15-3. 변환된 부모 그룹 안의 노드와 바깥 노드를 묶어도 화면 위치 유지
+		Document d3;
+		auto tg = std::make_unique<GroupNode>();
+		tg->SetTransform(Matrix2D::Translation(100.0f, 50.0f));
+		GroupNode* moved = static_cast<GroupNode*>(d3.AddShape(std::move(tg)));
+		Node* inner = moved->AddChild(MakePath(L"inner", 0.0f, 0.0f));
+		d3.AssignIds(*moved);
+		Node* outer = d3.AddShape(MakePath(L"outer", 7.0f, 7.0f));
+		d3.SetSelection({ inner, outer });
+		const Vec2 innerW = worldOrigin(inner), outerW = worldOrigin(outer);
+		GroupNode* mix = d3.GroupSelection();
+		GE_CHECK(mix != nullptr, L"변환된 그룹 안팎의 노드 그룹화 실패");
+		GE_CHECK(approx(worldOrigin(inner), innerW) && approx(worldOrigin(outer), outerW), L"부모 변환이 다른 노드를 그룹화한 뒤 월드 위치가 바뀜");
+
+		// 15-4. 조상이 함께 선택되면 조상에 포함 (자식은 따로 옮기지 않음)
+		Document d4;
+		auto pg = std::make_unique<GroupNode>();
+		GroupNode* parentGroup = static_cast<GroupNode*>(d4.AddShape(std::move(pg)));
+		Node* child = parentGroup->AddChild(MakePath(L"child", 0.0f, 0.0f));
+		d4.AssignIds(*parentGroup);
+		Node* sibling = d4.AddShape(MakePath(L"sibling", 9.0f, 0.0f));
+		d4.SetSelection({ parentGroup, child });
+		GE_CHECK(!d4.CanGroupSelection(), L"그룹과 그 자식만 선택하면 그룹화 대상은 1개(그룹)뿐이므로 불가해야 함");
+		d4.SetSelection({ parentGroup, child, sibling });
+		GroupNode* outerGroup = d4.GroupSelection();
+		GE_CHECK(outerGroup != nullptr && outerGroup->GetChildren().size() == 2 && child->GetParent() == parentGroup, L"조상이 선택된 자식이 따로 옮겨짐");
+
+		// 15-5. 그룹 해제: 자식이 그룹 자리로 올라오고 월드 위치 유지, 자식들이 선택됨, Undo 로 복원
+		Document d5;
+		Node* u1 = d5.AddShape(MakePath(L"u1", 0.0f, 0.0f));
+		Node* u2 = d5.AddShape(MakePath(L"u2", 20.0f, 0.0f));
+		d5.SetSelection({ u1, u2 });
+		GroupNode* ug = d5.GroupSelection();
+		ug->SetTransform(Matrix2D::Translation(30.0f, 40.0f));
+		const Vec2 u1W = worldOrigin(u1), u2W = worldOrigin(u2);
+		UndoManager um;
+		um.Reset(d5);
+		d5.SetSelection({ ug });
+		GE_CHECK(d5.CanUngroupSelection(), L"그룹 선택은 해제 가능해야 함");
+		const NodeId u1Id = u1->GetId();
+		d5.UngroupSelection();
+		GE_CHECK(d5.GetSelection().size() == 2 && d5.GetActiveLayer()->GetChildren().size() == 2, L"그룹 해제 후 자식이 레이어로 올라오지 않음");
+		GE_CHECK(approx(worldOrigin(d5.FindById(u1Id)), u1W), L"그룹 해제 후 월드 위치가 바뀜 (그룹 변환이 자식에 합쳐져야 함)");
+		(void)u2W;
+		GE_CHECK(um.CommitChange(L"그룹 해제", d5), L"그룹 해제가 Undo 로 기록되지 않음");
+		GE_CHECK(um.Undo(d5) && d5.FindById(u1Id) != nullptr && d5.FindById(u1Id)->GetParent()->Kind() == NodeKind::Group, L"그룹 해제 Undo 후 그룹이 복원되지 않음");
 	}
 
 #undef GE_CHECK

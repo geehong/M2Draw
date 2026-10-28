@@ -4,6 +4,7 @@
 #include "D2DLayer.h"
 
 #include <charconv>
+#include <functional>
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -161,23 +162,39 @@ std::string BuildNodeTypes(const PathNode& path) {
 	return res;
 }
 
-// 기본값이 아닌 공통 상태(보이기/잠금/혼합 모드)를 속성 문자열로 출력.
+// M2 전용 메타데이터(m2:visible / m2:locked / m2:blend). Clean 에서는 아무것도 출력하지 않음.
 // 레이어는 기존 형식(항상 locked/visible 출력)을 유지하므로 includeVisibleLocked=false 로 호출
 std::string BuildCommonState(const Node& n, bool includeVisibleLocked, bool meta) {
 	std::string s;
-	if (!meta) {
-		// Clean: m2:* 없이 표준 속성(display:none)만. 잠금/혼합 모드는 표준 SVG 에 대응이 없어 생략
-		if (includeVisibleLocked && !n.IsVisible()) s += " style=\"display:none\"";
-		return s;
-	}
+	if (!meta) return s;
 	if (includeVisibleLocked) {
-		if (!n.IsVisible()) s += " m2:visible=\"false\" style=\"display:none\"";
+		if (!n.IsVisible()) s += " m2:visible=\"false\"";
 		if (n.IsLocked())   s += " m2:locked=\"true\"";
 	}
 	if (n.GetBlendMode() != LayerBlendMode::Normal) {
 		s += " m2:blend=\"" + std::to_string(static_cast<int>(n.GetBlendMode())) + "\"";
 	}
 	return s;
+}
+
+// 표준 CSS style 속성: 숨김(display:none)과 혼합 모드(mix-blend-mode)는 모든 출력 모드에서 표준 형식으로 기록
+// (브라우저/Inkscape 호환). 잠금은 표준에 대응이 없어 m2:locked 로만 저장.
+std::string BuildCssStyle(const Node& n) {
+	std::string css;
+	if (!n.IsVisible()) css += "display:none";
+	if (n.GetBlendMode() != LayerBlendMode::Normal) {
+		if (!css.empty()) css += ";";
+		css += std::string("mix-blend-mode:") + BlendModeCssName(n.GetBlendMode());
+	}
+	return css.empty() ? std::string() : " style=\"" + css + "\"";
+}
+
+// 그라디언트 정의 id: 도형마다 자기 정의를 가짐 (동일 그라디언트 통합은 Step 2.8.2)
+std::string GradientId(const PathNode& p) { return "grad_" + std::to_string(p.GetId()); }
+
+// 이 도형이 <defs> 의 그라디언트를 참조해야 하는지 (렌더링 가능한 그라디언트 채우기)
+bool UsesGradientDef(const PathNode& p) {
+	return p.GetStyle().fill.type == PaintType::Gradient && p.GetStyle().fill.gradient.IsRenderable();
 }
 
 } // anonymous namespace
@@ -188,6 +205,52 @@ void SvgWriter::AppendIndent() {
 	for (int i = 0; i < m_indent; ++i) {
 		m_output += "  ";
 	}
+}
+
+// 렌더링 가능한 그라디언트 채우기를 가진 모든 도형의 <linearGradient>/<radialGradient> 정의를 <defs> 로 출력.
+// 좌표는 objectBoundingBox(도형 박스 기준 비율, SVG 기본 gradientUnits)
+void SvgWriter::WriteGradientDefs(Document& doc) {
+	std::vector<const PathNode*> users;
+	std::function<void(const Node&)> collect = [&](const Node& n) {
+		if (n.Kind() == NodeKind::Path) {
+			const PathNode& p = static_cast<const PathNode&>(n);
+			if (UsesGradientDef(p)) users.push_back(&p);
+		} else {
+			for (const auto& c : static_cast<const GroupNode&>(n).GetChildren())
+				if (c) collect(*c);
+		}
+	};
+	for (const auto& layer : doc.GetLayers()) if (layer) collect(*layer);
+	if (users.empty()) return;
+
+	AppendIndent();
+	m_output += "<defs>\n";
+	++m_indent;
+	for (const PathNode* p : users) {
+		Gradient g = p->GetStyle().fill.gradient;
+		g.NormalizeStops();   // SVG 는 stop offset 이 오름차순이어야 함 (편집 중 모델은 정렬되지 않았을 수 있음)
+		AppendIndent();
+		if (g.kind == Gradient::Kind::Linear) {
+			m_output += "<linearGradient id=\"" + GradientId(*p) + "\" x1=\"" + FormatFloat(g.start.x) + "\" y1=\"" + FormatFloat(g.start.y) +
+			            "\" x2=\"" + FormatFloat(g.end.x) + "\" y2=\"" + FormatFloat(g.end.y) + "\">\n";
+		} else {
+			m_output += "<radialGradient id=\"" + GradientId(*p) + "\" cx=\"" + FormatFloat(g.start.x) + "\" cy=\"" + FormatFloat(g.start.y) +
+			            "\" r=\"" + FormatFloat(g.radius) + "\" fx=\"" + FormatFloat(g.end.x) + "\" fy=\"" + FormatFloat(g.end.y) + "\">\n";
+		}
+		++m_indent;
+		for (const GradientStop& st : g.stops) {
+			AppendIndent();
+			m_output += "<stop offset=\"" + FormatFloat(st.offset) + "\" stop-color=\"" + ColorToHex(st.color) + "\"";
+			if (st.color.a < 0.999f) m_output += " stop-opacity=\"" + FormatFloat(st.color.a) + "\"";
+			m_output += " />\n";
+		}
+		--m_indent;
+		AppendIndent();
+		m_output += (g.kind == Gradient::Kind::Linear) ? "</linearGradient>\n" : "</radialGradient>\n";
+	}
+	--m_indent;
+	AppendIndent();
+	m_output += "</defs>\n";
 }
 
 std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options) {
@@ -223,6 +286,9 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 		AppendIndent();
 		m_output += "<sodipodi:namedview id=\"namedview_canvas\" pagecolor=\"" + ColorToHex(doc.backgroundColor) + "\" />\n";
 	}
+
+	// 그라디언트 정의는 사용하는 도형보다 먼저(문서 앞쪽 <defs>) 출력
+	WriteGradientDefs(doc);
 
 	// 레이어 순회
 	for (const auto& layer : doc.GetLayers()) {
@@ -266,14 +332,11 @@ void SvgWriter::Visit(LayerNode& node) {
 		m_output += std::string(" m2:visible=\"") + (node.IsVisible() ? "true" : "false") + "\"";
 	}
 
-	if (!node.IsVisible()) {
-		m_output += " style=\"display:none\"";
-	}
-
 	if (node.GetOpacity() < 0.999f) {
 		m_output += " opacity=\"" + FormatFloat(node.GetOpacity()) + "\"";
 	}
 	m_output += BuildCommonState(node, false, Meta());
+	m_output += BuildCssStyle(node);
 
 	m_output += ">\n";
 
@@ -304,6 +367,7 @@ void SvgWriter::Visit(GroupNode& node) {
 		m_output += " opacity=\"" + FormatFloat(node.GetOpacity()) + "\"";
 	}
 	m_output += BuildCommonState(node, true, Meta());
+	m_output += BuildCssStyle(node);
 
 	const Matrix2D& xf = node.GetTransform();
 	if (!IsIdentity(xf)) {
@@ -345,13 +409,14 @@ void SvgWriter::Visit(PathNode& node) {
 	// 스타일
 	const Style& st = node.GetStyle();
 
-	// 채우기: Gradient 의 직렬화(<linearGradient>/<radialGradient> + url(#id))는 Step 2.3/2.8.
-	// 그때까지는 렌더러와 같은 대체 색(첫 스톱)으로 출력
+	// 채우기: 렌더링 가능한 Gradient 는 <defs> 정의를 url(#id) 로 참조, 스톱이 2개 미만이면 렌더러와 같은 대체 색(첫 스톱)으로 출력
 	Color fillColor;
 	bool filled = false;
 	if (st.fill.type == PaintType::Solid)         { fillColor = st.fill.color; filled = true; }
 	else if (st.fill.type == PaintType::Gradient) { fillColor = st.fill.gradient.FallbackColor(); filled = true; }
-	if (!filled) {
+	if (UsesGradientDef(node)) {
+		m_output += " fill=\"url(#" + GradientId(node) + ")\"";
+	} else if (!filled) {
 		m_output += " fill=\"none\"";
 	} else {
 		m_output += " fill=\"" + ColorToHex(fillColor) + "\"";
@@ -400,6 +465,7 @@ void SvgWriter::Visit(PathNode& node) {
 		m_output += " opacity=\"" + FormatFloat(node.GetOpacity()) + "\"";
 	}
 	m_output += BuildCommonState(node, true, Meta());
+	m_output += BuildCssStyle(node);
 
 	const Matrix2D& xf = node.GetTransform();
 	if (!IsIdentity(xf)) {

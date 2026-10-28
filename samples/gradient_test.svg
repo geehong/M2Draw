@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400">
+  <defs>
+    <linearGradient id="lin" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff0000"/>
+      <stop offset="0.5" stop-color="#ffff00"/>
+      <stop offset="1" stop-color="#0000ff"/>
+    </linearGradient>
+    <linearGradient id="diag" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00aa00"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="rad" cx="0.5" cy="0.5" r="0.5" fx="0.5" fy="0.5">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#aa00ff"/>
+    </radialGradient>
+    <radialGradient id="radf" cx="0.5" cy="0.5" r="0.5" fx="0.25" fy="0.3">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#003a5c"/>
+    </radialGradient>
+  </defs>
+    <path d="M 30 30 L 230 30 L 230 130 L 30 130 Z" fill="url(#lin)" stroke="#000000" stroke-width="3"/>
+    <path d="M 260 30 L 360 30 L 360 130 L 260 130 Z" fill="url(#diag)" stroke="#000000" stroke-width="3"/>
+    <path d="M 30 170 L 130 170 L 130 270 L 30 270 Z" fill="url(#rad)" stroke="#000000" stroke-width="3"/>
+    <path d="M 160 170 L 300 170 L 300 270 L 160 270 Z" fill="url(#radf)" stroke="#000000" stroke-width="3"/>
+    <path d="M 330 170 C 330 130 450 130 450 170 C 450 210 330 210 330 170 Z" fill="url(#lin)"/>
+    <path d="M 400 30 L 560 30 L 480 130 Z" fill="url(#lin)" opacity="0.5"/>
+</svg>

@@ -196,7 +196,9 @@ struct GradientStop {
 	Color color;
 };
 
-// 그라디언트 모델 (렌더링/직렬화/편집 UI 는 Step 2.3). 좌표는 도형 바운딩 박스 기준 비율(0~1)
+// 그라디언트 모델. 좌표는 도형 로컬 바운딩 박스 기준 비율(0~1, SVG gradientUnits="objectBoundingBox")
+//  - Linear: start -> end 방향
+//  - Radial: start = 중심(cx,cy), end = 초점(fx,fy), radius = 반지름(박스 너비/높이에 각각 비례하는 타원)
 struct Gradient {
 	enum class Kind : uint8_t { Linear = 0, Radial };
 	Kind kind = Kind::Linear;
@@ -205,8 +207,58 @@ struct Gradient {
 	float radius = 0.5f;                  // Radial 전용
 	std::vector<GradientStop> stops;
 
-	// 그라디언트를 아직 렌더링하지 못하는 동안의 대체 색 (첫 스톱, 없으면 투명)
+	// 그라디언트로 렌더링 가능한 최소 조건: 스톱 2개 이상
+	bool IsRenderable() const { return stops.size() >= 2; }
+
+	// 렌더링할 수 없을 때의 대체 색 (첫 스톱, 없으면 투명)
 	Color FallbackColor() const { return stops.empty() ? Color(0.0f, 0.0f, 0.0f, 0.0f) : stops.front().color; }
+
+	// 종류별 기본 기하 (선형: 왼쪽->오른쪽, 방사형: 중심에서 바깥으로 초점=중심)
+	void ResetGeometry() {
+		if (kind == Kind::Linear) { start = { 0.0f, 0.0f }; end = { 1.0f, 0.0f }; radius = 0.5f; }
+		else                      { start = { 0.5f, 0.5f }; end = { 0.5f, 0.5f }; radius = 0.5f; }
+	}
+
+	// 종류 전환: 스톱은 유지하고 기하만 해당 종류의 기본값으로
+	void SetKind(Kind k) { if (kind != k) { kind = k; ResetGeometry(); } }
+
+	static Gradient Make(Kind k, const Color& a, const Color& b) {
+		Gradient g;
+		g.kind = k;
+		g.ResetGeometry();
+		g.stops = { { 0.0f, a }, { 1.0f, b } };
+		return g;
+	}
+
+	// offset 오름차순 정렬(같은 offset 은 기존 순서 유지) 및 0~1 범위로 제한
+	void NormalizeStops() {
+		for (auto& s : stops) s.offset = (std::max)(0.0f, (std::min)(1.0f, s.offset));
+		std::stable_sort(stops.begin(), stops.end(), [](const GradientStop& a, const GradientStop& b) { return a.offset < b.offset; });
+	}
+
+	// 그라디언트 방향 반전: 모든 스톱의 offset 을 1 - offset 으로
+	void Reverse() {
+		for (auto& s : stops) s.offset = 1.0f - s.offset;
+		NormalizeStops();
+	}
+
+	// offset 위치의 색 (스톱 사이 선형 보간, 범위 밖은 양 끝 색). 새 스톱 추가 시 기본 색으로 사용
+	Color SampleColor(float t) const {
+		if (stops.empty()) return Color(0.0f, 0.0f, 0.0f, 0.0f);
+		if (t <= stops.front().offset) return stops.front().color;
+		if (t >= stops.back().offset)  return stops.back().color;
+		for (size_t i = 1; i < stops.size(); ++i) {
+			if (t <= stops[i].offset) {
+				const GradientStop& a = stops[i - 1];
+				const GradientStop& b = stops[i];
+				const float span = b.offset - a.offset;
+				const float u = span > 1e-6f ? (t - a.offset) / span : 0.0f;
+				return Color(a.color.r + (b.color.r - a.color.r) * u, a.color.g + (b.color.g - a.color.g) * u,
+				             a.color.b + (b.color.b - a.color.b) * u, a.color.a + (b.color.a - a.color.a) * u);
+			}
+		}
+		return stops.back().color;
+	}
 };
 
 struct Paint {
@@ -396,6 +448,24 @@ inline const wchar_t* BlendModeName(LayerBlendMode m) {
 	};
 	const int i = static_cast<int>(m);
 	return (i >= 0 && i < kBlendModeCount) ? names[i] : names[0];
+}
+
+// CSS/SVG mix-blend-mode 키워드 (표준). 저장·출력 용도 (화면 합성은 렌더 타깃 전환 2.2.6 이후)
+inline const char* BlendModeCssName(LayerBlendMode m) {
+	static const char* const names[kBlendModeCount] = {
+		"normal", "darken", "multiply", "color-burn", "lighten", "screen", "color-dodge", "overlay",
+		"soft-light", "hard-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity"
+	};
+	const int i = static_cast<int>(m);
+	return (i >= 0 && i < kBlendModeCount) ? names[i] : names[0];
+}
+
+// CSS 키워드 -> 혼합 모드. 알 수 없는 값이면 false (out 은 변경하지 않음)
+inline bool BlendModeFromCssName(const std::string& css, LayerBlendMode& out) {
+	for (int i = 0; i < kBlendModeCount; ++i) {
+		if (css == BlendModeCssName(static_cast<LayerBlendMode>(i))) { out = static_cast<LayerBlendMode>(i); return true; }
+	}
+	return false;
 }
 
 // 파라메트릭 도형 종류 (구엔진과 1:1 호환 및 확장 지원)
@@ -682,6 +752,8 @@ public:
 	// 그룹화
 	GroupNode* GroupSelection();
 	void       UngroupSelection();
+	bool       CanGroupSelection() const;     // 그룹화 가능한 선택(2개 이상)인지
+	bool       CanUngroupSelection() const;   // 선택에 그룹이 있는지
 
 	// 복제 (Ctrl+D): 선택 항목을 같은 부모의 원본 바로 위에 복제, 새 ID/이름 발급 후 복제본을 선택
 	std::vector<Node*> DuplicateSelection();
@@ -702,6 +774,8 @@ public:
 		// 자동 명명 (Inkscape 스타일: rect1, ellipse1, path1 등)
 		std::wstring GenerateNodeName(ShapeKind kind) const;
 		std::wstring GenerateLayerName() const;
+		std::wstring GenerateGroupName() const;                              // group1, group2 ...
+		std::wstring GenerateNameWithPrefix(const std::wstring& prefix) const;
 
 		// 선택 항목 Z-Order 변경 (각자의 부모 안에서)
 		enum class ZOrder { Front, Back, Forward, Backward };
@@ -868,7 +942,9 @@ public:
 
 	// 노드 -> D2D 지오메트리 (m_dirty 일 때만 재생성)
 	ID2D1Geometry* GetGeometry(PathNode& node);
-		void ClearCache() { m_geoCache.clear(); m_strokeStyleCache.clear(); }
+	// 도형의 실제 지오메트리 경계 (컨트롤 포인트 제외). 그라디언트 objectBoundingBox 의 기준 - 렌더러/기즈모/SVG 가 같은 박스를 쓴다
+	bool GetFillBounds(PathNode& node, Rect2& out);
+		void ClearCache() { m_geoCache.clear(); m_strokeStyleCache.clear(); m_gradientCache.clear(); }
 		ID2D1Factory* GetFactory() const { return m_factory; }
 
 private:
@@ -877,6 +953,8 @@ private:
 	ComPtr<ID2D1PathGeometry> BuildGeometry(const PathNode& node);
 	// 기본값(Butt/Miter/실선)이면 nullptr, 아니면 캐시된 스트로크 스타일
 	ID2D1StrokeStyle* GetStrokeStyle(const Stroke& stroke);
+	// 그라디언트 채우기 브러시 (노드 버전이 같으면 캐시 재사용). 만들 수 없으면 nullptr
+	ID2D1Brush* GetGradientBrush(PathNode& node, const Rect2& bounds);
 
 	ID2D1RenderTarget*             m_rt      = nullptr;   // 비소유
 	ID2D1Factory*                  m_factory = nullptr;   // 비소유
@@ -885,6 +963,9 @@ private:
 	struct GeoCache { uint32_t version = 0; ComPtr<ID2D1PathGeometry> geo; };
 	// Stroke(cap/join/miter/dash) 조합별 D2D 스트로크 스타일 캐시 (키는 정규화된 값 문자열)
 	std::unordered_map<std::string, ComPtr<ID2D1StrokeStyle>> m_strokeStyleCache;
+	// 그라디언트 브러시 캐시 (렌더 타깃에 종속되므로 Initialize/Shutdown 에서 폐기)
+	struct GradientCache { uint32_t version = 0; ComPtr<ID2D1Brush> brush; };
+	std::unordered_map<NodeId, GradientCache> m_gradientCache;
 	std::unordered_map<NodeId, GeoCache> m_geoCache;
 };
 

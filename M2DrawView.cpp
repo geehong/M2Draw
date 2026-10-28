@@ -531,6 +531,19 @@ void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		return;
 	}
 
+	// 0-2. Ctrl+G: 그룹화, Ctrl+Shift+G: 그룹 해제 (G 도구 단축키보다 먼저 처리)
+	if (nChar == 'G' && (::GetKeyState(VK_CONTROL) & 0x8000))
+	{
+		CM2DrawDoc* pDoc = GetDocument();
+		if (pDoc)
+		{
+			const bool shift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+			if (shift ? pDoc->UngroupSelectedObjects() : pDoc->GroupSelectedObjects())
+				Invalidate(FALSE);
+		}
+		return;
+	}
+
 	// 1. Space 키 누르고 있는 동안 임시 패닝(Pan) 모드 활성화
 	if (nChar == VK_SPACE && (nRepCnt == 1))
 	{
@@ -745,8 +758,9 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 	}
 
 	// 3. 작업 중인 선택 도형의 에디트 포인트(변형 핸들) 상시 렌더링 (활성 도구가 SelectTool이 아닐 때도 표시)
+	// (그라디언트 도구는 자체 기즈모만 표시하므로 선택 핸들/기즈모가 겹쳐 그려지지 않게 제외)
 	SelectTool* pSelectTool = GetApp()->GetToolManager().GetSelectTool();
-	if (pSelectTool && pActiveTool != pSelectTool)
+	if (pSelectTool && pActiveTool != pSelectTool && !(pActiveTool && pActiveTool->GetType() == ToolType::Gradient))
 	{
 		pSelectTool->DrawOverlay(m_pRenderTarget, m_pSolidBrush, m_fZoom, m_ptPan, pDoc);
 	}

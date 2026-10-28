@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <functional>
+#include "D2DGraphicEngine.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -65,6 +66,8 @@ public:
 
 	// 상태 리셋
 	virtual void ResetState();
+
+	bool IsHovered() const { return m_bHovered; }
 
 protected:
 	D2D1_RECT_F m_bounds = { 0, 0, 0, 0 };
@@ -589,4 +592,81 @@ private:
 	bool           m_bEditing = false;
 	bool           m_bSelectAllOnFirstKey = false;
 	CommitCallback m_onCommit;
+};
+
+// ============================================================================
+// 13. M2DrawGradientBar: 그라디언트 컬러 스톱 편집 바
+//  - 위쪽에 그라디언트 미리보기(체커보드 위, 알파 표시), 아래쪽에 스톱 마커(색 상자 + 삼각형)
+//  - 빈 곳 클릭: 그 위치에 새 스톱 추가(보간 색), 마커 클릭: 선택, 마커 드래그: 위치 이동
+//  - 드래그 중에는 정렬하지 않고(마커가 서로 지나가도 선택 유지), 마우스를 놓을 때 offset 순으로 정렬
+// ============================================================================
+class M2DrawGradientBar : public M2DrawControl
+{
+public:
+	using ChangeCallback = std::function<void(M2DrawGradientBar* pBar, bool isFinal)>;   // 드래그 중 false, 확정 true
+	using SelectCallback = std::function<void(M2DrawGradientBar* pBar, int index)>;
+
+	M2DrawGradientBar() = default;
+
+	void SetStops(const std::vector<ge::GradientStop>& stops) { if (!m_bDragging) m_stops = stops; ClampSelection(); }
+	const std::vector<ge::GradientStop>& GetStops() const { return m_stops; }
+	void SetSelected(int index) { m_selected = index; ClampSelection(); }
+	int  GetSelected() const { return m_selected; }
+	void SetOnChanged(ChangeCallback cb) { m_onChanged = cb; }
+	void SetOnSelected(SelectCallback cb) { m_onSelected = cb; }
+
+	// 편집 명령 (버튼에서 호출). 변경되면 true 이고 onChanged(final) 가 호출됨
+	bool AddStopInLargestGap();
+	bool RemoveSelected();                  // 스톱이 2개 이하이면 삭제하지 않음
+	bool ReverseStops();
+
+	void Draw(ID2D1RenderTarget* pRT, ID2D1SolidColorBrush* pBrush,
+		IDWriteFactory* pDWFactory, IDWriteTextFormat* pTextFormat) override;
+
+	bool OnLButtonDown(D2D1_POINT_2F pt) override;
+	bool OnMouseMove(D2D1_POINT_2F pt) override;
+	bool OnLButtonUp(D2D1_POINT_2F pt) override;
+	void ResetState() override;
+
+private:
+	static constexpr float kPad = 8.0f;          // 좌우 여백 (마커가 가장자리에서 잘리지 않게)
+	static constexpr float kBarH = 18.0f;        // 미리보기 바 높이
+
+	std::vector<ge::GradientStop> m_stops;
+	int            m_selected = 0;
+	bool           m_bDragging = false;
+	ChangeCallback m_onChanged;
+	SelectCallback m_onSelected;
+
+	D2D1_RECT_F BarRect() const { return D2D1::RectF(m_bounds.left + kPad, m_bounds.top + 2.0f, m_bounds.right - kPad, m_bounds.top + 2.0f + kBarH); }
+	float OffsetToX(float offset) const { const D2D1_RECT_F r = BarRect(); return r.left + offset * (r.right - r.left); }
+	float XToOffset(float x) const;
+	int   HitMarker(D2D1_POINT_2F pt) const;     // 마커 영역(바 아래)에서 가장 가까운 스톱 인덱스, 없으면 -1
+	void  ClampSelection();
+	void  SortKeepingSelection();
+	void  FireChanged(bool isFinal) { if (m_onChanged) m_onChanged(this, isFinal); }
+};
+
+// ============================================================================
+// 14. M2DrawIconButton: 글자 대신 그림(아이콘)으로 표시하는 토글 버튼 (채우기 종류 선택 등, Inkscape 스타일)
+//  - None(X) / Solid(단색 사각형) / Linear(선형 그라디언트 사각형) / Radial(방사형 그라디언트 사각형)
+// ============================================================================
+class M2DrawIconButton : public M2DrawButton
+{
+public:
+	enum class Icon { None, Solid, Linear, Radial };
+
+	explicit M2DrawIconButton(Icon icon) : M2DrawButton(L""), m_icon(icon) {}
+
+	void SetIconColor(D2D1_COLOR_F clr) { m_iconColor = clr; }
+	void SetTooltip(const std::wstring& text) { m_tooltip = text; }
+	const std::wstring& GetTooltip() const { return m_tooltip; }
+
+	void Draw(ID2D1RenderTarget* pRT, ID2D1SolidColorBrush* pBrush,
+		IDWriteFactory* pDWFactory, IDWriteTextFormat* pTextFormat) override;
+
+private:
+	Icon         m_icon;
+	D2D1_COLOR_F m_iconColor = D2D1::ColorF(0.10f, 0.50f, 0.95f, 1.0f);
+	std::wstring m_tooltip;
 };

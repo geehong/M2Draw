@@ -287,13 +287,14 @@ void CPropertiesWnd::SetSelectedShape(ge::Node* pShape, CM2DrawDoc* pDoc)
 
 	const uint64_t newId = (pDoc && pShape) ? pShape->GetId() : 0;
 
-	// 이미 동일한 도형이 선택되어 있는 상태에서 수치만 바뀐 경우:
-	// 콤보박스 재구축 및 SetPaneMode(컨트롤 전체 파괴/재생성)를 건너뛰고 초고속 Transform만 동기화!
+	// 이미 동일한 도형이 선택되어 있는 상태에서 값만 바뀐 경우:
+	// 콤보박스 재구축 및 SetPaneMode(컨트롤 전체 파괴/재생성)는 건너뛰고, 컨트롤들만 모델에서 다시 읽어 동기화한다.
+	// (Transform 뿐 아니라 채우기 종류/그라디언트 스톱·방향 등 스타일도 도구/기즈모 조작으로 바뀔 수 있음)
 	if (newId != 0 && m_selectedNodeId == newId && m_pActiveDoc == pDoc)
 	{
 		if (m_wndD2DProp.GetSafeHwnd())
 		{
-			m_wndD2DProp.SyncTransformOnly();
+			m_wndD2DProp.SetTargetShape(pDoc, pShape);
 		}
 		return;
 	}

@@ -106,6 +106,7 @@ public:
 
 	bool HandleShortcut(wchar_t key);
 	SelectTool* GetSelectTool();
+	GradientTool* GetGradientTool();
 	std::vector<std::unique_ptr<ITool>>& GetTools() { return m_tools; }
 	const std::vector<std::unique_ptr<ITool>>& GetTools() const { return m_tools; }
 };

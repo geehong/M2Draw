@@ -72,6 +72,8 @@
 #define IDS_EXPLORER				305
 #define IDS_EDIT_MENU				306
 #define ID_VIEW_GRID       32780
+#define ID_OBJECT_GROUP    32781
+#define ID_OBJECT_UNGROUP  32782
 
 // 다음은 새 개체에 사용할 기본값입니다.
 //

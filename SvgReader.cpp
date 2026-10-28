@@ -9,6 +9,7 @@
 
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <sstream>
 #include <cwctype>
@@ -232,6 +233,49 @@ NodeId ParseNodeId(const AttrMap& attrs) {
 	return 0;
 }
 
+// "0.5" 또는 "50%" -> 비율 (퍼센트는 100 으로 나눔). 비어 있거나 잘못되면 def
+float ParseRatio(const std::wstring* v, float def) {
+	if (!v || v->empty()) return def;
+	wchar_t* end = nullptr;
+	float x = std::wcstof(v->c_str(), &end);
+	if (end == v->c_str()) return def;
+	while (*end && iswspace(*end)) ++end;
+	if (*end == L'%') x /= 100.0f;
+	return x;
+}
+
+// style="a:b; c:d" -> 속성 맵 (공백 제거, 키는 그대로)
+std::unordered_map<std::wstring, std::wstring> ParseCssDeclarations(const std::wstring& css) {
+	std::unordered_map<std::wstring, std::wstring> out;
+	size_t i = 0;
+	while (i < css.size()) {
+		size_t semi = css.find(L';', i);
+		if (semi == std::wstring::npos) semi = css.size();
+		const std::wstring decl = css.substr(i, semi - i);
+		const size_t colon = decl.find(L':');
+		if (colon != std::wstring::npos) {
+			auto trim = [](std::wstring t) {
+				size_t a = 0, b = t.size();
+				while (a < b && iswspace(t[a])) ++a;
+				while (b > a && iswspace(t[b - 1])) --b;
+				return t.substr(a, b - a);
+			};
+			out[trim(decl.substr(0, colon))] = trim(decl.substr(colon + 1));
+		}
+		i = semi + 1;
+	}
+	return out;
+}
+
+// fill="url(#id)" -> "id" (아니면 빈 문자열)
+std::wstring ParseUrlRef(const std::wstring& v) {
+	if (v.compare(0, 4, L"url(") != 0) return L"";
+	size_t a = v.find(L'#');
+	size_t b = v.find(L')', a == std::wstring::npos ? 0 : a);
+	if (a == std::wstring::npos || b == std::wstring::npos || b <= a + 1) return L"";
+	return v.substr(a + 1, b - a - 1);
+}
+
 // 보이기/잠금/혼합 모드 복원 (SvgWriter::BuildCommonState 와 대응)
 void ApplyCommonState(Node& n, const AttrMap& attrs) {
 	auto get = [&](const wchar_t* key) -> const std::wstring* {
@@ -245,6 +289,24 @@ void ApplyCommonState(Node& n, const AttrMap& attrs) {
 		const long m = std::wcstol(b->c_str(), nullptr, 10);
 		if (m >= 0 && m <= static_cast<long>(LayerBlendMode::Luminosity))
 			n.SetBlendMode(static_cast<LayerBlendMode>(m));
+	}
+
+	// 표준 CSS: style="mix-blend-mode:multiply" (외부 SVG / Clean 출력). m2:blend 가 없어도 복원됨
+	if (const auto* s = get(L"style")) {
+		const size_t key = s->find(L"mix-blend-mode");
+		if (key != std::wstring::npos) {
+			size_t p = s->find(L':', key);
+			if (p != std::wstring::npos) {
+				++p;
+				while (p < s->size() && iswspace((*s)[p])) ++p;
+				size_t e = p;
+				while (e < s->size() && (*s)[e] != L';' && !iswspace((*s)[e])) ++e;
+				std::string css;
+				for (size_t i = p; i < e; ++i) css.push_back(static_cast<char>((*s)[i]));   // 키워드는 ASCII
+				LayerBlendMode mode = LayerBlendMode::Normal;
+				if (BlendModeFromCssName(css, mode)) n.SetBlendMode(mode);
+			}
+		}
 	}
 }
 
@@ -265,6 +327,19 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 	XmlNodeType nodeType;
 	bool sawSvgRoot = false;
 	std::wstring fileVersion;
+
+	// <defs> 의 그라디언트 (id -> 정의). gradientUnits="userSpaceOnUse" 는 도형 박스로 환산할 수 없어 첫 스톱 단색으로 대체 (Step 2.9)
+	std::unordered_map<std::wstring, Gradient> gradients;
+	std::unordered_set<std::wstring> userSpaceGradients;
+	std::wstring curGradientId;
+	Gradient curGradient;
+	bool inGradient = false;
+	auto finishGradient = [&]() {
+		if (!inGradient) return;
+		curGradient.NormalizeStops();
+		if (!curGradientId.empty()) gradients[curGradientId] = curGradient;
+		inGradient = false;
+	};
 
 	// Read 는 문서 끝에서 S_FALSE, XML 오류에서는 실패 HRESULT 를 반환 -> 오류 시 부분 문서를 성공으로 취급하지 않음
 	while (S_OK == (hr = pReader->Read(&nodeType))) {
@@ -382,6 +457,40 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 					}
 				}
 			}
+			else if (elemName == L"linearGradient" || elemName == L"radialGradient") {
+				finishGradient();   // 중첩/이전 정의가 닫히지 않은 경우 대비
+				auto get = [&](const wchar_t* k) -> const std::wstring* { auto it = attrs.find(k); return it == attrs.end() ? nullptr : &it->second; };
+				curGradient = Gradient();
+				curGradientId = get(L"id") ? *get(L"id") : L"";
+				if (elemName == L"linearGradient") {
+					curGradient.kind = Gradient::Kind::Linear;
+					curGradient.start = { ParseRatio(get(L"x1"), 0.0f), ParseRatio(get(L"y1"), 0.0f) };
+					curGradient.end   = { ParseRatio(get(L"x2"), 1.0f), ParseRatio(get(L"y2"), 0.0f) };
+				} else {
+					curGradient.kind = Gradient::Kind::Radial;
+					curGradient.start  = { ParseRatio(get(L"cx"), 0.5f), ParseRatio(get(L"cy"), 0.5f) };
+					curGradient.radius = ParseRatio(get(L"r"), 0.5f);
+					curGradient.end    = { ParseRatio(get(L"fx"), curGradient.start.x), ParseRatio(get(L"fy"), curGradient.start.y) };
+				}
+				if (get(L"gradientUnits") && *get(L"gradientUnits") == L"userSpaceOnUse") userSpaceGradients.insert(curGradientId);
+				inGradient = true;
+				if (isEmpty) finishGradient();
+			}
+			else if (elemName == L"stop" && inGradient) {
+				auto get = [&](const wchar_t* k) -> const std::wstring* { auto it = attrs.find(k); return it == attrs.end() ? nullptr : &it->second; };
+				// stop-color / stop-opacity 는 속성 또는 style 선언 둘 다 가능 (Inkscape 는 style 사용)
+				std::unordered_map<std::wstring, std::wstring> css;
+				if (get(L"style")) css = ParseCssDeclarations(*get(L"style"));
+				const std::wstring* colorStr = get(L"stop-color");
+				const std::wstring* opacityStr = get(L"stop-opacity");
+				if (css.count(L"stop-color")) colorStr = &css[L"stop-color"];
+				if (css.count(L"stop-opacity")) opacityStr = &css[L"stop-opacity"];
+				GradientStop st;
+				st.offset = ParseRatio(get(L"offset"), 0.0f);
+				st.color = colorStr ? ParseColorHex(*colorStr) : Color(0.0f, 0.0f, 0.0f, 1.0f);
+				st.color.a = (std::max)(0.0f, (std::min)(1.0f, ParseRatio(opacityStr, 1.0f)));
+				curGradient.stops.push_back(st);
+			}
 			else if (elemName == L"path") {
 				auto pathNode = std::make_unique<PathNode>();
 				outDoc.RestoreNodeId(*pathNode, ParseNodeId(attrs));
@@ -399,8 +508,20 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 				// 스타일
 				Style st = pathNode->GetStyle();
 				if (attrs.count(L"fill")) {
+					const std::wstring gradRef = ParseUrlRef(attrs[L"fill"]);
 					if (attrs[L"fill"] == L"none") {
 						st.fill.type = PaintType::None;
+					} else if (!gradRef.empty()) {
+						auto git = gradients.find(gradRef);
+						if (git == gradients.end() || git->second.stops.empty()) {
+							st.fill.type = PaintType::None;                       // 알 수 없는 참조 (패턴 등은 Step 2.9)
+						} else if (userSpaceGradients.count(gradRef) || !git->second.IsRenderable()) {
+							st.fill.type = PaintType::Solid;                      // 환산 불가/스톱 1개: 첫 스톱 색으로 대체
+							st.fill.color = git->second.FallbackColor();
+						} else {
+							st.fill.type = PaintType::Gradient;
+							st.fill.gradient = git->second;
+						}
 					} else {
 						st.fill.type = PaintType::Solid;
 						st.fill.color = ParseColorHex(attrs[L"fill"]);
@@ -544,6 +665,9 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 					if (!groupStack.empty()) {
 						groupStack.pop_back();
 					}
+				}
+				else if (elemName == L"linearGradient" || elemName == L"radialGradient") {
+					finishGradient();
 				}
 			}
 		}

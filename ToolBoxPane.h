@@ -16,6 +16,7 @@ struct ToolButtonItem
 	wchar_t        shortcut;
 	CRect          rect;
 	std::vector<ToolType> subTools; // 비어 있지 않으면 우하단 삼각 표시 + 플라이아웃 그룹
+	int            gapBefore = 0; // 이 버튼 위에 두는 추가 간격(px) - 도구 묶음과 동작 버튼 구분용
 };
 
 // 서브도구 플라이아웃 팝업 (그리기 전용, 포커스를 가져가지 않음)
@@ -39,7 +40,7 @@ private:
 	int      m_hot = -1;
 	ToolType m_current = ToolType::Select;
 	IWICImagingFactory* m_pWic = nullptr;
-	static const int kItemW = 140;
+	static const int kItemW = 228;   // "그룹 해제 (Ctrl+Shift+G)" 같은 긴 이름이 잘리지 않는 폭
 	static const int kItemH = 32;
 };
 
@@ -75,6 +76,17 @@ protected:
 	bool            m_flyoutOpen = false;
 	CToolFlyoutWnd  m_flyout;
 
+	// 동작 버튼(그룹/그룹 해제) 활성 상태: 현재 문서의 선택에 따라 바뀌므로 타이머로 감시해 바뀌면 다시 그림
+	static const UINT_PTR kStateTimer = 1002;
+	static const UINT     kStateIntervalMs = 200;
+	UINT            m_enabledMask = 0;     // bit0: 그룹 가능, bit1: 그룹 해제 가능
+	CString         m_tipText;             // 툴팁 문자열 보관 (TTN_NEEDTEXT 가 포인터를 읽는 동안 유효해야 함)
+	ID2D1StrokeStyle* m_pDashStyle = nullptr;
+
+	UINT ComputeEnabledMask() const;
+	bool IsCommandEnabled(UINT commandId) const;
+	void DrawActionIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, UINT commandId, D2D1_RECT_F btnRect, bool enabled);
+
 	void OpenFlyout(int buttonIndex);
 	void CloseFlyout();
 	bool IsButtonActive(const ToolButtonItem& btn, ToolType active) const;
@@ -98,6 +110,9 @@ protected:
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnCaptureChanged(CWnd* pWnd);
+	afx_msg BOOL OnToolTipText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
+
+	virtual INT_PTR OnToolHitTest(CPoint point, TOOLINFO* pTI) const override;
 
 	DECLARE_MESSAGE_MAP()
 };

@@ -33,6 +33,10 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_EDIT_UNDO, &CM2DrawDoc::OnUpdateEditUndo)
 	ON_COMMAND(ID_EDIT_REDO, &CM2DrawDoc::OnEditRedo)
 	ON_UPDATE_COMMAND_UI(ID_EDIT_REDO, &CM2DrawDoc::OnUpdateEditRedo)
+	ON_COMMAND(ID_OBJECT_GROUP, &CM2DrawDoc::OnObjectGroup)
+	ON_UPDATE_COMMAND_UI(ID_OBJECT_GROUP, &CM2DrawDoc::OnUpdateObjectGroup)
+	ON_COMMAND(ID_OBJECT_UNGROUP, &CM2DrawDoc::OnObjectUngroup)
+	ON_UPDATE_COMMAND_UI(ID_OBJECT_UNGROUP, &CM2DrawDoc::OnUpdateObjectUngroup)
 END_MESSAGE_MAP()
 
 
@@ -241,6 +245,7 @@ void CM2DrawDoc::ResetToolInteraction()
 	CM2DrawApp* pApp = dynamic_cast<CM2DrawApp*>(AfxGetApp());
 	SelectTool* pSelect = pApp ? pApp->GetToolManager().GetSelectTool() : nullptr;
 	if (pSelect) pSelect->ResetInteraction();
+	if (GradientTool* pGradient = pApp ? pApp->GetToolManager().GetGradientTool() : nullptr) pGradient->ResetInteraction();
 }
 
 void CM2DrawDoc::OnEditUndo()
@@ -508,3 +513,56 @@ bool CM2DrawDoc::DuplicateSelectedObjects()
 	}
 	return true;
 }
+
+// ---------------------------------------------------------------------------
+// 그룹화 / 그룹 해제
+// ---------------------------------------------------------------------------
+bool CM2DrawDoc::GroupSelectedObjects()
+{
+	// 선택된 오브젝트 2개 이상을 하나의 그룹으로 (부모가 달라도 월드 위치 유지, 맨 위 오브젝트가 있던 자리에 생성)
+	ge::GroupNode* group = m_doc.GroupSelection();
+	if (!group)
+		return false;
+
+	UpdateShapePropertiesSelection(group, this);
+
+	CString strLog;
+	strLog.Format(_T("[그룹화] '%s' 생성 (오브젝트 %d개)"), group->GetName().c_str(), static_cast<int>(group->GetChildren().size()));
+	LogAppEvent(strLog);
+	SetAppStatusText(strLog);
+
+	CommitUndoPoint(L"그룹");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+bool CM2DrawDoc::UngroupSelectedObjects()
+{
+	if (!m_doc.CanUngroupSelection())
+		return false;
+
+	m_doc.UngroupSelection();   // 자식들이 그룹 자리로 올라오고(월드 위치/불투명도 유지) 자식들이 새 선택이 됨
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+
+	CString strLog;
+	strLog.Format(_T("[그룹 해제] 오브젝트 %d개 선택됨"), static_cast<int>(m_doc.GetSelection().size()));
+	LogAppEvent(strLog);
+	SetAppStatusText(strLog);
+
+	CommitUndoPoint(L"그룹 해제");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+void CM2DrawDoc::OnObjectGroup()               { GroupSelectedObjects(); }
+void CM2DrawDoc::OnUpdateObjectGroup(CCmdUI* pCmdUI)   { pCmdUI->Enable(CanGroup()); }
+void CM2DrawDoc::OnObjectUngroup()             { UngroupSelectedObjects(); }
+void CM2DrawDoc::OnUpdateObjectUngroup(CCmdUI* pCmdUI) { pCmdUI->Enable(CanUngroup()); }

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500">
+    <path d="M 40 160 L 100 40 L 160 160" fill="none" stroke="#d62828" stroke-width="14" stroke-linejoin="miter"/>
+    <path d="M 220 160 L 280 40 L 340 160" fill="none" stroke="#1d7a1d" stroke-width="14" stroke-linejoin="round"/>
+    <path d="M 400 160 L 460 40 L 520 160" fill="none" stroke="#1f4fd8" stroke-width="14" stroke-linejoin="bevel"/>
+    <path d="M 40 230 L 520 230" fill="none" stroke="#000000" stroke-width="12" stroke-dasharray="30 18"/>
+    <path d="M 40 280 L 520 280" fill="none" stroke="#000000" stroke-width="12" stroke-dasharray="30 18" stroke-linecap="round"/>
+    <path d="M 40 330 L 520 330" fill="none" stroke="#000000" stroke-width="12" stroke-dasharray="30 18" stroke-linecap="square"/>
+    <path d="M 40 380 L 520 380" fill="none" stroke="#7a1fa2" stroke-width="6" stroke-dasharray="24 6 6 6"/>
+    <path d="M 40 430 L 520 430" fill="none" stroke="#c27000" stroke-width="6" stroke-dasharray="1 10" stroke-linecap="round"/>
+    <path d="M 600 60 L 860 60 L 860 200 L 600 200 Z" fill="#aee1ff" stroke="#003a5c" stroke-width="8" stroke-dasharray="20 10" stroke-linejoin="round"/>
+    <path d="M 600 260 L 860 260 L 730 420 Z" fill="#ffd9a8" fill-opacity="0.6" stroke="#5c2a00" stroke-width="10" stroke-linejoin="miter" stroke-miterlimit="1.2"/>
+</svg>

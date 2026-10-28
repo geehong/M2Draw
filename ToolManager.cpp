@@ -376,6 +376,7 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<PaintBucketTool>());
 	m_tools.push_back(std::make_unique<ZoomInTool>());
 	m_tools.push_back(std::make_unique<ZoomOutTool>());
+	m_tools.push_back(std::make_unique<GradientTool>());
 }
 
 void ToolManager::SetActiveTool(ToolType type)
@@ -465,4 +466,14 @@ bool ToolManager::HandleShortcut(wchar_t key)
 		}
 	}
 	return false;
+}
+
+GradientTool* ToolManager::GetGradientTool()
+{
+	for (auto& tool : m_tools)
+	{
+		if (tool->GetType() == ToolType::Gradient)
+			return dynamic_cast<GradientTool*>(tool.get());
+	}
+	return nullptr;
 }

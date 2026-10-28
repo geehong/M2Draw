@@ -75,6 +75,230 @@ static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const
 	return hit;
 }
 
+// ============================================================================
+// 그라디언트 기즈모: 선택된 도형의 그라디언트 핸들 (좌표는 도형 지오메트리 경계 기준 비율)
+// ============================================================================
+namespace {
+
+struct GradientGizmo
+{
+	ge::Rect2     bounds{};
+	ge::Matrix2D  worldXf;
+	bool          radial = false;
+	D2D1_POINT_2F start{}, end{}, radius{};   // 화면 좌표. 방사형: start=중심, end=초점, radius=중심에서 +X 방향 반지름 지점
+
+	// 박스 비율 좌표 -> 화면 좌표
+	D2D1_POINT_2F ToScreen(float rx, float ry, const ViewportTransform& view) const
+	{
+		const D2D1_POINT_2F local = D2D1::Point2F(bounds.left + rx * (bounds.right - bounds.left),
+		                                          bounds.top + ry * (bounds.bottom - bounds.top));
+		return CoordinateSpace::LocalToScreen(local, worldXf, view);
+	}
+};
+
+// 단일 도형의 그라디언트 기즈모 계산. 그라디언트 채우기가 아니거나 박스를 만들 수 없으면 false
+bool ComputeGradientGizmo(ge::Node* n, const ViewportTransform& view, ID2D1Factory* f, GradientGizmo& out)
+{
+	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
+	if (!ps || !f || ps->GetStyle().fill.type != ge::PaintType::Gradient) return false;
+	const ge::Gradient& g = ps->GetStyle().fill.gradient;
+	if (!g.IsRenderable()) return false;
+
+	ge::D2DRenderer renderer;
+	renderer.Initialize(nullptr, f);   // 지오메트리 경계만 필요 (렌더 타깃 없이 팩터리만 사용)
+	if (!renderer.GetFillBounds(*ps, out.bounds)) return false;
+	if (out.bounds.right - out.bounds.left < 1e-4f || out.bounds.bottom - out.bounds.top < 1e-4f) return false;
+
+	out.worldXf = ps->GetWorldTransform();
+	out.radial = (g.kind == ge::Gradient::Kind::Radial);
+	out.start = out.ToScreen(g.start.x, g.start.y, view);
+	out.end = out.ToScreen(g.end.x, g.end.y, view);
+	out.radius = out.ToScreen(g.start.x + g.radius, g.start.y, view);
+	return true;
+}
+
+float DistSq(D2D1_POINT_2F a, D2D1_POINT_2F b) { return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y); }
+
+} // namespace
+
+// ============================================================================
+// 그라디언트 공용 헬퍼 (선택 도구의 기즈모 편집과 그라디언트 도구가 함께 사용)
+// ============================================================================
+namespace {
+
+// 기즈모 핸들 종류 (SelectTool::GradHandle 과 같은 값)
+enum GradPartId { kGradNone = 0, kGradStart = 1, kGradEnd = 2, kGradRadius = 3 };
+
+// 화면 좌표 -> 도형 지오메트리 박스 비율 좌표. 박스를 만들 수 없거나 변환이 불가능하면 false
+bool ScreenToGradRatio(ge::PathNode* ps, const ge::Rect2& b, D2D1_POINT_2F screenPt, const ViewportTransform& view, float& rx, float& ry)
+{
+	const float w = b.right - b.left;
+	const float h = b.bottom - b.top;
+	if (!ps || w < 1e-4f || h < 1e-4f) return false;
+	auto local = CoordinateSpace::ScreenToLocal(screenPt, ps->GetWorldTransform(), view);
+	if (!local) return false;
+	rx = (local->x - b.left) / w;
+	ry = (local->y - b.top) / h;
+	return true;
+}
+
+// 기즈모 핸들 드래그를 그라디언트 필드에 반영
+void ApplyGradPartDrag(ge::PathNode* ps, const ge::Rect2& b, int part, D2D1_POINT_2F screenPt, const ViewportTransform& view)
+{
+	float rx = 0.0f, ry = 0.0f;
+	if (!ScreenToGradRatio(ps, b, screenPt, view, rx, ry)) return;
+
+	ge::Gradient& g = ps->GetStyleRef().fill.gradient;   // GetStyleRef: 지오메트리/브러시 캐시 무효화 + 변경 카운터
+	switch (part)
+	{
+	case kGradStart:
+	{
+		const bool focusFollows = (g.kind == ge::Gradient::Kind::Radial) &&
+			std::abs(g.end.x - g.start.x) < 1e-4f && std::abs(g.end.y - g.start.y) < 1e-4f;   // 초점이 중심과 같으면 함께 이동
+		g.start = { rx, ry };
+		if (focusFollows) g.end = g.start;
+		break;
+	}
+	case kGradEnd:
+		g.end = { rx, ry };
+		break;
+	case kGradRadius:
+		g.radius = (std::max)(0.01f, std::abs(rx - g.start.x));
+		break;
+	default:
+		break;
+	}
+}
+
+// 그라디언트가 없으면 현재 채움 색 -> 같은 색의 투명으로 새로 만들고, 있으면 그대로 둔다
+void EnsureGradient(ge::PathNode* ps, ge::Gradient::Kind kind)
+{
+	const ge::Style& cur = ps->GetStyle();
+	if (cur.fill.type == ge::PaintType::Gradient && cur.fill.gradient.stops.size() >= 2) return;
+
+	ge::Style& st = ps->GetStyleRef();
+	ge::Color from = st.fill.color;
+	if (st.fill.type != ge::PaintType::Solid) from.a = 1.0f;   // 채움이 없던 도형은 불투명 색에서 시작
+	ge::Color to = from;
+	to.a = 0.0f;
+	st.fill.gradient = ge::Gradient::Make(kind, from, to);
+	st.fill.type = ge::PaintType::Gradient;
+}
+
+// 도형의 기하 경계 (그라디언트 박스) - 채움 종류와 무관하게 계산
+bool ComputePathBounds(ge::PathNode* ps, ID2D1Factory* f, ge::Rect2& out)
+{
+	if (!ps || !f) return false;
+	ge::D2DRenderer renderer;
+	renderer.Initialize(nullptr, f);
+	return renderer.GetFillBounds(*ps, out) && (out.right - out.left) > 1e-4f && (out.bottom - out.top) > 1e-4f;
+}
+
+// 축(선형: 시작->끝, 방사형: 중심->반지름 지점) 위 한 점의 매개변수 t (0~1 로 제한)와 축까지의 거리 제곱
+float ProjectOnAxis(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F p, float& distSqToSegment)
+{
+	const float dx = b.x - a.x, dy = b.y - a.y;
+	const float len2 = dx * dx + dy * dy;
+	float t = len2 > 1e-6f ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0.0f;
+	t = (std::max)(0.0f, (std::min)(1.0f, t));
+	const D2D1_POINT_2F q = D2D1::Point2F(a.x + dx * t, a.y + dy * t);
+	distSqToSegment = DistSq(p, q);
+	return t;
+}
+
+// 마우스 아래의 최상단 PathNode (그룹 안쪽 포함, 숨김/잠금 제외)
+ge::PathNode* HitTestPathInNode(ge::Node* n, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
+{
+	if (!n || !n->IsVisible() || n->IsLocked()) return nullptr;
+	if (auto* group = dynamic_cast<ge::GroupNode*>(n))
+	{
+		const auto& children = group->GetChildren();
+		for (int i = static_cast<int>(children.size()) - 1; i >= 0; --i)
+			if (ge::PathNode* hit = HitTestPathInNode(children[i].get(), screenPt, view, f)) return hit;
+		return nullptr;
+	}
+	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
+	return (ps && ps->HitTestScreenSpace(screenPt, 8.0f, view, f).part != HitResult::Part::None) ? ps : nullptr;
+}
+
+ge::PathNode* HitTestPathDeep(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
+{
+	ge::PathNode* hit = nullptr;
+	ForEachSelectableTopDown(pDoc, [&](ge::Node* n) {
+		hit = HitTestPathInNode(n, screenPt, view, f);
+		return hit != nullptr;
+	});
+	return hit;
+}
+
+// 그라디언트 기즈모 그리기: 축/반지름 타원, 컬러 스톱 점, 핸들(시작 ■ / 끝·초점 ● / 반지름 ◆)
+// activePart: 강조할 핸들(GradPartId), activeStop: 강조할 스톱 인덱스(-1 = 없음)
+void DrawGradientGizmo(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const ViewportTransform& view, ID2D1Factory* f,
+                       ge::PathNode* ps, int activePart, int activeStop)
+{
+	GradientGizmo gz;
+	if (!ComputeGradientGizmo(ps, view, f, gz)) return;
+	const ge::Gradient& grad = ps->GetStyle().fill.gradient;
+
+	auto line = [&](D2D1_POINT_2F a, D2D1_POINT_2F b) {
+		brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.95f));
+		rt->DrawLine(a, b, brush, 3.0f);
+		brush->SetColor(D2D1::ColorF(0.10f, 0.30f, 0.70f, 1.0f));
+		rt->DrawLine(a, b, brush, 1.3f);
+	};
+	auto dot = [&](D2D1_POINT_2F p, float r, D2D1_COLOR_F fill) {
+		brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+		rt->FillEllipse(D2D1::Ellipse(p, r + 1.5f, r + 1.5f), brush);
+		brush->SetColor(fill);
+		rt->FillEllipse(D2D1::Ellipse(p, r, r), brush);
+		brush->SetColor(D2D1::ColorF(0.10f, 0.30f, 0.70f, 1.0f));
+		rt->DrawEllipse(D2D1::Ellipse(p, r + 1.5f, r + 1.5f), brush, 1.0f);
+	};
+
+	if (!gz.radial)
+	{
+		line(gz.start, gz.end);
+	}
+	else
+	{
+		// 반지름 타원 (박스 너비/높이에 비례) 을 64각형으로 근사해 화면 좌표로 그림
+		const int kSeg = 64;
+		D2D1_POINT_2F prev{};
+		for (int i = 0; i <= kSeg; ++i)
+		{
+			const float t = static_cast<float>(i) / kSeg * 6.28318530718f;
+			D2D1_POINT_2F p = gz.ToScreen(grad.start.x + grad.radius * std::cos(t), grad.start.y + grad.radius * std::sin(t), view);
+			if (i > 0) line(prev, p);
+			prev = p;
+		}
+		line(gz.start, gz.radius);   // 중심 -> 반지름 핸들 (스톱 위치 표시용 축)
+	}
+
+	// 컬러 스톱: 축 위에 스톱 색 점 (선형: 시작->끝, 방사형: 중심->반지름 지점). 조작 중인 스톱은 크게
+	const D2D1_POINT_2F axisA = gz.start;
+	const D2D1_POINT_2F axisB = gz.radial ? gz.radius : gz.end;
+	for (int i = 0; i < static_cast<int>(grad.stops.size()); ++i)
+	{
+		const ge::GradientStop& st = grad.stops[i];
+		const D2D1_POINT_2F p = D2D1::Point2F(axisA.x + (axisB.x - axisA.x) * st.offset, axisA.y + (axisB.y - axisA.y) * st.offset);
+		dot(p, i == activeStop ? 5.5f : 4.0f, D2D1::ColorF(st.color.r, st.color.g, st.color.b, 1.0f));
+	}
+
+	auto square = [&](D2D1_POINT_2F p, bool active) {
+		D2D1_RECT_F r = D2D1::RectF(p.x - 5.0f, p.y - 5.0f, p.x + 5.0f, p.y + 5.0f);
+		brush->SetColor(active ? D2D1::ColorF(0.10f, 0.50f, 0.95f, 1.0f) : D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+		rt->FillRectangle(r, brush);
+		brush->SetColor(D2D1::ColorF(0.10f, 0.30f, 0.70f, 1.0f));
+		rt->DrawRectangle(r, brush, 1.5f);
+	};
+	square(gz.start, activePart == kGradStart);
+	dot(gz.end, 5.5f, activePart == kGradEnd ? D2D1::ColorF(0.10f, 0.50f, 0.95f, 1.0f) : D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+	if (gz.radial)
+		dot(gz.radius, 5.5f, activePart == kGradRadius ? D2D1::ColorF(0.10f, 0.50f, 0.95f, 1.0f) : D2D1::ColorF(1.0f, 0.85f, 0.2f, 1.0f));
+}
+
+} // namespace
+
 // 노드가 속한 레이어를 활성 레이어로 (새 도형 생성/복제 대상 레이어와 일치시킴)
 static void ActivateLayerOf(CM2DrawDoc* pDoc, ge::Node* node)
 {
@@ -119,7 +343,7 @@ HCURSOR SelectTool::GetCursor() const
 		return ::LoadCursor(nullptr, IDC_SIZEALL);
 	}
 
-	if (m_hoverIsNode || m_mode == Mode::EditNode)
+	if (m_hoverIsNode || m_mode == Mode::EditNode || m_mode == Mode::GradientHandle)
 	{
 		return ::LoadCursor(nullptr, IDC_CROSS);
 	}
@@ -192,6 +416,44 @@ void SelectTool::OnDown(const ToolEvent& e)
 	m_dragStartWorld = e.worldPt;
 	m_dragCurrentWorld = e.worldPt;
 	D2D1_POINT_2F screenPt = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+
+	// 0. 단일 선택된 그라디언트 도형의 기즈모 핸들(시작/끝 또는 중심/초점/반지름) 최우선
+	if (sel.size() == 1 && IsInteractive(sel[0]))
+	{
+		GradientGizmo gz;
+		if (ComputeGradientGizmo(sel[0], e.view, e.pD2DFactory, gz))
+		{
+			const float tolSq = 8.0f * 8.0f;
+			GradHandle hit = GradHandle::None;
+			float best = tolSq;
+			auto consider = [&](GradHandle h, D2D1_POINT_2F p) {
+				const float d = DistSq(screenPt, p);
+				if (d <= best) { best = d; hit = h; }
+			};
+			// 방사형에서 중심과 초점이 겹쳐 있으면 기본은 중심을 잡고, Shift 를 누르고 잡으면 초점을 움직임
+			const bool coincident = gz.radial && DistSq(gz.start, gz.end) < 1.0f;
+			if (coincident && e.shiftDown)
+			{
+				consider(GradHandle::End, gz.end);
+			}
+			else
+			{
+				consider(GradHandle::Start, gz.start);
+				if (!coincident) consider(GradHandle::End, gz.end);
+			}
+			if (gz.radial) consider(GradHandle::Radius, gz.radius);
+			if (hit != GradHandle::None)
+			{
+				m_mode = Mode::GradientHandle;
+				m_gradShape = static_cast<ge::PathNode*>(sel[0]);
+				m_gradHandle = hit;
+				m_gradBounds = gz.bounds;
+				m_handle = Handle::None;
+				LogAppEvent(_T("[선택 도구] 그라디언트 핸들 드래그 시작"));
+				return;
+			}
+		}
+	}
 
 	// 1. 이미 선택된 패스 도형의 노드(앵커, 핸들 In/Out) 클릭 여부 최우선 검사
 	for (ge::Node* n : sel)
@@ -327,6 +589,22 @@ void SelectTool::OnMove(const ToolEvent& e)
 		m_hoverHandle = Handle::None;
 		m_hoverOnShape = false;
 
+		// 0) 그라디언트 기즈모 핸들 호버 -> 십자 커서
+		if (sel.size() == 1 && IsInteractive(sel[0]))
+		{
+			GradientGizmo gz;
+			if (ComputeGradientGizmo(sel[0], e.view, e.pD2DFactory, gz))
+			{
+				const float tolSq = 8.0f * 8.0f;
+				if (DistSq(screenPt, gz.start) <= tolSq || DistSq(screenPt, gz.end) <= tolSq ||
+				    (gz.radial && DistSq(screenPt, gz.radius) <= tolSq))
+				{
+					m_hoverIsNode = true;
+					return;
+				}
+			}
+		}
+
 		// 1) 선택된 도형의 노드(앵커/핸들) 및 바운딩 박스 핸들 호버 검사
 		for (ge::Node* n : sel)
 		{
@@ -361,6 +639,20 @@ void SelectTool::OnMove(const ToolEvent& e)
 	if (m_mode == Mode::Marquee)
 	{
 		// 마키(영역 선택) 드래그 중: 화면 갱신 유도
+		return;
+	}
+
+	if (m_mode == Mode::GradientHandle)
+	{
+		ApplyGradientDrag(e);
+
+		static DWORD s_lastGradTick = 0;
+		const DWORD curTick = ::GetTickCount();
+		if (curTick - s_lastGradTick >= 30)
+		{
+			s_lastGradTick = curTick;
+			UpdateShapePropertiesSelection(m_gradShape, e.pDoc);   // 속성창 수치(시작/끝/반지름) 실시간 동기화
+		}
 		return;
 	}
 
@@ -411,6 +703,14 @@ void SelectTool::OnMove(const ToolEvent& e)
 			UpdateShapePropertiesSelection(shown, e.pDoc);
 		}
 	}
+}
+
+// 기즈모 핸들 드래그: 화면 좌표 -> 도형 로컬 -> 지오메트리 박스 비율로 바꿔 그라디언트 필드에 반영
+void SelectTool::ApplyGradientDrag(const ToolEvent& e)
+{
+	if (!m_gradShape) return;
+	const D2D1_POINT_2F screenPt = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+	ApplyGradPartDrag(m_gradShape, m_gradBounds, static_cast<int>(m_gradHandle), screenPt, e.view);
 }
 
 // 엔진에 에디트 포인트 조작 위임!
@@ -555,6 +855,8 @@ void SelectTool::OnUp(const ToolEvent& e)
 	m_handle = Handle::None;
 	m_editShape = nullptr;
 	m_xfTarget = nullptr;
+	m_gradShape = nullptr;
+	m_gradHandle = GradHandle::None;
 	m_initialXfs.clear();
 }
 
@@ -690,6 +992,13 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 				}
 			}
 		}
+	}
+
+	// 그라디언트 기즈모: 단일 선택된 그라디언트 도형의 시작/끝(방사형: 중심/초점/반지름) 핸들과 컬러 스톱 위치
+	if (sel.size() == 1)
+	{
+		if (auto* gradShape = dynamic_cast<ge::PathNode*>(sel[0]))
+			DrawGradientGizmo(rt, brush, view, f, gradShape, static_cast<int>(m_gradHandle), -1);
 	}
 
 	f->Release();
@@ -1959,3 +2268,286 @@ void ZoomOutTool::OnUp(const ToolEvent& e)
 {
 }
 
+
+// ============================================================================
+// GradientTool 구현 (전통적인 그라디언트 도구)
+// ============================================================================
+void GradientTool::OnDown(const ToolEvent& e)
+{
+	m_drag = Drag::None;
+	m_moved = false;
+	if (!e.pDoc || !e.pD2DFactory) return;
+
+	auto& doc = e.pDoc->GetDoc();
+	const D2D1_POINT_2F screenPt = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+	m_downScreen = m_curScreen = screenPt;
+
+	const std::vector<ge::Node*> sel = doc.GetSelection();
+	ge::PathNode* cur = (sel.size() == 1) ? dynamic_cast<ge::PathNode*>(sel[0]) : nullptr;
+	if (cur && !IsInteractive(cur)) cur = nullptr;
+
+	// 1~3. 선택된 그라디언트 도형의 기즈모: 핸들 -> 컬러 스톱 점 -> 축 클릭(스톱 추가) 순으로 우선 처리
+	GradientGizmo gz;
+	if (cur && cur->GetStyle().fill.type == ge::PaintType::Gradient && ComputeGradientGizmo(cur, e.view, e.pD2DFactory, gz))
+	{
+		// 1) 핸들 (방사형에서 중심과 초점이 겹쳐 있으면 중심, Shift 를 누르면 초점)
+		int hitPart = kGradNone;
+		float best = 8.0f * 8.0f;
+		auto consider = [&](int part, D2D1_POINT_2F p) {
+			const float d = DistSq(screenPt, p);
+			if (d <= best) { best = d; hitPart = part; }
+		};
+		const bool coincident = gz.radial && DistSq(gz.start, gz.end) < 1.0f;
+		if (coincident && e.shiftDown)
+		{
+			consider(kGradEnd, gz.end);
+		}
+		else
+		{
+			consider(kGradStart, gz.start);
+			if (!coincident) consider(kGradEnd, gz.end);
+		}
+		if (gz.radial) consider(kGradRadius, gz.radius);
+		if (hitPart != kGradNone)
+		{
+			m_drag = Drag::Part;
+			m_shapeId = cur->GetId();
+			m_part = hitPart;
+			m_bounds = gz.bounds;
+			return;
+		}
+
+		// 2) 컬러 스톱 점 (양 끝 스톱은 시작/끝 핸들과 겹치므로 안쪽 스톱만): 드래그로 이동, Alt+클릭으로 삭제
+		m_axisA = gz.start;
+		m_axisB = gz.radial ? gz.radius : gz.end;
+		ge::Gradient& g = cur->GetStyleRef().fill.gradient;
+		for (int i = 0; i < static_cast<int>(g.stops.size()); ++i)
+		{
+			const float off = g.stops[i].offset;
+			if (off <= 0.001f || off >= 0.999f) continue;
+			const D2D1_POINT_2F p = D2D1::Point2F(m_axisA.x + (m_axisB.x - m_axisA.x) * off, m_axisA.y + (m_axisB.y - m_axisA.y) * off);
+			if (DistSq(screenPt, p) > 7.0f * 7.0f) continue;
+
+			if (e.altDown)
+			{
+				if (g.stops.size() > 2)
+				{
+					g.stops.erase(g.stops.begin() + i);
+					m_activeStop = -1;
+					LogAppEvent(_T("[그라디언트 도구] 컬러 스톱 삭제"));
+					UpdateShapePropertiesSelection(cur, e.pDoc);
+				}
+				return;
+			}
+			m_drag = Drag::Stop;
+			m_shapeId = cur->GetId();
+			m_stop = m_activeStop = i;
+			m_bounds = gz.bounds;
+			return;
+		}
+
+		// 3) 축(선) 위 클릭: 그 위치에 새 컬러 스톱 추가 (현재 그라디언트에서 보간한 색) 후 바로 드래그 가능
+		float d2 = 0.0f;
+		const float t = ProjectOnAxis(m_axisA, m_axisB, screenPt, d2);
+		if (d2 <= 6.0f * 6.0f && t > 0.01f && t < 0.99f && g.stops.size() < 16)
+		{
+			ge::Gradient sorted = g;
+			sorted.NormalizeStops();
+			const ge::Color c = sorted.SampleColor(t);
+			g.stops = sorted.stops;
+			g.stops.push_back({ t, c });
+			g.NormalizeStops();
+			for (int i = 0; i < static_cast<int>(g.stops.size()); ++i)
+				if (g.stops[i].offset == t) { m_stop = m_activeStop = i; break; }
+			m_drag = Drag::Stop;
+			m_shapeId = cur->GetId();
+			m_bounds = gz.bounds;
+			LogAppEvent(_T("[그라디언트 도구] 컬러 스톱 추가"));
+			UpdateShapePropertiesSelection(cur, e.pDoc);
+			return;
+		}
+	}
+
+	// 4. 도형 집기 + 드래그로 그라디언트 만들기: 클릭한 도형(그룹 안쪽 포함)을 선택하거나, 선택된 도형에 대해 어디서든 드래그
+	ge::PathNode* hit = HitTestPathDeep(e.pDoc, screenPt, e.view, e.pD2DFactory);
+	ge::PathNode* target = hit ? hit : cur;
+	if (hit && hit != cur)
+	{
+		if (SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool())
+			pSelect->SelectNode(hit, e.pDoc);
+		m_activeStop = -1;
+	}
+	if (!target)
+	{
+		doc.ClearSelection();
+		UpdateShapePropertiesSelection(nullptr, e.pDoc);
+		return;
+	}
+	if (!ComputePathBounds(target, e.pD2DFactory, m_bounds)) return;
+	m_drag = Drag::Create;
+	m_shapeId = target->GetId();
+}
+
+void GradientTool::OnMove(const ToolEvent& e)
+{
+	m_curScreen = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+	if (m_drag == Drag::None || !e.pDoc) return;
+
+	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(e.pDoc->GetDoc().FindById(m_shapeId));
+	if (!ps) { m_drag = Drag::None; return; }
+
+	if (DistSq(m_downScreen, m_curScreen) > 3.0f * 3.0f) m_moved = true;
+
+	switch (m_drag)
+	{
+	case Drag::Part:
+		ApplyGradPartDrag(ps, m_bounds, m_part, m_curScreen, e.view);
+		break;
+
+	case Drag::Stop:
+	{
+		float d2 = 0.0f;
+		const float t = ProjectOnAxis(m_axisA, m_axisB, m_curScreen, d2);
+		ge::Gradient& g = ps->GetStyleRef().fill.gradient;
+		if (m_stop >= 0 && m_stop < static_cast<int>(g.stops.size()))
+			g.stops[m_stop].offset = t;   // 드래그 중에는 정렬하지 않음 (렌더러가 정렬된 복사본을 사용)
+		break;
+	}
+
+	case Drag::Create:
+	default:
+		break;   // 미리보기는 DrawOverlay 가 m_downScreen -> m_curScreen 선으로 그림
+	}
+
+	if (m_drag == Drag::Part || m_drag == Drag::Stop)
+	{
+		static DWORD s_lastTick = 0;
+		const DWORD now = ::GetTickCount();
+		if (now - s_lastTick >= 30)
+		{
+			s_lastTick = now;
+			UpdateShapePropertiesSelection(ps, e.pDoc);   // 속성창 수치/스톱 바 실시간 동기화
+		}
+	}
+}
+
+void GradientTool::OnUp(const ToolEvent& e)
+{
+	const Drag drag = m_drag;
+	m_drag = Drag::None;
+	if (drag == Drag::None || !e.pDoc) return;
+
+	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(e.pDoc->GetDoc().FindById(m_shapeId));
+	if (!ps) return;
+
+	if (drag == Drag::Create)
+	{
+		if (!m_moved) return;   // 단순 클릭은 선택만
+		float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+		const D2D1_POINT_2F upScreen = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+		if (!ScreenToGradRatio(ps, m_bounds, m_downScreen, e.view, x0, y0) || !ScreenToGradRatio(ps, m_bounds, upScreen, e.view, x1, y1)) return;
+
+		EnsureGradient(ps, m_kind);
+		ge::Gradient& g = ps->GetStyleRef().fill.gradient;
+		if (g.kind != m_kind) g.SetKind(m_kind);   // 도구의 Linear/Radial 선택이 기존 그라디언트 종류보다 우선
+		g.start = { x0, y0 };
+		if (m_kind == ge::Gradient::Kind::Linear)
+		{
+			g.end = { x1, y1 };
+		}
+		else
+		{
+			// 방사형: 드래그 시작점이 중심, 드래그 거리가 반지름 (박스 너비 기준 비율), 초점은 중심과 같게
+			const float w = m_bounds.right - m_bounds.left;
+			const float h = m_bounds.bottom - m_bounds.top;
+			const float dx = (x1 - x0) * w, dy = (y1 - y0) * h;
+			g.end = g.start;
+			g.radius = (std::max)(0.01f, std::sqrt(dx * dx + dy * dy) / w);
+		}
+		LogAppEvent(m_kind == ge::Gradient::Kind::Linear ? _T("[그라디언트 도구] 선형 그라디언트 방향 지정") : _T("[그라디언트 도구] 방사형 그라디언트 중심/반지름 지정"));
+	}
+	else if (drag == Drag::Stop)
+	{
+		// 드래그가 끝나면 offset 순으로 정렬하고, 같은 스톱을 계속 강조
+		ge::Gradient& g = ps->GetStyleRef().fill.gradient;
+		if (m_stop >= 0 && m_stop < static_cast<int>(g.stops.size()))
+		{
+			const float off = g.stops[m_stop].offset;
+			g.NormalizeStops();
+			for (int i = 0; i < static_cast<int>(g.stops.size()); ++i)
+				if (g.stops[i].offset == off) { m_activeStop = i; break; }
+		}
+	}
+
+	UpdateShapePropertiesSelection(ps, e.pDoc);
+}
+
+bool GradientTool::OnDoubleClicked(CM2DrawDoc* pDoc)
+{
+	if (!pDoc) return false;
+	const std::vector<ge::Node*>& sel = pDoc->GetDoc().GetSelection();
+	ge::PathNode* ps = (sel.size() == 1) ? dynamic_cast<ge::PathNode*>(sel[0]) : nullptr;
+	if (!ps || !IsInteractive(ps)) return false;
+
+	// 기본 그라디언트: 없으면 만들고, 있으면 방향/반지름만 종류별 기본값으로 되돌림
+	EnsureGradient(ps, m_kind);
+	ge::Gradient& g = ps->GetStyleRef().fill.gradient;
+	if (g.kind != m_kind) g.SetKind(m_kind);
+	g.ResetGeometry();
+	LogAppEvent(_T("[그라디언트 도구] 기본 그라디언트 적용"));
+	UpdateShapePropertiesSelection(ps, pDoc);
+	return false;   // 도구는 유지
+}
+
+void GradientTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
+{
+	if (!rt || !brush || !pDoc) return;
+	const ViewportTransform view = { zoom, { pan.x, pan.y } };
+
+	ID2D1Factory* f = nullptr;
+	rt->GetFactory(&f);
+	if (!f) return;
+
+	const std::vector<ge::Node*>& sel = pDoc->GetDoc().GetSelection();
+	ge::PathNode* ps = (sel.size() == 1) ? dynamic_cast<ge::PathNode*>(sel[0]) : nullptr;
+	if (ps && IsInteractive(ps))
+	{
+		// 선택된 도형의 경계 상자 (그라디언트 박스 = 비율 좌표의 기준) 를 얇게 표시
+		ge::Rect2 b{};
+		if (ComputePathBounds(ps, f, b))
+		{
+			const ge::Matrix2D wx = ps->GetWorldTransform();
+			const D2D1_POINT_2F c[4] = {
+				CoordinateSpace::LocalToScreen(D2D1::Point2F(b.left, b.top), wx, view),
+				CoordinateSpace::LocalToScreen(D2D1::Point2F(b.right, b.top), wx, view),
+				CoordinateSpace::LocalToScreen(D2D1::Point2F(b.right, b.bottom), wx, view),
+				CoordinateSpace::LocalToScreen(D2D1::Point2F(b.left, b.bottom), wx, view) };
+			brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.75f));
+			for (int i = 0; i < 4; ++i)
+				rt->DrawLine(c[i], c[(i + 1) % 4], brush, 1.0f);
+		}
+
+		if (ps->GetStyle().fill.type == ge::PaintType::Gradient)
+			DrawGradientGizmo(rt, brush, view, f, ps, m_drag == Drag::Part ? m_part : 0, m_activeStop);
+	}
+
+	// 새 그라디언트를 드래그로 지정하는 동안의 미리보기 (시작 ■ -> 현재 위치 ●)
+	if (m_drag == Drag::Create && m_moved)
+	{
+		brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.95f));
+		rt->DrawLine(m_downScreen, m_curScreen, brush, 3.0f);
+		brush->SetColor(D2D1::ColorF(0.10f, 0.30f, 0.70f, 1.0f));
+		rt->DrawLine(m_downScreen, m_curScreen, brush, 1.3f);
+		const D2D1_RECT_F sq = D2D1::RectF(m_downScreen.x - 5.0f, m_downScreen.y - 5.0f, m_downScreen.x + 5.0f, m_downScreen.y + 5.0f);
+		brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+		rt->FillRectangle(sq, brush);
+		brush->SetColor(D2D1::ColorF(0.10f, 0.30f, 0.70f, 1.0f));
+		rt->DrawRectangle(sq, brush, 1.5f);
+		brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+		rt->FillEllipse(D2D1::Ellipse(m_curScreen, 5.5f, 5.5f), brush);
+		brush->SetColor(D2D1::ColorF(0.10f, 0.30f, 0.70f, 1.0f));
+		rt->DrawEllipse(D2D1::Ellipse(m_curScreen, 5.5f, 5.5f), brush, 1.5f);
+	}
+
+	f->Release();
+}

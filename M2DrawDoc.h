@@ -49,6 +49,12 @@ public:
 	// --- 복제 (Ctrl+D) ---
 	bool DuplicateSelectedObjects();
 
+	// --- 그룹화 / 그룹 해제 (Ctrl+G / Ctrl+Shift+G, 오브젝트 메뉴, 속성창 버튼 공용) ---
+	bool CanGroup() const   { return m_doc.CanGroupSelection(); }
+	bool CanUngroup() const { return m_doc.CanUngroupSelection(); }
+	bool GroupSelectedObjects();
+	bool UngroupSelectedObjects();
+
 	// --- Undo / Redo (Ctrl+Z / Ctrl+Y) ---
 	ge::UndoManager& GetUndoManager() { return m_undoMgr; }
 	// 편집이 끝난 지점에서 호출: 마지막 확정 상태와 달라졌으면 Undo 이력에 기록하고 수정 표시를 켬 (true = 변경됨)
@@ -60,6 +66,10 @@ public:
 	afx_msg void OnUpdateEditUndo(CCmdUI* pCmdUI);
 	afx_msg void OnEditRedo();
 	afx_msg void OnUpdateEditRedo(CCmdUI* pCmdUI);
+	afx_msg void OnObjectGroup();
+	afx_msg void OnUpdateObjectGroup(CCmdUI* pCmdUI);
+	afx_msg void OnObjectUngroup();
+	afx_msg void OnUpdateObjectUngroup(CCmdUI* pCmdUI);
 
 private:
 	ge::UndoManager m_undoMgr;
