@@ -845,6 +845,18 @@ void CLayerView::DrawNodeIcon(ID2D1RenderTarget* pRT, ID2D1SolidColorBrush* pBru
 
 	if (pNode->Kind() == ge::NodeKind::Group)
 	{
+		auto* pGrp = dynamic_cast<ge::GroupNode*>(pNode);
+		if (pGrp && pGrp->IsClippingMask())
+		{
+			// 클리핑 마스크 아이콘: 점선 프레임 또는 마스크 글리프
+			pBrush->SetColor(D2D1::ColorF(0.95f, 0.65f, 0.25f, 1.0f));
+			D2D1_RECT_F g1 = D2D1::RectF(iconRect.left + 0.5f, iconRect.top + 0.5f, iconRect.right - 0.5f, iconRect.bottom - 0.5f);
+			pRT->DrawRectangle(g1, pBrush, 1.0f);
+			D2D1_ELLIPSE el = D2D1::Ellipse(D2D1::Point2F((iconRect.left + iconRect.right) * 0.5f, (iconRect.top + iconRect.bottom) * 0.5f), 3.5f, 3.5f);
+			pRT->DrawEllipse(el, pBrush, 1.2f);
+			return;
+		}
+
 		// 그룹 아이콘: 겹친 두 사각형
 		pBrush->SetColor(D2D1::ColorF(0.55f, 0.80f, 0.55f, 1.0f));
 		D2D1_RECT_F g1 = D2D1::RectF(iconRect.left + 0.5f, iconRect.top + 0.5f, iconRect.right - 4.5f, iconRect.bottom - 4.5f);
@@ -1002,6 +1014,11 @@ void CLayerView::OnPaint()
 		if (row.pNode && row.labelRect.right > row.labelRect.left)
 		{
 			std::wstring name = row.pNode->GetName();
+			auto* pGrp = dynamic_cast<ge::GroupNode*>(row.pNode);
+			if (pGrp && pGrp->IsClippingMask())
+			{
+				name = L"<클립> " + name;
+			}
 			m_pBrush->SetColor(isSelected ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f) : D2D1::ColorF(0.88f, 0.88f, 0.92f, 1.0f));
 			m_pRenderTarget->PushAxisAlignedClip(row.labelRect, D2D1_ANTIALIAS_MODE_ALIASED);
 			m_pRenderTarget->DrawText(

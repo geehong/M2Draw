@@ -11,7 +11,8 @@ static bool IsActionType(ToolType t)
 	       t == ToolType::ActionForward || t == ToolType::ActionBackward || t == ToolType::ActionToBack ||
 	       t == ToolType::ActionBooleanUnion || t == ToolType::ActionBooleanSubtract ||
 	       t == ToolType::ActionBooleanIntersect || t == ToolType::ActionBooleanExclude ||
-	       t == ToolType::ActionBooleanTrim;
+	       t == ToolType::ActionBooleanTrim ||
+	       t == ToolType::ActionClipMask || t == ToolType::ActionReleaseMask;
 }
 static UINT CommandOfType(ToolType t)
 {
@@ -28,11 +29,14 @@ static UINT CommandOfType(ToolType t)
 	case ToolType::ActionBooleanIntersect:return ID_BOOLEAN_INTERSECT;
 	case ToolType::ActionBooleanExclude:  return ID_BOOLEAN_EXCLUDE;
 	case ToolType::ActionBooleanTrim:     return ID_BOOLEAN_TRIM;
+	case ToolType::ActionClipMask:        return ID_OBJECT_CLIP_MASK;
+	case ToolType::ActionReleaseMask:     return ID_OBJECT_RELEASE_MASK;
 	default:                              return 0;
 	}
 }
 static bool IsArrangeCommand(UINT id) { return id >= ID_OBJECT_FRONT && id <= ID_OBJECT_BACK; }
 static bool IsBooleanCommand(UINT id) { return id >= ID_BOOLEAN_UNION && id <= ID_BOOLEAN_TRIM; }
+static bool IsClipMaskCommand(UINT id) { return id == ID_OBJECT_CLIP_MASK || id == ID_OBJECT_RELEASE_MASK; }
 static const wchar_t* GetFlyoutToolName(ToolType t);
 
 #ifdef _DEBUG
@@ -87,7 +91,9 @@ CToolBoxPane::CToolBoxPane() noexcept
 		// 순서(Z-order) 동작 그룹: 맨 앞으로 / 앞으로 / 뒤로 / 맨 뒤로
 		{ ToolType::ActionToFront,      L"순서",                       0, CRect(), {}, 0 },
 		// 불리언(패스파인더) 연산 그룹: 합치기 / 빼기 / 교차 / 제외 / 트림
-		{ ToolType::ActionBooleanUnion, L"불리언 (패스파인더)",        0, CRect(), {}, 0 }
+		{ ToolType::ActionBooleanUnion, L"불리언 (패스파인더)",        0, CRect(), {}, 0 },
+		// 클리핑 마스크 그룹: 만들기 / 해제
+		{ ToolType::ActionClipMask,     L"클리핑 마스크",              0, CRect(), {}, 0 }
 	};
 
 	// 사각형 그룹: 사각형 / 삼각형 (마지막 선택은 앱 설정에 저장)
@@ -145,6 +151,14 @@ CToolBoxPane::CToolBoxPane() noexcept
 			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("BooleanActionTool"), static_cast<int>(ToolType::ActionBooleanUnion));
 			for (ToolType st : btn.subTools)
 				if (saved == static_cast<int>(st)) { btn.type = st; break; }
+		}
+		else if (btn.type == ToolType::ActionClipMask)
+		{
+			// 클리핑 마스크 그룹: 만들기 / 해제
+			btn.subTools = { ToolType::ActionClipMask, ToolType::ActionReleaseMask };
+			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("ClipMaskActionTool"), static_cast<int>(ToolType::ActionClipMask));
+			if (saved == static_cast<int>(ToolType::ActionReleaseMask))
+				btn.type = ToolType::ActionReleaseMask;
 		}
 	}
 }
@@ -891,13 +905,21 @@ void CToolBoxPane::OnLButtonDown(UINT nFlags, CPoint point)
 
 		if (!m_buttons[i].subTools.empty())
 		{
-			// 불리언 버튼을 클릭한 경우 상단 서브도구 툴바를 즉시 불리언 연산자 모음으로 전환
+			// 불리언 또는 클리핑 마스크 버튼을 클릭한 경우 상단 서브도구 툴바를 즉시 해당 연산자 모음으로 전환
 			if (m_buttons[i].type == ToolType::ActionBooleanUnion ||
 				(!m_buttons[i].subTools.empty() && m_buttons[i].subTools[0] == ToolType::ActionBooleanUnion))
 			{
 				if (CMainFrame* pMain = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd()))
 				{
 					pMain->UpdateSubToolBar(ToolType::ActionBooleanUnion);
+				}
+			}
+			else if (m_buttons[i].type == ToolType::ActionClipMask ||
+				(!m_buttons[i].subTools.empty() && m_buttons[i].subTools[0] == ToolType::ActionClipMask))
+			{
+				if (CMainFrame* pMain = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd()))
+				{
+					pMain->UpdateSubToolBar(ToolType::ActionClipMask);
 				}
 			}
 
@@ -936,6 +958,7 @@ void CToolBoxPane::OnLButtonUp(UINT nFlags, CPoint point)
 
 	bool selected = false;
 	ToolType chosen = m_buttons[idx].type;
+	const bool wasFlyout = m_flyoutOpen;
 
 	if (m_flyoutOpen)
 	{
@@ -976,26 +999,53 @@ void CToolBoxPane::OnLButtonUp(UINT nFlags, CPoint point)
 			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("ArrangeActionTool"), static_cast<int>(chosen));
 		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionBooleanUnion)
 			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("BooleanActionTool"), static_cast<int>(chosen));
+		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionClipMask)
+			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("ClipMaskActionTool"), static_cast<int>(chosen));
 
 		if (IsActionType(chosen))
 		{
-			// 불리언 동작인 경우, 바로 실행하지 않고 상단 서브도구 툴바에 연산자들을 펼쳐 사용자가 선택할 수 있도록 함
-			if (IsBooleanCommand(CommandOfType(chosen)))
+			const UINT cmd = CommandOfType(chosen);
+			const bool isBoolean = IsBooleanCommand(cmd);
+			const bool isClipMask = IsClipMaskCommand(cmd);
+
+			if (wasFlyout)
 			{
-				if (CMainFrame* pMain = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd()))
-				{
-					pMain->UpdateSubToolBar(ToolType::ActionBooleanUnion);
-				}
-			}
-			else
-			{
-				// 그룹/순서 등 즉각 적용 동작: 활성일 때만 실행 (오브젝트 메뉴와 같은 명령 경로 -> 활성 문서가 처리)
-				const UINT cmd = CommandOfType(chosen);
+				// 플라이아웃 메뉴에서 세부 연산자를 직접 클릭하여 선택한 경우: 해당 연산 즉시 실행!
 				if (IsCommandEnabled(cmd))
 				{
 					if (CWnd* pMain = AfxGetMainWnd())
 						pMain->SendMessage(WM_COMMAND, MAKEWPARAM(cmd, 0), 0);
 					m_enabledMask = ComputeEnabledMask();
+				}
+			}
+			else
+			{
+				// 사이드 메뉴 버튼을 단순히 클릭한 경우:
+				if (isBoolean)
+				{
+					// 상단 서브도구 툴바에 불리언 연산자들 펼치기
+					if (CMainFrame* pMain = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd()))
+					{
+						pMain->UpdateSubToolBar(ToolType::ActionBooleanUnion);
+					}
+				}
+				else if (isClipMask)
+				{
+					// 상단 서브도구 툴바에 클리핑 마스크 서브도구 펼치기
+					if (CMainFrame* pMain = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd()))
+					{
+						pMain->UpdateSubToolBar(ToolType::ActionClipMask);
+					}
+				}
+				else
+				{
+					// 그룹/순서 등 즉각 적용 동작: 활성일 때만 실행 (오브젝트 메뉴와 같은 명령 경로 -> 활성 문서가 처리)
+					if (IsCommandEnabled(cmd))
+					{
+						if (CWnd* pMain = AfxGetMainWnd())
+							pMain->SendMessage(WM_COMMAND, MAKEWPARAM(cmd, 0), 0);
+						m_enabledMask = ComputeEnabledMask();
+					}
 				}
 			}
 		}
@@ -1052,20 +1102,24 @@ UINT CToolBoxPane::ComputeEnabledMask() const
 	UINT mask = 0;
 	if (pDoc)
 	{
-		if (pDoc->CanGroup())   mask |= 1;
-		if (pDoc->CanUngroup()) mask |= 2;
-		if (pDoc->CanArrange()) mask |= 4;
-		if (pDoc->CanBoolean()) mask |= 8;
+		if (pDoc->CanGroup())          mask |= 1;
+		if (pDoc->CanUngroup())        mask |= 2;
+		if (pDoc->CanArrange())        mask |= 4;
+		if (pDoc->CanBoolean())        mask |= 8;
+		if (pDoc->CanMakeClipMask())    mask |= 16;
+		if (pDoc->CanReleaseClipMask()) mask |= 32;
 	}
 	return mask;
 }
 
 bool CToolBoxPane::IsCommandEnabled(UINT commandId) const
 {
-	if (commandId == ID_OBJECT_GROUP)   return (m_enabledMask & 1) != 0;
-	if (commandId == ID_OBJECT_UNGROUP) return (m_enabledMask & 2) != 0;
-	if (IsArrangeCommand(commandId))    return (m_enabledMask & 4) != 0;
-	if (IsBooleanCommand(commandId))    return (m_enabledMask & 8) != 0;
+	if (commandId == ID_OBJECT_GROUP)        return (m_enabledMask & 1) != 0;
+	if (commandId == ID_OBJECT_UNGROUP)      return (m_enabledMask & 2) != 0;
+	if (IsArrangeCommand(commandId))         return (m_enabledMask & 4) != 0;
+	if (IsBooleanCommand(commandId))         return (m_enabledMask & 8) != 0;
+	if (commandId == ID_OBJECT_CLIP_MASK)    return (m_enabledMask & 16) != 0;
+	if (commandId == ID_OBJECT_RELEASE_MASK) return (m_enabledMask & 32) != 0;
 	return true;
 }
 
@@ -1159,6 +1213,30 @@ void CToolBoxPane::DrawActionIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 		{
 			// 트림 분할선 표시
 			rt->DrawLine(D2D1::Point2F(cx, cy - 8.0f), D2D1::Point2F(cx, cy + 8.0f), brush, 1.5f);
+		}
+		return;
+	}
+
+	if (IsClipMaskCommand(commandId))
+	{
+		brush->SetColor(col);
+		const D2D1_RECT_F sq = D2D1::RectF(cx - 7.0f, cy - 5.0f, cx + 5.0f, cy + 7.0f);
+		const D2D1_ELLIPSE cir = D2D1::Ellipse(D2D1::Point2F(cx + 2.0f, cy - 2.0f), 5.5f, 5.5f);
+		if (commandId == ID_OBJECT_CLIP_MASK)
+		{
+			// 마스크 만들기: 사각형 외곽선 + 안쪽 원 채움
+			brush->SetColor(D2D1::ColorF(col.r, col.g, col.b, 0.3f));
+			rt->FillEllipse(cir, brush);
+			brush->SetColor(col);
+			rt->DrawRectangle(sq, brush, 1.3f);
+			rt->DrawEllipse(cir, brush, 1.3f);
+		}
+		else
+		{
+			// 마스크 해제: 사각형 + 원 + 해제 대각선
+			rt->DrawRectangle(sq, brush, 1.3f);
+			rt->DrawEllipse(cir, brush, 1.3f);
+			rt->DrawLine(D2D1::Point2F(cx - 8.0f, cy + 8.0f), D2D1::Point2F(cx + 8.0f, cy - 8.0f), brush, 1.6f);
 		}
 		return;
 	}
@@ -1276,6 +1354,8 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	case ToolType::ActionBooleanIntersect: return L"교차 (Ctrl+Shift+I)";
 	case ToolType::ActionBooleanExclude:   return L"제외 (Ctrl+Shift+X)";
 	case ToolType::ActionBooleanTrim:      return L"트림 / 분할 (Ctrl+Shift+T)";
+	case ToolType::ActionClipMask:         return L"클리핑 마스크 만들기 (Ctrl+7)";
+	case ToolType::ActionReleaseMask:      return L"클리핑 마스크 해제 (Ctrl+Alt+7)";
 	default:                 return L"";
 	}
 }
@@ -1455,6 +1535,18 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color, bool
 		{
 			dc.MoveTo(c.x, c.y - 7);
 			dc.LineTo(c.x, c.y + 7);
+		}
+		break;
+	}
+	case ToolType::ActionClipMask:
+	case ToolType::ActionReleaseMask:
+	{
+		dc.Rectangle(c.x - 7, c.y - 5, c.x + 5, c.y + 7);
+		dc.Ellipse(c.x - 3, c.y - 7, c.x + 7, c.y + 3);
+		if (t == ToolType::ActionReleaseMask)
+		{
+			dc.MoveTo(c.x - 8, c.y + 8);
+			dc.LineTo(c.x + 8, c.y - 8);
 		}
 		break;
 	}

@@ -722,8 +722,17 @@ public:
 	void BringForward(Node* child);
 	void SendBackward(Node* child);
 
+	// 클리핑 마스크 (SVG <clipPath> / D2D geometricMask)
+	bool  IsClippingMask() const noexcept { return m_bClippingMask; }
+	void  SetClippingMask(bool bClip) noexcept { m_bClippingMask = bClip; }
+	Node* GetMaskNode() const noexcept {
+		// 마스크 노드는 관례상 자식 중 최상단(맨 뒤 인덱스) 도형
+		return (m_bClippingMask && !m_children.empty()) ? m_children.back().get() : nullptr;
+	}
+
 protected:
 	std::vector<std::unique_ptr<Node>> m_children;   // 0 = 최하단
+	bool m_bClippingMask = false;
 };
 
 } // namespace ge
@@ -774,6 +783,11 @@ public:
 #ifndef GE_NO_D2D
 	PathNode*  BooleanOperation(BooleanMode mode, ID2D1Factory* factory);
 #endif
+	// 클리핑 마스크 (Ctrl+7 만들기, Ctrl+Alt+7 해제)
+	bool       CanMakeClipMask() const;
+	bool       CanReleaseClipMask() const;
+	GroupNode* MakeClipMask();
+	void       ReleaseClipMask();
 
 	// 복제 (Ctrl+D): 선택 항목을 같은 부모의 원본 바로 위에 복제, 새 ID/이름 발급 후 복제본을 선택
 	std::vector<Node*> DuplicateSelection();

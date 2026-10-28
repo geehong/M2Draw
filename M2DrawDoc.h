@@ -63,6 +63,12 @@ public:
 	bool CanBoolean() const { return m_doc.CanBooleanOperation(); }
 	bool PerformBooleanOperation(ge::BooleanMode mode);
 
+	// --- 클리핑 마스크 (Ctrl+7 / Ctrl+Alt+7) ---
+	bool CanMakeClipMask() const    { return m_doc.CanMakeClipMask(); }
+	bool CanReleaseClipMask() const { return m_doc.CanReleaseClipMask(); }
+	bool MakeClipMask();
+	bool ReleaseClipMask();
+
 	// --- Undo / Redo (Ctrl+Z / Ctrl+Y) ---
 	ge::UndoManager& GetUndoManager() { return m_undoMgr; }
 	// 편집이 끝난 지점에서 호출: 마지막 확정 상태와 달라졌으면 Undo 이력에 기록하고 수정 표시를 켬 (true = 변경됨)
@@ -82,6 +88,10 @@ public:
 	afx_msg void OnUpdateObjectArrange(CCmdUI* pCmdUI);
 	afx_msg void OnBooleanOperation(UINT nID);
 	afx_msg void OnUpdateBooleanOperation(CCmdUI* pCmdUI);
+	afx_msg void OnObjectClipMask();
+	afx_msg void OnUpdateObjectClipMask(CCmdUI* pCmdUI);
+	afx_msg void OnObjectReleaseMask();
+	afx_msg void OnUpdateObjectReleaseMask(CCmdUI* pCmdUI);
 
 private:
 	ge::UndoManager m_undoMgr;

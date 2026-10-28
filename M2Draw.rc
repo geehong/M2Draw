@@ -260,6 +260,12 @@ BEGIN
             MENUITEM "트림/분할(&T)\tCtrl+Shift+T",   ID_BOOLEAN_TRIM
         END
         MENUITEM "맨 뒤로(&K)\tCtrl+Shift+[",         ID_OBJECT_BACK
+        MENUITEM SEPARATOR
+        POPUP "클리핑 마스크(&M)"
+        BEGIN
+            MENUITEM "만들기(&M)\tCtrl+7",               ID_OBJECT_CLIP_MASK
+            MENUITEM "해제(&R)\tCtrl+Alt+7",             ID_OBJECT_RELEASE_MASK
+        END
     END
     POPUP "보기(&V)"
     BEGIN
@@ -374,6 +380,8 @@ BEGIN
     "S",            ID_BOOLEAN_SUBTRACT,    VIRTKEY,CONTROL,SHIFT
     "I",            ID_BOOLEAN_INTERSECT,   VIRTKEY,CONTROL,SHIFT
     "X",            ID_BOOLEAN_EXCLUDE,     VIRTKEY,CONTROL,SHIFT
+    "7",            ID_OBJECT_CLIP_MASK,    VIRTKEY,CONTROL
+    "7",            ID_OBJECT_RELEASE_MASK, VIRTKEY,CONTROL,ALT
 END
 
 

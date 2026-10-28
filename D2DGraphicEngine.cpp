@@ -296,6 +296,7 @@ std::unique_ptr<Node> GroupNode::Clone() const
 {
 	auto copy = std::make_unique<GroupNode>();
 	copy->CopyNodePropsFrom(*this);
+	copy->m_bClippingMask = m_bClippingMask;
 	for (const auto& c : m_children) copy->AddChild(c->Clone());
 	return copy;
 }
@@ -914,6 +915,63 @@ void Document::UngroupSelection()
 	m_selection = result;
 }
 
+bool Document::CanMakeClipMask() const
+{
+	// 2개 이상의 노드가 선택되어 있고, 그 중 최상단 노드가 PathNode(마스크 도형)일 때
+	return CanGroupSelection();
+}
+
+bool Document::CanReleaseClipMask() const
+{
+	// 선택 항목 중에 클리핑 마스크 그룹이 있거나, 클리핑 마스크 그룹의 자식이 선택되어 있는 경우
+	for (const Node* n : m_selection) {
+		if (!n) continue;
+		if (n->Kind() == NodeKind::Group && static_cast<const GroupNode*>(n)->IsClippingMask())
+			return true;
+		const GroupNode* p = n->GetParent();
+		if (p && p->IsClippingMask())
+			return true;
+	}
+	return false;
+}
+
+GroupNode* Document::MakeClipMask()
+{
+	// 1) 2개 이상의 선택 항목을 하나의 그룹으로 묶음
+	GroupNode* g = GroupSelection();
+	if (!g) return nullptr;
+
+	// 2) 그룹을 클리핑 마스크로 설정
+	g->SetClippingMask(true);
+	ChangeTracker::Bump();
+	return g;
+}
+
+void Document::ReleaseClipMask()
+{
+	std::vector<GroupNode*> maskGroups;
+	for (Node* n : m_selection) {
+		if (!n) continue;
+		if (n->Kind() == NodeKind::Group && static_cast<GroupNode*>(n)->IsClippingMask()) {
+			if (std::find(maskGroups.begin(), maskGroups.end(), static_cast<GroupNode*>(n)) == maskGroups.end())
+				maskGroups.push_back(static_cast<GroupNode*>(n));
+		}
+		GroupNode* p = n->GetParent();
+		if (p && p->IsClippingMask()) {
+			if (std::find(maskGroups.begin(), maskGroups.end(), p) == maskGroups.end())
+				maskGroups.push_back(p);
+		}
+	}
+
+	for (GroupNode* g : maskGroups) {
+		g->SetClippingMask(false);
+	}
+
+	if (!maskGroups.empty()) {
+		ChangeTracker::Bump();
+	}
+}
+
 std::vector<Node*> Document::DuplicateSelection()
 {
 	auto isSelected = [&](const Node* n) {
@@ -1390,8 +1448,47 @@ void D2DRenderer::DrawNode(Node& node, const Matrix2D& parentXf, const Viewport&
 
 void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const Viewport& view)
 {
-	for (auto& c : node.GetChildren())
+	const bool isClipMask = node.IsClippingMask();
+	Node* maskNode = isClipMask ? node.GetMaskNode() : nullptr;
+
+	ComPtr<ID2D1Geometry> maskGeo;
+	if (isClipMask && maskNode && maskNode->Kind() == NodeKind::Path && m_rt && m_factory) {
+		PathNode& pathMask = static_cast<PathNode&>(*maskNode);
+		// 마스크 노드의 월드 변환 = maskNode 로컬 변환 * 그룹 월드 변환
+		Matrix2D maskWorldXf = pathMask.GetTransform() * worldXf;
+		ComPtr<ID2D1PathGeometry> localGeo = PathOp::BuildGeometry(pathMask, m_factory);
+		if (localGeo) {
+			if (maskWorldXf.IsIdentity()) {
+				maskGeo = localGeo;
+			} else {
+				D2D1_MATRIX_3X2_F d2dXf = maskWorldXf.ToD2D();
+				ComPtr<ID2D1TransformedGeometry> xfGeo;
+				if (SUCCEEDED(m_factory->CreateTransformedGeometry(localGeo.Get(), &d2dXf, &xfGeo))) {
+					maskGeo = xfGeo;
+				}
+			}
+		}
+	}
+
+	const bool pushMaskLayer = (maskGeo != nullptr);
+	if (pushMaskLayer) {
+		D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters();
+		params.geometricMask = maskGeo.Get();
+		params.maskTransform = D2D1::IdentityMatrix();
+		params.contentBounds = D2D1::InfiniteRect();
+		m_rt->PushLayer(params, nullptr);
+	}
+
+	for (auto& c : node.GetChildren()) {
+		// 클리핑 마스크 그룹일 경우, 마스크로 사용되는 최상단 도형 자체는 오리기 형태(geometry)로만 쓰이고 직접 그려지지 않음
+		if (isClipMask && c.get() == maskNode)
+			continue;
 		DrawNode(*c, worldXf, view);
+	}
+
+	if (pushMaskLayer) {
+		m_rt->PopLayer();
+	}
 }
 
 static D2D1_COLOR_F ToD2D(const Color& c, float opacity)

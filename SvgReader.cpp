@@ -451,6 +451,11 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 					if (attrs.count(L"m2:name")) group->SetName(attrs[L"m2:name"]);
 					if (attrs.count(L"opacity")) group->SetOpacity(std::wcstof(attrs[L"opacity"].c_str(), nullptr));
 					if (attrs.count(L"transform")) group->SetTransform(ParseTransformMatrix(attrs[L"transform"]));
+					if (attrs.count(L"m2:clipMask") && attrs[L"m2:clipMask"] == L"true") {
+						group->SetClippingMask(true);
+					} else if (attrs.count(L"clip-path")) {
+						group->SetClippingMask(true);
+					}
 
 					GroupNode* rawGroup = group.get();
 					if (!groupStack.empty()) {

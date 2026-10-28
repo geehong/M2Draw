@@ -42,6 +42,10 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnUpdateObjectArrange)
 	ON_COMMAND_RANGE(ID_BOOLEAN_UNION, ID_BOOLEAN_TRIM, &CM2DrawDoc::OnBooleanOperation)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_BOOLEAN_UNION, ID_BOOLEAN_TRIM, &CM2DrawDoc::OnUpdateBooleanOperation)
+	ON_COMMAND(ID_OBJECT_CLIP_MASK, &CM2DrawDoc::OnObjectClipMask)
+	ON_UPDATE_COMMAND_UI(ID_OBJECT_CLIP_MASK, &CM2DrawDoc::OnUpdateObjectClipMask)
+	ON_COMMAND(ID_OBJECT_RELEASE_MASK, &CM2DrawDoc::OnObjectReleaseMask)
+	ON_UPDATE_COMMAND_UI(ID_OBJECT_RELEASE_MASK, &CM2DrawDoc::OnUpdateObjectReleaseMask)
 END_MESSAGE_MAP()
 
 
@@ -683,4 +687,59 @@ void CM2DrawDoc::OnUpdateBooleanOperation(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(CanBoolean());
 }
+
+bool CM2DrawDoc::MakeClipMask()
+{
+	ge::GroupNode* g = m_doc.MakeClipMask();
+	if (!g) return false;
+
+	UpdateShapePropertiesSelection(g, this);
+	CommitUndoPoint(L"클리핑 마스크 만들기");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame))) {
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+		static_cast<CMainFrame*>(pMainWnd)->UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+	}
+	return true;
+}
+
+bool CM2DrawDoc::ReleaseClipMask()
+{
+	if (!CanReleaseClipMask()) return false;
+	m_doc.ReleaseClipMask();
+
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+	CommitUndoPoint(L"클리핑 마스크 해제");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame))) {
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+		static_cast<CMainFrame*>(pMainWnd)->UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+	}
+	return true;
+}
+
+void CM2DrawDoc::OnObjectClipMask()
+{
+	MakeClipMask();
+}
+
+void CM2DrawDoc::OnUpdateObjectClipMask(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(CanMakeClipMask());
+}
+
+void CM2DrawDoc::OnObjectReleaseMask()
+{
+	ReleaseClipMask();
+}
+
+void CM2DrawDoc::OnUpdateObjectReleaseMask(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(CanReleaseClipMask());
+}
+
 

@@ -88,7 +88,9 @@ enum class ToolType
 	ActionBooleanSubtract,  // 불리언: 빼기
 	ActionBooleanIntersect, // 불리언: 교차
 	ActionBooleanExclude,   // 불리언: 제외
-	ActionBooleanTrim       // 불리언: 트림/분할
+	ActionBooleanTrim,      // 불리언: 트림/분할
+	ActionClipMask,         // 클리핑 마스크 만들기
+	ActionReleaseMask       // 클리핑 마스크 해제
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)

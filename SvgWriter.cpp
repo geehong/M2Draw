@@ -223,9 +223,6 @@ void SvgWriter::WriteGradientDefs(Document& doc) {
 	for (const auto& layer : doc.GetLayers()) if (layer) collect(*layer);
 	if (users.empty()) return;
 
-	AppendIndent();
-	m_output += "<defs>\n";
-	++m_indent;
 	for (const PathNode* p : users) {
 		Gradient g = p->GetStyle().fill.gradient;
 		g.NormalizeStops();   // SVG 는 stop offset 이 오름차순이어야 함 (편집 중 모델은 정렬되지 않았을 수 있음)
@@ -248,9 +245,45 @@ void SvgWriter::WriteGradientDefs(Document& doc) {
 		AppendIndent();
 		m_output += (g.kind == Gradient::Kind::Linear) ? "</linearGradient>\n" : "</radialGradient>\n";
 	}
-	--m_indent;
-	AppendIndent();
-	m_output += "</defs>\n";
+}
+void SvgWriter::WriteClipPathDefs(Document& doc) {
+	std::vector<const GroupNode*> maskGroups;
+	std::function<void(const Node&)> collect = [&](const Node& n) {
+		if (n.Kind() == NodeKind::Group) {
+			const GroupNode& g = static_cast<const GroupNode&>(n);
+			if (g.IsClippingMask() && g.GetMaskNode() != nullptr) {
+				maskGroups.push_back(&g);
+			}
+			for (const auto& c : g.GetChildren()) {
+				if (c) collect(*c);
+			}
+		}
+	};
+	for (const auto& layer : doc.GetLayers()) if (layer) collect(*layer);
+	if (maskGroups.empty()) return;
+
+	for (const GroupNode* g : maskGroups) {
+		const Node* maskNode = g->GetMaskNode();
+		if (!maskNode || maskNode->Kind() != NodeKind::Path) continue;
+		const PathNode& pathMask = static_cast<const PathNode&>(*maskNode);
+
+		AppendIndent();
+		m_output += "<clipPath id=\"clip_group_" + std::to_string(g->GetId()) + "\">\n";
+		++m_indent;
+		AppendIndent();
+		m_output += "<path d=\"" + BuildPathData(pathMask) + "\"";
+		const Matrix2D& xf = pathMask.GetTransform();
+		if (!IsIdentity(xf)) {
+			m_output += " transform=\"matrix(" +
+				FormatFloat(xf.m11) + " " + FormatFloat(xf.m12) + " " +
+				FormatFloat(xf.m21) + " " + FormatFloat(xf.m22) + " " +
+				FormatFloat(xf.dx) + " " + FormatFloat(xf.dy) + ")\"";
+		}
+		m_output += " />\n";
+		--m_indent;
+		AppendIndent();
+		m_output += "</clipPath>\n";
+	}
 }
 
 std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options) {
@@ -287,8 +320,33 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 		m_output += "<sodipodi:namedview id=\"namedview_canvas\" pagecolor=\"" + ColorToHex(doc.backgroundColor) + "\" />\n";
 	}
 
-	// 그라디언트 정의는 사용하는 도형보다 먼저(문서 앞쪽 <defs>) 출력
-	WriteGradientDefs(doc);
+	// defs 블록 출력: 그라디언트 정의 및 클리핑 마스크 정의
+	std::vector<const PathNode*> gradUsers;
+	std::vector<const GroupNode*> maskGroups;
+	std::function<void(const Node&)> collect = [&](const Node& n) {
+		if (n.Kind() == NodeKind::Path) {
+			const PathNode& p = static_cast<const PathNode&>(n);
+			if (UsesGradientDef(p)) gradUsers.push_back(&p);
+		} else if (n.Kind() == NodeKind::Group) {
+			const GroupNode& g = static_cast<const GroupNode&>(n);
+			if (g.IsClippingMask() && g.GetMaskNode() != nullptr) {
+				maskGroups.push_back(&g);
+			}
+			for (const auto& c : g.GetChildren()) if (c) collect(*c);
+		}
+	};
+	for (const auto& layer : doc.GetLayers()) if (layer) collect(*layer);
+
+	if (!gradUsers.empty() || !maskGroups.empty()) {
+		AppendIndent();
+		m_output += "<defs>\n";
+		++m_indent;
+		WriteGradientDefs(doc);
+		WriteClipPathDefs(doc);
+		--m_indent;
+		AppendIndent();
+		m_output += "</defs>\n";
+	}
 
 	// 레이어 순회
 	for (const auto& layer : doc.GetLayers()) {
@@ -369,6 +427,14 @@ void SvgWriter::Visit(GroupNode& node) {
 	m_output += BuildCommonState(node, true, Meta());
 	m_output += BuildCssStyle(node);
 
+	const bool isMask = node.IsClippingMask() && (node.GetMaskNode() != nullptr);
+	if (isMask) {
+		m_output += " clip-path=\"url(#clip_group_" + std::to_string(node.GetId()) + ")\"";
+		if (Meta()) {
+			m_output += " m2:clipMask=\"true\"";
+		}
+	}
+
 	const Matrix2D& xf = node.GetTransform();
 	if (!IsIdentity(xf)) {
 		m_output += " transform=\"matrix(" +
@@ -380,6 +446,7 @@ void SvgWriter::Visit(GroupNode& node) {
 	m_output += ">\n";
 
 	++m_indent;
+	const Node* maskNode = isMask ? node.GetMaskNode() : nullptr;
 	for (const auto& child : node.GetChildren()) {
 		if (child) {
 			child->Accept(*this);

@@ -440,17 +440,25 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 
 	m_wndSubToolBar.RemoveAllButtons();
 
-	// 다중 선택 등으로 불리언 연산이 가능한 상태인지 확인
+	// 다중 선택 등으로 불리언 연산 또는 클리핑 마스크가 가능한 상태인지 확인
 	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
 	const bool bCanBoolean = pDoc && pDoc->CanBoolean();
+	const bool bCanMakeMask = pDoc && pDoc->CanMakeClipMask();
+	const bool bCanReleaseMask = pDoc && pDoc->CanReleaseClipMask();
 
 	// 도구별 서브도구 버튼 목록 구성
 	std::vector<UINT> btnIds;
-	if (bCanBoolean || curTool == ToolType::ActionBooleanUnion || curTool == ToolType::ActionBooleanSubtract ||
-		curTool == ToolType::ActionBooleanIntersect || curTool == ToolType::ActionBooleanExclude || curTool == ToolType::ActionBooleanTrim)
+	if (bCanReleaseMask)
 	{
-		// 다중 선택 시 자동으로 상단에 불리언 연산자 아이콘 표시
-		btnIds = { ID_BOOLEAN_UNION, ID_BOOLEAN_SUBTRACT, ID_BOOLEAN_INTERSECT, ID_BOOLEAN_EXCLUDE, ID_BOOLEAN_TRIM };
+		// 이미 마스크가 적용된 그룹이 선택된 경우 해제 버튼 노출
+		btnIds = { ID_OBJECT_RELEASE_MASK };
+	}
+	else if (bCanBoolean || bCanMakeMask || curTool == ToolType::ActionBooleanUnion || curTool == ToolType::ActionBooleanSubtract ||
+		curTool == ToolType::ActionBooleanIntersect || curTool == ToolType::ActionBooleanExclude || curTool == ToolType::ActionBooleanTrim ||
+		curTool == ToolType::ActionClipMask || curTool == ToolType::ActionReleaseMask)
+	{
+		// 다중 선택 시 상단에 불리언 연산자 5종 및 클리핑 마스크 만들기 버튼 표시
+		btnIds = { ID_BOOLEAN_UNION, ID_BOOLEAN_SUBTRACT, ID_BOOLEAN_INTERSECT, ID_BOOLEAN_EXCLUDE, ID_BOOLEAN_TRIM, ID_OBJECT_CLIP_MASK };
 	}
 	else
 	{
@@ -509,6 +517,8 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_BOOLEAN_INTERSECT:  imgIdx = 13; break;
 		case ID_BOOLEAN_EXCLUDE:    imgIdx = 14; break;
 		case ID_BOOLEAN_TRIM:       imgIdx = 15; break;
+		case ID_OBJECT_CLIP_MASK:   imgIdx = 16; break;
+		case ID_OBJECT_RELEASE_MASK:imgIdx = 17; break;
 		default: break;
 		}
 
