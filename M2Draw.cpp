@@ -288,6 +288,17 @@ void UpdateShapePropertiesSelection(ge::Node* pShape, CM2DrawDoc* pDoc)
 	}
 }
 
+void UpdateShapePropertiesLight(ge::Node* pShape, CM2DrawDoc* pDoc)
+{
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+	{
+		CMainFrame* pMainFrame = static_cast<CMainFrame*>(pMainWnd);
+		pMainFrame->GetPropertiesWnd().SetSelectedShape(pShape, pDoc);
+		pMainFrame->GetOptionBar().SyncSelection(pDoc, pShape);
+	}
+}
+
 void SyncOptionBarWithSelection(ge::Node* pShape, CM2DrawDoc* pDoc)
 {
 	CWnd* pMainWnd = AfxGetMainWnd();

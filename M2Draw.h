@@ -61,6 +61,8 @@ namespace ge { class Node; }
 
 // 선택된 도형(nullptr = 선택 없음)을 속성창 / 옵션바 / 레이어 패널에 반영
 void UpdateShapePropertiesSelection(ge::Node* pShape, CM2DrawDoc* pDoc);
+// 드래그(이동/크기/회전) 중 값만 가볍게 동기화: 속성창 + 옵션바 (레이어 패널/서브도구 바 재구성 없음)
+void UpdateShapePropertiesLight(ge::Node* pShape, CM2DrawDoc* pDoc);
 void SyncOptionBarWithSelection(ge::Node* pShape, CM2DrawDoc* pDoc);
 void SyncPropertiesWithSelection(ge::Node* pShape, CM2DrawDoc* pDoc);
 

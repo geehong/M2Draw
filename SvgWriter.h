@@ -2,6 +2,7 @@
 
 #include "GeNodeVisitor.h"
 #include <string>
+#include <unordered_map>
 
 namespace ge {
 
@@ -9,6 +10,7 @@ class Document;
 class PathNode;
 class GroupNode;
 class LayerNode;
+class TextNode;
 
 // SVG 출력 용도
 //  - Snapshot: Undo/Redo 용 내부 스냅샷. 모든 M2 메타데이터 포함, 이미지는 리소스 참조 ID 만 기록 (이미지 중복 보관 방지)
@@ -19,9 +21,11 @@ enum class SvgWriteMode { Snapshot, File, Clean };
 
 struct SvgWriteOptions {
 	SvgWriteMode mode = SvgWriteMode::File;
+	// 파라메트릭 도형(Rect/Ellipse)을 <rect rx ry>/<ellipse>/<circle> 네이티브 태그로 출력. Clean 출력의 기본값 (File/Snapshot 은 M2 메타데이터를 읽는 <path> 유지)
+	bool nativeShapes = false;
 
 	SvgWriteOptions() = default;
-	explicit SvgWriteOptions(SvgWriteMode m) : mode(m) {}
+	explicit SvgWriteOptions(SvgWriteMode m) : mode(m), nativeShapes(m == SvgWriteMode::Clean) {}
 
 	bool IncludeMetadata() const { return mode != SvgWriteMode::Clean; }      // m2:/inkscape:/sodipodi: 포함 여부
 	bool EmbedImages() const     { return mode != SvgWriteMode::Snapshot; }  // 이미지 base64 임베드 여부
@@ -44,11 +48,16 @@ public:
 	void Visit(PathNode& node) override;
 	void Visit(GroupNode& node) override;
 	void Visit(LayerNode& node) override;
+	void Visit(TextNode& node) override;
 
 private:
 	void AppendIndent();
 	void WriteGradientDefs(Document& doc);
 	void WriteClipPathDefs(Document& doc);
+
+	// 같은 내용의 그라디언트는 <defs> 에 한 번만 정의하고 여러 도형이 참조 (도형 -> 사용할 id)
+	std::unordered_map<const PathNode*, std::string> m_gradIds;
+	std::string GradientIdFor(const PathNode& p) const;
 
 	std::string m_output;
 	int         m_indent = 0;

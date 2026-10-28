@@ -66,6 +66,9 @@ public:
 // LineTool, RectTool, EllipseTool은 BoxShapeTool 인스턴스,
 // PolygonTool은 MultiPointShapeTool 인스턴스로 일원화 처리됩니다.
 
+// 텍스트 입력 대화상자 (한글 IME 는 표준 EDIT 컨트롤이 처리). 확인하면 true, text 에 \n 구분 문자열을 돌려줌
+bool EditTextDialog(CWnd* parent, std::wstring& text);
+
 class TextTool : public ITool
 {
 public:
@@ -73,6 +76,9 @@ public:
 	const wchar_t* GetName() const override { return L"텍스트 도구 (Text)"; }
 	wchar_t GetShortcut() const override { return L'T'; }
 	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_IBEAM); }
+
+	// 캔버스를 클릭하면 그 위치에 텍스트를 만들고 (입력 대화상자) 선택 도구로 돌아감
+	void OnDown(const ToolEvent& e) override;
 };
 
 class PaintBucketTool : public ITool

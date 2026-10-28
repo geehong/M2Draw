@@ -209,13 +209,19 @@ void SvgWriter::AppendIndent() {
 
 // 렌더링 가능한 그라디언트 채우기를 가진 모든 도형의 <linearGradient>/<radialGradient> 정의를 <defs> 로 출력.
 // 좌표는 objectBoundingBox(도형 박스 기준 비율, SVG 기본 gradientUnits)
+std::string SvgWriter::GradientIdFor(const PathNode& p) const {
+	auto it = m_gradIds.find(&p);
+	return it != m_gradIds.end() ? it->second : GradientId(p);
+}
+
 void SvgWriter::WriteGradientDefs(Document& doc) {
+	m_gradIds.clear();
 	std::vector<const PathNode*> users;
 	std::function<void(const Node&)> collect = [&](const Node& n) {
 		if (n.Kind() == NodeKind::Path) {
 			const PathNode& p = static_cast<const PathNode&>(n);
 			if (UsesGradientDef(p)) users.push_back(&p);
-		} else {
+		} else if (n.Kind() == NodeKind::Group || n.Kind() == NodeKind::Layer) {
 			for (const auto& c : static_cast<const GroupNode&>(n).GetChildren())
 				if (c) collect(*c);
 		}
@@ -223,9 +229,20 @@ void SvgWriter::WriteGradientDefs(Document& doc) {
 	for (const auto& layer : doc.GetLayers()) if (layer) collect(*layer);
 	if (users.empty()) return;
 
+	std::unordered_map<std::string, std::string> byContent;   // 그라디언트 내용 -> id (중복 제거)
 	for (const PathNode* p : users) {
 		Gradient g = p->GetStyle().fill.gradient;
 		g.NormalizeStops();   // SVG 는 stop offset 이 오름차순이어야 함 (편집 중 모델은 정렬되지 않았을 수 있음)
+
+		std::string key = (g.kind == Gradient::Kind::Linear ? "L" : "R") + FormatFloat(g.start.x) + "," + FormatFloat(g.start.y) + "," +
+			FormatFloat(g.end.x) + "," + FormatFloat(g.end.y) + "," + FormatFloat(g.radius);
+		for (const GradientStop& st : g.stops)
+			key += "|" + FormatFloat(st.offset) + ColorToHex(st.color) + FormatFloat(st.color.a);
+		auto dup = byContent.find(key);
+		if (dup != byContent.end()) { m_gradIds[p] = dup->second; continue; }
+		byContent[key] = GradientId(*p);
+		m_gradIds[p] = GradientId(*p);
+
 		AppendIndent();
 		if (g.kind == Gradient::Kind::Linear) {
 			m_output += "<linearGradient id=\"" + GradientId(*p) + "\" x1=\"" + FormatFloat(g.start.x) + "\" y1=\"" + FormatFloat(g.start.y) +
@@ -462,9 +479,87 @@ void SvgWriter::Visit(GroupNode& node) {
 	m_output += "</g>\n";
 }
 
+void SvgWriter::Visit(TextNode& node) {
+	AppendIndent();
+	m_output += "<text id=\"text_" + std::to_string(node.GetId()) + "\"";
+	if (Meta()) {
+		std::string utfName = WideToUtf8(node.GetName());
+		if (!utfName.empty()) m_output += " m2:name=\"" + EscapeXml(utfName) + "\"";
+	}
+	const float size = node.GetFontSize();
+	m_output += " x=\"0\" y=\"" + FormatFloat(size * TextNode::kAscentRatio) + "\"";
+	m_output += " font-family=\"" + EscapeXml(WideToUtf8(node.GetFontFamily())) + "\" font-size=\"" + FormatFloat(size) + "\"";
+	if (node.IsBold()) m_output += " font-weight=\"bold\"";
+	if (node.IsItalic()) m_output += " font-style=\"italic\"";
+	if (node.GetAlign() == TextAlign::Center) m_output += " text-anchor=\"middle\"";
+	else if (node.GetAlign() == TextAlign::Right) m_output += " text-anchor=\"end\"";
+
+	const Style& st = node.GetStyle();
+	if (st.fill.type == PaintType::None) {
+		m_output += " fill=\"none\"";
+	} else {
+		m_output += " fill=\"" + ColorToHex(st.fill.color) + "\"";
+		if (st.fill.color.a < 0.999f) m_output += " fill-opacity=\"" + FormatFloat(st.fill.color.a) + "\"";
+	}
+	if (node.GetOpacity() < 0.999f) m_output += " opacity=\"" + FormatFloat(node.GetOpacity()) + "\"";
+	m_output += BuildCommonState(node, true, Meta());
+	m_output += BuildCssStyle(node);
+	const Matrix2D& xf = node.GetTransform();
+	if (!IsIdentity(xf)) {
+		m_output += " transform=\"matrix(" + FormatFloat(xf.m11) + " " + FormatFloat(xf.m12) + " " + FormatFloat(xf.m21) + " " +
+			FormatFloat(xf.m22) + " " + FormatFloat(xf.dx) + " " + FormatFloat(xf.dy) + ")\"";
+	}
+	m_output += " xml:space=\"preserve\">";
+
+	// 여러 줄은 <tspan x dy> 로 (첫 줄은 본문)
+	const std::string utf = WideToUtf8(node.GetText());
+	size_t pos = 0;
+	bool first = true;
+	while (pos <= utf.size()) {
+		size_t nl = utf.find('\n', pos);
+		if (nl == std::string::npos) nl = utf.size();
+		const std::string line = EscapeXml(utf.substr(pos, nl - pos));
+		if (first) m_output += line;
+		else m_output += "<tspan x=\"0\" dy=\"" + FormatFloat(size * TextNode::kLineHeightRatio) + "\">" + line + "</tspan>";
+		first = false;
+		pos = nl + 1;
+		if (nl == utf.size()) break;
+	}
+	m_output += "</text>\n";
+}
+
 void SvgWriter::Visit(PathNode& node) {
 	AppendIndent();
-	m_output += "<path id=\"path_" + std::to_string(node.GetId()) + "\"";
+
+	// 네이티브 도형 태그 (옵션): Rect -> <rect rx ry>, Ellipse -> <ellipse>/<circle>. 위치/크기는 로컬 경계 상자에서 얻고 transform 은 그대로 출력
+	std::string nativeAttrs;
+	const char* nativeTag = nullptr;
+	if (m_options.nativeShapes && node.GetPaths().size() == 1 && node.GetPaths()[0].closed) {
+		Rect2 lb;
+		const ShapeKind k = node.GetShapeKind();
+		if ((k == ShapeKind::Rect || k == ShapeKind::Ellipse) && node.GetLocalBounds(lb) && !lb.IsEmpty()) {
+			if (k == ShapeKind::Rect) {
+				float rx = 0.0f, ry = 0.0f;
+				if (const auto* rp = node.GetParam<RectParams>()) { rx = rp->rx; ry = rp->ry; }
+				rx = (std::max)(0.0f, (std::min)(rx, lb.Width() / 2)); ry = (std::max)(0.0f, (std::min)(ry, lb.Height() / 2));
+				nativeTag = "rect";
+				nativeAttrs = " x=\"" + FormatFloat(lb.left) + "\" y=\"" + FormatFloat(lb.top) + "\" width=\"" + FormatFloat(lb.Width()) +
+					"\" height=\"" + FormatFloat(lb.Height()) + "\"";
+				if (rx > 0.0f || ry > 0.0f) nativeAttrs += " rx=\"" + FormatFloat(rx) + "\" ry=\"" + FormatFloat(ry) + "\"";
+			} else {
+				const float rx = lb.Width() / 2, ry = lb.Height() / 2;
+				if (std::abs(rx - ry) < 1e-3f) {
+					nativeTag = "circle";
+					nativeAttrs = " cx=\"" + FormatFloat(lb.MidX()) + "\" cy=\"" + FormatFloat(lb.MidY()) + "\" r=\"" + FormatFloat(rx) + "\"";
+				} else {
+					nativeTag = "ellipse";
+					nativeAttrs = " cx=\"" + FormatFloat(lb.MidX()) + "\" cy=\"" + FormatFloat(lb.MidY()) + "\" rx=\"" + FormatFloat(rx) +
+						"\" ry=\"" + FormatFloat(ry) + "\"";
+				}
+			}
+		}
+	}
+	m_output += std::string("<") + (nativeTag ? nativeTag : "path") + " id=\"path_" + std::to_string(node.GetId()) + "\"";
 
 	if (Meta()) {
 		std::string utfName = WideToUtf8(node.GetName());
@@ -474,8 +569,12 @@ void SvgWriter::Visit(PathNode& node) {
 	}
 
 	// 패스 데이터 d
-	std::string d = BuildPathData(node);
-	m_output += " d=\"" + d + "\"";
+	if (nativeTag) {
+		m_output += nativeAttrs;
+	} else {
+		std::string d = BuildPathData(node);
+		m_output += " d=\"" + d + "\"";
+	}
 
 	// 스타일
 	const Style& st = node.GetStyle();
@@ -486,7 +585,7 @@ void SvgWriter::Visit(PathNode& node) {
 	if (st.fill.type == PaintType::Solid)         { fillColor = st.fill.color; filled = true; }
 	else if (st.fill.type == PaintType::Gradient) { fillColor = st.fill.gradient.FallbackColor(); filled = true; }
 	if (UsesGradientDef(node)) {
-		m_output += " fill=\"url(#" + GradientId(node) + ")\"";
+		m_output += " fill=\"url(#" + GradientIdFor(node) + ")\"";
 	} else if (!filled) {
 		m_output += " fill=\"none\"";
 	} else {

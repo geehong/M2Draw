@@ -446,7 +446,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 	if (!m_wndSubToolBar.GetSafeHwnd())
 		return;
 
-	m_wndSubToolBar.RemoveAllButtons();
+	// (버튼 구성이 이전과 같으면 아래에서 바로 반환: 드래그 중 반복 호출되어도 툴바를 다시 만들지 않음)
 
 	// 다중 선택 등으로 불리언 연산 또는 클리핑 마스크가 가능한 상태인지 확인
 	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
@@ -530,6 +530,13 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 			break;
 		}
 	}
+
+	// 구성이 그대로면 재구성(버튼 삭제/생성 + 프레임 레이아웃 재계산)을 건너뜀
+	if (btnIds == m_lastSubIds && m_subInputMode == m_lastSubMode && m_wndSubToolBar.GetCount() > 0)
+		return;
+	m_lastSubIds = btnIds;
+	m_lastSubMode = m_subInputMode;
+	m_wndSubToolBar.RemoveAllButtons();
 
 	for (UINT id : btnIds)
 	{

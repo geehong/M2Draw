@@ -126,6 +126,52 @@ Matrix2D Node::GetWorldTransform() const
 }
 
 // ---- PathNode ---------------------------------------------------------------
+// ---------------- TextNode ----------------
+std::unique_ptr<Node> TextNode::Clone() const
+{
+	auto copy = std::make_unique<TextNode>(*this);
+	copy->ResetIdentity();
+	return copy;
+}
+
+void TextNode::Accept(INodeVisitor& visitor)
+{
+	visitor.Visit(*this);
+}
+
+int TextNode::LineCount() const
+{
+	int n = 1;
+	for (wchar_t c : m_text) if (c == L'\n') ++n;
+	return n;
+}
+
+float TextNode::MeasuredWidth() const
+{
+	if (m_mw > 0.0f) return m_mw;
+	size_t longest = 0, cur = 0;   // 렌더 전 추정: 글자 수 x 글꼴 크기 x 0.6 (전각 문자는 1.0)
+	float w = 0.0f, best = 0.0f;
+	for (wchar_t c : m_text) {
+		if (c == L'\n') { best = (std::max)(best, w); w = 0.0f; continue; }
+		w += m_size * (c > 0x2E80 ? 1.0f : 0.6f);
+	}
+	(void)longest; (void)cur;
+	return (std::max)(best, w);
+}
+
+float TextNode::MeasuredHeight() const
+{
+	return m_mh > 0.0f ? m_mh : m_size * kLineHeightRatio * LineCount();
+}
+
+bool TextNode::GetLocalBounds(Rect2& out)
+{
+	const float w = MeasuredWidth(), h = MeasuredHeight();
+	const float left = (m_align == TextAlign::Center) ? -w * 0.5f : (m_align == TextAlign::Right) ? -w : 0.0f;
+	out = Rect2{ left, 0.0f, left + w, h };
+	return true;
+}
+
 std::unique_ptr<Node> PathNode::Clone() const
 {
 	auto copy = std::make_unique<PathNode>(*this);
@@ -584,7 +630,7 @@ std::wstring Document::GenerateLayerName() const
 void Document::AssignIds(Node& node)
 {
 	if (node.m_id == 0) { node.m_id = IssueId(); ChangeTracker::Bump(); }
-	if (node.Kind() != NodeKind::Path)
+	if (node.Kind() == NodeKind::Group || node.Kind() == NodeKind::Layer)
 		for (const auto& c : static_cast<GroupNode&>(node).GetChildren()) AssignIds(*c);
 }
 
@@ -605,7 +651,7 @@ void Document::EnsureUniqueIds()
 			n.m_id = IssueId();                // 0 또는 중복 -> 새 ID (카운터는 항상 기존 최대값보다 큼)
 			used.insert(n.m_id);
 		}
-		if (n.Kind() != NodeKind::Path)
+		if (n.Kind() == NodeKind::Group || n.Kind() == NodeKind::Layer)
 			for (const auto& c : static_cast<GroupNode&>(n).GetChildren()) walk(*c);
 	};
 	for (const auto& layer : m_layers) walk(*layer);
@@ -614,7 +660,7 @@ void Document::EnsureUniqueIds()
 static Node* FindIn(Node& n, NodeId id)
 {
 	if (n.GetId() == id) return &n;
-	if (n.Kind() != NodeKind::Path)
+	if (n.Kind() == NodeKind::Group || n.Kind() == NodeKind::Layer)
 		for (const auto& c : static_cast<GroupNode&>(n).GetChildren())
 			if (Node* r = FindIn(*c, id)) return r;
 	return nullptr;
@@ -1901,11 +1947,61 @@ void D2DRenderer::DrawNode(Node& node, const Matrix2D& parentXf, const Viewport&
 
 	switch (node.Kind()) {
 	case NodeKind::Path:  DrawPath(static_cast<PathNode&>(node), worldXf, view); break;
+	case NodeKind::Text:  DrawTextNode(static_cast<TextNode&>(node), worldXf, view); break;
 	case NodeKind::Group:
 	case NodeKind::Layer: DrawGroup(static_cast<GroupNode&>(node), worldXf, view); break;
 	}
 
 	if (needLayer) m_rt->PopLayer();
+}
+
+void D2DRenderer::DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Viewport& view)
+{
+	if (!m_rt || !m_brush || node.GetText().empty()) return;
+
+	static ComPtr<IDWriteFactory> s_dw;
+	if (!s_dw && FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(s_dw.GetAddressOf())))) return;
+
+	// 레이아웃 캐시: 노드 버전은 프로세스 전역에서 유일하고 글자/글꼴이 바뀔 때만 바뀐다 (이동/크기 조절은 버전 불변).
+	// 매 프레임 포맷/레이아웃을 새로 만들면 크기 조절처럼 자주 다시 그리는 동안 버벅거리므로 재사용
+	struct TextCache { ComPtr<IDWriteTextLayout> layout; float w = 0, h = 0; };
+	static std::unordered_map<uint32_t, TextCache> s_cache;
+	auto hit = s_cache.find(node.GetVersion());
+	if (hit == s_cache.end()) {
+		ComPtr<IDWriteTextFormat> fmt;
+		if (FAILED(s_dw->CreateTextFormat(node.GetFontFamily().c_str(), nullptr,
+			node.IsBold() ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+			node.IsItalic() ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+			DWRITE_FONT_STRETCH_NORMAL, node.GetFontSize(), L"ko-kr", &fmt))) return;
+		fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, node.GetFontSize() * TextNode::kLineHeightRatio, node.GetFontSize() * TextNode::kAscentRatio);
+		fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
+		const std::wstring& txt = node.GetText();
+		TextCache entry;
+		if (FAILED(s_dw->CreateTextLayout(txt.c_str(), static_cast<UINT32>(txt.size()), fmt.Get(), 100000.0f, 100000.0f, &entry.layout))) return;
+		DWRITE_TEXT_METRICS tm{};
+		entry.layout->GetMetrics(&tm);
+		entry.w = (std::max)(tm.widthIncludingTrailingWhitespace, 1.0f);
+		entry.h = (std::max)(tm.height, 1.0f);
+		if (s_cache.size() > 512) s_cache.clear();
+		hit = s_cache.emplace(node.GetVersion(), std::move(entry)).first;
+	}
+	IDWriteTextLayout* layout = hit->second.layout.Get();
+	if (node.MeasuredWidth() != hit->second.w || node.MeasuredHeight() != hit->second.h) node.SetMeasured(hit->second.w, hit->second.h);
+	DWRITE_TEXT_METRICS tm{};
+	tm.widthIncludingTrailingWhitespace = hit->second.w;
+
+	// 정렬 기준점(로컬 원점)에 맞춰 왼쪽 시작 위치 결정
+	float x0 = 0.0f;
+	if (node.GetAlign() == TextAlign::Center) x0 = -tm.widthIncludingTrailingWhitespace * 0.5f;
+	else if (node.GetAlign() == TextAlign::Right) x0 = -tm.widthIncludingTrailingWhitespace;
+
+	const Style& st = node.GetStyle();
+	const Color col = (st.fill.type == PaintType::None) ? Color(0, 0, 0, 0) : st.fill.color;
+	m_brush->SetColor(D2D1::ColorF(col.r, col.g, col.b, col.a));
+	m_rt->SetTransform((worldXf * view.ToMatrix()).ToD2D());
+	m_rt->DrawTextLayout(D2D1::Point2F(x0, 0.0f), layout, m_brush.Get());
+	m_rt->SetTransform(D2D1::Matrix3x2F::Identity());   // 이후 그리기(눈금자/가이드)가 이 변환을 물려받지 않도록 복원
 }
 
 void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const Viewport& view)
@@ -2135,6 +2231,7 @@ ComPtr<ID2D1PathGeometry> D2DRenderer::BuildGeometry(const PathNode& node)
 static bool HitNode(Node& n, Vec2 sp, float tol, const Viewport& view, D2DRenderer& r, HitResult& out)
 {
 	if (!n.IsVisible() || n.IsLocked()) return false;
+	if (n.Kind() == NodeKind::Text) return false;   // 텍스트 히트는 선택 도구가 글자 상자로 처리
 	if (n.Kind() != NodeKind::Path) {
 		const auto& ch = static_cast<GroupNode&>(n).GetChildren();
 		for (int i = (int)ch.size() - 1; i >= 0; --i)

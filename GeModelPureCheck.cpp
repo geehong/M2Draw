@@ -266,7 +266,7 @@ bool RunPureModelVerification(std::wstring* failure)
 			bool ok = true;
 			std::function<void(const Node&)> walk = [&](const Node& n) {
 				if (n.GetId() == 0 || !ids.insert(n.GetId()).second) ok = false;
-				if (n.Kind() != NodeKind::Path)
+				if (n.Kind() == NodeKind::Group || n.Kind() == NodeKind::Layer)
 					for (const auto& c : static_cast<const GroupNode&>(n).GetChildren()) if (c) walk(*c);
 			};
 			for (const auto& l : d.GetLayers()) if (l) walk(*l);
@@ -1037,6 +1037,145 @@ bool RunPureModelVerification(std::wstring* failure)
 
 		GE_CHECK(d.MoveNodeTo(mask, layer, -1), L"마스크 도형을 그룹 밖으로 이동 실패");
 		GE_CHECK(!grp->IsClippingMask(), L"마스크 도형을 빼면 클리핑이 해제되어야 함");
+	}
+
+	// ---- 20. 외부 SVG 가져오기 (2.9): 상대 명령/H/V/호, 기본 도형, 속성 상속, CSS, 색상, transform 리스트, viewBox ----
+	{
+		const std::string ext =
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"100\" viewBox=\"0 0 400 200\">\n"
+			"  <style>.r{fill:#00ff00} circle{stroke:blue}</style>\n"
+			"  <g fill=\"red\" stroke=\"black\" stroke-width=\"3\" transform=\"translate(10,20) scale(2)\">\n"
+			"    <rect x=\"1\" y=\"2\" width=\"30\" height=\"40\"/>\n"
+			"    <rect class=\"r\" x=\"0\" y=\"0\" width=\"5\" height=\"5\" style=\"stroke:rgb(255,0,0)\"/>\n"
+			"    <circle cx=\"50\" cy=\"50\" r=\"10\"/>\n"
+			"  </g>\n"
+			"  <path d=\"m 10 10 h 20 v 20 l -20 0 z\" fill=\"none\"/>\n"
+			"  <path d=\"M0 0 A 10 10 0 0 1 20 0\" fill=\"none\" stroke=\"#000\"/>\n"
+			"  <polygon points=\"0,0 10,0 10,10\"/>\n"
+			"</svg>\n";
+		Document e;
+		GE_CHECK(reader.ReadFromString(ext, e), L"외부 SVG(2.9) 읽기 실패");
+		GE_CHECK(e.width == 200.0f && e.height == 100.0f, L"width/height 가 문서 크기로 반영되지 않음");
+		const auto& top = e.GetLayers()[0]->GetChildren();
+		GE_CHECK(top.size() == 4, L"최상위 요소 수가 틀림 (g, path, path, polygon)");
+
+		// viewBox(400x200) -> 문서(200x100): 레이어에 0.5 배 스케일
+		const Vec2 vp = e.GetLayers()[0]->GetTransform().TransformPoint(Vec2{ 100.0f, 100.0f });
+		GE_CHECK(std::abs(vp.x - 50.0f) < 1e-3f && std::abs(vp.y - 50.0f) < 1e-3f, L"viewBox 스케일이 적용되지 않음");
+
+		auto* g = dynamic_cast<GroupNode*>(top[0].get());
+		GE_CHECK(g && g->GetChildren().size() == 3, L"그룹 자식 수가 틀림");
+		const Vec2 gp = g->GetTransform().TransformPoint(Vec2{ 1.0f, 1.0f });
+		GE_CHECK(std::abs(gp.x - 12.0f) < 1e-3f && std::abs(gp.y - 22.0f) < 1e-3f, L"transform 리스트 합성(translate scale)이 틀림");
+
+		auto* r0 = dynamic_cast<PathNode*>(g->GetChildren()[0].get());
+		auto* r1 = dynamic_cast<PathNode*>(g->GetChildren()[1].get());
+		auto* c0 = dynamic_cast<PathNode*>(g->GetChildren()[2].get());
+		GE_CHECK(r0 && r1 && c0, L"기본 도형이 PathNode 로 변환되지 않음");
+		GE_CHECK(r0->GetStyle().fill.color.r == 1.0f && r0->GetStyle().stroke.width == 3.0f, L"그룹의 fill/stroke-width 상속이 안 됨");
+		GE_CHECK(r1->GetStyle().fill.color.g == 1.0f && r1->GetStyle().fill.color.r == 0.0f, L"<style> 클래스 규칙(.r)이 적용되지 않음");
+		GE_CHECK(r1->GetStyle().stroke.color.r == 1.0f && r1->GetStyle().stroke.color.g == 0.0f, L"style 속성의 rgb() 색상이 적용되지 않음");
+		GE_CHECK(c0->GetStyle().stroke.color.b == 1.0f, L"<style> 태그 규칙(circle)이 적용되지 않음");
+		GE_CHECK(c0->GetPaths().size() == 1 && c0->GetPaths()[0].closed && c0->GetPaths()[0].nodes.size() >= 3, L"circle 이 닫힌 패스로 변환되지 않음");
+
+		auto* rel = dynamic_cast<PathNode*>(top[1].get());
+		GE_CHECK(rel && rel->GetPaths().size() == 1 && rel->GetPaths()[0].closed && rel->GetPaths()[0].nodes.size() == 4, L"상대 명령(m h v l z) 패스의 노드 수가 틀림");
+		GE_CHECK(rel->GetPaths()[0].nodes[2].anchor.x == 30.0f && rel->GetPaths()[0].nodes[2].anchor.y == 30.0f, L"상대 좌표 누적이 틀림");
+
+		auto* arc = dynamic_cast<PathNode*>(top[2].get());
+		GE_CHECK(arc && arc->GetPaths().size() == 1 && arc->GetPaths()[0].nodes.size() >= 3, L"호(A) 가 베지에 곡선으로 변환되지 않음");
+		const Vec2 arcEnd = arc->GetPaths()[0].nodes.back().anchor;
+		GE_CHECK(std::abs(arcEnd.x - 20.0f) < 1e-3f && std::abs(arcEnd.y) < 1e-3f, L"호의 끝점이 틀림");
+		const BezierNode& mid = arc->GetPaths()[0].nodes[1];   // 반원 중간 점: 위쪽(sweep=1 -> y 증가 방향)으로 반지름 10
+		GE_CHECK(std::abs(mid.anchor.x - 10.0f) < 1e-2f && std::abs(std::abs(mid.anchor.y) - 10.0f) < 1e-2f, L"호의 중간 점이 반지름 위에 있지 않음");
+
+		auto* poly = dynamic_cast<PathNode*>(top[3].get());
+		GE_CHECK(poly && poly->GetPaths()[0].closed && poly->GetPaths()[0].nodes.size() == 3, L"polygon 변환이 틀림");
+		GE_CHECK(poly->GetStyle().fill.type == PaintType::Solid && poly->GetStyle().fill.color.r == 0.0f && poly->GetStyle().stroke.width == 0.0f,
+			L"SVG 기본값(fill 검정, stroke 없음)이 적용되지 않음");
+	}
+
+	// ---- 21. SVG 출력 다듬기 (2.8): 네이티브 도형 태그 / 그라디언트 중복 제거 / Clean 네임스페이스 ----
+	{
+		Document d;
+		PathNode* rc = static_cast<PathNode*>(d.AddShape(MakePath(L"r", 0.0f, 0.0f)));
+		rc->SetShapeKind(ShapeKind::Rect);
+		rc->SetParams(RectParams{ 3.0f, 3.0f, true });
+		PathNode* g1 = static_cast<PathNode*>(d.AddShape(MakePath(L"g1", 10.0f, 0.0f)));
+		PathNode* g2 = static_cast<PathNode*>(d.AddShape(MakePath(L"g2", 20.0f, 0.0f)));
+		Gradient gr;
+		gr.kind = Gradient::Kind::Linear;
+		gr.stops = { GradientStop{ 0.0f, Color(1, 0, 0, 1) }, GradientStop{ 1.0f, Color(0, 0, 1, 1) } };
+		for (PathNode* gp : { g1, g2 }) {
+			Style st = gp->GetStyle();
+			st.fill.type = PaintType::Gradient;
+			st.fill.gradient = gr;
+			gp->SetStyle(st);
+		}
+		SvgWriter nw;
+		const std::string clean = nw.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("<rect ") != std::string::npos && clean.find("rx=\"") != std::string::npos, L"Clean 출력에서 Rect 가 <rect rx ry> 로 나오지 않음");
+		GE_CHECK(clean.find("xmlns:inkscape") == std::string::npos && clean.find("xmlns:sodipodi") == std::string::npos && clean.find("xmlns:m2") == std::string::npos,
+			L"Clean 출력에 M2/Inkscape 네임스페이스 선언이 남음");
+		size_t gradDefs = 0;
+		for (size_t pos = clean.find("<linearGradient"); pos != std::string::npos; pos = clean.find("<linearGradient", pos + 1)) ++gradDefs;
+		GE_CHECK(gradDefs == 1, L"같은 그라디언트가 <defs> 에 중복 정의됨");
+		size_t refs = 0;
+		for (size_t pos = clean.find("fill=\"url(#"); pos != std::string::npos; pos = clean.find("fill=\"url(#", pos + 1)) ++refs;
+		GE_CHECK(refs == 2, L"두 도형이 공유 그라디언트를 참조하지 않음");
+		Document back;
+		GE_CHECK(reader.ReadFromString(clean, back), L"네이티브 도형 Clean SVG 를 다시 읽지 못함");
+
+		// File 출력은 M2 메타데이터를 읽는 <path> 를 유지
+		const std::string file = nw.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(file.find("<rect ") == std::string::npos && file.find("m2:shape=\"rect\"") != std::string::npos, L"File 출력은 Rect 를 <path m2:shape> 로 유지해야 함");
+	}
+
+	// ---- 22. 텍스트 노드 (3.1): 모델, 복제, SVG 왕복, 외부 <text> 읽기 ----------------------------
+	{
+		Document d;
+		auto tn = std::make_unique<TextNode>();
+		tn->SetText(L"가나다\nABC");
+		tn->SetFontSize(20.0f);
+		tn->SetBold(true);
+		tn->SetAlign(TextAlign::Center);
+		tn->SetTransform(Matrix2D::Translation(30.0f, 40.0f));
+		TextNode* t0 = static_cast<TextNode*>(d.AddShape(std::move(tn)));
+		GE_CHECK(t0 && t0->GetId() != 0 && t0->Kind() == NodeKind::Text, L"TextNode 를 문서에 추가하지 못함");
+		GE_CHECK(t0->LineCount() == 2, L"줄 수 계산이 틀림");
+		Rect2 b;
+		GE_CHECK(t0->GetLocalBounds(b) && b.left < 0.0f && b.right > 0.0f && b.Height() >= 40.0f, L"가운데 정렬 텍스트의 경계가 기준점을 가운데에 두지 않음");
+
+		auto clone = t0->Clone();
+		GE_CHECK(clone->Kind() == NodeKind::Text && static_cast<TextNode*>(clone.get())->GetText() == L"가나다\nABC" && clone->GetId() == 0, L"TextNode 복제가 틀림");
+
+		SvgWriter tw;
+		const std::string svg = tw.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(svg.find("<text ") != std::string::npos && svg.find("<tspan") != std::string::npos && svg.find("text-anchor=\"middle\"") != std::string::npos, L"텍스트가 <text>/<tspan> 으로 출력되지 않음");
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"텍스트 SVG 를 다시 읽지 못함");
+		const auto& kids = back.GetLayers()[0]->GetChildren();
+		GE_CHECK(kids.size() == 1 && kids[0]->Kind() == NodeKind::Text, L"읽은 문서에 텍스트 노드가 없음");
+		auto* t1 = static_cast<TextNode*>(kids[0].get());
+		GE_CHECK(t1->GetText() == L"가나다\nABC" && t1->IsBold() && t1->GetAlign() == TextAlign::Center && std::abs(t1->GetFontSize() - 20.0f) < 1e-3f, L"텍스트 속성 왕복이 틀림");
+		const Vec2 o = t1->GetWorldTransform().TransformPoint(Vec2{ 0.0f, 0.0f });
+		GE_CHECK(std::abs(o.x - 30.0f) < 1e-3f && std::abs(o.y - 40.0f) < 1e-3f, L"텍스트 위치 왕복이 틀림");
+
+		const std::string ext =
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"60\">\n"
+			"  <g fill=\"#336699\"><text x=\"10\" y=\"30\" font-family=\"'Arial', sans-serif\" font-size=\"16\" font-weight=\"700\" font-style=\"italic\">\n"
+			"     Hello   <tspan>World</tspan>\n  </text></g>\n"
+			"</svg>\n";
+		Document ed;
+		GE_CHECK(reader.ReadFromString(ext, ed), L"외부 <text> SVG 읽기 실패");
+		auto* eg = dynamic_cast<GroupNode*>(ed.GetLayers()[0]->GetChildren()[0].get());
+		GE_CHECK(eg && eg->GetChildren().size() == 1 && eg->GetChildren()[0]->Kind() == NodeKind::Text, L"외부 <text> 가 TextNode 로 읽히지 않음");
+		auto* et = static_cast<TextNode*>(eg->GetChildren()[0].get());
+		GE_CHECK(et->GetText() == L"Hello\nWorld", L"공백 정규화/tspan 줄바꿈이 틀림");
+		GE_CHECK(et->GetFontFamily() == L"Arial" && et->IsBold() && et->IsItalic(), L"외부 글꼴 속성이 틀림");
+		GE_CHECK(et->GetStyle().fill.color.b > 0.5f && et->GetStyle().fill.color.r < 0.3f, L"그룹의 fill 이 텍스트에 상속되지 않음");
+		const Vec2 eo = et->GetWorldTransform().TransformPoint(Vec2{ 0.0f, 0.0f });
+		GE_CHECK(std::abs(eo.x - 10.0f) < 1e-3f && std::abs(eo.y - (30.0f - 16.0f * TextNode::kAscentRatio)) < 1e-3f, L"기준선 y 가 상자 위쪽으로 환산되지 않음");
 	}
 
 #undef GE_CHECK

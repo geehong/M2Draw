@@ -424,7 +424,7 @@ struct SubPath {
 	bool closed = false;
 };
 
-enum class NodeKind : uint8_t { Path, Group, Layer };
+enum class NodeKind : uint8_t { Path, Group, Layer, Text };
 
 // 혼합 모드 (SVG/CSS mix-blend-mode 와 1:1 대응). 모든 노드에 지정 가능, 렌더링 적용은 Phase 2
 enum class LayerBlendMode : uint8_t {
@@ -643,6 +643,55 @@ protected:
 	float        m_opacity = 1.0f;
 	LayerBlendMode m_blendMode = LayerBlendMode::Normal;
 	bool         m_dirty   = true;
+};
+
+// ---- 텍스트 (Step 3.1) -------------------------------------------------------
+// 로컬 원점 = 텍스트 상자의 (정렬 기준점 x, 위쪽 y). 글자는 원점에서 아래로 배치된다 (Left: 원점이 왼쪽 끝, Center: 가운데, Right: 오른쪽 끝).
+// 채우기 색은 Style.fill 을 사용한다. 크기(폭/높이)는 렌더러가 DirectWrite 로 재서 캐시하고, 그 전에는 추정치를 쓴다.
+enum class TextAlign : uint8_t { Left, Center, Right };
+
+class TextNode : public Node {
+public:
+	// SVG <text> 의 y 는 기준선: 위쪽 y 와의 차이를 글꼴 크기 비율로 근사 (읽기/쓰기가 같은 값을 써서 왕복 시 위치 보존)
+	static constexpr float kAscentRatio = 0.8f;
+	static constexpr float kLineHeightRatio = 1.25f;
+
+	TextNode() { m_style.fill.type = PaintType::Solid; m_style.fill.color = Color(0.0f, 0.0f, 0.0f, 1.0f); m_style.stroke.width = 0.0f; }
+
+	NodeKind Kind() const override { return NodeKind::Text; }
+	std::unique_ptr<Node> Clone() const override;
+	void Accept(INodeVisitor& visitor) override;
+	bool GetLocalBounds(Rect2& out) override;
+	using Node::GetLocalBounds;
+	const wchar_t* GetShapeTypeName() const override { return L"텍스트"; }
+
+	const std::wstring& GetText() const       { return m_text; }
+	void SetText(const std::wstring& v)       { m_text = v; m_mw = m_mh = 0.0f; Invalidate(); }
+	const std::wstring& GetFontFamily() const { return m_family; }
+	void SetFontFamily(const std::wstring& v) { m_family = v; m_mw = m_mh = 0.0f; Invalidate(); }
+	float GetFontSize() const                 { return m_size; }
+	void SetFontSize(float v)                 { m_size = (std::max)(1.0f, v); m_mw = m_mh = 0.0f; Invalidate(); }
+	bool IsBold() const                       { return m_bold; }
+	void SetBold(bool v)                      { m_bold = v; m_mw = m_mh = 0.0f; Invalidate(); }
+	bool IsItalic() const                     { return m_italic; }
+	void SetItalic(bool v)                    { m_italic = v; m_mw = m_mh = 0.0f; Invalidate(); }
+	TextAlign GetAlign() const                { return m_align; }
+	void SetAlign(TextAlign v)                { m_align = v; Invalidate(); }
+
+	// 렌더러가 잰 크기 (변경 카운터를 올리지 않음: 화면 갱신의 부산물)
+	void SetMeasured(float w, float h)        { m_mw = w; m_mh = h; }
+	float MeasuredWidth() const;
+	float MeasuredHeight() const;
+	int   LineCount() const;
+
+private:
+	std::wstring m_text = L"텍스트";
+	std::wstring m_family = L"Segoe UI";
+	float        m_size = 24.0f;
+	bool         m_bold = false;
+	bool         m_italic = false;
+	TextAlign    m_align = TextAlign::Left;
+	float        m_mw = 0.0f, m_mh = 0.0f;   // 측정값 (0 = 아직 안 잼)
 };
 
 // ---- 패스 도형 --------------------------------------------------------------
@@ -1026,6 +1075,7 @@ public:
 private:
 	void DrawPath(PathNode& node, const Matrix2D& worldXf, const Viewport& view);
 	void DrawGroup(GroupNode& node, const Matrix2D& worldXf, const Viewport& view);
+	void DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Viewport& view);
 	ComPtr<ID2D1PathGeometry> BuildGeometry(const PathNode& node);
 	// 기본값(Butt/Miter/실선)이면 nullptr, 아니면 캐시된 스트로크 스타일
 	ID2D1StrokeStyle* GetStrokeStyle(const Stroke& stroke);

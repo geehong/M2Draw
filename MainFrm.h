@@ -22,6 +22,8 @@ public:
 	// 외곽선 확장/단순화: 상단에 값 입력창 + 적용/취소를 띄우는 입력 모드 (버튼을 눌러도 바로 적용하지 않음)
 	enum class SubInputMode { None, Outline, Simplify, Smooth };
 	SubInputMode m_subInputMode = SubInputMode::None;
+	std::vector<UINT> m_lastSubIds;                           // 마지막으로 만든 서브도구 버튼 구성 (같으면 재구성 생략)
+	SubInputMode      m_lastSubMode = SubInputMode::None;
 	float        m_subInputValue = 2.0f;
 
 public:

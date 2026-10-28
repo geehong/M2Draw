@@ -282,19 +282,19 @@
 
 ### Step 2.8 SVG 출력 다듬기
 > 2.9 완료 후 진행 (외부 SVG 를 가져와 다시 내보내며 품질 검증). 좌표계(2.0.1)가 정리된 뒤 상하 방향을 반드시 브라우저로 확인
-- [ ] 2.8.1 파라메트릭 도형의 네이티브 SVG 태그(`<rect rx>`, `<circle>`, `<ellipse>`, `<polygon>`) 출력 옵션
-- [ ] 2.8.2 중복 그라디언트, 클립마스크의 `<defs>` 통합 관리 및 ID 참조 최적화
-- [ ] 2.8.3 순수 표준 SVG(Clean SVG) 내보내기 대화상자 옵션: `xmlns:m2`/`m2:*` 속성뿐 아니라 `inkscape:*`/`sodipodi:*` 네임스페이스도 제거 (`SvgWriteOptions::Clean`, 2.0.4)
-- [ ] 2.8.4 빌드 확인 및 타 벡터 툴(Illustrator, Inkscape, Figma) 불러오기 호환성 점검
+- [x] 2.8.1 파라메트릭 도형의 네이티브 SVG 태그(`<rect rx>`, `<circle>`, `<ellipse>`, `<polygon>`) 출력 옵션 — (완료 2026-10-28) `SvgWriteOptions::nativeShapes`: Clean 출력에서 Rect→`<rect rx ry>`, Ellipse→`<ellipse>`/`<circle>` (File/Snapshot 은 M2 메타데이터용 `<path>` 유지)
+- [x] 2.8.2 중복 그라디언트, 클립마스크의 `<defs>` 통합 관리 및 ID 참조 최적화 — (완료) 내용이 같은 그라디언트는 `<defs>` 에 한 번만 정의하고 공유 참조. 클립마스크 정의 통합은 도형마다 고유해 해당 없음
+- [x] 2.8.3 순수 표준 SVG(Clean SVG) 내보내기 대화상자 옵션: `xmlns:m2`/`m2:*` 속성뿐 아니라 `inkscape:*`/`sodipodi:*` 네임스페이스도 제거 (`SvgWriteOptions::Clean`, 2.0.4) — (완료) Clean 은 m2:/inkscape:/sodipodi: 속성·네임스페이스·namedview 제거 (자체 검증 7, 21). 내보내기 대화상자 UI 는 미구현
+- [ ] 2.8.4 빌드 확인 및 타 벡터 툴(Illustrator, Inkscape, Figma) 불러오기 호환성 점검 — (미완료) 자체 검증과 앱 재읽기까지만 확인, Illustrator/Inkscape/Figma 에서 직접 열어 보는 점검은 수행하지 않음
 
 ### Step 2.9 외부 SVG 가져오기
-- [ ] 2.9.1 표준 기본 도형(`<rect>`, `<circle>`, `<line>` 등)의 `PathNode` 변환 파서
-- [ ] 2.9.2 패스 `d` 속성의 상대/절대 좌표(`M, L, H, V, C, S, Q, T, A, Z`) 완전 지원 (기존 Reader 가 상대 좌표 `c`/`m` 을 절대 좌표로 처리하는 버그도 함께 수정)
-- [ ] 2.9.2b **속성 상속** (가장 중요): `<g fill="red" stroke="...">` 등 그룹에 지정된 표현 속성이 자식에 상속되도록 스타일 스택 도입 (현재 Reader 는 `<path>` 자신의 속성만 읽어 실제 SVG 대부분이 깨짐)
-- [ ] 2.9.2c `style="..."` 속성 / `<style>` CSS(클래스·태그 선택자 기본), `rgb()`·`#rgb`·색 이름·`currentColor`, 단위(px/mm/pt/%), `viewBox` + `preserveAspectRatio` 스케일, `transform` 리스트(translate/rotate/scale/skew/matrix), `<defs>` 그라디언트·`<use>`·`<symbol>`
-- [ ] 2.9.2d 가져온 노드는 `Document::ImportNodes()`(2.0.5)로 삽입하여 ID 중복 방지
-- [ ] 2.9.3 타원 호(`A/a` 명령어)를 3차 베지에 곡선으로 근사 변환하는 알고리즘 적용
-- [ ] 2.9.4 외부 W3C SVG 테스트 파일셋 임포트 렌더링 검증
+- [x] 2.9.1 표준 기본 도형(`<rect>`, `<circle>`, `<line>` 등)의 `PathNode` 변환 파서 — (완료) rect(rx/ry), circle, ellipse, line, polyline, polygon → PathNode
+- [x] 2.9.2 패스 `d` 속성의 상대/절대 좌표(`M, L, H, V, C, S, Q, T, A, Z`) 완전 지원 (기존 Reader 가 상대 좌표 `c`/`m` 을 절대 좌표로 처리하는 버그도 함께 수정) — (완료) M L H V C S Q T A Z 대/소문자 전체 지원, 상대 좌표 버그 수정 (자체 검증 20)
+- [x] 2.9.2b **속성 상속** (가장 중요): `<g fill="red" stroke="...">` 등 그룹에 지정된 표현 속성이 자식에 상속되도록 스타일 스택 도입 (현재 Reader 는 `<path>` 자신의 속성만 읽어 실제 SVG 대부분이 깨짐) — (완료) 그룹 표현 속성 상속 스택 + SVG 기본값(fill 검정, stroke 없음), currentColor
+- [ ] 2.9.2c `style="..."` 속성 / `<style>` CSS(클래스·태그 선택자 기본), `rgb()`·`#rgb`·색 이름·`currentColor`, 단위(px/mm/pt/%), `viewBox` + `preserveAspectRatio` 스케일, `transform` 리스트(translate/rotate/scale/skew/matrix), `<defs>` 그라디언트·`<use>`·`<symbol>` — (부분 완료) style 속성, `<style>` 단순 선택자(태그/.class/#id), rgb()/#rgb/색 이름, 단위(px/pt/pc/mm/cm/in/em), viewBox 스케일(xMidYMid meet), transform 리스트. 미지원: `<use>/<symbol>/<defs>` 재사용, 복합 선택자, preserveAspectRatio 옵션
+- [ ] 2.9.2d 가져온 노드는 `Document::ImportNodes()`(2.0.5)로 삽입하여 ID 중복 방지 — (미확인) Reader 가 대상 Document 에 직접 노드를 만들어 ID 는 EnsureUniqueIds 로 보정. ImportNodes 경로(붙여넣기/가져오기 UI) 연결은 별도 확인 필요
+- [x] 2.9.3 타원 호(`A/a` 명령어)를 3차 베지에 곡선으로 근사 변환하는 알고리즘 적용 — (완료) 호(A)를 90° 단위 3차 베지에 조각으로 변환 (자체 검증 20, 앱 렌더링 확인)
+- [ ] 2.9.4 외부 W3C SVG 테스트 파일셋 임포트 렌더링 검증 — (미완료) W3C 테스트 파일셋은 실행하지 않음. 직접 만든 샘플(CSS/호/상대 곡선/변환)로만 렌더링 확인
 
 ---
 
@@ -302,10 +302,10 @@
 
 ### Step 3.1 TextNode 모델 + DirectWrite 렌더 & 속성창 UI
 > 선행: 2.0.1(좌표계). Y 반전 뷰포트 아래에서는 텍스트가 거울상이 됨. 모델은 확장 가능하게 `vector<TextRun>`(런별 스타일)로 두고 1차는 단일 런만 UI 노출. 글꼴 폴백 스택(font-family 목록) 속성 포함 (출력 PC 에 글꼴이 없을 때 대비)
-- [ ] 3.1.1 `NodeKind::Text` 및 `TextNode` 클래스 구현 (문자열, 글꼴, 크기, 굵기, 정렬, Point/Area 모드)
-- [ ] 3.1.2 DirectWrite(`IDWriteFactory`, `IDWriteTextFormat`, `IDWriteTextLayout`) 렌더러 캐시 파이프라인 구축
-- [ ] 3.1.3 변환 행렬(`m_xf`)과 결합된 텍스트 렌더링 및 히트테스트 바운딩 박스 구현
-- [ ] 3.1.4 **`PropertyView` 텍스트 패널 모드/섹션 구현**:
+- [x] 3.1.1 `NodeKind::Text` 및 `TextNode` 클래스 구현 (문자열, 글꼴, 크기, 굵기, 정렬, Point/Area 모드) — (완료 2026-10-28) `NodeKind::Text`/`TextNode`(문자열, 글꼴, 크기, 굵기, 기울임, 정렬, 여러 줄). Point 모드만, Area(상자) 모드는 미구현
+- [ ] 3.1.2 DirectWrite(`IDWriteFactory`, `IDWriteTextFormat`, `IDWriteTextLayout`) 렌더러 캐시 파이프라인 구축 — (부분) 그릴 때마다 `IDWriteTextFormat/TextLayout` 생성 후 측정값을 노드에 캐시. 레이아웃/포맷 캐시 파이프라인은 미구현
+- [ ] 3.1.3 변환 행렬(`m_xf`)과 결합된 텍스트 렌더링 및 히트테스트 바운딩 박스 구현 — (부분) 변환 행렬과 함께 렌더링, 선택 도구 히트(글자 상자). 측정 전에는 추정 경계
+- [ ] 3.1.4 **`PropertyView` 텍스트 패널 모드/섹션 구현**: — (미착수) 텍스트 속성창 섹션 없음 — 글꼴/크기/굵기/정렬은 현재 모델과 SVG 로만 지정 가능
   - 글꼴 패밀리 콤보박스 (시스템 글꼴 열거)
   - 폰트 크기, 굵기(Bold/Regular), 기울임(Italic), 밑줄 토글
   - 정렬 (좌/가운데/우/양쪽 정렬)
@@ -314,9 +314,9 @@
 - [ ] 3.1.5 빌드 확인 및 화면 출력 및 속성창 변경 검증
 
 ### Step 3.2 TextTool (인라인 편집, IME)
-- [ ] 3.2.1 캔버스 클릭 시 Point Text 생성, 드래그 시 Area Box Text 생성
-- [ ] 3.2.2 **1차 구현은 편집용 네이티브 컨트롤(RichEdit/멀티라인 EDIT)을 캔버스 위에 오버레이**하고 확정 시 `TextNode`에 반영 (IME 조합을 직접 그린 편집기에서 완벽히 처리하는 것은 위험도가 매우 높음). 직접 그리는 캐럿/선택 편집기와 TSF 지원은 후속 개선으로 분리
-- [ ] 3.2.3 한글 및 동아시아 IME 조합 문자 완벽 처리(`WM_IME_COMPOSITION`, `WM_IME_CHAR`)
+- [ ] 3.2.1 캔버스 클릭 시 Point Text 생성, 드래그 시 Area Box Text 생성 — (부분) 캔버스 클릭 -> 입력 대화상자 -> Point Text 생성. 드래그 Area Text 는 미구현
+- [ ] 3.2.2 **1차 구현은 편집용 네이티브 컨트롤(RichEdit/멀티라인 EDIT)을 캔버스 위에 오버레이**하고 확정 시 `TextNode`에 반영 (IME 조합을 직접 그린 편집기에서 완벽히 처리하는 것은 위험도가 매우 높음). 직접 그리는 캐럿/선택 편집기와 TSF 지원은 후속 개선으로 분리 — (대체) 캔버스 오버레이 대신 모달 입력 대화상자(표준 EDIT, 여러 줄)로 1차 구현. 선택된 텍스트 더블클릭으로 재편집
+- [ ] 3.2.3 한글 및 동아시아 IME 조합 문자 완벽 처리(`WM_IME_COMPOSITION`, `WM_IME_CHAR`) — (부분) 표준 EDIT 컨트롤이라 한글 IME 조합은 OS 가 처리. 앱에서 직접 입력해 보는 확인은 하지 않음
 - [ ] 3.2.4 편집 완료(ESC 또는 외곽 클릭) 시 텍스트 커밋 및 Undo 스냅샷 기록
 - [ ] 3.2.5 빌드 확인 및 한글/영문 입력 테스트
 
@@ -336,7 +336,7 @@
 
 
 ### Step 3.5 텍스트/이미지 SVG 출력
-- [ ] 3.5.1 `SvgWriter`에 `TextNode` 직렬화 연동 (`<text>`, `<tspan>`, 글꼴 속성 매핑)
+- [ ] 3.5.1 `SvgWriter`에 `TextNode` 직렬화 연동 (`<text>`, `<tspan>`, 글꼴 속성 매핑) — (부분 완료) `<text>`/`<tspan>` 쓰기·읽기 왕복(자체 검증 22, 외부 SVG `<text>` 읽기 포함). 폰트 스택/웹폰트/윤곽선 변환 옵션은 3.5.5 에서
 - [ ] 3.5.2 Area Text의 줄바꿈 계산 결과를 다중 `<tspan>` 또는 윤곽선 출력으로 지원
 - [ ] 3.5.3 `ImageNode`를 `<image href="data:image/png;base64,...">` 인라인 또는 상대 경로로 직렬화
 - [ ] 3.5.4 빌드 확인 및 브라우저에서 텍스트/이미지가 포함된 SVG 파일 렌더링 검증

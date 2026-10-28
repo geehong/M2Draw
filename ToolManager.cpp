@@ -354,6 +354,102 @@ void PenTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, fl
 	}
 }
 
+// ---------------- 텍스트 입력 대화상자 / TextTool ----------------
+namespace {
+
+// 메모리 안에 대화상자 템플릿을 만들어 쓰는 단순 입력창 (리소스 파일을 건드리지 않음)
+class CTextEditDlg : public CDialog
+{
+public:
+	std::wstring m_text;
+
+	INT_PTR Run(CWnd* parent)
+	{
+		std::vector<WORD> w;
+		auto add32 = [&](DWORD v) { w.push_back(LOWORD(v)); w.push_back(HIWORD(v)); };
+		auto addStr = [&](const wchar_t* s) { while (*s) w.push_back(*s++); w.push_back(0); };
+		auto align = [&]() { if (w.size() % 2) w.push_back(0); };
+
+		add32(DS_MODALFRAME | DS_SETFONT | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+		add32(0);
+		w.push_back(3);                                   // 항목 수
+		w.push_back(0); w.push_back(0); w.push_back(240); w.push_back(104);
+		w.push_back(0); w.push_back(0);                   // 메뉴/클래스 없음
+		addStr(L"\uD14D\uC2A4\uD2B8 \uC785\uB825");             // "텍스트 입력"
+		w.push_back(9); addStr(L"Segoe UI");              // 글꼴
+
+		auto item = [&](DWORD style, short x, short y, short cx, short cy, WORD id, WORD atom, const wchar_t* title) {
+			align();
+			add32(style | WS_CHILD | WS_VISIBLE);
+			add32(0);
+			w.push_back(x); w.push_back(y); w.push_back(cx); w.push_back(cy);
+			w.push_back(id);
+			w.push_back(0xFFFF); w.push_back(atom);       // 사전 정의 클래스 (0x0081 = Edit, 0x0080 = Button)
+			addStr(title);
+			w.push_back(0);                               // 생성 데이터 없음
+		};
+		item(WS_BORDER | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN, 6, 6, 228, 72, 1001, 0x0081, L"");
+		item(BS_DEFPUSHBUTTON | WS_TABSTOP, 128, 84, 50, 14, IDOK, 0x0080, L"\uD655\uC778");     // 확인
+		item(BS_PUSHBUTTON | WS_TABSTOP, 184, 84, 50, 14, IDCANCEL, 0x0080, L"\uCDE8\uC18C");   // 취소
+
+		if (!InitModalIndirect(reinterpret_cast<LPCDLGTEMPLATE>(w.data()), parent)) return IDCANCEL;
+		return DoModal();
+	}
+
+protected:
+	BOOL OnInitDialog() override
+	{
+		CDialog::OnInitDialog();
+		CString s(m_text.c_str());
+		s.Replace(_T("\n"), _T("\r\n"));
+		SetDlgItemText(1001, s);
+		if (CEdit* e = static_cast<CEdit*>(GetDlgItem(1001))) { e->SetFocus(); e->SetSel(0, -1); }
+		return FALSE;   // 포커스를 직접 지정
+	}
+	void OnOK() override
+	{
+		CString s;
+		GetDlgItemText(1001, s);
+		s.Replace(_T("\r\n"), _T("\n"));
+		m_text = (LPCTSTR)s;
+		CDialog::OnOK();
+	}
+};
+
+} // namespace
+
+bool EditTextDialog(CWnd* parent, std::wstring& text)
+{
+	CTextEditDlg dlg;
+	dlg.m_text = text;
+	if (dlg.Run(parent) != IDOK) return false;
+	text = dlg.m_text;
+	return true;
+}
+
+void TextTool::OnDown(const ToolEvent& e)
+{
+	if (!e.pDoc) return;
+	std::wstring txt;
+	if (!EditTextDialog(AfxGetMainWnd(), txt) || txt.empty()) return;
+
+	auto tn = std::make_unique<ge::TextNode>();
+	tn->SetTransform(ge::Matrix2D::Translation(e.worldPt.x, e.worldPt.y));
+	tn->SetText(txt);
+	tn->SetName(L"\uD14D\uC2A4\uD2B8");   // "텍스트"
+	ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(tn));
+	if (!added) return;
+	e.pDoc->GetDoc().SetSelection({ added });
+	e.pDoc->SetModifiedFlag(TRUE);
+	e.pDoc->CommitUndoPoint(L"\uD14D\uC2A4\uD2B8 \uCD94\uAC00");
+	LogAppEvent(_T("[텍스트 도구] 텍스트 추가"));
+
+	CM2DrawDoc* pDoc = e.pDoc;
+	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+	if (SelectTool* sel = GetApp()->GetToolManager().GetSelectTool()) sel->SelectNode(added, pDoc);
+	pDoc->UpdateAllViews(nullptr);
+}
+
 // ---------------- ToolManager ----------------
 ToolManager::ToolManager()
 	: m_activeType(ToolType::Select)

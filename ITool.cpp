@@ -56,6 +56,16 @@ static bool HitTestNodeRecursive(ge::Node* n, D2D1_POINT_2F screenPt, const View
 		return false;
 	}
 
+	if (n->Kind() == ge::NodeKind::Text)
+	{
+		// 텍스트: 글자 상자(로컬 경계) 안쪽 클릭이면 히트
+		ge::Rect2 b;
+		ge::Matrix2D inv = n->GetWorldTransform();
+		if (!n->GetLocalBounds(b) || !inv.Invert()) return false;
+		const ge::Vec2 l = inv.TransformPoint(view.ScreenToWorld(ge::Vec2{ screenPt.x, screenPt.y }));
+		return l.x >= b.left && l.x <= b.right && l.y >= b.top && l.y <= b.bottom;
+	}
+
 	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
 	return ps && ps->HitTestScreenSpace(screenPt, 8.0f, view, f).part != HitResult::Part::None;
 }
@@ -700,7 +710,7 @@ void SelectTool::OnMove(const ToolEvent& e)
 		{
 			s_lastDragTick = curTick;
 			ge::Node* shown = (m_mode == Mode::Moving || !m_xfTarget) ? sel.front() : m_xfTarget;
-			UpdateShapePropertiesSelection(shown, e.pDoc);
+			UpdateShapePropertiesLight(shown, e.pDoc);   // 드래그 중에는 값 동기화만 (레이어 패널/서브도구 바 재구성은 놓을 때)
 		}
 	}
 }
@@ -759,7 +769,7 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 		auto it = m_initialXfs.find(n);
 		D2D1::Matrix3x2F baseInitXf = (it != m_initialXfs.end()) ? it->second : static_cast<D2D1::Matrix3x2F>(n->GetTransform());
 		n->SetTransform(ge::Transformer::Translate(D2D1::Point2F(dx, dy), baseInitXf));
-		n->Invalidate();
+		if (n->Kind() != ge::NodeKind::Text) n->Invalidate();   // 텍스트 배치 캐시 보존
 	}
 }
 
@@ -771,7 +781,8 @@ void SelectTool::ApplyScale(ge::Node* shape)
 	if (newXf)
 	{
 		shape->SetTransform(*newXf);
-		shape->Invalidate();
+		// 텍스트는 변환만 바뀌므로 Invalidate 하면 안 됨: 버전이 매 프레임 바뀌어 글자 배치 캐시가 계속 무효화됨 (크기 조절이 버벅거림)
+		if (shape->Kind() != ge::NodeKind::Text) shape->Invalidate();
 	}
 }
 
@@ -781,7 +792,7 @@ void SelectTool::ApplyRotate(ge::Node* shape)
 	if (!shape) return;
 	auto newXf = ge::Transformer::RotateAboutCenter(m_dragStartWorld, m_dragCurrentWorld, m_initialLocalBounds, m_initialXf);
 	shape->SetTransform(newXf);
-	shape->Invalidate();
+	if (shape->Kind() != ge::NodeKind::Text) shape->Invalidate();   // 텍스트 배치 캐시 보존
 }
 
 void SelectTool::OnUp(const ToolEvent& e)

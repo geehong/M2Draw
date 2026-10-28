@@ -375,6 +375,36 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 	CM2DrawDoc* pDoc = GetDocument();
 	ToolType activeType = GetApp()->GetToolManager().GetActiveType();
 
+	// 0-a. 선택 도구: 선택된 텍스트를 더블클릭하면 내용 편집
+	if (activeType == ToolType::Select && pDoc && pDoc->GetDoc().GetSelection().size() == 1)
+	{
+		ge::Node* sel = pDoc->GetPrimarySelection();
+		if (sel && sel->Kind() == ge::NodeKind::Text)
+		{
+			ge::Rect2 b;
+			ge::Matrix2D inv = sel->GetWorldTransform();
+			const D2D1_POINT_2F w = ScreenToWorld(point);
+			if (sel->GetLocalBounds(b) && inv.Invert())
+			{
+				const ge::Vec2 l = inv.TransformPoint(ge::Vec2{ w.x, w.y });
+				if (l.x >= b.left && l.x <= b.right && l.y >= b.top && l.y <= b.bottom)
+				{
+					auto* tn = static_cast<ge::TextNode*>(sel);
+					std::wstring txt = tn->GetText();
+					if (EditTextDialog(this, txt) && !txt.empty() && txt != tn->GetText())
+					{
+						tn->SetText(txt);
+						LogAppEvent(_T("[선택 도구] 텍스트 내용 편집"));
+						pDoc->CommitUndoPoint(L"텍스트 편집");
+						UpdateShapePropertiesSelection(tn, pDoc);
+						pDoc->UpdateAllViews(nullptr);
+					}
+					return;
+				}
+			}
+		}
+	}
+
 	// 0. 선택 도구: 선택된 패스 위 더블클릭 = 앵커 삭제(앵커 위) / 앵커 추가(선분 위)
 	if (activeType == ToolType::Select && pDoc && pDoc->GetDoc().GetSelection().size() == 1)
 	{
