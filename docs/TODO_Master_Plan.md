@@ -305,7 +305,7 @@
 - [x] 3.1.1 `NodeKind::Text` 및 `TextNode` 클래스 구현 (문자열, 글꼴, 크기, 굵기, 정렬, Point/Area 모드) — (완료 2026-10-28) `NodeKind::Text`/`TextNode`(문자열, 글꼴, 크기, 굵기, 기울임, 정렬, 여러 줄). Point 모드만, Area(상자) 모드는 미구현
 - [ ] 3.1.2 DirectWrite(`IDWriteFactory`, `IDWriteTextFormat`, `IDWriteTextLayout`) 렌더러 캐시 파이프라인 구축 — (부분) 그릴 때마다 `IDWriteTextFormat/TextLayout` 생성 후 측정값을 노드에 캐시. 레이아웃/포맷 캐시 파이프라인은 미구현
 - [ ] 3.1.3 변환 행렬(`m_xf`)과 결합된 텍스트 렌더링 및 히트테스트 바운딩 박스 구현 — (부분) 변환 행렬과 함께 렌더링, 선택 도구 히트(글자 상자). 측정 전에는 추정 경계
-- [ ] 3.1.4 **`PropertyView` 텍스트 패널 모드/섹션 구현**: — (미착수) 텍스트 속성창 섹션 없음 — 글꼴/크기/굵기/정렬은 현재 모델과 SVG 로만 지정 가능
+- [ ] 3.1.4 **`PropertyView` 텍스트 패널 모드/섹션 구현**: — (미착수) 텍스트 속성창 섹션 없음 — 글꼴/크기/굵기/정렬은 현재 모델과 SVG 로만 지정 가능 — (2026-10-28 대체 구현) 속성창 섹션 대신 텍스트 입력 대화상자에서 내용·글꼴·크기·굵게·기울임·정렬 편집(생성 시, 더블클릭 시). 채우기 색은 기존 속성창 Fill 로 편집. 전용 속성창 섹션은 미구현
   - 글꼴 패밀리 콤보박스 (시스템 글꼴 열거)
   - 폰트 크기, 굵기(Bold/Regular), 기울임(Italic), 밑줄 토글
   - 정렬 (좌/가운데/우/양쪽 정렬)
@@ -321,10 +321,10 @@
 - [ ] 3.2.5 빌드 확인 및 한글/영문 입력 테스트
 
 ### Step 3.3 텍스트 → 윤곽선 변환 (Convert to Curves)
-- [ ] 3.3.1 `IDWriteFontFace::GetGlyphRunOutline` 인터페이스를 통한 벡터 윤곽선 기하학 추출
-- [ ] 3.3.2 추출된 기하학 데이터를 `PathNode`의 `SubPath` 목록으로 변환
-- [ ] 3.3.3 메뉴 및 속성창 버튼 연결: `TextNode`를 일반 `PathNode`로 치환
-- [ ] 3.3.4 빌드 확인 및 글꼴 아웃라인의 베지에 노드 편집 가능 여부 검증
+- [x] 3.3.1 `IDWriteFontFace::GetGlyphRunOutline` 인터페이스를 통한 벡터 윤곽선 기하학 추출 — (완료) `PathOp::TextToPath`: IDWriteTextRenderer 로 글리프 런 수집 + `GetGlyphRunOutline`
+- [x] 3.3.2 추출된 기하학 데이터를 `PathNode`의 `SubPath` 목록으로 변환 — (완료) 글리프 윤곽을 `ExtractSubPaths` 로 `SubPath` 목록으로 변환 (정렬/여러 줄/굵기 반영)
+- [ ] 3.3.3 메뉴 및 속성창 버튼 연결: `TextNode`를 일반 `PathNode`로 치환 — (부분) 선택한 텍스트가 있으면 상단 서브도구에 "윤곽선으로 변환" 버튼(Undo 1단계). 메뉴/속성창 버튼은 미구현
+- [ ] 3.3.4 빌드 확인 및 글꼴 아웃라인의 베지에 노드 편집 가능 여부 검증 — (부분) 앱에서 한글+영문 텍스트 변환 후 같은 위치/색의 패스(앵커 다수)로 바뀌는 것 확인. 앵커/핸들 편집 동작은 직접 확인하지 않음
 
 ### Step 3.4 ImageNode + 리소스 테이블 & 속성창 UI
 - [ ] 3.4.1 `Document`에 비트맵 리소스 테이블(ID, 원본 바이너리/경로) 추가. **노드는 리소스 ID 만 참조** — `SvgWriteOptions::Snapshot`(Undo)은 이미지를 참조 ID 로만 쓰고 `File`/`Clean` 모드에서만 base64 임베드 (2.0.4. 임베드하면 Undo 스냅샷 50개에 이미지가 중복 보관됨)

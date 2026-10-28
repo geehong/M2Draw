@@ -76,6 +76,8 @@ public:
 	bool CanJoinPaths() const     { return m_doc.CanJoinPaths(); }
 	bool OutlineStroke(float widthOverride = -1.0f);
 	bool SmoothPath(float tolerance);
+	bool ConvertTextToPath();
+	bool CanConvertTextToPath() const { return m_doc.CanConvertTextToPath(); }
 	bool SimplifyPath(float tolerance = 2.0f);
 	bool ReversePath();
 	bool JoinPaths();
@@ -95,6 +97,8 @@ public:
 	afx_msg void OnUpdateObjectGroup(CCmdUI* pCmdUI);
 	afx_msg void OnObjectUngroup();
 	afx_msg void OnUpdateObjectUngroup(CCmdUI* pCmdUI);
+	afx_msg void OnTextToPath();
+	afx_msg void OnUpdateTextToPath(CCmdUI* pCmdUI);
 	afx_msg void OnObjectArrange(UINT nID);
 	afx_msg void OnAlignCommand(UINT nID);
 	afx_msg void OnUpdateAlignCommand(CCmdUI* pCmdUI);

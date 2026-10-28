@@ -390,11 +390,22 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 				if (l.x >= b.left && l.x <= b.right && l.y >= b.top && l.y <= b.bottom)
 				{
 					auto* tn = static_cast<ge::TextNode*>(sel);
-					std::wstring txt = tn->GetText();
-					if (EditTextDialog(this, txt) && !txt.empty() && txt != tn->GetText())
+					TextEditProps props;
+					props.text = tn->GetText();
+					props.family = tn->GetFontFamily();
+					props.size = tn->GetFontSize();
+					props.bold = tn->IsBold();
+					props.italic = tn->IsItalic();
+					props.align = static_cast<int>(tn->GetAlign());
+					if (EditTextPropsDialog(this, props) && !props.text.empty())
 					{
-						tn->SetText(txt);
-						LogAppEvent(_T("[선택 도구] 텍스트 내용 편집"));
+						tn->SetText(props.text);
+						tn->SetFontFamily(props.family);
+						tn->SetFontSize(props.size);
+						tn->SetBold(props.bold);
+						tn->SetItalic(props.italic);
+						tn->SetAlign(static_cast<ge::TextAlign>((std::max)(0, (std::min)(2, props.align))));
+						LogAppEvent(_T("[선택 도구] 텍스트 편집"));
 						pDoc->CommitUndoPoint(L"텍스트 편집");
 						UpdateShapePropertiesSelection(tn, pDoc);
 						pDoc->UpdateAllViews(nullptr);

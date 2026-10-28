@@ -48,6 +48,8 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_RELEASE_MASK, &CM2DrawDoc::OnUpdateObjectReleaseMask)
 	ON_COMMAND_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnAlignCommand)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnUpdateAlignCommand)
+	ON_COMMAND(ID_TEXT_TO_PATH, &CM2DrawDoc::OnTextToPath)
+	ON_UPDATE_COMMAND_UI(ID_TEXT_TO_PATH, &CM2DrawDoc::OnUpdateTextToPath)
 	ON_COMMAND(ID_PATH_OUTLINE, &CM2DrawDoc::OnPathOutline)
 	ON_UPDATE_COMMAND_UI(ID_PATH_OUTLINE, &CM2DrawDoc::OnUpdatePathOutline)
 	ON_COMMAND(ID_PATH_SIMPLIFY, &CM2DrawDoc::OnPathSimplify)
@@ -780,6 +782,35 @@ bool CM2DrawDoc::OutlineStroke(float widthOverride)
 	}
 	return true;
 }
+
+bool CM2DrawDoc::ConvertTextToPath()
+{
+	if (!CanConvertTextToPath()) return false;
+
+	ID2D1Factory* pFactory = nullptr;
+	POSITION pos = GetFirstViewPosition();
+	if (pos) {
+		CView* pView = GetNextView(pos);
+		if (pView && pView->IsKindOf(RUNTIME_CLASS(CM2DrawView)))
+			pFactory = static_cast<CM2DrawView*>(pView)->GetD2DFactory();
+	}
+	if (!pFactory) return false;
+
+	auto results = m_doc.TextToPathSelection(pFactory);
+	if (results.empty()) return false;
+
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+	CommitUndoPoint(L"텍스트를 윤곽선으로 변환");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+void CM2DrawDoc::OnTextToPath() { ConvertTextToPath(); }
+void CM2DrawDoc::OnUpdateTextToPath(CCmdUI* pCmdUI) { pCmdUI->Enable(CanConvertTextToPath()); }
 
 bool CM2DrawDoc::SmoothPath(float tolerance)
 {

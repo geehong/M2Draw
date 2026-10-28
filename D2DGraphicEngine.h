@@ -851,6 +851,8 @@ public:
 #ifndef GE_NO_D2D
 	std::vector<PathNode*> OutlineStrokeSelection(ID2D1Factory* factory, float widthOverride = -1.0f);   // widthOverride > 0: 선 두께를 이 값으로 확장
 	std::vector<PathNode*> SmoothSelection(float tolerance);
+	bool CanConvertTextToPath() const;
+	std::vector<PathNode*> TextToPathSelection(ID2D1Factory* factory);   // 선택된 텍스트를 같은 위치의 PathNode 로 교체
 	std::vector<PathNode*> SimplifySelection(float tolerance = 2.0f);
 	std::vector<PathNode*> ReversePathSelection();
 	PathNode*              JoinSelection();
@@ -1038,6 +1040,12 @@ public:
 
 	// 4) 패스 결합: 인접한 끝점을 가진 서브패스 또는 두 패스를 하나로 결합
 	static std::unique_ptr<PathNode> Join(const PathNode& a, const PathNode& b, float maxDistance = 10.0f);
+
+	// 텍스트 크기를 DirectWrite 로 즉시 재서 노드에 기록 (속성창에서 글꼴/크기를 바꾼 직후 W/H 를 바로 갱신하기 위함)
+	static void MeasureText(TextNode& text);
+
+	// 텍스트 -> 윤곽선 패스 (DirectWrite 글리프 윤곽). 원본과 같은 로컬 좌표/변환/채우기를 가져 화면상 모양이 같다
+	static std::unique_ptr<PathNode> TextToPath(const TextNode& text, ID2D1Factory* factory);
 };
 
 // ============================================================================

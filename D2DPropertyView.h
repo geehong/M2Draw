@@ -54,7 +54,8 @@ protected:
 	bool        m_bUpdating = false;
 
 	ge::Node* GetSelectedShape() const;   // m_selectedNodeId 를 문서에서 조회 (없으면 nullptr)
-	bool IsGroupSelected() const;         // 선택된 노드가 그룹이면 도형용 스타일 UI 대신 그룹 전용 UI 표시
+	bool IsGroupSelected() const;
+	bool IsTextSelected() const;          // 선택된 노드가 텍스트면 Transform 위에 글꼴/크기/굵기/정렬 UI 표시         // 선택된 노드가 그룹이면 도형용 스타일 UI 대신 그룹 전용 UI 표시
 
 	// --- 그라디언트 편집 (채우기 탭 + Linear/Radial 모드 + 그라디언트 채움 도형일 때만 표시) ---
 	bool IsGradientMode() const;          // 그라디언트 편집 UI 를 보여야 하는지
@@ -144,6 +145,15 @@ protected:
 	std::shared_ptr<M2DrawNumericInput> m_spinGradR;
 	std::shared_ptr<M2DrawLabel>        m_lblBlend;            // "Blend Mode" (그룹 전용)
 	std::shared_ptr<M2DrawComboBox>     m_cboBlend;            // 혼합 모드 콤보 (그룹 전용)
+
+	// 텍스트 전용 (Transform 바로 위): 변경 즉시 노드에 반영
+	std::shared_ptr<M2DrawLabel>        m_lblText;
+	std::shared_ptr<M2DrawComboBox>     m_cboFont;
+	std::shared_ptr<M2DrawNumericInput> m_spinFontSize;
+	std::shared_ptr<M2DrawComboBox>     m_cboTextAlign;
+	std::shared_ptr<M2DrawCheckBox>     m_chkBold;
+	std::shared_ptr<M2DrawCheckBox>     m_chkItalic;
+	void ApplyTextProps(const std::function<void(ge::TextNode&)>& fn);
 	std::shared_ptr<M2DrawLabel>        m_lblStrokeWidth;      // "Stroke Width"
 	std::shared_ptr<M2DrawSlider>       m_sliderStrokeWidth;   // Stroke width bar
 	std::shared_ptr<M2DrawNumericInput> m_spinStrokeWidth;     // Stroke width number input

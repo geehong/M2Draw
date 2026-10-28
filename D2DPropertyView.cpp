@@ -302,6 +302,25 @@ bool CD2DPropertyView::IsGroupSelected() const
 	return n && n->Kind() == ge::NodeKind::Group;
 }
 
+bool CD2DPropertyView::IsTextSelected() const
+{
+	ge::Node* n = GetSelectedShape();
+	return n && n->Kind() == ge::NodeKind::Text;
+}
+
+// 텍스트 속성 변경을 선택된 텍스트에 즉시 적용 (Undo 는 마우스 버튼을 놓을 때 "속성 변경" 으로 한 번 기록됨)
+void CD2DPropertyView::ApplyTextProps(const std::function<void(ge::TextNode&)>& fn)
+{
+	if (m_bUpdating || !m_pActiveDoc) return;
+	auto* tn = dynamic_cast<ge::TextNode*>(GetSelectedShape());
+	if (!tn) return;
+	fn(*tn);
+	ge::PathOp::MeasureText(*tn);   // 새 크기를 바로 재서 아래 Transform 의 W/H 에 반영
+	m_pActiveDoc->UpdateAllViews(nullptr);
+	UpdateShapePropertiesLight(tn, m_pActiveDoc);
+	SafeInvalidate(FALSE);
+}
+
 void CD2DPropertyView::ApplyGroupAppearance()
 {
 	ge::Node* node = GetSelectedShape();
@@ -969,6 +988,44 @@ void CD2DPropertyView::InitControls()
 		});
 		m_pCurrentPanel->AddChild(m_cboBlend);
 
+		// 텍스트 속성 (텍스트가 선택되었을 때만 표시)
+		m_lblText = std::make_shared<M2DrawLabel>(L"● Text (Font, Size, Style)");
+		m_pCurrentPanel->AddChild(m_lblText);
+
+		m_chkBold = std::make_shared<M2DrawCheckBox>(L"Bold", false);
+		m_chkBold->SetOnChanged([this](M2DrawCheckBox*, bool b) { ApplyTextProps([b](ge::TextNode& t) { t.SetBold(b); }); });
+		m_pCurrentPanel->AddChild(m_chkBold);
+
+		m_chkItalic = std::make_shared<M2DrawCheckBox>(L"Italic", false);
+		m_chkItalic->SetOnChanged([this](M2DrawCheckBox*, bool b) { ApplyTextProps([b](ge::TextNode& t) { t.SetItalic(b); }); });
+		m_pCurrentPanel->AddChild(m_chkItalic);
+
+		m_spinFontSize = std::make_shared<M2DrawNumericInput>(1.0, 2000.0, 24.0, 1.0);
+		m_spinFontSize->SetSuffix(L" px");
+		m_spinFontSize->SetOnChanged([this](M2DrawNumericInput*, double v) { ApplyTextProps([v](ge::TextNode& t) { t.SetFontSize(static_cast<float>(v)); }); });
+		m_pCurrentPanel->AddChild(m_spinFontSize);
+
+		m_cboFont = std::make_shared<M2DrawComboBox>();
+		m_cboFont->SetItemHeight(20.0f);
+		m_cboFont->SetOnSelectionChanged([this](M2DrawComboBox* pCombo, int sel) {
+			if (sel < 0 || sel >= pCombo->GetItemCount()) return;
+			const std::wstring family = pCombo->GetItemText(sel);
+			ApplyTextProps([family](ge::TextNode& t) { t.SetFontFamily(family); });
+		});
+		m_pCurrentPanel->AddChild(m_cboFont);
+
+		m_cboTextAlign = std::make_shared<M2DrawComboBox>();
+		m_cboTextAlign->SetItemHeight(20.0f);
+		m_cboTextAlign->AddItem(L"Left");
+		m_cboTextAlign->AddItem(L"Center");
+		m_cboTextAlign->AddItem(L"Right");
+		m_cboTextAlign->SetCurSel(0, false);
+		m_cboTextAlign->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 2) return;
+			ApplyTextProps([sel](ge::TextNode& t) { t.SetAlign(static_cast<ge::TextAlign>(sel)); });
+		});
+		m_pCurrentPanel->AddChild(m_cboTextAlign);
+
 		// 7. Stroke Width Label & Slider Bar & Number Input
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
@@ -1438,6 +1495,28 @@ void CD2DPropertyView::SyncControlsFromData()
 		if (m_cboBlend && IsGroupSelected())
 			m_cboBlend->SetCurSel(static_cast<int>(GetSelectedShape()->GetBlendMode()), false);
 
+		// 텍스트: 컨트롤 값을 노드 현재 값으로 맞춤 (콜백 억제)
+		if (auto* tn = dynamic_cast<ge::TextNode*>(GetSelectedShape()))
+		{
+			const bool prevUpdating = m_bUpdating;
+			m_bUpdating = true;
+			if (m_cboFont)
+			{
+				static const wchar_t* kFonts[] = { L"Segoe UI", L"Malgun Gothic", L"Arial", L"Times New Roman", L"Courier New", L"Consolas",
+					L"Georgia", L"Verdana", L"Tahoma", L"Batang", L"Gulim", L"Dotum", L"Gungsuh", L"Impact", L"Comic Sans MS" };
+				m_cboFont->ClearItems();
+				int cur = -1, i = 0;
+				for (const wchar_t* f : kFonts) { m_cboFont->AddItem(f); if (tn->GetFontFamily() == f) cur = i; ++i; }
+				if (cur < 0) { m_cboFont->AddItem(tn->GetFontFamily()); cur = i; }   // 목록에 없는 글꼴(외부 SVG 등)도 표시
+				m_cboFont->SetCurSel(cur, false);
+			}
+			if (m_spinFontSize) m_spinFontSize->SetValue(tn->GetFontSize(), false);
+			if (m_chkBold) m_chkBold->SetChecked(tn->IsBold());
+			if (m_chkItalic) m_chkItalic->SetChecked(tn->IsItalic());
+			if (m_cboTextAlign) m_cboTextAlign->SetCurSel(static_cast<int>(tn->GetAlign()), false);
+			m_bUpdating = prevUpdating;
+		}
+
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
 		float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -1776,6 +1855,29 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 		{
 			m_lblShapeHeader->SetBounds(left, y, right, y + 20.0f);
 			y += 24.0f;
+		}
+
+		// 텍스트 속성: Transform 바로 위 (텍스트가 선택된 경우만)
+		{
+			const bool isText = IsTextSelected();
+			if (m_lblText)       m_lblText->SetVisible(isText);
+			if (m_cboFont)       m_cboFont->SetVisible(isText);
+			if (m_spinFontSize)  m_spinFontSize->SetVisible(isText);
+			if (m_cboTextAlign)  m_cboTextAlign->SetVisible(isText);
+			if (m_chkBold)       m_chkBold->SetVisible(isText);
+			if (m_chkItalic)     m_chkItalic->SetVisible(isText);
+			if (isText)
+			{
+				const float halfTW = (contentW - 6.0f) * 0.5f;
+				if (m_lblText)      { m_lblText->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+				if (m_cboFont)      { m_cboFont->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+				if (m_spinFontSize) m_spinFontSize->SetBounds(left, y, left + halfTW, y + 24.0f);
+				if (m_cboTextAlign) m_cboTextAlign->SetBounds(left + halfTW + 6.0f, y, right, y + 24.0f);
+				y += 28.0f;
+				if (m_chkBold)      m_chkBold->SetBounds(left, y, left + halfTW, y + 20.0f);
+				if (m_chkItalic)    m_chkItalic->SetBounds(left + halfTW + 6.0f, y, right, y + 20.0f);
+				y += 26.0f;
+			}
 		}
 
 		// Transform Header & Inputs

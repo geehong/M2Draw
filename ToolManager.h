@@ -69,6 +69,18 @@ public:
 // 텍스트 입력 대화상자 (한글 IME 는 표준 EDIT 컨트롤이 처리). 확인하면 true, text 에 \n 구분 문자열을 돌려줌
 bool EditTextDialog(CWnd* parent, std::wstring& text);
 
+// 텍스트 내용 + 글꼴/크기/굵기/기울임/정렬을 한 번에 편집하는 대화상자 (3.1.4: 속성창 대신 대화상자로 1차 제공)
+struct TextEditProps
+{
+	std::wstring text;
+	std::wstring family = L"Segoe UI";
+	float        size = 24.0f;
+	bool         bold = false;
+	bool         italic = false;
+	int          align = 0;   // 0 왼쪽, 1 가운데, 2 오른쪽 (ge::TextAlign 과 같은 값)
+};
+bool EditTextPropsDialog(CWnd* parent, TextEditProps& props);
+
 class TextTool : public ITool
 {
 public:

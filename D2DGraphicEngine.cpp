@@ -1119,6 +1119,39 @@ std::vector<PathNode*> Document::OutlineStrokeSelection(ID2D1Factory* factory, f
 	return results;
 }
 
+bool Document::CanConvertTextToPath() const
+{
+	for (const Node* n : m_selection)
+		if (n && n->Kind() == NodeKind::Text && n->GetParent()) return true;
+	return false;
+}
+
+std::vector<PathNode*> Document::TextToPathSelection(ID2D1Factory* factory)
+{
+	std::vector<PathNode*> results;
+	if (!factory) return results;
+	std::vector<TextNode*> targets;
+	for (Node* n : m_selection)
+		if (n && n->Kind() == NodeKind::Text && n->GetParent()) targets.push_back(static_cast<TextNode*>(n));
+
+	for (TextNode* src : targets) {
+		GroupNode* parent = src->GetParent();
+		auto path = PathOp::TextToPath(*src, factory);
+		if (!path) continue;
+		path->m_id = IssueId();
+		path->SetName(src->GetName().empty() ? std::wstring(L"Text Outline") : src->GetName() + L" Outline");
+		const int idx = parent->IndexOf(src);
+		parent->RemoveChild(src);
+		results.push_back(static_cast<PathNode*>(parent->AddChild(std::move(path), idx)));
+	}
+	if (!results.empty()) {
+		m_selection.clear();
+		for (PathNode* p : results) m_selection.push_back(p);
+		ChangeTracker::Bump();
+	}
+	return results;
+}
+
 std::vector<PathNode*> Document::SmoothSelection(float tolerance)
 {
 	std::vector<PathNode*> results;
@@ -1802,6 +1835,126 @@ bool PathOp::Smooth(PathNode& node, float tolerance)
 	return modified;
 }
 
+// 텍스트 -> 윤곽선: IDWriteTextRenderer 로 글리프 런을 수집해 IDWriteFontFace::GetGlyphRunOutline 으로 패스화
+namespace {
+class GlyphOutlineCollector : public IDWriteTextRenderer
+{
+public:
+	GlyphOutlineCollector(ID2D1Factory* f, float dx) : m_factory(f), m_dx(dx) {}
+
+	std::vector<SubPath> paths;
+
+	// IUnknown
+	STDMETHOD(QueryInterface)(REFIID iid, void** obj) override
+	{
+		if (iid == __uuidof(IUnknown) || iid == __uuidof(IDWritePixelSnapping) || iid == __uuidof(IDWriteTextRenderer)) { *obj = this; AddRef(); return S_OK; }
+		*obj = nullptr; return E_NOINTERFACE;
+	}
+	STDMETHOD_(ULONG, AddRef)() override { return ++m_ref; }
+	STDMETHOD_(ULONG, Release)() override { const ULONG r = --m_ref; if (r == 0) delete this; return r; }
+
+	// IDWritePixelSnapping
+	STDMETHOD(IsPixelSnappingDisabled)(void*, BOOL* disabled) override { *disabled = TRUE; return S_OK; }
+	STDMETHOD(GetCurrentTransform)(void*, DWRITE_MATRIX* m) override { *m = DWRITE_MATRIX{ 1, 0, 0, 1, 0, 0 }; return S_OK; }
+	STDMETHOD(GetPixelsPerDip)(void*, FLOAT* p) override { *p = 1.0f; return S_OK; }
+
+	// IDWriteTextRenderer
+	STDMETHOD(DrawGlyphRun)(void*, FLOAT ox, FLOAT oy, DWRITE_MEASURING_MODE, const DWRITE_GLYPH_RUN* run, const DWRITE_GLYPH_RUN_DESCRIPTION*, IUnknown*) override
+	{
+		if (!run || !run->fontFace || run->glyphCount == 0) return S_OK;
+		ComPtr<ID2D1PathGeometry> geo;
+		if (FAILED(m_factory->CreatePathGeometry(&geo))) return S_OK;
+		ComPtr<ID2D1GeometrySink> sink;
+		if (FAILED(geo->Open(&sink))) return S_OK;
+		const HRESULT hr = run->fontFace->GetGlyphRunOutline(run->fontEmSize, run->glyphIndices, run->glyphAdvances, run->glyphOffsets,
+			run->glyphCount, run->isSideways, (run->bidiLevel & 1) != 0, sink.Get());
+		sink->Close();
+		if (FAILED(hr)) return S_OK;
+
+		// 런의 기준선 원점(+ 정렬 이동)으로 옮겨서 추출
+		const D2D1_MATRIX_3X2_F tr = D2D1::Matrix3x2F::Translation(ox + m_dx, oy);
+		ComPtr<ID2D1TransformedGeometry> xg;
+		if (FAILED(m_factory->CreateTransformedGeometry(geo.Get(), &tr, &xg))) return S_OK;
+		std::vector<SubPath> sub;
+		if (PathOp::ExtractSubPaths(xg.Get(), sub))
+			for (auto& sp : sub) paths.push_back(std::move(sp));
+		return S_OK;
+	}
+	STDMETHOD(DrawUnderline)(void*, FLOAT, FLOAT, const DWRITE_UNDERLINE*, IUnknown*) override { return S_OK; }
+	STDMETHOD(DrawStrikethrough)(void*, FLOAT, FLOAT, const DWRITE_STRIKETHROUGH*, IUnknown*) override { return S_OK; }
+	STDMETHOD(DrawInlineObject)(void*, FLOAT, FLOAT, IDWriteInlineObject*, BOOL, BOOL, IUnknown*) override { return S_OK; }
+
+private:
+	ID2D1Factory* m_factory;
+	float m_dx;
+	ULONG m_ref = 1;
+};
+} // namespace
+
+void PathOp::MeasureText(TextNode& text)
+{
+	if (text.GetText().empty()) return;
+	ComPtr<IDWriteFactory> dw;
+	if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dw.GetAddressOf())))) return;
+	ComPtr<IDWriteTextFormat> fmt;
+	if (FAILED(dw->CreateTextFormat(text.GetFontFamily().c_str(), nullptr,
+		text.IsBold() ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+		text.IsItalic() ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+		DWRITE_FONT_STRETCH_NORMAL, text.GetFontSize(), L"ko-kr", &fmt))) return;
+	fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, text.GetFontSize() * TextNode::kLineHeightRatio, text.GetFontSize() * TextNode::kAscentRatio);
+	fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+	const std::wstring& txt = text.GetText();
+	ComPtr<IDWriteTextLayout> layout;
+	if (FAILED(dw->CreateTextLayout(txt.c_str(), static_cast<UINT32>(txt.size()), fmt.Get(), 100000.0f, 100000.0f, &layout))) return;
+	DWRITE_TEXT_METRICS tm{};
+	layout->GetMetrics(&tm);
+	text.SetMeasured((std::max)(tm.widthIncludingTrailingWhitespace, 1.0f), (std::max)(tm.height, 1.0f));
+}
+
+std::unique_ptr<PathNode> PathOp::TextToPath(const TextNode& text, ID2D1Factory* factory)
+{
+	if (!factory || text.GetText().empty()) return nullptr;
+
+	ComPtr<IDWriteFactory> dw;
+	if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dw.GetAddressOf())))) return nullptr;
+	ComPtr<IDWriteTextFormat> fmt;
+	if (FAILED(dw->CreateTextFormat(text.GetFontFamily().c_str(), nullptr,
+		text.IsBold() ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+		text.IsItalic() ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+		DWRITE_FONT_STRETCH_NORMAL, text.GetFontSize(), L"ko-kr", &fmt))) return nullptr;
+	fmt->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, text.GetFontSize() * TextNode::kLineHeightRatio, text.GetFontSize() * TextNode::kAscentRatio);
+	fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
+	const std::wstring& txt = text.GetText();
+	ComPtr<IDWriteTextLayout> layout;
+	if (FAILED(dw->CreateTextLayout(txt.c_str(), static_cast<UINT32>(txt.size()), fmt.Get(), 100000.0f, 100000.0f, &layout))) return nullptr;
+	DWRITE_TEXT_METRICS tm{};
+	layout->GetMetrics(&tm);
+	const float w = (std::max)(tm.widthIncludingTrailingWhitespace, 1.0f);
+	if (text.GetAlign() != TextAlign::Left) {
+		layout->SetMaxWidth(w);
+		layout->SetTextAlignment(text.GetAlign() == TextAlign::Center ? DWRITE_TEXT_ALIGNMENT_CENTER : DWRITE_TEXT_ALIGNMENT_TRAILING);
+	}
+	const float x0 = (text.GetAlign() == TextAlign::Center) ? -w * 0.5f : (text.GetAlign() == TextAlign::Right) ? -w : 0.0f;
+
+	ComPtr<GlyphOutlineCollector> collector;
+	collector.Attach(new GlyphOutlineCollector(factory, x0));
+	if (FAILED(layout->Draw(nullptr, collector.Get(), 0.0f, 0.0f)) || collector->paths.empty()) return nullptr;
+
+	auto result = std::make_unique<PathNode>();
+	Style st;
+	st.fill = text.GetStyle().fill;
+	if (st.fill.type == PaintType::None) { st.fill.type = PaintType::Solid; st.fill.color = Color(0, 0, 0, 1); }
+	st.stroke.width = 0.0f;
+	st.fill.color = text.GetStyle().fill.color;
+	st.fillMode = FillMode::Winding;   // 글리프 윤곽: 안쪽 구멍(ㅇ, O 등)은 반대 방향 서브패스로 표현됨
+	result->SetStyle(st);
+	result->SetPaths(std::move(collector->paths));
+	result->SetTransform(text.GetTransform());
+	result->SetOpacity(text.GetOpacity());
+	return result;
+}
+
 // 3) 패스 방향 반전
 void PathOp::ReversePath(PathNode& node)
 {
@@ -1983,6 +2136,11 @@ void D2DRenderer::DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Vi
 		entry.layout->GetMetrics(&tm);
 		entry.w = (std::max)(tm.widthIncludingTrailingWhitespace, 1.0f);
 		entry.h = (std::max)(tm.height, 1.0f);
+		// 가운데/오른쪽 정렬: 각 줄을 가장 긴 줄의 폭 안에서 정렬 (SVG text-anchor 와 같은 모양)
+		if (node.GetAlign() != TextAlign::Left) {
+			entry.layout->SetMaxWidth(entry.w);
+			entry.layout->SetTextAlignment(node.GetAlign() == TextAlign::Center ? DWRITE_TEXT_ALIGNMENT_CENTER : DWRITE_TEXT_ALIGNMENT_TRAILING);
+		}
 		if (s_cache.size() > 512) s_cache.clear();
 		hit = s_cache.emplace(node.GetVersion(), std::move(entry)).first;
 	}

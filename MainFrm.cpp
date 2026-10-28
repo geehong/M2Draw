@@ -486,6 +486,8 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 	{
 		if ((bCanBoolean && hasClosedPath) || boolTool)
 			btnIds.insert(btnIds.end(), { ID_BOOLEAN_UNION, ID_BOOLEAN_SUBTRACT, ID_BOOLEAN_INTERSECT, ID_BOOLEAN_EXCLUDE, ID_BOOLEAN_TRIM });
+		if (pDoc && pDoc->CanConvertTextToPath())
+			btnIds.push_back(ID_TEXT_TO_PATH);
 		if (bCanMakeMask || curTool == ToolType::ActionClipMask)
 			btnIds.push_back(ID_OBJECT_CLIP_MASK);
 		if (pDoc && pDoc->GetDoc().GetSelection().size() >= 2)
@@ -569,6 +571,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_PATH_JOIN:          imgIdx = 21; break;
 		case ID_TOOL_POLYLINE:      imgIdx = 22; break;
 		case ID_SUB_SMOOTH:         imgIdx = 31; break;
+		case ID_TEXT_TO_PATH:       imgIdx = 32; break;
 		case ID_ALIGN_LEFT:         imgIdx = 23; break;
 		case ID_ALIGN_CENTERH:      imgIdx = 24; break;
 		case ID_ALIGN_RIGHT:        imgIdx = 25; break;
