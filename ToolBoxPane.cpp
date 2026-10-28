@@ -5,13 +5,25 @@
 #include "M2DrawDoc.h"
 
 // 그룹/그룹 해제는 도구가 아니라 동작: 플라이아웃 그룹의 항목으로 ToolType::Action* 를 사용하고, 선택하면 명령을 실행한다
-static bool IsActionType(ToolType t) { return t == ToolType::ActionGroup || t == ToolType::ActionUngroup; }
+static bool IsActionType(ToolType t)
+{
+	return t == ToolType::ActionGroup || t == ToolType::ActionUngroup || t == ToolType::ActionToFront ||
+	       t == ToolType::ActionForward || t == ToolType::ActionBackward || t == ToolType::ActionToBack;
+}
 static UINT CommandOfType(ToolType t)
 {
-	if (t == ToolType::ActionGroup)   return ID_OBJECT_GROUP;
-	if (t == ToolType::ActionUngroup) return ID_OBJECT_UNGROUP;
-	return 0;
+	switch (t)
+	{
+	case ToolType::ActionGroup:    return ID_OBJECT_GROUP;
+	case ToolType::ActionUngroup:  return ID_OBJECT_UNGROUP;
+	case ToolType::ActionToFront:  return ID_OBJECT_FRONT;
+	case ToolType::ActionForward:  return ID_OBJECT_FORWARD;
+	case ToolType::ActionBackward: return ID_OBJECT_BACKWARD;
+	case ToolType::ActionToBack:   return ID_OBJECT_BACK;
+	default:                       return 0;
+	}
 }
+static bool IsArrangeCommand(UINT id) { return id >= ID_OBJECT_FRONT && id <= ID_OBJECT_BACK; }
 static const wchar_t* GetFlyoutToolName(ToolType t);
 
 #ifdef _DEBUG
@@ -62,7 +74,9 @@ CToolBoxPane::CToolBoxPane() noexcept
 		{ ToolType::Gradient,    L"그라디언트 (D)",  L'D', CRect() },
 		{ ToolType::ZoomIn,      L"돋보기 (확대 Z / 축소 X)", L'Z', CRect() },   // 확대/축소 플라이아웃 그룹
 		// 동작 버튼 그룹 (도구가 아님): 그룹화 / 그룹 해제. 도구 묶음과 간격을 둠
-		{ ToolType::ActionGroup, L"그룹 / 그룹 해제",          0, CRect(), {}, 12 }
+		{ ToolType::ActionGroup,   L"그룹 / 그룹 해제",          0, CRect(), {}, 12 },
+		// 순서(Z-order) 동작 그룹: 맨 앞으로 / 앞으로 / 뒤로 / 맨 뒤로
+		{ ToolType::ActionToFront, L"순서",                       0, CRect(), {}, 0 }
 	};
 
 	// 사각형 그룹: 사각형 / 삼각형 (마지막 선택은 앱 설정에 저장)
@@ -104,6 +118,14 @@ CToolBoxPane::CToolBoxPane() noexcept
 			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("GroupActionTool"), static_cast<int>(ToolType::ActionGroup));
 			if (saved == static_cast<int>(ToolType::ActionUngroup))
 				btn.type = ToolType::ActionUngroup;
+		}
+		else if (btn.type == ToolType::ActionToFront)
+		{
+			// 순서 동작 그룹 (마지막에 쓴 동작이 대표)
+			btn.subTools = { ToolType::ActionToFront, ToolType::ActionForward, ToolType::ActionBackward, ToolType::ActionToBack };
+			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("ArrangeActionTool"), static_cast<int>(ToolType::ActionToFront));
+			for (ToolType st : btn.subTools)
+				if (saved == static_cast<int>(st)) { btn.type = st; break; }
 		}
 	}
 }
@@ -921,6 +943,8 @@ void CToolBoxPane::OnLButtonUp(UINT nFlags, CPoint point)
 			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("ZoomGroupTool"), static_cast<int>(chosen));
 		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionGroup)
 			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("GroupActionTool"), static_cast<int>(chosen));
+		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionToFront)
+			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("ArrangeActionTool"), static_cast<int>(chosen));
 
 		if (IsActionType(chosen))
 		{
@@ -988,6 +1012,7 @@ UINT CToolBoxPane::ComputeEnabledMask() const
 	{
 		if (pDoc->CanGroup())   mask |= 1;
 		if (pDoc->CanUngroup()) mask |= 2;
+		if (pDoc->CanArrange()) mask |= 4;
 	}
 	return mask;
 }
@@ -996,6 +1021,7 @@ bool CToolBoxPane::IsCommandEnabled(UINT commandId) const
 {
 	if (commandId == ID_OBJECT_GROUP)   return (m_enabledMask & 1) != 0;
 	if (commandId == ID_OBJECT_UNGROUP) return (m_enabledMask & 2) != 0;
+	if (IsArrangeCommand(commandId))    return (m_enabledMask & 4) != 0;
 	return true;
 }
 
@@ -1006,6 +1032,47 @@ void CToolBoxPane::DrawActionIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 	const float cy = (r.top + r.bottom) * 0.5f;
 	const bool group = (commandId == ID_OBJECT_GROUP);
 	const D2D1_COLOR_F col = enabled ? D2D1::ColorF(0.25f, 0.28f, 0.35f) : D2D1::ColorF(0.70f, 0.72f, 0.77f);
+
+	if (IsArrangeCommand(commandId))
+	{
+		// 순서: 겹친 두 사각형(채워진 쪽이 이동하는 오브젝트) + 이동 방향 화살표. 맨 앞/맨 뒤는 화살표 끝에 막대
+		const bool toFront = (commandId == ID_OBJECT_FRONT || commandId == ID_OBJECT_FORWARD);
+		const bool extreme = (commandId == ID_OBJECT_FRONT || commandId == ID_OBJECT_BACK);
+		const D2D1_RECT_F back = D2D1::RectF(cx - 11.0f, cy - 8.0f, cx - 2.0f, cy + 1.0f);
+		const D2D1_RECT_F mover = D2D1::RectF(cx - 6.0f, cy - 3.0f, cx + 3.0f, cy + 6.0f);
+		brush->SetColor(col);
+		if (toFront)
+		{
+			rt->DrawRectangle(back, brush, 1.4f);
+			brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+			rt->FillRectangle(mover, brush);
+			brush->SetColor(D2D1::ColorF(col.r, col.g, col.b, 0.35f));
+			rt->FillRectangle(mover, brush);
+			brush->SetColor(col);
+			rt->DrawRectangle(mover, brush, 1.4f);
+		}
+		else
+		{
+			brush->SetColor(D2D1::ColorF(col.r, col.g, col.b, 0.35f));
+			rt->FillRectangle(mover, brush);
+			brush->SetColor(col);
+			rt->DrawRectangle(mover, brush, 1.4f);
+			brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+			rt->FillRectangle(back, brush);
+			brush->SetColor(col);
+			rt->DrawRectangle(back, brush, 1.4f);
+		}
+		const float ax = cx + 10.0f;
+		const float y0 = cy + (toFront ? 7.0f : -7.0f);
+		const float y1 = cy + (toFront ? -6.0f : 6.0f);
+		const float dir = toFront ? 1.0f : -1.0f;   // 화살촉이 위(+) / 아래(-)
+		rt->DrawLine(D2D1::Point2F(ax, y0), D2D1::Point2F(ax, y1), brush, 1.6f);
+		rt->DrawLine(D2D1::Point2F(ax - 3.5f, y1 + dir * 3.5f), D2D1::Point2F(ax, y1), brush, 1.6f);
+		rt->DrawLine(D2D1::Point2F(ax + 3.5f, y1 + dir * 3.5f), D2D1::Point2F(ax, y1), brush, 1.6f);
+		if (extreme)
+			rt->DrawLine(D2D1::Point2F(ax - 4.0f, y1 - dir * 1.5f), D2D1::Point2F(ax + 4.0f, y1 - dir * 1.5f), brush, 1.6f);
+		return;
+	}
 
 	if (!group && !m_pDashStyle && m_pD2DFactory)
 	{
@@ -1111,6 +1178,10 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	case ToolType::ZoomOut:  return L"돋보기 축소 (X)";
 	case ToolType::ActionGroup:   return L"그룹 (Ctrl+G)";
 	case ToolType::ActionUngroup: return L"그룹 해제 (Ctrl+Shift+G)";
+	case ToolType::ActionToFront:  return L"맨 앞으로 (Ctrl+Shift+])";
+	case ToolType::ActionForward:  return L"앞으로 (Ctrl+])";
+	case ToolType::ActionBackward: return L"뒤로 (Ctrl+[)";
+	case ToolType::ActionToBack:   return L"맨 뒤로 (Ctrl+Shift+[)";
 	default:                 return L"";
 	}
 }
@@ -1249,6 +1320,24 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color, bool
 		dc.Rectangle(c.x - 6, c.y - 5, c.x + 2, c.y + 3);
 		dc.Rectangle(c.x - 1, c.y - 1, c.x + 7, c.y + 7);
 		break;
+	case ToolType::ActionToFront:
+	case ToolType::ActionForward:
+	case ToolType::ActionBackward:
+	case ToolType::ActionToBack: // 순서: 겹친 두 사각형 + 이동 방향 화살표 (맨 앞/맨 뒤는 화살표 끝 막대)
+	{
+		const bool up = (t == ToolType::ActionToFront || t == ToolType::ActionForward);
+		const bool bar = (t == ToolType::ActionToFront || t == ToolType::ActionToBack);
+		dc.Rectangle(c.x - 10, c.y - 8, c.x - 1, c.y + 1);
+		dc.Rectangle(c.x - 5, c.y - 3, c.x + 4, c.y + 6);
+		const int ax = c.x + 9;
+		const int tip = c.y + (up ? -7 : 7);
+		const int tail = c.y + (up ? 7 : -7);
+		const int d = up ? 4 : -4;
+		dc.MoveTo(ax, tail); dc.LineTo(ax, tip);
+		dc.MoveTo(ax - 4, tip + d); dc.LineTo(ax, tip); dc.LineTo(ax + 5, tip + d);
+		if (bar) { dc.MoveTo(ax - 4, tip - d / 2); dc.LineTo(ax + 5, tip - d / 2); }
+		break;
+	}
 	case ToolType::ActionUngroup: // 그룹 해제: 점선 상자 안에 떨어진 두 사각형
 	{
 		CPen dotted(PS_DOT, 1, color);

@@ -544,6 +544,22 @@ void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		return;
 	}
 
+	// 0-3. Ctrl+] 앞으로 / Ctrl+[ 뒤로 (Shift 를 함께 누르면 맨 앞으로 / 맨 뒤로)
+	if ((nChar == VK_OEM_6 || nChar == VK_OEM_4) && (::GetKeyState(VK_CONTROL) & 0x8000))
+	{
+		CM2DrawDoc* pDoc = GetDocument();
+		if (pDoc)
+		{
+			const bool shift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+			ge::Document::ZOrder order = (nChar == VK_OEM_6)
+				? (shift ? ge::Document::ZOrder::Front : ge::Document::ZOrder::Forward)
+				: (shift ? ge::Document::ZOrder::Back : ge::Document::ZOrder::Backward);
+			if (pDoc->ArrangeSelectedObjects(order))
+				Invalidate(FALSE);
+		}
+		return;
+	}
+
 	// 1. Space 키 누르고 있는 동안 임시 패닝(Pan) 모드 활성화
 	if (nChar == VK_SPACE && (nRepCnt == 1))
 	{

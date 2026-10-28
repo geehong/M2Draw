@@ -37,6 +37,8 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_GROUP, &CM2DrawDoc::OnUpdateObjectGroup)
 	ON_COMMAND(ID_OBJECT_UNGROUP, &CM2DrawDoc::OnObjectUngroup)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_UNGROUP, &CM2DrawDoc::OnUpdateObjectUngroup)
+	ON_COMMAND_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnObjectArrange)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnUpdateObjectArrange)
 END_MESSAGE_MAP()
 
 
@@ -566,3 +568,49 @@ void CM2DrawDoc::OnObjectGroup()               { GroupSelectedObjects(); }
 void CM2DrawDoc::OnUpdateObjectGroup(CCmdUI* pCmdUI)   { pCmdUI->Enable(CanGroup()); }
 void CM2DrawDoc::OnObjectUngroup()             { UngroupSelectedObjects(); }
 void CM2DrawDoc::OnUpdateObjectUngroup(CCmdUI* pCmdUI) { pCmdUI->Enable(CanUngroup()); }
+
+// ---------------------------------------------------------------------------
+// 순서(Z-order) 변경
+// ---------------------------------------------------------------------------
+bool CM2DrawDoc::ArrangeSelectedObjects(ge::Document::ZOrder order)
+{
+	if (!m_doc.CanArrangeSelection())
+		return false;
+
+	m_doc.ArrangeSelection(order);   // 선택 노드는 각자의 부모 안에서 이동, 선택 노드끼리의 상대 순서는 유지
+
+	const wchar_t* label = L"순서 변경";
+	switch (order)
+	{
+	case ge::Document::ZOrder::Front:    label = L"맨 앞으로"; break;
+	case ge::Document::ZOrder::Forward:  label = L"앞으로";   break;
+	case ge::Document::ZOrder::Backward: label = L"뒤로";     break;
+	case ge::Document::ZOrder::Back:     label = L"맨 뒤로";  break;
+	}
+
+	CString strLog;
+	strLog.Format(_T("[순서 변경] %s (선택 %d개)"), label, static_cast<int>(m_doc.GetSelection().size()));
+	LogAppEvent(strLog);
+	SetAppStatusText(strLog);
+
+	CommitUndoPoint(label);   // 순서가 실제로 바뀌지 않았으면(이미 맨 앞 등) 기록되지 않음
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+void CM2DrawDoc::OnObjectArrange(UINT nID)
+{
+	switch (nID)
+	{
+	case ID_OBJECT_FRONT:    ArrangeSelectedObjects(ge::Document::ZOrder::Front);    break;
+	case ID_OBJECT_FORWARD:  ArrangeSelectedObjects(ge::Document::ZOrder::Forward);  break;
+	case ID_OBJECT_BACKWARD: ArrangeSelectedObjects(ge::Document::ZOrder::Backward); break;
+	case ID_OBJECT_BACK:     ArrangeSelectedObjects(ge::Document::ZOrder::Back);     break;
+	}
+}
+
+void CM2DrawDoc::OnUpdateObjectArrange(CCmdUI* pCmdUI) { pCmdUI->Enable(CanArrange()); }

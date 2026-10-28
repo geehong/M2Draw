@@ -548,36 +548,10 @@ int CLayerView::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	});
 
 	m_btnMoveUp = std::make_shared<M2DrawButton>(L"▲");
-	m_btnMoveUp->SetOnClick([this](M2DrawButton*) {
-		CM2DrawDoc* pDoc = GetDocSafe();
-		if (!pDoc) return;
-		auto& doc = pDoc->GetDoc();
-		int active = doc.GetActiveLayerIndex();
-		if (active < static_cast<int>(doc.GetLayers().size()) - 1)
-		{
-			doc.MoveLayer(doc.GetActiveLayer(), active + 1);
-			LogAppEvent(_T("[레이어 패널] 레이어 위로 이동"));
-			pDoc->UpdateAllViews(nullptr);
-			RefreshLayers();
-			SafeInvalidate(FALSE);
-		}
-	});
+	m_btnMoveUp->SetOnClick([this](M2DrawButton*) { MoveSelectionOrLayer(true); });
 
 	m_btnMoveDown = std::make_shared<M2DrawButton>(L"▼");
-	m_btnMoveDown->SetOnClick([this](M2DrawButton*) {
-		CM2DrawDoc* pDoc = GetDocSafe();
-		if (!pDoc) return;
-		auto& doc = pDoc->GetDoc();
-		int active = doc.GetActiveLayerIndex();
-		if (active > 0)
-		{
-			doc.MoveLayer(doc.GetActiveLayer(), active - 1);
-			LogAppEvent(_T("[레이어 패널] 레이어 아래로 이동"));
-			pDoc->UpdateAllViews(nullptr);
-			RefreshLayers();
-			SafeInvalidate(FALSE);
-		}
-	});
+	m_btnMoveDown->SetOnClick([this](M2DrawButton*) { MoveSelectionOrLayer(false); });
 
 	m_btnDelete = std::make_shared<M2DrawButton>(L"🗑");
 	m_btnDelete->SetOnClick([this](M2DrawButton*) {
@@ -1081,6 +1055,31 @@ void CLayerView::OnPaint()
 		);
 	}
 
+	// 드래그 중: 드롭 위치 표시선(위/아래) 또는 강조 테두리(안으로) + 커서 옆 이름표
+	if (m_dragging && m_dragNode)
+	{
+		if (m_drop.mode != DropMode::None && m_drop.row >= 0 && m_drop.row < static_cast<int>(m_rowItems.size()))
+		{
+			const LayerRowItem& tr = m_rowItems[m_drop.row];
+			m_pBrush->SetColor(D2D1::ColorF(1.0f, 0.75f, 0.20f, 1.0f));
+			if (m_drop.mode == DropMode::Into)
+				m_pRenderTarget->DrawRectangle(tr.rowRect, m_pBrush, 2.0f);
+			else
+			{
+				const float y = (m_drop.mode == DropMode::Above) ? tr.rowRect.top : tr.rowRect.bottom;
+				m_pRenderTarget->DrawLine(D2D1::Point2F(tr.rowRect.left, y), D2D1::Point2F(tr.rowRect.right, y), m_pBrush, 2.5f);
+			}
+		}
+		const std::wstring dragName = m_dragNode->GetName();
+		const D2D1_RECT_F tag = D2D1::RectF(static_cast<float>(m_dragPt.x) + 12.0f, static_cast<float>(m_dragPt.y) - 9.0f,
+			static_cast<float>(m_dragPt.x) + 12.0f + 110.0f, static_cast<float>(m_dragPt.y) + 9.0f);
+		m_pBrush->SetColor(D2D1::ColorF(0.10f, 0.10f, 0.14f, 0.92f));
+		m_pRenderTarget->FillRectangle(tag, m_pBrush);
+		m_pBrush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+		m_pRenderTarget->DrawText(dragName.c_str(), static_cast<UINT32>(dragName.length()), m_pTextFormat,
+			D2D1::RectF(tag.left + 4.0f, tag.top, tag.right - 2.0f, tag.bottom), m_pBrush);
+	}
+
 	m_pRenderTarget->PopAxisAlignedClip();
 
 	HRESULT hr = m_pRenderTarget->EndDraw();
@@ -1088,6 +1087,123 @@ void CLayerView::OnPaint()
 	{
 		DiscardDeviceResources();
 	}
+}
+
+void CLayerView::MoveSelectionOrLayer(bool up)
+{
+	CM2DrawDoc* pDoc = GetDocSafe();
+	if (!pDoc) return;
+	auto& doc = pDoc->GetDoc();
+
+	// 선택된 오브젝트(레이어 제외)가 있으면 그 오브젝트의 순서를, 없으면 활성 레이어를 이동 (목록 위 = z 앞)
+	if (doc.CanArrangeSelection())
+	{
+		pDoc->ArrangeSelectedObjects(up ? ge::Document::ZOrder::Forward : ge::Document::ZOrder::Backward);
+		RefreshLayers();
+		SafeInvalidate(FALSE);
+		return;
+	}
+
+	const int active = doc.GetActiveLayerIndex();
+	const int target = up ? active + 1 : active - 1;
+	if (active >= 0 && target >= 0 && target < static_cast<int>(doc.GetLayers().size()))
+	{
+		doc.MoveLayer(doc.GetActiveLayer(), target);
+		LogAppEvent(up ? _T("[레이어 패널] 레이어 위로 이동") : _T("[레이어 패널] 레이어 아래로 이동"));
+		pDoc->UpdateAllViews(nullptr);
+		RefreshLayers();
+		SafeInvalidate(FALSE);
+	}
+}
+
+// 커서 위치(pt)가 가리키는 드롭 위치 계산. 목록은 위 = z 앞 이므로 "위쪽에 놓기" = 형제 중 한 칸 앞(인덱스 +1)
+CLayerView::DropTarget CLayerView::ComputeDropTarget(const ge::Node* dragNode, D2D1_POINT_2F pt) const
+{
+	DropTarget t;
+	CM2DrawDoc* pDoc = const_cast<CLayerView*>(this)->GetDocSafe();
+	if (!pDoc || !dragNode) return t;
+	auto& doc = pDoc->GetDoc();
+	const bool dragIsLayer = (dragNode->Kind() == ge::NodeKind::Layer);
+
+	for (size_t ri = 0; ri < m_rowItems.size(); ++ri)
+	{
+		const LayerRowItem& row = m_rowItems[ri];
+		if (!row.pNode || pt.y < row.rowRect.top || pt.y > row.rowRect.bottom) continue;
+		const float h = (std::max)(row.rowRect.bottom - row.rowRect.top, 1.0f);
+		const float frac = (pt.y - row.rowRect.top) / h;
+
+		if (dragIsLayer)
+		{
+			// 레이어는 레이어 행에서만 순서 변경 (위쪽 절반 = 그 레이어 앞, 아래쪽 절반 = 뒤)
+			if (!row.isLayer || row.pNode == dragNode) return t;
+			int from = -1, at = -1;
+			for (int i = 0; i < static_cast<int>(doc.GetLayers().size()); ++i)
+			{
+				if (doc.GetLayers()[i].get() == dragNode) from = i;
+				if (doc.GetLayers()[i].get() == row.pNode) at = i;
+			}
+			if (from < 0 || at < 0) return t;
+			const bool above = frac < 0.5f;
+			t.mode = above ? DropMode::Above : DropMode::Below;
+			t.row = static_cast<int>(ri);
+			t.index = (above ? at + 1 : at) - (from < at ? 1 : 0);   // MoveLayer 는 제거 후의 최종 인덱스
+			return t;
+		}
+
+		// 오브젝트: 자기 자신/자기 후손 위에는 놓을 수 없음
+		for (const ge::Node* p = row.pNode; p; p = p->GetParent())
+			if (p == dragNode) return t;
+
+		DropMode mode;
+		if (row.isLayer) mode = DropMode::Into;
+		else if (row.pNode->Kind() == ge::NodeKind::Group)
+			mode = frac < 0.25f ? DropMode::Above : (frac > 0.75f ? DropMode::Below : DropMode::Into);
+		else
+			mode = frac < 0.5f ? DropMode::Above : DropMode::Below;
+
+		t.mode = mode;
+		t.row = static_cast<int>(ri);
+		if (mode == DropMode::Into)
+		{
+			t.parent = static_cast<ge::GroupNode*>(row.pNode);
+			t.index = -1;
+		}
+		else
+		{
+			t.parent = row.pNode->GetParent();
+			if (!t.parent) { t = DropTarget(); return t; }
+			const int at = t.parent->IndexOf(row.pNode);
+			t.index = (mode == DropMode::Above) ? at + 1 : at;
+		}
+		return t;
+	}
+	return t;
+}
+
+void CLayerView::PerformDrop(ge::Node* dragNode, const DropTarget& t)
+{
+	CM2DrawDoc* pDoc = GetDocSafe();
+	if (!pDoc || !dragNode || t.mode == DropMode::None) return;
+	auto& doc = pDoc->GetDoc();
+
+	bool moved = false;
+	if (dragNode->Kind() == ge::NodeKind::Layer)
+	{
+		doc.MoveLayer(static_cast<ge::LayerNode*>(dragNode), t.index);
+		moved = true;
+	}
+	else if (t.parent)
+	{
+		moved = doc.MoveNodeTo(dragNode, t.parent, t.index);
+		if (moved) m_collapsedIds.erase(t.parent->GetId());   // 새 부모가 접혀 있으면 펼쳐서 결과를 보여줌
+	}
+	if (!moved) return;
+
+	CString strLog;
+	strLog.Format(_T("[레이어 패널] 드래그 이동: '%s'"), dragNode->GetName().c_str());
+	LogAppEvent(strLog);
+	pDoc->UpdateAllViews(nullptr);
+	RefreshLayers();
 }
 
 void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
@@ -1203,6 +1319,14 @@ void CLayerView::OnLButtonDown(UINT /*nFlags*/, CPoint point)
 			const D2D1_RECT_F labelRect = row.labelRect;
 			const D2D1_RECT_F rowRect = row.rowRect;
 			const bool bInNameArea = IsInNameArea(row, ptD2D);
+
+			// 행 드래그 후보 등록 (일정 거리 이상 움직이면 순서/부모 변경 드래그 시작)
+			m_dragNode = pRowNode;
+			m_dragStart = point;
+			m_dragPt = point;
+			m_dragging = false;
+			m_drop = DropTarget();
+			SetCapture();
 
 			// E. 라벨 또는 행 클릭 -> 캔버스 및 속성창 선택 동기화!
 			if (pDoc && pRowNode)
@@ -1354,9 +1478,25 @@ void CLayerView::OnEditKillFocus()
 	CommitEditName();
 }
 
-void CLayerView::OnMouseMove(UINT /*nFlags*/, CPoint point)
+void CLayerView::OnMouseMove(UINT nFlags, CPoint point)
 {
 	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
+
+	if (m_dragNode && !m_capturedControl && (nFlags & MK_LBUTTON))
+	{
+		if (!m_dragging && (abs(point.x - m_dragStart.x) > 5 || abs(point.y - m_dragStart.y) > 5))
+		{
+			m_dragging = true;
+			m_pLastClickedNode = nullptr;   // 드래그 후 "천천히 재클릭 -> 이름 변경" 오작동 방지
+		}
+		if (m_dragging)
+		{
+			m_dragPt = point;
+			m_drop = ComputeDropTarget(m_dragNode, ptD2D);
+			SafeInvalidate(FALSE);
+		}
+		return;
+	}
 
 	if (m_capturedControl)
 	{
@@ -1390,6 +1530,17 @@ void CLayerView::OnMouseMove(UINT /*nFlags*/, CPoint point)
 void CLayerView::OnLButtonUp(UINT /*nFlags*/, CPoint point)
 {
 	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
+
+	if (m_dragNode)
+	{
+		ge::Node* dragNode = m_dragNode;
+		const bool wasDragging = m_dragging;
+		const DropTarget target = wasDragging ? ComputeDropTarget(dragNode, ptD2D) : DropTarget();
+		m_dragNode = nullptr;
+		m_dragging = false;
+		m_drop = DropTarget();
+		if (wasDragging) PerformDrop(dragNode, target);
+	}
 
 	if (m_capturedControl)
 	{

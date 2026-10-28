@@ -328,6 +328,14 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 	bool sawSvgRoot = false;
 	std::wstring fileVersion;
 
+	// 레이어 밖에 있는 요소(<g inkscape:groupmode="layer"> 가 아닌 최상위 <path>/<g>)는 하나의 대체 레이어에 모음.
+	// (요소마다 레이어를 만들면 순서 변경(Z-order)이 레이어 경계에 막혀 동작하지 않음)
+	LayerNode* sharedFallbackLayer = nullptr;
+	auto getFallbackLayer = [&]() {
+		if (!sharedFallbackLayer) sharedFallbackLayer = outDoc.AddLayer(L"Layer 1");
+		return sharedFallbackLayer;
+	};
+
 	// <defs> 의 그라디언트 (id -> 정의). gradientUnits="userSpaceOnUse" 는 도형 박스로 환산할 수 없어 첫 스톱 단색으로 대체 (Step 2.9)
 	std::unordered_map<std::wstring, Gradient> gradients;
 	std::unordered_set<std::wstring> userSpaceGradients;
@@ -448,8 +456,7 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 					if (!groupStack.empty()) {
 						groupStack.back()->AddChild(std::move(group));
 					} else {
-						LayerNode* fallbackLayer = outDoc.AddLayer(L"Layer 1");
-						fallbackLayer->AddChild(std::move(group));
+						getFallbackLayer()->AddChild(std::move(group));
 					}
 
 					if (!isEmpty) {
@@ -650,8 +657,7 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 				if (!groupStack.empty()) {
 					groupStack.back()->AddChild(std::move(pathNode));
 				} else {
-					LayerNode* fallbackLayer = outDoc.AddLayer(L"Layer 1");
-					fallbackLayer->AddChild(std::move(pathNode));
+					getFallbackLayer()->AddChild(std::move(pathNode));
 				}
 			}
 		}

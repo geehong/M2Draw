@@ -847,7 +847,127 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(um.Undo(d5) && d5.FindById(u1Id) != nullptr && d5.FindById(u1Id)->GetParent()->Kind() == NodeKind::Group, L"그룹 해제 Undo 후 그룹이 복원되지 않음");
 	}
 
+	// ---- 16. 순서(Z-order) 변경 (2.7.2) ----------------------------------------------------------
+	{
+		Document d;
+		Node* a = d.AddShape(MakePath(L"a", 0.0f, 0.0f));
+		Node* b = d.AddShape(MakePath(L"b", 10.0f, 0.0f));
+		Node* c = d.AddShape(MakePath(L"c", 20.0f, 0.0f));
+		Node* e = d.AddShape(MakePath(L"e", 30.0f, 0.0f));
+		LayerNode* layer = d.GetActiveLayer();
+		auto order = [&](GroupNode* g) {
+			std::wstring s;
+			for (const auto& ch : g->GetChildren()) s += ch->GetName();
+			return s;
+		};
+		GE_CHECK(order(layer) == L"abce", L"테스트 전제: 초기 순서");
+
+		d.ClearSelection();
+		GE_CHECK(!d.CanArrangeSelection(), L"선택이 없으면 순서 변경 불가여야 함");
+		d.SetSelection({ b });
+		GE_CHECK(d.CanArrangeSelection(), L"도형 선택이면 순서 변경 가능해야 함");
+
+		d.ArrangeSelection(Document::ZOrder::Front);
+		GE_CHECK(order(layer) == L"aceb", L"맨 앞으로 결과가 틀림");
+		d.ArrangeSelection(Document::ZOrder::Back);
+		GE_CHECK(order(layer) == L"bace", L"맨 뒤로 결과가 틀림");
+		d.ArrangeSelection(Document::ZOrder::Forward);
+		GE_CHECK(order(layer) == L"abce", L"앞으로(한 단계) 결과가 틀림");
+		d.ArrangeSelection(Document::ZOrder::Backward);
+		GE_CHECK(order(layer) == L"bace", L"뒤로(한 단계) 결과가 틀림");
+		d.ArrangeSelection(Document::ZOrder::Backward);
+		GE_CHECK(order(layer) == L"bace", L"맨 뒤에서 더 뒤로 보내도 순서가 바뀌면 안 됨");
+
+		// 여러 개 선택: 선택된 노드끼리의 상대 순서 유지
+		d.SetSelection({ a, c });
+		d.ArrangeSelection(Document::ZOrder::Front);
+		GE_CHECK(order(layer) == L"beac", L"다중 선택 맨 앞으로: 선택 노드의 상대 순서가 유지되어야 함");
+		d.ArrangeSelection(Document::ZOrder::Back);
+		GE_CHECK(order(layer) == L"acbe", L"다중 선택 맨 뒤로: 선택 노드의 상대 순서가 유지되어야 함");
+
+		// 그룹 안의 노드는 자기 부모 안에서만 이동
+		auto gu = std::make_unique<GroupNode>();
+		GroupNode* grp = static_cast<GroupNode*>(d.AddShape(std::move(gu)));
+		Node* g1 = grp->AddChild(MakePath(L"g1", 0.0f, 0.0f));
+		Node* g2 = grp->AddChild(MakePath(L"g2", 5.0f, 0.0f));
+		d.AssignIds(*grp);
+		d.SetSelection({ g1 });
+		d.ArrangeSelection(Document::ZOrder::Front);
+		GE_CHECK(order(grp) == L"g2g1", L"그룹 안 노드의 맨 앞으로가 틀림");
+		GE_CHECK(layer->GetChildren().back().get() == grp, L"그룹 안 노드를 옮겼는데 그룹의 레이어 내 순서가 바뀜");
+		(void)g2;
+
+		// 변경 카운터/Undo: 실제로 바뀌면 기록, 바뀌지 않으면 기록 안 함
+		UndoManager um;
+		um.Reset(d);
+		d.SetSelection({ b });
+		d.ArrangeSelection(Document::ZOrder::Front);
+		GE_CHECK(um.CommitChange(L"맨 앞으로", d), L"순서 변경이 Undo 로 기록되지 않음");
+		d.ArrangeSelection(Document::ZOrder::Front);   // 이미 맨 앞
+		GE_CHECK(!um.CommitChange(L"맨 앞으로", d), L"바뀌지 않은 순서 변경이 Undo 로 기록됨");
+		const NodeId bId = b->GetId();
+		GE_CHECK(um.Undo(d), L"순서 변경 Undo 실패");
+		Node* ub = d.FindById(bId);
+		GE_CHECK(ub != nullptr && ub->GetParent()->GetChildren().back().get() != ub, L"Undo 후 순서가 복원되지 않음");
+		(void)e;
+
+		// 레이어 밖의 최상위 <path> 들은 하나의 레이어에 모여야 함 (요소마다 레이어를 만들면 Z-order 가 레이어 경계에 막힘)
+		const std::string flat =
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">\n"
+			"  <path d=\"M 0 0 L 10 10\" />\n"
+			"  <path d=\"M 5 5 L 20 20\" />\n"
+			"  <g><path d=\"M 1 1 L 2 2\" /></g>\n"
+			"</svg>\n";
+		Document flatDoc;
+		GE_CHECK(reader.ReadFromString(flat, flatDoc), L"레이어 없는 SVG 읽기 실패");
+		GE_CHECK(flatDoc.GetLayers().size() == 1 && flatDoc.GetLayers()[0]->GetChildren().size() == 3, L"레이어 밖의 최상위 요소들이 하나의 레이어에 모이지 않음");
+	}
+
+	// ---- 17. 노드 이동 (레이어 패널 드래그) ------------------------------------------------------
+	{
+		Document d;
+		Node* a = d.AddShape(MakePath(L"a", 0.0f, 0.0f));
+		Node* b = d.AddShape(MakePath(L"b", 10.0f, 0.0f));
+		Node* c = d.AddShape(MakePath(L"c", 20.0f, 0.0f));
+		LayerNode* l1 = d.GetActiveLayer();
+		auto order = [&](GroupNode* g) {
+			std::wstring s;
+			for (const auto& ch : g->GetChildren()) s += ch->GetName();
+			return s;
+		};
+		GE_CHECK(order(l1) == L"abc", L"테스트 전제: 초기 순서");
+
+		// 같은 부모: a 를 c 위(index = c 인덱스 + 1 = 3)로 -> 제거로 밀리는 만큼 보정되어 맨 앞
+		GE_CHECK(d.MoveNodeTo(a, l1, 3), L"같은 부모 이동 실패");
+		GE_CHECK(order(l1) == L"bca", L"같은 부모 맨 위 이동 결과가 틀림");
+		// c 를 b 아래(index = b 인덱스 = 0)로 -> 맨 뒤
+		GE_CHECK(d.MoveNodeTo(c, l1, 0), L"같은 부모 아래 이동 실패");
+		GE_CHECK(order(l1) == L"cba", L"같은 부모 맨 아래 이동 결과가 틀림");
+
+		// 다른 레이어로 이동 (최상단)
+		LayerNode* l2 = d.AddLayer(L"Layer 2");
+		GE_CHECK(d.MoveNodeTo(b, l2, -1), L"다른 레이어로 이동 실패");
+		GE_CHECK(order(l1) == L"ca" && order(l2) == L"b" && b->GetParent() == l2, L"다른 레이어 이동 결과가 틀림");
+
+		// 변환 있는 그룹으로 이동해도 화면 위치(월드 변환)는 유지
+		auto gu = std::make_unique<GroupNode>();
+		GroupNode* grp = static_cast<GroupNode*>(l2->AddChild(std::move(gu)));
+		d.AssignIds(*grp);
+		grp->SetTransform(Matrix2D::Translation(100.0f, 50.0f));
+		const Matrix2D before = a->GetWorldTransform();
+		GE_CHECK(d.MoveNodeTo(a, grp, -1), L"그룹 안으로 이동 실패");
+		const Matrix2D after = a->GetWorldTransform();
+		GE_CHECK(std::abs(before.TransformPoint(Vec2{ 1.0f, 2.0f }).x - after.TransformPoint(Vec2{ 1.0f, 2.0f }).x) < 1e-3f &&
+			std::abs(before.TransformPoint(Vec2{ 1.0f, 2.0f }).y - after.TransformPoint(Vec2{ 1.0f, 2.0f }).y) < 1e-3f,
+			L"그룹으로 옮긴 뒤 월드 위치가 바뀜");
+
+		// 거부: 자기 자신/후손 안으로, 레이어 자체
+		GE_CHECK(!d.MoveNodeTo(grp, grp, -1), L"그룹을 자기 자신 안으로 이동할 수 있으면 안 됨");
+		GE_CHECK(!d.MoveNodeTo(l1, l2, -1), L"레이어를 노드 이동으로 옮길 수 있으면 안 됨");
+	}
+
 #undef GE_CHECK
+
 	return true;
 }
 

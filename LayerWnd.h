@@ -113,6 +113,24 @@ protected:
 	std::shared_ptr<M2DrawButton>      m_btnMoveDown;
 	std::shared_ptr<M2DrawButton>      m_btnDelete;
 
+	// 행 드래그로 순서/부모 변경 (포토샵/일러스트 스타일)
+	enum class DropMode { None, Above, Below, Into };
+	struct DropTarget
+	{
+		DropMode       mode = DropMode::None;
+		int            row = -1;            // m_rowItems 인덱스 (표시선/강조 위치)
+		ge::GroupNode* parent = nullptr;    // 노드 이동: 새 부모
+		int            index = -1;          // 노드 이동: 부모 기준 삽입 위치 / 레이어 이동: 최종 레이어 인덱스
+	};
+	ge::Node*                          m_dragNode = nullptr;
+	CPoint                             m_dragStart;
+	CPoint                             m_dragPt;
+	bool                               m_dragging = false;
+	DropTarget                         m_drop;
+	DropTarget ComputeDropTarget(const ge::Node* dragNode, D2D1_POINT_2F pt) const;
+	void       PerformDrop(ge::Node* dragNode, const DropTarget& t);
+	void       MoveSelectionOrLayer(bool up);   // ▲/▼ 버튼: 선택 오브젝트가 있으면 그 순서, 없으면 활성 레이어
+
 	// 스크롤 및 레이아웃 상태
 	float                              m_scrollY = 0.0f;
 	float                              m_totalContentHeight = 0.0f;

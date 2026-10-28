@@ -79,7 +79,11 @@ enum class ToolType
 	Gradient,   // D (그라디언트 도구) - 값은 앱 설정에 저장되는 기존 도구 값이 바뀌지 않도록 맨 끝에 추가
 	// 아래 둘은 도구가 아니라 도구상자의 "동작" 항목(그룹/그룹 해제)을 플라이아웃 그룹에 담기 위한 표시용 값. 활성 도구가 되지 않음
 	ActionGroup,
-	ActionUngroup
+	ActionUngroup,
+	ActionToFront,   // 순서: 맨 앞으로
+	ActionForward,   // 앞으로
+	ActionBackward,  // 뒤로
+	ActionToBack     // 맨 뒤로
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)

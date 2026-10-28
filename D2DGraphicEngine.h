@@ -737,6 +737,10 @@ public:
 	LayerNode* AddLayer(const std::wstring& name, int index = -1);
 	bool       RemoveLayer(LayerNode* layer);
 	void       MoveLayer(LayerNode* layer, int newIndex);
+	// 노드를 다른 부모(레이어/그룹) 또는 같은 부모의 다른 위치로 이동 (레이어 패널 드래그용).
+	// index = 이동 전 newParent 자식 목록 기준 삽입 위치 (-1 = 최상단). 화면상 위치가 변하지 않게 로컬 변환을 보정.
+	// 레이어/자기 자신/자기 후손 안으로의 이동은 거부 (false)
+	bool       MoveNodeTo(Node* node, GroupNode* newParent, int index);
 	LayerNode* GetActiveLayer() const;
 	void       SetActiveLayer(int index);
 	int        GetActiveLayerIndex() const { return m_activeLayer; }
@@ -754,6 +758,7 @@ public:
 	void       UngroupSelection();
 	bool       CanGroupSelection() const;     // 그룹화 가능한 선택(2개 이상)인지
 	bool       CanUngroupSelection() const;   // 선택에 그룹이 있는지
+	bool       CanArrangeSelection() const;   // 순서(Z-order)를 바꿀 수 있는 선택(레이어 제외, 부모가 있는 노드)이 있는지
 
 	// 복제 (Ctrl+D): 선택 항목을 같은 부모의 원본 바로 위에 복제, 새 ID/이름 발급 후 복제본을 선택
 	std::vector<Node*> DuplicateSelection();

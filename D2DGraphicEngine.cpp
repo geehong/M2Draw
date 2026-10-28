@@ -438,6 +438,29 @@ void Document::MoveLayer(LayerNode* layer, int newIndex)
 	for (int i = 0; i < (int)m_layers.size(); ++i) if (m_layers[i].get() == active) m_activeLayer = i;
 }
 
+bool Document::MoveNodeTo(Node* node, GroupNode* newParent, int index)
+{
+	if (!node || !newParent || node->Kind() == NodeKind::Layer) return false;
+	GroupNode* oldParent = node->GetParent();
+	if (!oldParent) return false;
+	for (const GroupNode* p = newParent; p; p = p->GetParent())
+		if (p == node) return false;   // 자기 자신/후손 안으로는 이동 불가
+
+	const Matrix2D world = node->GetWorldTransform();
+	const int from = oldParent->IndexOf(node);
+	if (index >= 0 && oldParent == newParent && from < index) --index;   // 제거로 밀리는 만큼 보정
+
+	auto owned = oldParent->RemoveChild(node);
+	if (!owned) return false;
+	newParent->AddChild(std::move(owned), index);
+
+	if (oldParent != newParent) {
+		Matrix2D parentInv = newParent->GetWorldTransform();
+		if (parentInv.Invert()) node->SetTransform(world * parentInv);   // local = world * inverse(새 부모 월드)
+	}
+	return true;
+}
+
 LayerNode* Document::GetActiveLayer() const
 {
 	if (m_activeLayer < 0 || m_activeLayer >= static_cast<int>(m_layers.size())) return nullptr;
@@ -700,6 +723,14 @@ bool Document::CanGroupSelection() const
 		if (!ancestorSelected) ++count;
 	}
 	return count >= 2;
+}
+
+// 순서를 바꿀 수 있는 선택(레이어 제외, 부모가 있는 노드)이 하나라도 있는지
+bool Document::CanArrangeSelection() const
+{
+	for (const Node* n : m_selection)
+		if (n && n->GetParent() && n->Kind() != NodeKind::Layer) return true;
+	return false;
 }
 
 // 선택에 그룹(레이어 제외)이 하나라도 있는지
@@ -1419,7 +1450,8 @@ HitResult PathNode::HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, cons
 	// 2순위: 스트로크 및 채우기
 	// D2D 변환 행렬(월드 Transform * 뷰포트 행렬)을 StrokeContainsPoint / FillContainsPoint에 직접 전달하여 정확한 화면 판정 수행
 	D2DRenderer renderer;
-	if (renderer.Initialize(nullptr, f)) {
+	renderer.Initialize(nullptr, f);   // 렌더 타깃 없이 팩터리만 사용 (반환값 false 는 정상)
+	{
 		auto* g = renderer.GetGeometry(*this);
 		if (g) {
 			const D2D1_MATRIX_3X2_F m = ToD2D(GetWorldTransform() * view.ToMatrix());

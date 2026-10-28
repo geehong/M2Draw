@@ -55,6 +55,10 @@ public:
 	bool GroupSelectedObjects();
 	bool UngroupSelectedObjects();
 
+	// --- 순서(Z-order) 변경 (오브젝트 메뉴 / Ctrl+[ ] / 도구상자 공용). 각 노드는 자기 부모 안에서 이동 ---
+	bool CanArrange() const { return m_doc.CanArrangeSelection(); }
+	bool ArrangeSelectedObjects(ge::Document::ZOrder order);
+
 	// --- Undo / Redo (Ctrl+Z / Ctrl+Y) ---
 	ge::UndoManager& GetUndoManager() { return m_undoMgr; }
 	// 편집이 끝난 지점에서 호출: 마지막 확정 상태와 달라졌으면 Undo 이력에 기록하고 수정 표시를 켬 (true = 변경됨)
@@ -70,6 +74,8 @@ public:
 	afx_msg void OnUpdateObjectGroup(CCmdUI* pCmdUI);
 	afx_msg void OnObjectUngroup();
 	afx_msg void OnUpdateObjectUngroup(CCmdUI* pCmdUI);
+	afx_msg void OnObjectArrange(UINT nID);
+	afx_msg void OnUpdateObjectArrange(CCmdUI* pCmdUI);
 
 private:
 	ge::UndoManager m_undoMgr;

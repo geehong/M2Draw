@@ -74,6 +74,10 @@
 #define ID_VIEW_GRID       32780
 #define ID_OBJECT_GROUP    32781
 #define ID_OBJECT_UNGROUP  32782
+#define ID_OBJECT_FRONT    32783
+#define ID_OBJECT_FORWARD  32784
+#define ID_OBJECT_BACKWARD 32785
+#define ID_OBJECT_BACK     32786
 
 // 다음은 새 개체에 사용할 기본값입니다.
 //
