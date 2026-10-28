@@ -53,6 +53,11 @@ struct Vec2 {
 	Vec2() = default;
 	Vec2(float _x, float _y) : x(_x), y(_y) {}
 
+	Vec2 operator+(const Vec2& o) const { return { x + o.x, y + o.y }; }
+	Vec2 operator-(const Vec2& o) const { return { x - o.x, y - o.y }; }
+	Vec2 operator*(float s) const { return { x * s, y * s }; }
+	float Length() const { return std::sqrt(x * x + y * y); }
+
 #ifndef GE_NO_D2D
 	Vec2(const D2D1_POINT_2F& p) : x(p.x), y(p.y) {}
 	operator D2D1_POINT_2F() const { return D2D1::Point2F(x, y); }
@@ -789,6 +794,18 @@ public:
 	GroupNode* MakeClipMask();
 	void       ReleaseClipMask();
 
+	// 패스 연산 (Step 2.6: Outline, Simplify, Reverse, Join)
+	bool       CanOutlineStroke() const;
+	bool       CanSimplify() const;
+	bool       CanReversePath() const;
+	bool       CanJoinPaths() const;
+#ifndef GE_NO_D2D
+	std::vector<PathNode*> OutlineStrokeSelection(ID2D1Factory* factory, float widthOverride = -1.0f);   // widthOverride > 0: 선 두께를 이 값으로 확장
+	std::vector<PathNode*> SimplifySelection(float tolerance = 2.0f);
+	std::vector<PathNode*> ReversePathSelection();
+	PathNode*              JoinSelection();
+#endif
+
 	// 복제 (Ctrl+D): 선택 항목을 같은 부모의 원본 바로 위에 복제, 새 ID/이름 발급 후 복제본을 선택
 	std::vector<Node*> DuplicateSelection();
 
@@ -953,6 +970,21 @@ public:
 	static std::unique_ptr<PathNode> Combine(const PathNode& a, const PathNode& b,
 	                                         BooleanMode mode, ID2D1Factory* factory,
 	                                         float flatteningTolerance = D2D1_DEFAULT_FLATTENING_TOLERANCE);
+
+	// 패스 연산 (Step 2.6)
+	// 1) 외곽선 확장: 선(Stroke)을 닫힌 면(Fill) 패스로 변환
+	static std::unique_ptr<PathNode> OutlineStroke(const PathNode& node, ID2D1Factory* factory,
+	                                              float flatteningTolerance = D2D1_DEFAULT_FLATTENING_TOLERANCE,
+	                                              float widthOverride = -1.0f);
+
+	// 2) 패스 단순화: RDP 알고리즘으로 과도한 정점 제거
+	static bool Simplify(PathNode& node, float tolerance = 2.0f);
+
+	// 3) 패스 방향 반전: 서브패스 정점 순서 및 핸들 반전
+	static void ReversePath(PathNode& node);
+
+	// 4) 패스 결합: 인접한 끝점을 가진 서브패스 또는 두 패스를 하나로 결합
+	static std::unique_ptr<PathNode> Join(const PathNode& a, const PathNode& b, float maxDistance = 10.0f);
 };
 
 // ============================================================================

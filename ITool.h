@@ -90,7 +90,8 @@ enum class ToolType
 	ActionBooleanExclude,   // 불리언: 제외
 	ActionBooleanTrim,      // 불리언: 트림/분할
 	ActionClipMask,         // 클리핑 마스크 만들기
-	ActionReleaseMask       // 클리핑 마스크 해제
+	ActionReleaseMask,      // 클리핑 마스크 해제
+	Polyline                // 열린 다각형(폴리라인) 도구: 클릭으로 꺾은선, 더블클릭/우클릭/Enter 로 완성
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)

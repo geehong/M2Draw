@@ -86,6 +86,10 @@
 #define ID_BOOLEAN_TRIM     32791
 #define ID_OBJECT_CLIP_MASK 32792
 #define ID_OBJECT_RELEASE_MASK 32793
+#define ID_PATH_OUTLINE     32794
+#define ID_PATH_SIMPLIFY    32795
+#define ID_PATH_REVERSE     32796
+#define ID_PATH_JOIN        32797
 #define ID_TOOL_RECT        32801
 #define ID_TOOL_TRIANGLE    32802
 #define ID_TOOL_POLYGON     32803
@@ -95,6 +99,20 @@
 #define ID_TOOL_HEART       32807
 #define ID_TOOL_ZOOMIN      32808
 #define ID_TOOL_ZOOMOUT     32809
+#define ID_SUB_OUTLINE      32810
+#define ID_SUB_SIMPLIFY     32811
+#define ID_SUB_APPLY        32812
+#define ID_SUB_CANCEL       32813
+#define ID_SUB_VALUE        32814
+#define ID_TOOL_POLYLINE   32815
+#define ID_ALIGN_LEFT       32816
+#define ID_ALIGN_CENTERH    32817
+#define ID_ALIGN_RIGHT      32818
+#define ID_ALIGN_TOP        32819
+#define ID_ALIGN_CENTERV    32820
+#define ID_ALIGN_BOTTOM     32821
+#define ID_DISTRIBUTE_H     32822
+#define ID_DISTRIBUTE_V     32823
 
 // ?????? ?? ??u?? ????? ????????.
 //

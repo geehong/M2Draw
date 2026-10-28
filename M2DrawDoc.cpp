@@ -46,6 +46,16 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_CLIP_MASK, &CM2DrawDoc::OnUpdateObjectClipMask)
 	ON_COMMAND(ID_OBJECT_RELEASE_MASK, &CM2DrawDoc::OnObjectReleaseMask)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_RELEASE_MASK, &CM2DrawDoc::OnUpdateObjectReleaseMask)
+	ON_COMMAND_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnAlignCommand)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnUpdateAlignCommand)
+	ON_COMMAND(ID_PATH_OUTLINE, &CM2DrawDoc::OnPathOutline)
+	ON_UPDATE_COMMAND_UI(ID_PATH_OUTLINE, &CM2DrawDoc::OnUpdatePathOutline)
+	ON_COMMAND(ID_PATH_SIMPLIFY, &CM2DrawDoc::OnPathSimplify)
+	ON_UPDATE_COMMAND_UI(ID_PATH_SIMPLIFY, &CM2DrawDoc::OnUpdatePathSimplify)
+	ON_COMMAND(ID_PATH_REVERSE, &CM2DrawDoc::OnPathReverse)
+	ON_UPDATE_COMMAND_UI(ID_PATH_REVERSE, &CM2DrawDoc::OnUpdatePathReverse)
+	ON_COMMAND(ID_PATH_JOIN, &CM2DrawDoc::OnPathJoin)
+	ON_UPDATE_COMMAND_UI(ID_PATH_JOIN, &CM2DrawDoc::OnUpdatePathJoin)
 END_MESSAGE_MAP()
 
 
@@ -741,5 +751,152 @@ void CM2DrawDoc::OnUpdateObjectReleaseMask(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(CanReleaseClipMask());
 }
+
+bool CM2DrawDoc::OutlineStroke(float widthOverride)
+{
+	if (!CanOutlineStroke()) return false;
+
+	ID2D1Factory* pFactory = nullptr;
+	POSITION pos = GetFirstViewPosition();
+	if (pos) {
+		CView* pView = GetNextView(pos);
+		if (pView && pView->IsKindOf(RUNTIME_CLASS(CM2DrawView))) {
+			pFactory = static_cast<CM2DrawView*>(pView)->GetD2DFactory();
+		}
+	}
+	if (!pFactory) return false;
+
+	auto results = m_doc.OutlineStrokeSelection(pFactory, widthOverride);
+	if (results.empty()) return false;
+
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+	CommitUndoPoint(L"윤곽선 만들기 (외곽선 확장)");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame))) {
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+		static_cast<CMainFrame*>(pMainWnd)->UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+	}
+	return true;
+}
+
+bool CM2DrawDoc::SimplifyPath(float tolerance)
+{
+	if (!CanSimplify()) return false;
+
+	auto results = m_doc.SimplifySelection(tolerance);
+	if (results.empty()) return false;
+
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+	CommitUndoPoint(L"패스 단순화");
+	UpdateAllViews(nullptr);
+	return true;
+}
+
+bool CM2DrawDoc::ReversePath()
+{
+	if (!CanReversePath()) return false;
+
+	auto results = m_doc.ReversePathSelection();
+	if (results.empty()) return false;
+
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+	CommitUndoPoint(L"패스 방향 반전");
+	UpdateAllViews(nullptr);
+	return true;
+}
+
+bool CM2DrawDoc::JoinPaths()
+{
+	if (!CanJoinPaths()) return false;
+
+	ge::PathNode* joined = m_doc.JoinSelection();
+	if (!joined) return false;
+
+	UpdateShapePropertiesSelection(joined, this);
+	CommitUndoPoint(L"패스 결합 (Join)");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame))) {
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+		static_cast<CMainFrame*>(pMainWnd)->UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+	}
+	return true;
+}
+
+void CM2DrawDoc::OnAlignCommand(UINT nID)
+{
+	const bool distribute = (nID == ID_DISTRIBUTE_H || nID == ID_DISTRIBUTE_V);
+	if (m_doc.GetSelection().size() < (distribute ? 3u : 2u)) return;
+
+	const wchar_t* label = L"정렬";
+	switch (nID)
+	{
+	case ID_ALIGN_LEFT:    m_doc.AlignSelection(ge::Document::AlignMode::Left, false);    label = L"왼쪽 정렬"; break;
+	case ID_ALIGN_CENTERH: m_doc.AlignSelection(ge::Document::AlignMode::CenterH, false); label = L"가로 가운데 정렬"; break;
+	case ID_ALIGN_RIGHT:   m_doc.AlignSelection(ge::Document::AlignMode::Right, false);   label = L"오른쪽 정렬"; break;
+	case ID_ALIGN_TOP:     m_doc.AlignSelection(ge::Document::AlignMode::Top, false);     label = L"위쪽 정렬"; break;
+	case ID_ALIGN_CENTERV: m_doc.AlignSelection(ge::Document::AlignMode::CenterV, false); label = L"세로 가운데 정렬"; break;
+	case ID_ALIGN_BOTTOM:  m_doc.AlignSelection(ge::Document::AlignMode::Bottom, false);  label = L"아래쪽 정렬"; break;
+	case ID_DISTRIBUTE_H:  m_doc.DistributeSelection(true);  label = L"가로 균등 분배"; break;
+	case ID_DISTRIBUTE_V:  m_doc.DistributeSelection(false); label = L"세로 균등 분배"; break;
+	}
+
+	CString strLog;
+	strLog.Format(_T("[정렬] %s (선택 %d개)"), label, static_cast<int>(m_doc.GetSelection().size()));
+	LogAppEvent(strLog);
+	CommitUndoPoint(label);   // 위치가 실제로 바뀌지 않았으면 기록되지 않음
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+	UpdateAllViews(nullptr);
+}
+
+void CM2DrawDoc::OnUpdateAlignCommand(CCmdUI* pCmdUI)
+{
+	const bool distribute = (pCmdUI->m_nID == ID_DISTRIBUTE_H || pCmdUI->m_nID == ID_DISTRIBUTE_V);
+	pCmdUI->Enable(m_doc.GetSelection().size() >= (distribute ? 3u : 2u));
+}
+
+void CM2DrawDoc::OnPathOutline()
+{
+	OutlineStroke();
+}
+
+void CM2DrawDoc::OnUpdatePathOutline(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(CanOutlineStroke());
+}
+
+void CM2DrawDoc::OnPathSimplify()
+{
+	SimplifyPath(2.0f);
+}
+
+void CM2DrawDoc::OnUpdatePathSimplify(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(CanSimplify());
+}
+
+void CM2DrawDoc::OnPathReverse()
+{
+	ReversePath();
+}
+
+void CM2DrawDoc::OnUpdatePathReverse(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(CanReversePath());
+}
+
+void CM2DrawDoc::OnPathJoin()
+{
+	JoinPaths();
+}
+
+void CM2DrawDoc::OnUpdatePathJoin(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(CanJoinPaths());
+}
+
 
 

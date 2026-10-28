@@ -342,6 +342,12 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 	std::wstring curGradientId;
 	Gradient curGradient;
 	bool inGradient = false;
+
+	// <clipPath id>: 첫 번째 도형을 마스크로 보관했다가, clip-path="url(#id)" 를 가진 그룹이 닫힐 때 그룹의 마지막 자식(= 마스크 노드)으로 추가
+	bool inClipPath = false;
+	std::wstring curClipId;
+	std::unordered_map<std::wstring, std::unique_ptr<PathNode>> clipMasks;
+	std::unordered_map<GroupNode*, std::wstring> pendingClipGroups;
 	auto finishGradient = [&]() {
 		if (!inGradient) return;
 		curGradient.NormalizeStops();
@@ -451,10 +457,13 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 					if (attrs.count(L"m2:name")) group->SetName(attrs[L"m2:name"]);
 					if (attrs.count(L"opacity")) group->SetOpacity(std::wcstof(attrs[L"opacity"].c_str(), nullptr));
 					if (attrs.count(L"transform")) group->SetTransform(ParseTransformMatrix(attrs[L"transform"]));
-					if (attrs.count(L"m2:clipMask") && attrs[L"m2:clipMask"] == L"true") {
-						group->SetClippingMask(true);
-					} else if (attrs.count(L"clip-path")) {
-						group->SetClippingMask(true);
+					std::wstring clipRefId;
+					if (attrs.count(L"clip-path")) {
+						const std::wstring& cp = attrs[L"clip-path"];
+						const size_t hash = cp.find(L'#');
+						const size_t close = cp.find(L')', hash == std::wstring::npos ? 0 : hash);
+						if (hash != std::wstring::npos && close != std::wstring::npos && close > hash)
+							clipRefId = cp.substr(hash + 1, close - hash - 1);
 					}
 
 					GroupNode* rawGroup = group.get();
@@ -464,9 +473,17 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 						getFallbackLayer()->AddChild(std::move(group));
 					}
 
+					if (!clipRefId.empty()) pendingClipGroups[rawGroup] = clipRefId;
+
 					if (!isEmpty) {
 						groupStack.push_back(rawGroup);
 					}
+				}
+			}
+			else if (elemName == L"clipPath") {
+				if (!isEmpty && attrs.count(L"id")) {
+					inClipPath = true;
+					curClipId = attrs[L"id"];
 				}
 			}
 			else if (elemName == L"linearGradient" || elemName == L"radialGradient") {
@@ -659,7 +676,10 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 					ApplyNodeTypes(*pathNode, attrs[L"m2:node-types"]);
 				}
 
-				if (!groupStack.empty()) {
+				if (inClipPath) {
+					// 클립 정의 안의 도형은 화면에 그리지 않는 마스크 후보 (첫 번째만 사용)
+					if (!clipMasks.count(curClipId)) clipMasks[curClipId] = std::move(pathNode);
+				} else if (!groupStack.empty()) {
 					groupStack.back()->AddChild(std::move(pathNode));
 				} else {
 					getFallbackLayer()->AddChild(std::move(pathNode));
@@ -674,8 +694,22 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 				std::wstring elemName(localName, nameLen);
 				if (elemName == L"g") {
 					if (!groupStack.empty()) {
+						GroupNode* closing = groupStack.back();
 						groupStack.pop_back();
+						auto pc = pendingClipGroups.find(closing);
+						if (pc != pendingClipGroups.end()) {
+							auto cm = clipMasks.find(pc->second);
+							if (cm != clipMasks.end() && cm->second) {
+								// 마스크 노드는 관례상 그룹의 마지막(최상단) 자식. 같은 clipPath 를 여러 그룹이 쓰면 복제본 사용
+								closing->AddChild(cm->second->Clone());
+								closing->SetClippingMask(true);
+							}
+							pendingClipGroups.erase(pc);
+						}
 					}
+				}
+				else if (elemName == L"clipPath") {
+					inClipPath = false;
 				}
 				else if (elemName == L"linearGradient" || elemName == L"radialGradient") {
 					finishGradient();

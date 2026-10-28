@@ -48,6 +48,19 @@ private:
 	D2D1_POINT_2F m_downScreenPt{};
 	D2D1_POINT_2F m_hoverWorld{};
 	bool          m_hasHover = false;
+
+protected:
+	bool          m_cornerOnly = false;   // true: 클릭만으로 각진 꼭짓점 추가 (드래그 핸들/첫 점 클릭 폐합 없음) -> 폴리라인
+};
+
+// 열린 다각형(폴리라인) 도구: 펜 도구의 각진 꼭짓점 전용 변형
+class PolylineTool : public PenTool
+{
+public:
+	PolylineTool() { m_cornerOnly = true; }
+	ToolType GetType() const override { return ToolType::Polyline; }
+	const wchar_t* GetName() const override { return L"열린 다각형 도구 (Polyline)"; }
+	wchar_t GetShortcut() const override { return 0; }
 };
 
 // LineTool, RectTool, EllipseTool은 BoxShapeTool 인스턴스,

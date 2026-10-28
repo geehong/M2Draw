@@ -31,6 +31,11 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_COMMAND_RANGE(ID_OPT_FIRST, ID_OPT_LAST, &CMainFrame::OnOptionBarCommit)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_OPT_LABEL, ID_OPT_LAST, &CMainFrame::OnUpdateOptionBar)
 	ON_COMMAND_RANGE(ID_TOOL_RECT, ID_TOOL_ZOOMOUT, &CMainFrame::OnSubToolCommand)
+	ON_COMMAND(ID_TOOL_POLYLINE, &CMainFrame::OnSubPolyline)
+	ON_COMMAND(ID_SUB_OUTLINE, &CMainFrame::OnSubOutline)
+	ON_COMMAND(ID_SUB_SIMPLIFY, &CMainFrame::OnSubSimplify)
+	ON_COMMAND(ID_SUB_APPLY, &CMainFrame::OnSubApply)
+	ON_COMMAND(ID_SUB_CANCEL, &CMainFrame::OnSubCancel)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOL_RECT, ID_TOOL_ZOOMOUT, &CMainFrame::OnUpdateSubToolCommand)
 END_MESSAGE_MAP()
 
@@ -133,7 +138,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndMenuBar);
 	DockPane(&m_wndToolBar);
-	DockPaneLeftOf(&m_wndSubToolBar, &m_wndToolBar);
+	DockPane(&m_wndSubToolBar);   // 서브도구 바는 버튼 수가 많아 메인 툴바 옆이 아니라 자기 줄에 도킹
 	DockPane(&m_wndOptionBar);
 	m_wndOptionBar.Attach();
 
@@ -445,22 +450,48 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 	const bool bCanBoolean = pDoc && pDoc->CanBoolean();
 	const bool bCanMakeMask = pDoc && pDoc->CanMakeClipMask();
 	const bool bCanReleaseMask = pDoc && pDoc->CanReleaseClipMask();
+	const bool bCanOutline = pDoc && pDoc->CanOutlineStroke();
+	const bool bCanSimplify = pDoc && pDoc->CanSimplify();
+	const bool bCanReverse = pDoc && pDoc->CanReversePath();
+	const bool bCanJoin = pDoc && pDoc->CanJoinPaths();
+	const bool bIsPathSelected = bCanOutline || bCanSimplify || bCanReverse || bCanJoin;
 
-	// 도구별 서브도구 버튼 목록 구성
+	// 선택에 닫힌 패스(면)가 있는지: 열린 선만 선택하면 불리언 연산은 의미가 없으므로 숨김
+	bool hasClosedPath = false;
+	if (pDoc)
+		for (ge::Node* n : pDoc->GetDoc().GetSelection())
+			if (n && n->Kind() == ge::NodeKind::Path)
+				for (const auto& sp : static_cast<ge::PathNode*>(n)->GetPaths())
+					if (sp.closed) hasClosedPath = true;
+
+	if (m_subInputMode != SubInputMode::None && !(bCanOutline || bCanSimplify))
+		m_subInputMode = SubInputMode::None;   // 대상 선택이 사라졌으면 입력 모드 해제
+
+	// 도구별 서브도구 버튼 목록 구성 (필요한 메뉴만 동적으로)
 	std::vector<UINT> btnIds;
+	const bool boolTool = curTool == ToolType::ActionBooleanUnion || curTool == ToolType::ActionBooleanSubtract ||
+		curTool == ToolType::ActionBooleanIntersect || curTool == ToolType::ActionBooleanExclude || curTool == ToolType::ActionBooleanTrim;
 	if (bCanReleaseMask)
 	{
-		// 이미 마스크가 적용된 그룹이 선택된 경우 해제 버튼 노출
-		btnIds = { ID_OBJECT_RELEASE_MASK };
+		btnIds = { ID_OBJECT_RELEASE_MASK };   // 이미 마스크가 적용된 그룹이 선택된 경우 해제 버튼 노출
 	}
-	else if (bCanBoolean || bCanMakeMask || curTool == ToolType::ActionBooleanUnion || curTool == ToolType::ActionBooleanSubtract ||
-		curTool == ToolType::ActionBooleanIntersect || curTool == ToolType::ActionBooleanExclude || curTool == ToolType::ActionBooleanTrim ||
-		curTool == ToolType::ActionClipMask || curTool == ToolType::ActionReleaseMask)
+	else if (m_subInputMode != SubInputMode::None)
 	{
-		// 다중 선택 시 상단에 불리언 연산자 5종 및 클리핑 마스크 만들기 버튼 표시
-		btnIds = { ID_BOOLEAN_UNION, ID_BOOLEAN_SUBTRACT, ID_BOOLEAN_INTERSECT, ID_BOOLEAN_EXCLUDE, ID_BOOLEAN_TRIM, ID_OBJECT_CLIP_MASK };
+		btnIds = { ID_SUB_VALUE, ID_SUB_APPLY, ID_SUB_CANCEL };   // 다른 메뉴는 밀려나고 값 입력 + 적용/취소만 표시
 	}
 	else
+	{
+		if ((bCanBoolean && hasClosedPath) || boolTool)
+			btnIds.insert(btnIds.end(), { ID_BOOLEAN_UNION, ID_BOOLEAN_SUBTRACT, ID_BOOLEAN_INTERSECT, ID_BOOLEAN_EXCLUDE, ID_BOOLEAN_TRIM });
+		if (bCanMakeMask || curTool == ToolType::ActionClipMask)
+			btnIds.push_back(ID_OBJECT_CLIP_MASK);
+		if (pDoc && pDoc->GetDoc().GetSelection().size() >= 2)
+			btnIds.insert(btnIds.end(), { ID_ALIGN_LEFT, ID_ALIGN_CENTERH, ID_ALIGN_RIGHT, ID_ALIGN_TOP, ID_ALIGN_CENTERV, ID_ALIGN_BOTTOM, ID_DISTRIBUTE_H, ID_DISTRIBUTE_V });
+		if (bIsPathSelected || curTool == ToolType::Pen)
+			btnIds.insert(btnIds.end(), { ID_SUB_OUTLINE, ID_SUB_SIMPLIFY, ID_PATH_REVERSE, ID_PATH_JOIN });
+	}
+
+	if (btnIds.empty())
 	{
 		switch (curTool)
 		{
@@ -469,11 +500,12 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 			btnIds = { ID_TOOL_RECT, ID_TOOL_TRIANGLE };
 			break;
 		case ToolType::Polygon:
+		case ToolType::Polyline:
 		case ToolType::Star:
 		case ToolType::Gear:
 		case ToolType::Spiral:
 		case ToolType::Heart:
-			btnIds = { ID_TOOL_POLYGON, ID_TOOL_STAR, ID_TOOL_GEAR, ID_TOOL_SPIRAL, ID_TOOL_HEART };
+			btnIds = { ID_TOOL_POLYGON, ID_TOOL_POLYLINE, ID_TOOL_STAR, ID_TOOL_GEAR, ID_TOOL_SPIRAL, ID_TOOL_HEART };
 			break;
 		case ToolType::ZoomIn:
 		case ToolType::ZoomOut:
@@ -491,7 +523,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 			break;
 		default:
 			// 기본: 도형 생성 서브도구
-			btnIds = { ID_TOOL_RECT, ID_TOOL_TRIANGLE, ID_TOOL_POLYGON, ID_TOOL_STAR, ID_TOOL_GEAR, ID_TOOL_SPIRAL, ID_TOOL_HEART };
+			btnIds = { ID_TOOL_RECT, ID_TOOL_TRIANGLE, ID_TOOL_POLYGON, ID_TOOL_POLYLINE, ID_TOOL_STAR, ID_TOOL_GEAR, ID_TOOL_SPIRAL, ID_TOOL_HEART };
 			break;
 		}
 	}
@@ -519,15 +551,156 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_BOOLEAN_TRIM:       imgIdx = 15; break;
 		case ID_OBJECT_CLIP_MASK:   imgIdx = 16; break;
 		case ID_OBJECT_RELEASE_MASK:imgIdx = 17; break;
+		case ID_PATH_OUTLINE:
+		case ID_SUB_OUTLINE:        imgIdx = 18; break;
+		case ID_PATH_SIMPLIFY:
+		case ID_SUB_SIMPLIFY:       imgIdx = 19; break;
+		case ID_PATH_REVERSE:       imgIdx = 20; break;
+		case ID_PATH_JOIN:          imgIdx = 21; break;
+		case ID_TOOL_POLYLINE:      imgIdx = 22; break;
+		case ID_ALIGN_LEFT:         imgIdx = 23; break;
+		case ID_ALIGN_CENTERH:      imgIdx = 24; break;
+		case ID_ALIGN_RIGHT:        imgIdx = 25; break;
+		case ID_ALIGN_TOP:          imgIdx = 26; break;
+		case ID_ALIGN_CENTERV:      imgIdx = 27; break;
+		case ID_ALIGN_BOTTOM:       imgIdx = 28; break;
+		case ID_DISTRIBUTE_H:       imgIdx = 29; break;
+		case ID_DISTRIBUTE_V:       imgIdx = 30; break;
 		default: break;
+		}
+
+		if (id == ID_SUB_VALUE)
+		{
+			CMFCToolBarEditBoxButton edit(id, -1, ES_AUTOHSCROLL | WS_BORDER, 64);
+			m_wndSubToolBar.InsertButton(edit);
+			continue;
+		}
+		if (id == ID_SUB_APPLY || id == ID_SUB_CANCEL)
+		{
+			CMFCToolBarButton txt(id, -1, id == ID_SUB_APPLY ? _T("\u2713 \uC801\uC6A9") : _T("\u2715 \uCDE8\uC18C"));
+			m_wndSubToolBar.InsertButton(txt);
+			continue;
 		}
 
 		CMFCToolBarButton btn(id, imgIdx);
 		m_wndSubToolBar.InsertButton(btn);
+
+		// 툴팁: 이미지 버튼에 마우스를 올리면 설명 표시
+		const wchar_t* tip = nullptr;
+		switch (id)
+		{
+		case ID_TOOL_RECT: tip = L"사각형"; break;
+		case ID_TOOL_TRIANGLE: tip = L"삼각형"; break;
+		case ID_TOOL_POLYGON: tip = L"정다각형"; break;
+		case ID_TOOL_POLYLINE: tip = L"열린 다각형 (폴리라인): 클릭으로 꼭짓점, 더블클릭/우클릭으로 완성"; break;
+		case ID_TOOL_STAR: tip = L"별"; break;
+		case ID_TOOL_GEAR: tip = L"톱니바퀴"; break;
+		case ID_TOOL_SPIRAL: tip = L"나선"; break;
+		case ID_TOOL_HEART: tip = L"하트"; break;
+		case ID_TOOL_ZOOMIN: tip = L"확대"; break;
+		case ID_TOOL_ZOOMOUT: tip = L"축소"; break;
+		case ID_OBJECT_GROUP: tip = L"그룹 (Ctrl+G)"; break;
+		case ID_OBJECT_UNGROUP: tip = L"그룹 해제 (Ctrl+Shift+G)"; break;
+		case ID_BOOLEAN_UNION: tip = L"합치기 (Union)"; break;
+		case ID_BOOLEAN_SUBTRACT: tip = L"빼기 (Subtract)"; break;
+		case ID_BOOLEAN_INTERSECT: tip = L"교차 (Intersect)"; break;
+		case ID_BOOLEAN_EXCLUDE: tip = L"제외 (Exclude)"; break;
+		case ID_BOOLEAN_TRIM: tip = L"자르기 (Trim)"; break;
+		case ID_OBJECT_CLIP_MASK: tip = L"클리핑 마스크 만들기 (Ctrl+7)"; break;
+		case ID_OBJECT_RELEASE_MASK: tip = L"클리핑 마스크 해제 (Ctrl+Alt+7)"; break;
+		case ID_SUB_OUTLINE: tip = L"외곽선 확장: 선을 면(닫힌 패스)으로 변환 (두께 입력 후 적용)"; break;
+		case ID_SUB_SIMPLIFY: tip = L"단순화 / 부드럽게: 정점 줄이기 (허용 오차 입력 후 적용)"; break;
+		case ID_PATH_REVERSE: tip = L"방향 반전"; break;
+		case ID_PATH_JOIN: tip = L"패스 결합 (Ctrl+J)"; break;
+		case ID_ALIGN_LEFT: tip = L"왼쪽 정렬"; break;
+		case ID_ALIGN_CENTERH: tip = L"가로 가운데 정렬"; break;
+		case ID_ALIGN_RIGHT: tip = L"오른쪽 정렬"; break;
+		case ID_ALIGN_TOP: tip = L"위쪽 정렬"; break;
+		case ID_ALIGN_CENTERV: tip = L"세로 가운데 정렬"; break;
+		case ID_ALIGN_BOTTOM: tip = L"아래쪽 정렬"; break;
+		case ID_DISTRIBUTE_H: tip = L"가로 균등 분배 (3개 이상)"; break;
+		case ID_DISTRIBUTE_V: tip = L"세로 균등 분배 (3개 이상)"; break;
+		case ID_OBJECT_FRONT: tip = L"맨 앞으로 (Ctrl+Shift+])"; break;
+		case ID_OBJECT_FORWARD: tip = L"앞으로 (Ctrl+])"; break;
+		case ID_OBJECT_BACKWARD: tip = L"뒤로 (Ctrl+[)"; break;
+		case ID_OBJECT_BACK: tip = L"맨 뒤로 (Ctrl+Shift+[)"; break;
+		}
+		if (tip)
+		{
+			const int idx = m_wndSubToolBar.CommandToIndex(id);
+			if (idx >= 0) m_wndSubToolBar.SetToolBarBtnText(idx, tip, FALSE, TRUE);
+		}
+	}
+
+	// 입력 모드: 입력창에 기본값 채우기
+	if (m_subInputMode != SubInputMode::None)
+	{
+		const int vi = m_wndSubToolBar.CommandToIndex(ID_SUB_VALUE);
+		if (vi >= 0)
+			if (auto* eb = DYNAMIC_DOWNCAST(CMFCToolBarEditBoxButton, m_wndSubToolBar.GetButton(vi)))
+			{
+				CString v; v.Format(_T("%g"), m_subInputValue);
+				eb->SetContents(v);
+			}
 	}
 
 	m_wndSubToolBar.AdjustLayout();
+	m_wndSubToolBar.AdjustSizeImmediate();   // 버튼 수가 바뀌면 바 폭을 즉시 다시 계산 (안 하면 처음 폭에서 잘림)
+	RecalcLayout();
 	m_wndSubToolBar.Invalidate();
+}
+
+void CMainFrame::OnSubOutline()
+{
+	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
+	if (!pDoc || !pDoc->CanOutlineStroke()) return;
+	float w = 2.0f;
+	for (ge::Node* n : pDoc->GetDoc().GetSelection())
+		if (n && n->Kind() == ge::NodeKind::Path) { w = static_cast<ge::PathNode*>(n)->GetStyle().stroke.width; break; }
+	m_subInputMode = SubInputMode::Outline;
+	m_subInputValue = w;
+	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+}
+
+void CMainFrame::OnSubSimplify()
+{
+	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
+	if (!pDoc || !pDoc->CanSimplify()) return;
+	m_subInputMode = SubInputMode::Simplify;
+	m_subInputValue = 2.0f;
+	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+}
+
+void CMainFrame::OnSubApply()
+{
+	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
+	const SubInputMode mode = m_subInputMode;
+	float v = m_subInputValue;
+	const int vi = m_wndSubToolBar.CommandToIndex(ID_SUB_VALUE);
+	if (vi >= 0)
+		if (auto* eb = DYNAMIC_DOWNCAST(CMFCToolBarEditBoxButton, m_wndSubToolBar.GetButton(vi)))
+		{
+			const float parsed = static_cast<float>(_tstof(CMFCToolBarEditBoxButton::GetContentsAll(ID_SUB_VALUE)));
+			if (parsed > 0.0f) v = parsed;
+		}
+	m_subInputMode = SubInputMode::None;
+	if (pDoc)
+	{
+		if (mode == SubInputMode::Outline) pDoc->OutlineStroke(v);
+		else if (mode == SubInputMode::Simplify) pDoc->SimplifyPath(v);
+	}
+	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+}
+
+void CMainFrame::OnSubCancel()
+{
+	m_subInputMode = SubInputMode::None;
+	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+}
+
+void CMainFrame::OnSubPolyline()
+{
+	GetApp()->GetToolManager().SetActiveTool(ToolType::Polyline);
 }
 
 void CMainFrame::OnSubToolCommand(UINT nID)

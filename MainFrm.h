@@ -19,6 +19,10 @@ public:
 	// IToolChangeListener 구현
 	void OnToolChanged(ToolType newTool) override;
 	void UpdateSubToolBar(ToolType curTool);
+	// 외곽선 확장/단순화: 상단에 값 입력창 + 적용/취소를 띄우는 입력 모드 (버튼을 눌러도 바로 적용하지 않음)
+	enum class SubInputMode { None, Outline, Simplify };
+	SubInputMode m_subInputMode = SubInputMode::None;
+	float        m_subInputValue = 2.0f;
 
 public:
 	virtual ~CMainFrame();
@@ -72,6 +76,11 @@ protected:
 	afx_msg void OnOptionBarCommit(UINT nID);
 	afx_msg void OnUpdateOptionBar(CCmdUI* pCmdUI);
 	afx_msg void OnSubToolCommand(UINT nID);
+	afx_msg void OnSubPolyline();
+	afx_msg void OnSubOutline();
+	afx_msg void OnSubSimplify();
+	afx_msg void OnSubApply();
+	afx_msg void OnSubCancel();
 	afx_msg void OnUpdateSubToolCommand(CCmdUI* pCmdUI);
 	DECLARE_MESSAGE_MAP()
 

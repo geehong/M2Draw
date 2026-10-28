@@ -966,6 +966,79 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(!d.MoveNodeTo(l1, l2, -1), L"레이어를 노드 이동으로 옮길 수 있으면 안 됨");
 	}
 
+	// ---- 18. 클리핑 마스크 SVG 왕복 (2.4.6) ------------------------------------------------------
+	{
+		auto countOf = [](const std::string& s, const std::string& key) {
+			size_t n = 0;
+			for (size_t pos = s.find(key); pos != std::string::npos; pos = s.find(key, pos + key.size())) ++n;
+			return n;
+		};
+		Document d;
+		auto gu = std::make_unique<GroupNode>();
+		GroupNode* grp = static_cast<GroupNode*>(d.AddShape(std::move(gu)));
+		grp->AddChild(MakePath(L"c1", 0.0f, 0.0f));
+		grp->AddChild(MakePath(L"c2", 5.0f, 0.0f));
+		Node* maskNode = grp->AddChild(MakePath(L"mask", 20.0f, 0.0f));
+		grp->SetClippingMask(true);
+		d.AssignIds(*grp);
+		GE_CHECK(grp->GetMaskNode() == maskNode, L"테스트 전제: 마지막 자식이 마스크");
+
+		SvgWriter cw;
+		const std::string svg = cw.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(svg.find("<clipPath") != std::string::npos && svg.find("clip-path=\"url(#") != std::string::npos, L"클리핑 그룹이 clipPath 로 출력되지 않음");
+		GE_CHECK(countOf(svg, "<path") == 3, L"마스크 도형이 clipPath 정의 외에 본문에도 출력됨 (다른 뷰어에서 보이게 됨)");
+
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"클리핑 SVG 를 읽지 못함");
+		GE_CHECK(back.GetLayers().size() == 1 && back.GetLayers()[0]->GetChildren().size() == 1, L"clipPath 안의 도형이 화면 도형으로 읽힘");
+		auto* g2 = dynamic_cast<GroupNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+		GE_CHECK(g2 && g2->IsClippingMask() && g2->GetChildren().size() == 3, L"클리핑 그룹/마스크 복원 실패 (자식 3개: 내용 2 + 마스크)");
+		GE_CHECK(g2->GetMaskNode() != nullptr && g2->GetMaskNode() != g2->GetChildren()[0].get(), L"마스크 노드가 마지막 자식으로 복원되지 않음");
+
+		// 외부 SVG(다른 도구가 만든 clipPath): 정의 안의 도형은 마스크, 나머지 자식은 내용
+		const std::string ext =
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"100\">\n"
+			"  <defs><clipPath id=\"c1\"><path d=\"M 10 10 L 50 10 L 30 50 Z\" /></clipPath></defs>\n"
+			"  <g clip-path=\"url(#c1)\"><path d=\"M 0 0 L 100 0 L 100 100 Z\" fill=\"#ff0000\" /></g>\n"
+			"  <g clip-path=\"url(#missing)\"><path d=\"M 0 0 L 10 10\" /></g>\n"
+			"</svg>\n";
+		Document extDoc;
+		GE_CHECK(reader.ReadFromString(ext, extDoc), L"외부 clipPath SVG 읽기 실패");
+		const auto& top = extDoc.GetLayers()[0]->GetChildren();
+		GE_CHECK(top.size() == 2, L"외부 SVG 최상위 요소 수가 틀림");
+		auto* e1 = dynamic_cast<GroupNode*>(top[0].get());
+		auto* e2 = dynamic_cast<GroupNode*>(top[1].get());
+		GE_CHECK(e1 && e1->IsClippingMask() && e1->GetChildren().size() == 2, L"외부 clipPath 그룹: 내용 1 + 마스크 1 이어야 함");
+		GE_CHECK(e2 && !e2->IsClippingMask() && e2->GetChildren().size() == 1, L"없는 clipPath 를 참조하면 마스크 없이 내용만 유지되어야 함");
+	}
+
+	// ---- 19. 클리핑 그룹의 마스크 고정 (Z-order/드래그로 마스크가 바뀌지 않음) -------------------------
+	{
+		Document d;
+		auto gu = std::make_unique<GroupNode>();
+		GroupNode* grp = static_cast<GroupNode*>(d.AddShape(std::move(gu)));
+		Node* c1 = grp->AddChild(MakePath(L"c1", 0.0f, 0.0f));
+		grp->AddChild(MakePath(L"c2", 5.0f, 0.0f));
+		Node* mask = grp->AddChild(MakePath(L"mask", 20.0f, 0.0f));
+		grp->SetClippingMask(true);
+		d.AssignIds(*grp);
+
+		d.SetSelection({ c1 });
+		d.ArrangeSelection(Document::ZOrder::Front);
+		GE_CHECK(grp->GetMaskNode() == mask, L"일반 자식을 맨 앞으로 보내도 마스크는 그대로여야 함");
+		d.ArrangeSelection(Document::ZOrder::Forward);
+		GE_CHECK(grp->GetMaskNode() == mask, L"일반 자식을 앞으로 보내도 마스크는 그대로여야 함");
+
+		LayerNode* layer = d.GetActiveLayer();
+		Node* other = layer->AddChild(MakePath(L"other", 50.0f, 0.0f));
+		d.AssignIds(*layer);
+		GE_CHECK(d.MoveNodeTo(other, grp, -1), L"클리핑 그룹 안으로 이동 실패");
+		GE_CHECK(grp->GetMaskNode() == mask, L"클리핑 그룹 안으로 들어온 노드가 마스크가 되면 안 됨");
+
+		GE_CHECK(d.MoveNodeTo(mask, layer, -1), L"마스크 도형을 그룹 밖으로 이동 실패");
+		GE_CHECK(!grp->IsClippingMask(), L"마스크 도형을 빼면 클리핑이 해제되어야 함");
+	}
+
 #undef GE_CHECK
 
 	return true;

@@ -375,6 +375,55 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 	CM2DrawDoc* pDoc = GetDocument();
 	ToolType activeType = GetApp()->GetToolManager().GetActiveType();
 
+	// 0. 선택 도구: 선택된 패스 위 더블클릭 = 앵커 삭제(앵커 위) / 앵커 추가(선분 위)
+	if (activeType == ToolType::Select && pDoc && pDoc->GetDoc().GetSelection().size() == 1)
+	{
+		auto* ps = dynamic_cast<ge::PathNode*>(pDoc->GetPrimarySelection());
+		if (ps && m_pD2DFactory)
+		{
+			const ge::Viewport view{ m_fZoom, { m_ptPan.x, m_ptPan.y } };
+			const D2D1_POINT_2F sp = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
+			const ge::HitResult hr = ps->HitTestScreenSpace(sp, 8.0f, view, m_pD2DFactory);
+			bool edited = false;
+			const wchar_t* label = nullptr;
+			if (hr.part == ge::HitPart::Anchor)
+			{
+				// 점이 2개 미만이 되는 삭제는 막음 (선/면이 사라지지 않게)
+				if (ps->GetPaths()[hr.subPath].nodes.size() > 2 && ps->RemoveNode(hr.subPath, hr.nodeIdx))
+				{
+					edited = true;
+					label = L"앵커 삭제";
+				}
+			}
+			else if (hr.part == ge::HitPart::Stroke)
+			{
+				ge::Matrix2D inv = ps->GetWorldTransform();
+				if (inv.Invert())
+				{
+					const D2D1_POINT_2F w = ScreenToWorld(point);
+					const ge::Vec2 local = inv.TransformPoint(ge::Vec2{ w.x, w.y });
+					int spi = -1, seg = -1; float t = 0.0f, d2 = 0.0f;
+					if (ps->FindClosestSegment(local, spi, seg, t, d2) && ps->InsertNodeOnSegment(spi, seg, t) >= 0)
+					{
+						edited = true;
+						label = L"앵커 추가";
+					}
+				}
+			}
+			if (edited)
+			{
+				ps->SetShapeKind(ge::ShapeKind::Path);   // 노드를 편집한 도형은 더 이상 파라메트릭이 아님
+				ps->Invalidate();
+				CString str; str.Format(_T("[선택 도구] %s (더블클릭)"), label);
+				LogAppEvent(str);
+				pDoc->CommitUndoPoint(label);
+				UpdateShapePropertiesSelection(ps, pDoc);
+				pDoc->UpdateAllViews(nullptr);
+				return;
+			}
+		}
+	}
+
 	// 1. 활성 도구의 OnDoubleClicked()에 더블클릭 이벤트 위임
 	// 도구가 완료 및 선택 전환 신호(true)를 보낼 때만 선택 도구로 전환
 	ITool* pActiveTool = GetApp()->GetToolManager().GetActiveTool();

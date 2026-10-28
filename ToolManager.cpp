@@ -24,7 +24,7 @@ void PenTool::OnDown(const ToolEvent& e)
 	m_state = State::Pressed;
 
 	// 패스 폐합 검사 (첫 앵커와 8px 이내인지 비교)
-	if (!m_needNewSubPath && !currentPath->GetPaths().empty() && !currentPath->GetPathsRef().back().closed && currentPath->GetPathsRef().back().nodes.size() >= 3)
+	if (!m_cornerOnly && !m_needNewSubPath && !currentPath->GetPaths().empty() && !currentPath->GetPathsRef().back().closed && currentPath->GetPathsRef().back().nodes.size() >= 3)
 	{
 		auto& sp = currentPath->GetPathsRef().back();
 		D2D1_POINT_2F firstScreenPt = CoordinateSpace::LocalToScreen(sp.nodes[0].anchor, currentPath->GetTransform(), e.view);
@@ -67,6 +67,8 @@ void PenTool::OnMove(const ToolEvent& e)
 	if (sp.nodes.empty()) return;
 
 	D2D1_POINT_2F screenD2D = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+
+	if (m_cornerOnly) return;   // 폴리라인: 핸들 드래그 없음
 
 	if (m_state == State::Pressed)
 	{
@@ -361,6 +363,7 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<SelectTool>());
 	m_tools.push_back(std::make_unique<PanTool>());
 	m_tools.push_back(std::make_unique<PenTool>());
+	m_tools.push_back(std::make_unique<PolylineTool>());
 	// BoxShapeTool 단일 클래스 인스턴스 주입: 직선, 사각형, 타원 (2-Point 바운딩)
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Line, ToolType::Line, L"직선 도구 (Line)", L'L'));
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Rect, ToolType::Rect, L"사각형 도구 (Rectangle)", L'M'));

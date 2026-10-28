@@ -249,12 +249,12 @@ void SvgWriter::WriteGradientDefs(Document& doc) {
 void SvgWriter::WriteClipPathDefs(Document& doc) {
 	std::vector<const GroupNode*> maskGroups;
 	std::function<void(const Node&)> collect = [&](const Node& n) {
-		if (n.Kind() == NodeKind::Group) {
-			const GroupNode& g = static_cast<const GroupNode&>(n);
-			if (g.IsClippingMask() && g.GetMaskNode() != nullptr) {
-				maskGroups.push_back(&g);
+		// 레이어(LayerNode)도 GroupNode 를 상속하므로 dynamic_cast 로 레이어 안까지 순회
+		if (const auto* g = dynamic_cast<const GroupNode*>(&n)) {
+			if (g->IsClippingMask() && g->GetMaskNode() != nullptr) {
+				maskGroups.push_back(g);
 			}
-			for (const auto& c : g.GetChildren()) {
+			for (const auto& c : g->GetChildren()) {
 				if (c) collect(*c);
 			}
 		}
@@ -327,12 +327,15 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 		if (n.Kind() == NodeKind::Path) {
 			const PathNode& p = static_cast<const PathNode&>(n);
 			if (UsesGradientDef(p)) gradUsers.push_back(&p);
-		} else if (n.Kind() == NodeKind::Group) {
-			const GroupNode& g = static_cast<const GroupNode&>(n);
-			if (g.IsClippingMask() && g.GetMaskNode() != nullptr) {
-				maskGroups.push_back(&g);
+		} else {
+			// GroupNode 또는 LayerNode (LayerNode는 GroupNode를 상속)
+			const auto* g = dynamic_cast<const GroupNode*>(&n);
+			if (g) {
+				if (g->IsClippingMask() && g->GetMaskNode() != nullptr) {
+					maskGroups.push_back(g);
+				}
+				for (const auto& c : g->GetChildren()) if (c) collect(*c);
 			}
-			for (const auto& c : g.GetChildren()) if (c) collect(*c);
 		}
 	};
 	for (const auto& layer : doc.GetLayers()) if (layer) collect(*layer);
@@ -448,7 +451,8 @@ void SvgWriter::Visit(GroupNode& node) {
 	++m_indent;
 	const Node* maskNode = isMask ? node.GetMaskNode() : nullptr;
 	for (const auto& child : node.GetChildren()) {
-		if (child) {
+		// 마스크 도형은 <clipPath> 정의로만 출력 (본문에도 쓰면 다른 뷰어에서 보이는 도형으로 그려짐). 읽을 때 clipPath 에서 복원
+		if (child && child.get() != maskNode) {
 			child->Accept(*this);
 		}
 	}

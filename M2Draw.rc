@@ -266,6 +266,14 @@ BEGIN
             MENUITEM "만들기(&M)\tCtrl+7",               ID_OBJECT_CLIP_MASK
             MENUITEM "해제(&R)\tCtrl+Alt+7",             ID_OBJECT_RELEASE_MASK
         END
+        MENUITEM SEPARATOR
+        POPUP "패스(&P)"
+        BEGIN
+            MENUITEM "윤곽선 만들기 (외곽선 확장)(&O)",  ID_PATH_OUTLINE
+            MENUITEM "단순화(&S)...",                  ID_PATH_SIMPLIFY
+            MENUITEM "방향 반전(&R)",                  ID_PATH_REVERSE
+            MENUITEM "연결(Join)(&J)\tCtrl+J",        ID_PATH_JOIN
+        END
     END
     POPUP "보기(&V)"
     BEGIN
@@ -382,6 +390,7 @@ BEGIN
     "X",            ID_BOOLEAN_EXCLUDE,     VIRTKEY,CONTROL,SHIFT
     "7",            ID_OBJECT_CLIP_MASK,    VIRTKEY,CONTROL
     "7",            ID_OBJECT_RELEASE_MASK, VIRTKEY,CONTROL,ALT
+    "J",            ID_PATH_JOIN,           VIRTKEY,CONTROL
 END
 
 

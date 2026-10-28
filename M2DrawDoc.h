@@ -69,6 +69,16 @@ public:
 	bool MakeClipMask();
 	bool ReleaseClipMask();
 
+	// --- 패스 연산 (Step 2.6: Outline, Simplify, Reverse, Join) ---
+	bool CanOutlineStroke() const { return m_doc.CanOutlineStroke(); }
+	bool CanSimplify() const      { return m_doc.CanSimplify(); }
+	bool CanReversePath() const   { return m_doc.CanReversePath(); }
+	bool CanJoinPaths() const     { return m_doc.CanJoinPaths(); }
+	bool OutlineStroke(float widthOverride = -1.0f);
+	bool SimplifyPath(float tolerance = 2.0f);
+	bool ReversePath();
+	bool JoinPaths();
+
 	// --- Undo / Redo (Ctrl+Z / Ctrl+Y) ---
 	ge::UndoManager& GetUndoManager() { return m_undoMgr; }
 	// 편집이 끝난 지점에서 호출: 마지막 확정 상태와 달라졌으면 Undo 이력에 기록하고 수정 표시를 켬 (true = 변경됨)
@@ -85,6 +95,8 @@ public:
 	afx_msg void OnObjectUngroup();
 	afx_msg void OnUpdateObjectUngroup(CCmdUI* pCmdUI);
 	afx_msg void OnObjectArrange(UINT nID);
+	afx_msg void OnAlignCommand(UINT nID);
+	afx_msg void OnUpdateAlignCommand(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateObjectArrange(CCmdUI* pCmdUI);
 	afx_msg void OnBooleanOperation(UINT nID);
 	afx_msg void OnUpdateBooleanOperation(CCmdUI* pCmdUI);
@@ -92,6 +104,14 @@ public:
 	afx_msg void OnUpdateObjectClipMask(CCmdUI* pCmdUI);
 	afx_msg void OnObjectReleaseMask();
 	afx_msg void OnUpdateObjectReleaseMask(CCmdUI* pCmdUI);
+	afx_msg void OnPathOutline();
+	afx_msg void OnUpdatePathOutline(CCmdUI* pCmdUI);
+	afx_msg void OnPathSimplify();
+	afx_msg void OnUpdatePathSimplify(CCmdUI* pCmdUI);
+	afx_msg void OnPathReverse();
+	afx_msg void OnUpdatePathReverse(CCmdUI* pCmdUI);
+	afx_msg void OnPathJoin();
+	afx_msg void OnUpdatePathJoin(CCmdUI* pCmdUI);
 
 private:
 	ge::UndoManager m_undoMgr;

@@ -109,7 +109,7 @@ CToolBoxPane::CToolBoxPane() noexcept
 		else if (btn.type == ToolType::Polygon)
 		{
 			// 다각형 & 특수 도형 그룹: 정다각형, 별, 기어, 스파이럴, 하트
-			btn.subTools = { ToolType::Polygon, ToolType::Star, ToolType::Gear, ToolType::Spiral, ToolType::Heart };
+			btn.subTools = { ToolType::Polygon, ToolType::Polyline, ToolType::Star, ToolType::Gear, ToolType::Spiral, ToolType::Heart };
 			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("PolygonGroupTool"), static_cast<int>(ToolType::Polygon));
 			for (ToolType st : btn.subTools)
 			{
@@ -646,6 +646,12 @@ void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 	case ToolType::Ellipse: // 타원
 	{
 		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 7.5f, 6.0f), brush, 1.8f);
+		break;
+	}
+	case ToolType::Polyline: // 열린 꺾은선
+	{
+		const D2D1_POINT_2F pl[4] = { D2D1::Point2F(cx - 8.0f, cy + 6.0f), D2D1::Point2F(cx - 3.0f, cy - 6.0f), D2D1::Point2F(cx + 3.0f, cy + 4.0f), D2D1::Point2F(cx + 8.0f, cy - 6.0f) };
+		for (int i = 0; i < 3; ++i) rt->DrawLine(pl[i], pl[i + 1], brush, 1.8f);
 		break;
 	}
 	case ToolType::Polygon: // 6각형
@@ -1337,6 +1343,7 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	case ToolType::Rect:     return L"사각형 (M)";
 	case ToolType::Triangle: return L"삼각형";
 	case ToolType::Polygon:  return L"정다각형 (G)";
+	case ToolType::Polyline: return L"열린 다각형 (폴리라인)";
 	case ToolType::Star:     return L"별 (Star)";
 	case ToolType::Gear:     return L"기어 (Gear)";
 	case ToolType::Spiral:   return L"스파이럴 (Spiral)";
@@ -1554,6 +1561,12 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color, bool
 	{
 		CPoint pts[3] = { CPoint(c.x, c.y - 7), CPoint(c.x + 8, c.y + 6), CPoint(c.x - 8, c.y + 6) };
 		dc.Polygon(pts, 3);
+		break;
+	}
+	case ToolType::Polyline: // 열린 꺾은선
+	{
+		CPoint pts[4] = { CPoint(c.x - 8, c.y + 6), CPoint(c.x - 3, c.y - 6), CPoint(c.x + 3, c.y + 4), CPoint(c.x + 8, c.y - 6) };
+		dc.Polyline(pts, 4);
 		break;
 	}
 	case ToolType::Polygon:
