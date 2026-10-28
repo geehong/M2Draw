@@ -748,6 +748,21 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 			}
 			const bool isShapeElem = (elemName == L"rect" || elemName == L"circle" || elemName == L"ellipse" ||
 				elemName == L"line" || elemName == L"polyline" || elemName == L"polygon" || elemName == L"path");
+			if (elemName == L"rect" && attrs.count(L"m2:frameBg") && !groupStack.empty()) {
+				// 프레임의 배경/테두리 사각형: 프레임 스타일로 복원하고 별도 노드는 만들지 않음
+				if (auto* fr = dynamic_cast<FrameNode*>(groupStack.back())) {
+					Style st = fr->GetStyle();
+					const std::wstring fillV = attrs.count(L"fill") ? attrs[L"fill"] : L"none";
+					if (fillV == L"none") st.fill.type = PaintType::None;
+					else { st.fill.type = PaintType::Solid; st.fill.color = ParseColorHex(fillV); }
+					if (attrs.count(L"fill-opacity")) st.fill.color.a = std::wcstof(attrs[L"fill-opacity"].c_str(), nullptr);
+					const std::wstring strokeV = attrs.count(L"stroke") ? attrs[L"stroke"] : L"none";
+					if (strokeV == L"none") st.stroke.width = 0.0f;
+					else { st.stroke.color = ParseColorHex(strokeV); st.stroke.width = attrs.count(L"stroke-width") ? ParseLength(attrs[L"stroke-width"], 1.0f) : 1.0f; }
+					fr->SetStyle(st);
+				}
+				continue;
+			}
 			if (isShapeElem) {
 				ApplyInheritance(attrs, styleStack.back());
 				// SVG 기본값: fill = 검정, stroke = none (자체 출력은 항상 명시하므로 영향 없음)
@@ -924,7 +939,17 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 						groupStack.push_back(layer);
 					}
 				} else {
-					auto group = std::make_unique<GroupNode>();
+					std::unique_ptr<GroupNode> group;
+					const bool isFrame = attrs.count(L"m2:frame") && attrs[L"m2:frame"] == L"true";
+					if (isFrame) {
+						auto fn = std::make_unique<FrameNode>();
+						fn->SetFrameSize(attrs.count(L"m2:w") ? ParseLength(attrs[L"m2:w"], 100.0f) : 100.0f, attrs.count(L"m2:h") ? ParseLength(attrs[L"m2:h"], 100.0f) : 100.0f);
+						fn->SetClip(!(attrs.count(L"m2:clip") && attrs[L"m2:clip"] == L"false"));
+						if (attrs.count(L"m2:radius")) fn->SetCornerRadius(ParseLength(attrs[L"m2:radius"], 0.0f));
+						group = std::move(fn);
+					} else {
+						group = std::make_unique<GroupNode>();
+					}
 					outDoc.RestoreNodeId(*group, ParseNodeId(attrs));
 					ApplyCommonState(*group, attrs);
 					if (attrs.count(L"m2:name")) group->SetName(attrs[L"m2:name"]);
@@ -946,7 +971,7 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 						getFallbackLayer()->AddChild(std::move(group));
 					}
 
-					if (!clipRefId.empty()) pendingClipGroups[rawGroup] = clipRefId;
+					if (!clipRefId.empty() && !isFrame) pendingClipGroups[rawGroup] = clipRefId;   // 프레임의 clip-path 는 프레임 상자 클립이라 마스크 그룹으로 만들지 않음
 
 					if (!isEmpty) {
 						groupStack.push_back(rawGroup);

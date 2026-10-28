@@ -368,6 +368,15 @@ std::unique_ptr<Node> GroupNode::Clone() const
 	return copy;
 }
 
+std::unique_ptr<Node> FrameNode::Clone() const
+{
+	auto copy = std::make_unique<FrameNode>();
+	copy->CopyNodePropsFrom(*this);
+	copy->m_w = m_w; copy->m_h = m_h; copy->m_clip = m_clip; copy->m_radius = m_radius;
+	for (const auto& c : m_children) copy->AddChild(c->Clone());
+	return copy;
+}
+
 bool GroupNode::GetLocalBounds(Rect2& out)
 {
 	bool any = false;
@@ -2242,6 +2251,36 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 	Node* maskNode = isClipMask ? node.GetMaskNode() : nullptr;
 
 	ComPtr<ID2D1Geometry> maskGeo;
+
+	// 프레임: 배경/테두리를 먼저 그리고, 자식은 프레임 상자로 클리핑
+	const auto* frame = (node.Kind() == NodeKind::Group) ? dynamic_cast<const FrameNode*>(&node) : nullptr;
+	if (frame && m_rt && m_brush) {
+		const D2D1_MATRIX_3X2_F fm = (worldXf * view.ToMatrix()).ToD2D();
+		const Style& fst = frame->GetStyle();
+		const D2D1_RECT_F rc = D2D1::RectF(0.0f, 0.0f, frame->GetWidth(), frame->GetHeight());
+		const float rr = (std::min)(frame->GetCornerRadius(), (std::min)(frame->GetWidth(), frame->GetHeight()) * 0.5f);
+		m_rt->SetTransform(fm);
+		if (fst.fill.type == PaintType::Solid && fst.fill.color.a > 0.0f) {
+			m_brush->SetColor(D2D1::ColorF(fst.fill.color.r, fst.fill.color.g, fst.fill.color.b, fst.fill.color.a));
+			if (rr > 0.0f) m_rt->FillRoundedRectangle(D2D1::RoundedRect(rc, rr, rr), m_brush.Get());
+			else m_rt->FillRectangle(rc, m_brush.Get());
+		}
+		if (fst.stroke.width > 0.0f && fst.stroke.color.a > 0.0f) {
+			m_brush->SetColor(D2D1::ColorF(fst.stroke.color.r, fst.stroke.color.g, fst.stroke.color.b, fst.stroke.color.a));
+			if (rr > 0.0f) m_rt->DrawRoundedRectangle(D2D1::RoundedRect(rc, rr, rr), m_brush.Get(), fst.stroke.width);
+			else m_rt->DrawRectangle(rc, m_brush.Get(), fst.stroke.width);
+		}
+		m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
+
+		if (frame->IsClip() && m_factory) {
+			ComPtr<ID2D1RoundedRectangleGeometry> rg;
+			if (SUCCEEDED(m_factory->CreateRoundedRectangleGeometry(D2D1::RoundedRect(rc, rr, rr), &rg))) {
+				ComPtr<ID2D1TransformedGeometry> xg;
+				if (SUCCEEDED(m_factory->CreateTransformedGeometry(rg.Get(), &fm, &xg))) maskGeo = xg;
+			}
+		}
+	}
+
 	if (isClipMask && maskNode && maskNode->Kind() == NodeKind::Path && m_rt && m_factory) {
 		PathNode& pathMask = static_cast<PathNode&>(*maskNode);
 		// 마스크 노드의 화면 변환 = maskNode 로컬 변환 * 그룹 월드 변환 * 뷰포트 (DrawPath 와 동일하게 뷰 변환까지 포함해야 패닝/줌에서 마스크가 도형과 같이 움직임)

@@ -821,6 +821,33 @@ protected:
 	bool m_bClippingMask = false;
 };
 
+// ---- 프레임 / 아트보드 (Step 4.1~4.2) ---------------------------------------------
+// 그룹의 한 종류: 로컬 (0,0)~(W,H) 상자에 배경(Style.fill)/테두리(Style.stroke)/모서리 반경을 가지고 자식을 그 상자로 클리핑한다.
+// Kind() 는 Group 이라서 기존의 그룹 처리(선택, 순서, 패널, Undo)가 그대로 동작한다. 프레임 여부는 dynamic_cast<FrameNode*> 로 구분.
+// (자동 레이아웃(Row/Column)은 4.3)
+class FrameNode : public GroupNode {
+public:
+	FrameNode() { m_style.fill.type = PaintType::Solid; m_style.fill.color = Color(1.0f, 1.0f, 1.0f, 1.0f); m_style.stroke.width = 0.0f; }
+
+	std::unique_ptr<Node> Clone() const override;
+	bool GetLocalBounds(Rect2& out) override { out = Rect2{ 0.0f, 0.0f, m_w, m_h }; return true; }
+	using Node::GetLocalBounds;
+	const wchar_t* GetShapeTypeName() const override { return L"프레임"; }
+
+	float GetWidth() const  { return m_w; }
+	float GetHeight() const { return m_h; }
+	void  SetFrameSize(float w, float h) { m_w = (std::max)(1.0f, w); m_h = (std::max)(1.0f, h); Invalidate(); }
+	bool  IsClip() const    { return m_clip; }
+	void  SetClip(bool v)   { m_clip = v; Invalidate(); }
+	float GetCornerRadius() const { return m_radius; }
+	void  SetCornerRadius(float v) { m_radius = (std::max)(0.0f, v); Invalidate(); }
+
+private:
+	float m_w = 100.0f, m_h = 100.0f;
+	bool  m_clip = true;
+	float m_radius = 0.0f;
+};
+
 } // namespace ge
 
 #include "D2DLayer.h"

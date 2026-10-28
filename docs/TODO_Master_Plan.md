@@ -347,15 +347,15 @@
 ## Phase 4 — HTML 페이지 디자인
 
 ### Step 4.1 Artboard(= 최상위 FrameNode) 개념 (재검토에서 변경)
-- [ ] 4.1.1 ~~`Document`를 `vector<Page>` 구조로 확장~~ → **`Document` 구조는 유지**하고 Artboard 를 레이어 안의 최상위 `FrameNode`(너비/높이/배경)로 표현 (Figma 방식). 여러 페이지 = 여러 최상위 Frame, 내보내기는 Frame 단위. (`Document`를 바꾸면 Undo/Writer/Reader/레이어 전체가 영향받음)
+- [ ] 4.1.1 ~~`Document`를 `vector<Page>` 구조로 확장~~ → **`Document` 구조는 유지**하고 Artboard 를 레이어 안의 최상위 `FrameNode`(너비/높이/배경)로 표현 (Figma 방식). 여러 페이지 = 여러 최상위 Frame, 내보내기는 Frame 단위. (`Document`를 바꾸면 Undo/Writer/Reader/레이어 전체가 영향받음) — (부분 2026-10-28) Document 구조는 유지, Artboard 는 최상위 `FrameNode` 로 표현. 문서 용지(대지)와 별개로 여러 프레임을 둘 수 있음. 내보내기 대상 선택은 미구현
 - [ ] 4.1.2 캔버스에 Artboard 경계/이름 표시, Artboard 목록 UI. HTML 문서는 항상 Y↓ 좌표계(2.0.1)
 - [ ] 4.1.3 빌드 확인 및 다중 Artboard 생성/삭제/선택/내보내기 대상 선택 검증
 
 ### Step 4.2 FrameNode + Frame 도구 & 속성창 UI
 > 선행: 2.0.3(계층 트리 패널). **자식 순서 의미 정의**: 자동 레이아웃(Row/Column) Frame 안에서 자식 배열 순서는 z-order 가 아니라 **배치(흐름) 순서**다. 이 경우 "맨 앞으로/뒤로"는 순서 변경(패널 드래그 재정렬)으로, z-order 는 별도 `z-index` 속성으로 처리. 레이아웃 없음(None) Frame 은 기존 z-order 유지
-- [ ] 4.2.1 `GroupNode`를 상속받는 `FrameNode` 구현 (레이아웃 속성, 패딩, 갭, 배경/테두리, 클리핑)
-- [ ] 4.2.2 도구상자에 Frame 도구 추가 (드래그하여 프레임 생성, 선택된 노드들을 Frame으로 감싸기)
-- [ ] 4.2.3 **`PropertyView` 프레임/Auto Layout 패널 모드/섹션 구현**:
+- [ ] 4.2.1 `GroupNode`를 상속받는 `FrameNode` 구현 (레이아웃 속성, 패딩, 갭, 배경/테두리, 클리핑) — (부분 완료) `FrameNode : GroupNode`(Kind 는 Group 유지): 크기, 배경(fill)/테두리(stroke), 모서리 반경, 자식 클리핑. 패딩/갭/레이아웃 속성은 4.3
+- [ ] 4.2.2 도구상자에 Frame 도구 추가 (드래그하여 프레임 생성, 선택된 노드들을 Frame으로 감싸기) — (부분 완료) 사각형 그룹 플라이아웃에 프레임 도구(F): 드래그로 생성(미리보기, Undo, 자동 선택 도구 복귀). 선택한 노드를 프레임으로 감싸기는 미구현
+- [ ] 4.2.3 **`PropertyView` 프레임/Auto Layout 패널 모드/섹션 구현**: — (미착수) 프레임 속성창(크기/배경/모서리/클립/자동 레이아웃). 현재는 그룹 속성창(불투명도/혼합)이 표시됨
   - 레이아웃 모드 (None, Row, Column, Grid) 토글 버튼
   - 간격(Gap), 안쪽 여백(Padding - 상하좌우 개별/통합) 스핀 컨트롤
   - 가로/세로 크기 결정 규칙 (Fixed, Hug Content, Fill Container) 콤보

@@ -101,10 +101,12 @@ CToolBoxPane::CToolBoxPane() noexcept
 	{
 		if (btn.type == ToolType::Rect)
 		{
-			btn.subTools = { ToolType::Rect, ToolType::Triangle };
+			btn.subTools = { ToolType::Rect, ToolType::Triangle, ToolType::Frame };
 			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("RectGroupTool"), static_cast<int>(ToolType::Rect));
 			if (saved == static_cast<int>(ToolType::Triangle))
 				btn.type = ToolType::Triangle;
+			else if (saved == static_cast<int>(ToolType::Frame))
+				btn.type = ToolType::Frame;
 		}
 		else if (btn.type == ToolType::Polygon)
 		{
@@ -646,6 +648,15 @@ void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 	case ToolType::Ellipse: // 타원
 	{
 		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 7.5f, 6.0f), brush, 1.8f);
+		break;
+	}
+	case ToolType::Frame: // 프레임
+	{
+		rt->DrawRectangle(D2D1::RectF(cx - 6.0f, cy - 6.0f, cx + 6.0f, cy + 6.0f), brush, 1.6f);
+		rt->DrawLine(D2D1::Point2F(cx - 9.0f, cy - 3.0f), D2D1::Point2F(cx - 6.0f, cy - 3.0f), brush, 1.4f);
+		rt->DrawLine(D2D1::Point2F(cx - 9.0f, cy + 3.0f), D2D1::Point2F(cx - 6.0f, cy + 3.0f), brush, 1.4f);
+		rt->DrawLine(D2D1::Point2F(cx - 3.0f, cy - 9.0f), D2D1::Point2F(cx - 3.0f, cy - 6.0f), brush, 1.4f);
+		rt->DrawLine(D2D1::Point2F(cx + 3.0f, cy - 9.0f), D2D1::Point2F(cx + 3.0f, cy - 6.0f), brush, 1.4f);
 		break;
 	}
 	case ToolType::Polyline: // 열린 꺾은선
@@ -1344,6 +1355,7 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	case ToolType::Triangle: return L"삼각형";
 	case ToolType::Polygon:  return L"정다각형 (G)";
 	case ToolType::Polyline: return L"열린 다각형 (폴리라인)";
+	case ToolType::Frame:    return L"프레임 (F)";
 	case ToolType::Star:     return L"별 (Star)";
 	case ToolType::Gear:     return L"기어 (Gear)";
 	case ToolType::Spiral:   return L"스파이럴 (Spiral)";
@@ -1561,6 +1573,15 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color, bool
 	{
 		CPoint pts[3] = { CPoint(c.x, c.y - 7), CPoint(c.x + 8, c.y + 6), CPoint(c.x - 8, c.y + 6) };
 		dc.Polygon(pts, 3);
+		break;
+	}
+	case ToolType::Frame: // 프레임: 모서리 눈금이 있는 사각형
+	{
+		dc.Rectangle(c.x - 6, c.y - 6, c.x + 7, c.y + 7);
+		dc.MoveTo(c.x - 9, c.y - 3); dc.LineTo(c.x - 6, c.y - 3);
+		dc.MoveTo(c.x - 9, c.y + 3); dc.LineTo(c.x - 6, c.y + 3);
+		dc.MoveTo(c.x - 3, c.y - 9); dc.LineTo(c.x - 3, c.y - 6);
+		dc.MoveTo(c.x + 3, c.y - 9); dc.LineTo(c.x + 3, c.y - 6);
 		break;
 	}
 	case ToolType::Polyline: // 열린 꺾은선

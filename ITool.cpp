@@ -53,6 +53,16 @@ static bool HitTestNodeRecursive(ge::Node* n, D2D1_POINT_2F screenPt, const View
 		{
 			if (HitTestNodeRecursive(children[i].get(), screenPt, view, f)) return true;
 		}
+		// 프레임은 자식이 없는 빈 곳(프레임 상자 안쪽)을 클릭해도 선택됨
+		if (auto* fr = dynamic_cast<ge::FrameNode*>(group))
+		{
+			ge::Matrix2D inv = fr->GetWorldTransform();
+			if (inv.Invert())
+			{
+				const ge::Vec2 l = inv.TransformPoint(view.ScreenToWorld(ge::Vec2{ screenPt.x, screenPt.y }));
+				if (l.x >= 0.0f && l.x <= fr->GetWidth() && l.y >= 0.0f && l.y <= fr->GetHeight()) return true;
+			}
+		}
 		return false;
 	}
 
@@ -2196,6 +2206,58 @@ void PanTool::OnUp(const ToolEvent& e)
 // ============================================================================
 // 6. 돋보기 도구 (ZoomInTool / ZoomOutTool)
 // ============================================================================
+// ---------------- 프레임 도구 ----------------
+void FrameTool::OnDown(const ToolEvent& e)
+{
+	m_drag = true;
+	m_startW = m_curW = e.worldPt;
+	m_startS = m_curS = e.screenPt;
+}
+
+void FrameTool::OnMove(const ToolEvent& e)
+{
+	if (!m_drag) return;
+	m_curW = e.worldPt;
+	m_curS = e.screenPt;
+}
+
+void FrameTool::OnUp(const ToolEvent& e)
+{
+	if (!m_drag) return;
+	m_drag = false;
+	m_curW = e.worldPt;
+	const float x = (std::min)(m_startW.x, m_curW.x), y = (std::min)(m_startW.y, m_curW.y);
+	const float w = std::fabs(m_curW.x - m_startW.x), h = std::fabs(m_curW.y - m_startW.y);
+	if (!e.pDoc || w < 4.0f || h < 4.0f) return;
+
+	auto fn = std::make_unique<ge::FrameNode>();
+	fn->SetFrameSize(w, h);
+	fn->SetTransform(ge::Matrix2D::Translation(x, y));
+	fn->SetName(e.pDoc->GetDoc().GenerateGroupName());
+	ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(fn));
+	if (!added) return;
+	e.pDoc->GetDoc().SetSelection({ added });
+	e.pDoc->SetModifiedFlag(TRUE);
+	e.pDoc->CommitUndoPoint(L"프레임 추가");
+	LogAppEvent(_T("[프레임 도구] 프레임 추가"));
+
+	CM2DrawDoc* pDoc = e.pDoc;
+	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+	if (SelectTool* sel = GetApp()->GetToolManager().GetSelectTool()) sel->SelectNode(added, pDoc);
+	pDoc->UpdateAllViews(nullptr);
+}
+
+void FrameTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float /*zoom*/, D2D1_POINT_2F /*pan*/, CM2DrawDoc* /*pDoc*/)
+{
+	if (!m_drag || !rt || !brush) return;
+	const D2D1_RECT_F rc = D2D1::RectF(static_cast<float>((std::min)(m_startS.x, m_curS.x)), static_cast<float>((std::min)(m_startS.y, m_curS.y)),
+		static_cast<float>((std::max)(m_startS.x, m_curS.x)), static_cast<float>((std::max)(m_startS.y, m_curS.y)));
+	brush->SetColor(D2D1::ColorF(0.20f, 0.45f, 0.85f, 0.12f));
+	rt->FillRectangle(rc, brush);
+	brush->SetColor(D2D1::ColorF(0.20f, 0.45f, 0.85f, 1.0f));
+	rt->DrawRectangle(rc, brush, 1.0f);
+}
+
 void ZoomInTool::OnDown(const ToolEvent& e)
 {
 	m_isDragging = true;

@@ -1229,6 +1229,48 @@ bool RunPureModelVerification(std::wstring* failure)
 			!static_cast<ImageNode*>(after[0].get())->GetData()->bytes.empty(), L"Undo 후 이미지 데이터가 사라짐");
 	}
 
+	// ---- 24. 프레임 (4.1~4.2): 모델, 복제, SVG 왕복, 마스크 그룹과 구분 ---------------------------------
+	{
+		Document d;
+		auto fn = std::make_unique<FrameNode>();
+		fn->SetFrameSize(120.0f, 80.0f);
+		fn->SetCornerRadius(8.0f);
+		fn->SetTransform(Matrix2D::Translation(30.0f, 40.0f));
+		Style fs = fn->GetStyle();
+		fs.fill.color = Color(0.9f, 0.95f, 1.0f, 1.0f);
+		fs.stroke.width = 2.0f;
+		fs.stroke.color = Color(0.1f, 0.2f, 0.8f, 1.0f);
+		fn->SetStyle(fs);
+		FrameNode* f0 = static_cast<FrameNode*>(d.AddShape(std::move(fn)));
+		f0->AddChild(MakePath(L"in", 5.0f, 5.0f));
+		d.AssignIds(*f0);
+		GE_CHECK(f0->Kind() == NodeKind::Group && dynamic_cast<FrameNode*>(f0) != nullptr, L"FrameNode 는 Group 종류여야 함");
+		Rect2 b;
+		GE_CHECK(f0->GetLocalBounds(b) && b.right == 120.0f && b.bottom == 80.0f, L"프레임 경계는 상자 크기여야 함 (자식 합집합이 아님)");
+
+		auto clone = f0->Clone();
+		auto* c0 = dynamic_cast<FrameNode*>(clone.get());
+		GE_CHECK(c0 && c0->GetWidth() == 120.0f && c0->GetCornerRadius() == 8.0f && c0->GetChildren().size() == 1 && c0->IsClip(), L"프레임 복제가 속성/자식을 보존하지 못함");
+
+		SvgWriter fw;
+		const std::string svg = fw.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(svg.find("m2:frame=\"true\"") != std::string::npos && svg.find("<clipPath id=\"frame_clip_") != std::string::npos, L"프레임이 m2:frame/clipPath 로 출력되지 않음");
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"프레임 SVG 읽기 실패");
+		const auto& bk = back.GetLayers()[0]->GetChildren();
+		GE_CHECK(bk.size() == 1, L"프레임 왕복 후 최상위 요소 수가 틀림");
+		auto* f1 = dynamic_cast<FrameNode*>(bk[0].get());
+		GE_CHECK(f1 != nullptr, L"왕복 후 FrameNode 가 복원되지 않음");
+		GE_CHECK(f1->GetWidth() == 120.0f && f1->GetHeight() == 80.0f && f1->GetCornerRadius() == 8.0f && f1->IsClip(), L"프레임 크기/모서리/클립 왕복이 틀림");
+		GE_CHECK(f1->GetChildren().size() == 1 && f1->GetChildren()[0]->Kind() == NodeKind::Path, L"프레임 안 자식만 남아야 함 (배경 사각형/clipPath 는 노드가 아님)");
+		GE_CHECK(!f1->IsClippingMask(), L"프레임의 clip-path 가 마스크 그룹으로 오해되면 안 됨");
+		GE_CHECK(std::abs(f1->GetStyle().fill.color.r - 0.9f) < 0.01f && f1->GetStyle().stroke.width == 2.0f, L"프레임 배경/테두리 스타일 왕복이 틀림");
+
+		// Clean: 표준 뷰어용 clipPath + 배경 사각형은 나오되 m2: 는 없음
+		const std::string clean = fw.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("m2:") == std::string::npos && clean.find("clip-path=\"url(#frame_clip_") != std::string::npos, L"Clean 프레임 출력이 틀림");
+	}
+
 #undef GE_CHECK
 
 	return true;

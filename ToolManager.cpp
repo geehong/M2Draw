@@ -526,6 +526,7 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::RegularPoly, ToolType::Polygon, L"정다각형 도구 (Polygon)", L'G'));
 	m_tools.push_back(std::make_unique<TextTool>());
 	m_tools.push_back(std::make_unique<PaintBucketTool>());
+	m_tools.push_back(std::make_unique<FrameTool>());
 	m_tools.push_back(std::make_unique<ZoomInTool>());
 	m_tools.push_back(std::make_unique<ZoomOutTool>());
 	m_tools.push_back(std::make_unique<GradientTool>());

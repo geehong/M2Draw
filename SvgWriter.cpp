@@ -448,7 +448,16 @@ void SvgWriter::Visit(GroupNode& node) {
 	m_output += BuildCommonState(node, true, Meta());
 	m_output += BuildCssStyle(node);
 
-	const bool isMask = node.IsClippingMask() && (node.GetMaskNode() != nullptr);
+	const FrameNode* frame = dynamic_cast<const FrameNode*>(&node);
+	if (frame) {
+		if (Meta()) {
+			m_output += " m2:frame=\"true\" m2:w=\"" + FormatFloat(frame->GetWidth()) + "\" m2:h=\"" + FormatFloat(frame->GetHeight()) +
+				"\" m2:clip=\"" + std::string(frame->IsClip() ? "true" : "false") + "\" m2:radius=\"" + FormatFloat(frame->GetCornerRadius()) + "\"";
+		}
+		if (frame->IsClip()) m_output += " clip-path=\"url(#frame_clip_" + std::to_string(node.GetId()) + ")\"";
+	}
+
+	const bool isMask = !frame && node.IsClippingMask() && (node.GetMaskNode() != nullptr);
 	if (isMask) {
 		m_output += " clip-path=\"url(#clip_group_" + std::to_string(node.GetId()) + ")\"";
 		if (Meta()) {
@@ -467,6 +476,25 @@ void SvgWriter::Visit(GroupNode& node) {
 	m_output += ">\n";
 
 	++m_indent;
+	if (frame) {
+		// 표준 뷰어에서도 보이도록: 클립 영역 + 배경 사각형을 그룹 안 첫 요소로 출력 (읽을 때 m2:frameBg 로 프레임 스타일 복원)
+		const std::string geom = " x=\"0\" y=\"0\" width=\"" + FormatFloat(frame->GetWidth()) + "\" height=\"" + FormatFloat(frame->GetHeight()) + "\"" +
+			(frame->GetCornerRadius() > 0.0f ? " rx=\"" + FormatFloat(frame->GetCornerRadius()) + "\" ry=\"" + FormatFloat(frame->GetCornerRadius()) + "\"" : std::string());
+		if (frame->IsClip()) {
+			AppendIndent();
+			m_output += "<clipPath id=\"frame_clip_" + std::to_string(node.GetId()) + "\"><rect" + geom + " /></clipPath>\n";
+		}
+		const Style& fs = frame->GetStyle();
+		const bool hasFill = fs.fill.type == PaintType::Solid && fs.fill.color.a > 0.0f;
+		const bool hasStroke = fs.stroke.width > 0.0f && fs.stroke.color.a > 0.0f;
+		if (hasFill || hasStroke || Meta()) {
+			AppendIndent();
+			m_output += std::string("<rect") + (Meta() ? " m2:frameBg=\"true\"" : "") + geom;
+			m_output += hasFill ? " fill=\"" + ColorToHex(fs.fill.color) + "\"" + (fs.fill.color.a < 0.999f ? " fill-opacity=\"" + FormatFloat(fs.fill.color.a) + "\"" : std::string()) : std::string(" fill=\"none\"");
+			m_output += hasStroke ? " stroke=\"" + ColorToHex(fs.stroke.color) + "\" stroke-width=\"" + FormatFloat(fs.stroke.width) + "\"" : std::string(" stroke=\"none\"");
+			m_output += " />\n";
+		}
+	}
 	const Node* maskNode = isMask ? node.GetMaskNode() : nullptr;
 	for (const auto& child : node.GetChildren()) {
 		// 마스크 도형은 <clipPath> 정의로만 출력 (본문에도 쓰면 다른 뷰어에서 보이는 도형으로 그려짐). 읽을 때 clipPath 에서 복원

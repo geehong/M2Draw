@@ -91,7 +91,8 @@ enum class ToolType
 	ActionBooleanTrim,      // 불리언: 트림/분할
 	ActionClipMask,         // 클리핑 마스크 만들기
 	ActionReleaseMask,      // 클리핑 마스크 해제
-	Polyline                // 열린 다각형(폴리라인) 도구: 클릭으로 꺾은선, 더블클릭/우클릭/Enter 로 완성
+	Polyline,               // 열린 다각형(폴리라인) 도구: 클릭으로 꺾은선, 더블클릭/우클릭/Enter 로 완성
+	Frame                   // 프레임(아트보드) 도구 (F): 드래그로 프레임 생성
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)
@@ -469,6 +470,28 @@ private:
 //    - 클릭 시 클릭 지점 기준 Zoom In/Out
 //    - 드래그 시 지정 영역을 화면 가득 맞춤 확대 (Marquee Zoom)
 // ============================================================================
+// 프레임(아트보드) 도구: 드래그한 사각형 크기로 FrameNode 를 만들고 선택 도구로 돌아감
+class FrameTool : public ITool
+{
+public:
+	ToolType GetType() const override { return ToolType::Frame; }
+	const wchar_t* GetName() const override { return L"프레임 도구 (Frame)"; }
+	wchar_t GetShortcut() const override { return L'F'; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	bool HasActiveShape() const override { return m_drag; }
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+private:
+	bool          m_drag = false;
+	D2D1_POINT_2F m_startW{}, m_curW{};
+	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
+};
+
 class ZoomInTool : public ITool
 {
 public:
