@@ -56,9 +56,9 @@ static bool HitTestNodeRecursive(ge::Node* n, D2D1_POINT_2F screenPt, const View
 		return false;
 	}
 
-	if (n->Kind() == ge::NodeKind::Text)
+	if (n->Kind() == ge::NodeKind::Text || n->Kind() == ge::NodeKind::Image)
 	{
-		// 텍스트: 글자 상자(로컬 경계) 안쪽 클릭이면 히트
+		// 텍스트/이미지: 상자(로컬 경계) 안쪽 클릭이면 히트
 		ge::Rect2 b;
 		ge::Matrix2D inv = n->GetWorldTransform();
 		if (!n->GetLocalBounds(b) || !inv.Invert()) return false;

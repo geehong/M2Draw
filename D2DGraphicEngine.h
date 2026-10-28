@@ -424,7 +424,7 @@ struct SubPath {
 	bool closed = false;
 };
 
-enum class NodeKind : uint8_t { Path, Group, Layer, Text };
+enum class NodeKind : uint8_t { Path, Group, Layer, Text, Image };
 
 // 혼합 모드 (SVG/CSS mix-blend-mode 와 1:1 대응). 모든 노드에 지정 가능, 렌더링 적용은 Phase 2
 enum class LayerBlendMode : uint8_t {
@@ -692,6 +692,38 @@ private:
 	bool         m_italic = false;
 	TextAlign    m_align = TextAlign::Left;
 	float        m_mw = 0.0f, m_mh = 0.0f;   // 측정값 (0 = 아직 안 잼)
+};
+
+// ---- 이미지 (Step 3.4) ---------------------------------------------------------
+// 원본 파일 바이트(PNG/JPEG/GIF/BMP)를 그대로 보관한다. 같은 ImageData 를 가리키는 노드(복제본)는 바이트를 공유한다.
+// 계획서의 "문서 리소스 테이블" 대신 노드가 shared_ptr 로 직접 보관하는 단순한 구조 (SVG 에는 data URI 로 임베드되므로 문서 단위 테이블이 필요 없음)
+struct ImageData {
+	std::vector<uint8_t> bytes;
+	std::string          mime = "image/png";
+	int                  pixelW = 0, pixelH = 0;   // 원본 픽셀 크기 (모르면 0)
+};
+
+// 로컬 좌표 (0,0)~(W,H) 를 채우는 이미지 (비율 유지 없이 늘림 = preserveAspectRatio="none")
+class ImageNode : public Node {
+public:
+	ImageNode() { m_style.fill.type = PaintType::None; m_style.stroke.width = 0.0f; }
+
+	NodeKind Kind() const override { return NodeKind::Image; }
+	std::unique_ptr<Node> Clone() const override;
+	void Accept(INodeVisitor& visitor) override;
+	bool GetLocalBounds(Rect2& out) override;
+	using Node::GetLocalBounds;
+	const wchar_t* GetShapeTypeName() const override { return L"이미지"; }
+
+	const std::shared_ptr<const ImageData>& GetData() const { return m_data; }
+	void SetData(std::shared_ptr<const ImageData> d) { m_data = std::move(d); Invalidate(); }
+	float GetWidth() const  { return m_w; }
+	float GetHeight() const { return m_h; }
+	void  SetSize(float w, float h) { m_w = (std::max)(1.0f, w); m_h = (std::max)(1.0f, h); Invalidate(); }
+
+private:
+	std::shared_ptr<const ImageData> m_data;
+	float m_w = 100.0f, m_h = 100.0f;
 };
 
 // ---- 패스 도형 --------------------------------------------------------------
@@ -1041,6 +1073,9 @@ public:
 	// 4) 패스 결합: 인접한 끝점을 가진 서브패스 또는 두 패스를 하나로 결합
 	static std::unique_ptr<PathNode> Join(const PathNode& a, const PathNode& b, float maxDistance = 10.0f);
 
+	// 이미지 바이트의 원본 픽셀 크기 (WIC). 실패하면 false
+	static bool DecodeImageInfo(const std::vector<uint8_t>& bytes, int& w, int& h);
+
 	// 텍스트 크기를 DirectWrite 로 즉시 재서 노드에 기록 (속성창에서 글꼴/크기를 바꾼 직후 W/H 를 바로 갱신하기 위함)
 	static void MeasureText(TextNode& text);
 
@@ -1084,6 +1119,11 @@ private:
 	void DrawPath(PathNode& node, const Matrix2D& worldXf, const Viewport& view);
 	void DrawGroup(GroupNode& node, const Matrix2D& worldXf, const Viewport& view);
 	void DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Viewport& view);
+	void DrawImageNode(ImageNode& node, const Matrix2D& worldXf, const Viewport& view);
+
+	// 디코딩한 비트맵 캐시 (렌더 타깃에 종속이라 Initialize/Shutdown 에서 비움). 키 데이터를 함께 잡아 주소 재사용을 막음
+	struct ImageCacheEntry { std::shared_ptr<const ImageData> keep; ComPtr<ID2D1Bitmap> bitmap; };
+	std::unordered_map<const ImageData*, ImageCacheEntry> m_imageCache;
 	ComPtr<ID2D1PathGeometry> BuildGeometry(const PathNode& node);
 	// 기본값(Butt/Miter/실선)이면 nullptr, 아니면 캐시된 스트로크 스타일
 	ID2D1StrokeStyle* GetStrokeStyle(const Stroke& stroke);

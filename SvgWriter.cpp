@@ -311,6 +311,7 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 	// XML 선언 및 SVG 루트 시작
 	m_output += "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
 	m_output += "<svg xmlns=\"http://www.w3.org/2000/svg\"\n";
+	m_output += "     xmlns:xlink=\"http://www.w3.org/1999/xlink\"\n";   // <image xlink:href> 용 (표준 네임스페이스라 Clean 출력에도 포함)
 	if (Meta()) {
 		m_output += "     xmlns:m2=\"https://m2draw/ns\"\n";
 		m_output += "     xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"\n";
@@ -477,6 +478,46 @@ void SvgWriter::Visit(GroupNode& node) {
 
 	AppendIndent();
 	m_output += "</g>\n";
+}
+
+static std::string Base64Encode(const std::vector<uint8_t>& in)
+{
+	static const char* k = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	std::string out;
+	out.reserve((in.size() + 2) / 3 * 4);
+	size_t i = 0;
+	for (; i + 2 < in.size(); i += 3) {
+		const unsigned v = (in[i] << 16) | (in[i + 1] << 8) | in[i + 2];
+		out += k[(v >> 18) & 63]; out += k[(v >> 12) & 63]; out += k[(v >> 6) & 63]; out += k[v & 63];
+	}
+	if (i + 1 == in.size()) {
+		const unsigned v = in[i] << 16;
+		out += k[(v >> 18) & 63]; out += k[(v >> 12) & 63]; out += "==";
+	} else if (i + 2 == in.size()) {
+		const unsigned v = (in[i] << 16) | (in[i + 1] << 8);
+		out += k[(v >> 18) & 63]; out += k[(v >> 12) & 63]; out += k[(v >> 6) & 63]; out += '=';
+	}
+	return out;
+}
+
+void SvgWriter::Visit(ImageNode& node) {
+	if (!node.GetData()) return;   // 데이터가 없는 이미지는 출력하지 않음
+	AppendIndent();
+	m_output += "<image id=\"image_" + std::to_string(node.GetId()) + "\"";
+	if (Meta()) {
+		std::string utfName = WideToUtf8(node.GetName());
+		if (!utfName.empty()) m_output += " m2:name=\"" + EscapeXml(utfName) + "\"";
+	}
+	m_output += " x=\"0\" y=\"0\" width=\"" + FormatFloat(node.GetWidth()) + "\" height=\"" + FormatFloat(node.GetHeight()) + "\" preserveAspectRatio=\"none\"";
+	if (node.GetOpacity() < 0.999f) m_output += " opacity=\"" + FormatFloat(node.GetOpacity()) + "\"";
+	m_output += BuildCommonState(node, true, Meta());
+	m_output += BuildCssStyle(node);
+	const Matrix2D& xf = node.GetTransform();
+	if (!IsIdentity(xf)) {
+		m_output += " transform=\"matrix(" + FormatFloat(xf.m11) + " " + FormatFloat(xf.m12) + " " + FormatFloat(xf.m21) + " " +
+			FormatFloat(xf.m22) + " " + FormatFloat(xf.dx) + " " + FormatFloat(xf.dy) + ")\"";
+	}
+	m_output += " xlink:href=\"data:" + node.GetData()->mime + ";base64," + Base64Encode(node.GetData()->bytes) + "\" />\n";
 }
 
 void SvgWriter::Visit(TextNode& node) {

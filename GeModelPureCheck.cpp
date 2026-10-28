@@ -1178,6 +1178,57 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(std::abs(eo.x - 10.0f) < 1e-3f && std::abs(eo.y - (30.0f - 16.0f * TextNode::kAscentRatio)) < 1e-3f, L"기준선 y 가 상자 위쪽으로 환산되지 않음");
 	}
 
+	// ---- 23. 이미지 노드 (3.4): data URI 읽기/쓰기 왕복, 복제, Undo ------------------------------------
+	{
+		// 1x1 빨강 PNG
+		const char* kPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+		const std::string svg = std::string(
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"200\" height=\"100\">\n"
+			"  <image x=\"10\" y=\"20\" width=\"40\" height=\"30\" xlink:href=\"data:image/png;base64,") + kPng + "\"/>\n</svg>\n";
+		Document d;
+		GE_CHECK(reader.ReadFromString(svg, d), L"이미지 SVG 읽기 실패");
+		const auto& kids = d.GetLayers()[0]->GetChildren();
+		GE_CHECK(kids.size() == 1 && kids[0]->Kind() == NodeKind::Image, L"<image> 가 ImageNode 로 읽히지 않음");
+		auto* im = static_cast<ImageNode*>(kids[0].get());
+		GE_CHECK(im->GetData() && im->GetData()->bytes.size() > 50 && im->GetData()->mime == "image/png", L"이미지 바이트/MIME 복원이 틀림");
+		GE_CHECK(im->GetWidth() == 40.0f && im->GetHeight() == 30.0f, L"이미지 크기가 틀림");
+		Rect2 b;
+		GE_CHECK(im->GetLocalBounds(b) && b.right == 40.0f && b.bottom == 30.0f, L"이미지 경계가 틀림");
+		const Vec2 o = im->GetWorldTransform().TransformPoint(Vec2{ 0.0f, 0.0f });
+		GE_CHECK(o.x == 10.0f && o.y == 20.0f, L"이미지 위치(x,y)가 틀림");
+
+		auto clone = im->Clone();
+		GE_CHECK(clone->Kind() == NodeKind::Image && static_cast<ImageNode*>(clone.get())->GetData() == im->GetData(), L"이미지 복제는 데이터를 공유해야 함");
+
+		SvgWriter iw;
+		for (SvgWriteMode m : { SvgWriteMode::File, SvgWriteMode::Clean, SvgWriteMode::Snapshot }) {
+			const std::string out = iw.WriteString(d, SvgWriteOptions(m));
+			GE_CHECK(out.find("<image ") != std::string::npos && out.find("base64,") != std::string::npos, L"이미지가 data URI 로 출력되지 않음");
+			Document back;
+			GE_CHECK(reader.ReadFromString(out, back), L"이미지 SVG 왕복 읽기 실패");
+			// Clean 은 레이어 표식(inkscape:groupmode)이 없어 레이어가 일반 그룹으로 읽히므로 재귀로 이미지 노드를 찾음
+			ImageNode* found = nullptr;
+			std::function<void(Node&)> find = [&](Node& nn) {
+				if (nn.Kind() == NodeKind::Image) { found = static_cast<ImageNode*>(&nn); return; }
+				if (nn.Kind() == NodeKind::Group || nn.Kind() == NodeKind::Layer)
+					for (const auto& c : static_cast<GroupNode&>(nn).GetChildren()) if (c && !found) find(*c);
+			};
+			find(*back.GetLayers()[0]);
+			GE_CHECK(found != nullptr, L"왕복 후 이미지 노드가 없음");
+			GE_CHECK(found->GetData() && found->GetData()->bytes == im->GetData()->bytes, L"왕복 후 이미지 바이트가 달라짐");
+		}
+
+		// Undo: 스냅샷으로 복원해도 이미지가 남아야 함
+		UndoManager um;
+		um.Reset(d);
+		kids[0]->SetTransform(Matrix2D::Translation(99.0f, 99.0f));
+		GE_CHECK(um.CommitChange(L"이동", d), L"이미지 이동이 Undo 로 기록되지 않음");
+		GE_CHECK(um.Undo(d), L"이미지 문서 Undo 실패");
+		const auto& after = d.GetLayers()[0]->GetChildren();
+		GE_CHECK(after.size() == 1 && after[0]->Kind() == NodeKind::Image && static_cast<ImageNode*>(after[0].get())->GetData() &&
+			!static_cast<ImageNode*>(after[0].get())->GetData()->bytes.empty(), L"Undo 후 이미지 데이터가 사라짐");
+	}
+
 #undef GE_CHECK
 
 	return true;

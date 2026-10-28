@@ -77,6 +77,7 @@ public:
 	bool OutlineStroke(float widthOverride = -1.0f);
 	bool SmoothPath(float tolerance);
 	bool ConvertTextToPath();
+	afx_msg void OnFilePlaceImage();
 	bool CanConvertTextToPath() const { return m_doc.CanConvertTextToPath(); }
 	bool SimplifyPath(float tolerance = 2.0f);
 	bool ReversePath();

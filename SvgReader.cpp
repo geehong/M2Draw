@@ -42,6 +42,26 @@ bool ParseNextFloat(const wchar_t*& p, const wchar_t* end, float& val) {
 	return true;
 }
 
+// Base64 디코드 (data URI 용). 공백/줄바꿈은 무시
+bool Base64Decode(const std::string& in, std::vector<uint8_t>& out)
+{
+	out.clear();
+	unsigned v = 0; int bits = 0;
+	for (char c : in) {
+		int d;
+		if (c >= 'A' && c <= 'Z') d = c - 'A';
+		else if (c >= 'a' && c <= 'z') d = c - 'a' + 26;
+		else if (c >= '0' && c <= '9') d = c - '0' + 52;
+		else if (c == '+' || c == '-') d = 62;
+		else if (c == '/' || c == '_') d = 63;
+		else if (c == '=') break;
+		else continue;
+		v = (v << 6) | d; bits += 6;
+		if (bits >= 8) { bits -= 8; out.push_back(static_cast<uint8_t>((v >> bits) & 0xFF)); }
+	}
+	return !out.empty();
+}
+
 // 색상 이름 (SVG/CSS 자주 쓰는 것)
 bool NamedColor(const std::wstring& n, unsigned& rgb) {
 	static const std::unordered_map<std::wstring, unsigned> k = {
@@ -751,6 +771,41 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 			}
 			else if (elemName == L"style") {
 				if (!isEmpty) { inStyleElem = true; styleText.clear(); }
+			}
+			else if (elemName == L"image") {
+				// <image xlink:href="data:image/png;base64,..."> (data URI 만 지원: 외부 파일 참조는 읽지 않음)
+				std::wstring href = attrs.count(L"xlink:href") ? attrs[L"xlink:href"] : (attrs.count(L"href") ? attrs[L"href"] : L"");
+				const size_t comma = href.find(L',');
+				if (href.compare(0, 5, L"data:") == 0 && comma != std::wstring::npos && href.find(L"base64") < comma) {
+					auto data = std::make_shared<ImageData>();
+					std::string mime;
+					for (size_t i = 5; i < comma && href[i] != L';'; ++i) mime.push_back(static_cast<char>(href[i]));
+					if (!mime.empty()) data->mime = mime;
+					std::string b64;
+					for (size_t i = comma + 1; i < href.size(); ++i) b64.push_back(static_cast<char>(href[i] < 128 ? href[i] : '?'));
+					if (Base64Decode(b64, data->bytes)) {
+						int pw = 0, ph = 0;
+						if (PathOp::DecodeImageInfo(data->bytes, pw, ph)) { data->pixelW = pw; data->pixelH = ph; }
+						auto im = std::make_unique<ImageNode>();
+						outDoc.RestoreNodeId(*im, ParseNodeId(attrs));
+						ApplyCommonState(*im, attrs);
+						if (attrs.count(L"m2:name")) im->SetName(attrs[L"m2:name"]);
+						float w = attrs.count(L"width") ? ParseLength(attrs[L"width"], 0.0f) : 0.0f;
+						float h = attrs.count(L"height") ? ParseLength(attrs[L"height"], 0.0f) : 0.0f;
+						if (w <= 0.0f) w = data->pixelW > 0 ? static_cast<float>(data->pixelW) : 100.0f;
+						if (h <= 0.0f) h = data->pixelH > 0 ? static_cast<float>(data->pixelH) : 100.0f;
+						im->SetSize(w, h);
+						im->SetData(data);
+						if (attrs.count(L"opacity")) im->SetOpacity(std::wcstof(attrs[L"opacity"].c_str(), nullptr));
+						const float x = attrs.count(L"x") ? ParseLength(attrs[L"x"], 0.0f) : 0.0f;
+						const float y = attrs.count(L"y") ? ParseLength(attrs[L"y"], 0.0f) : 0.0f;
+						Matrix2D xf = Matrix2D::Translation(x, y);
+						if (attrs.count(L"transform")) xf = xf * ParseTransformMatrix(attrs[L"transform"]);
+						im->SetTransform(xf);
+						if (!groupStack.empty()) groupStack.back()->AddChild(std::move(im));
+						else getFallbackLayer()->AddChild(std::move(im));
+					}
+				}
 			}
 			else if (isTextElem) {
 				auto tn = std::make_unique<TextNode>();

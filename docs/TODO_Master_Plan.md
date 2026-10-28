@@ -327,18 +327,18 @@
 - [ ] 3.3.4 빌드 확인 및 글꼴 아웃라인의 베지에 노드 편집 가능 여부 검증 — (부분) 앱에서 한글+영문 텍스트 변환 후 같은 위치/색의 패스(앵커 다수)로 바뀌는 것 확인. 앵커/핸들 편집 동작은 직접 확인하지 않음
 
 ### Step 3.4 ImageNode + 리소스 테이블 & 속성창 UI
-- [ ] 3.4.1 `Document`에 비트맵 리소스 테이블(ID, 원본 바이너리/경로) 추가. **노드는 리소스 ID 만 참조** — `SvgWriteOptions::Snapshot`(Undo)은 이미지를 참조 ID 로만 쓰고 `File`/`Clean` 모드에서만 base64 임베드 (2.0.4. 임베드하면 Undo 스냅샷 50개에 이미지가 중복 보관됨)
-- [ ] 3.4.2 `ImageNode` 구현: 리소스 참조, 로컬 바운드, `objectFit` 옵션
-- [ ] 3.4.3 WIC(Windows Imaging Component)를 이용한 이미지 로딩 및 `ID2D1Bitmap` 렌더링
-- [ ] 3.4.4 **`PropertyView` 이미지 패널 모드/섹션 구현**: 원본 크기 표시, 맞춤 모드(Fit/Fill/Stretch) 콤보, 이미지 교체 버튼
-- [ ] 3.4.5 이미지 불러오기(메뉴/드래그 앤 드롭) 도구 연동
-- [ ] 3.4.6 빌드 확인 및 이미지 이동/스케일/회전 및 속성창 검증
+- [x] 3.4.1 `Document`에 비트맵 리소스 테이블(ID, 원본 바이너리/경로) 추가. **노드는 리소스 ID 만 참조** — `SvgWriteOptions::Snapshot`(Undo)은 이미지를 참조 ID 로만 쓰고 `File`/`Clean` 모드에서만 base64 임베드 (2.0.4. 임베드하면 Undo 스냅샷 50개에 이미지가 중복 보관됨) — (변경 구현 2026-10-28) 문서 리소스 테이블 대신 `ImageNode` 가 `shared_ptr<const ImageData>`(원본 바이트+MIME+픽셀 크기)를 직접 보관, 복제본은 공유. SVG 에 data URI 로 임베드되므로 문서 단위 테이블이 불필요. Undo 스냅샷도 임베드(복원 문서가 바이트를 다시 얻어야 함)
+- [ ] 3.4.2 `ImageNode` 구현: 리소스 참조, 로컬 바운드, `objectFit` 옵션 — (부분) `ImageNode`: 로컬 (0,0)~(W,H) 에 늘려 그림(preserveAspectRatio="none"). objectFit(Fit/Fill/Stretch) 옵션은 미구현
+- [x] 3.4.3 WIC(Windows Imaging Component)를 이용한 이미지 로딩 및 `ID2D1Bitmap` 렌더링 — (완료) WIC(`CreateDecoderFromStream` + 32bppPBGRA 변환) -> `ID2D1Bitmap`, 렌더 타깃별 캐시. PNG/JPEG 앱 렌더링 확인
+- [ ] 3.4.4 **`PropertyView` 이미지 패널 모드/섹션 구현**: 원본 크기 표시, 맞춤 모드(Fit/Fill/Stretch) 콤보, 이미지 교체 버튼 — (미착수) 이미지 속성창 섹션(원본 크기, 맞춤 모드, 교체) 없음
+- [ ] 3.4.5 이미지 불러오기(메뉴/드래그 앤 드롭) 도구 연동 — (부분) 파일 > 이미지 가져오기(Ctrl+Shift+I): 대화상자로 PNG/JPG/GIF/BMP 선택, 문서 60% 이내로 맞춰 중앙 배치. 드래그 앤 드롭은 미구현. 대화상자 경로는 자동 테스트하지 못함
+- [ ] 3.4.6 빌드 확인 및 이미지 이동/스케일/회전 및 속성창 검증 — (부분) SVG 왕복·Undo·복제는 자체 검증 23, PNG/JPEG/회전/투명도 렌더링은 앱에서 확인. 이미지 이동/스케일/회전 조작과 속성창은 직접 확인 안 함
 
 
 ### Step 3.5 텍스트/이미지 SVG 출력
 - [ ] 3.5.1 `SvgWriter`에 `TextNode` 직렬화 연동 (`<text>`, `<tspan>`, 글꼴 속성 매핑) — (부분 완료) `<text>`/`<tspan>` 쓰기·읽기 왕복(자체 검증 22, 외부 SVG `<text>` 읽기 포함). 폰트 스택/웹폰트/윤곽선 변환 옵션은 3.5.5 에서
 - [ ] 3.5.2 Area Text의 줄바꿈 계산 결과를 다중 `<tspan>` 또는 윤곽선 출력으로 지원
-- [ ] 3.5.3 `ImageNode`를 `<image href="data:image/png;base64,...">` 인라인 또는 상대 경로로 직렬화
+- [x] 3.5.3 `ImageNode`를 `<image href="data:image/png;base64,...">` 인라인 또는 상대 경로로 직렬화 — (완료) `<image xlink:href="data:...;base64,...">` 출력/읽기 (외부 파일 참조는 읽지 않음). 루트에 xmlns:xlink 선언
 - [ ] 3.5.4 빌드 확인 및 브라우저에서 텍스트/이미지가 포함된 SVG 파일 렌더링 검증
 - [ ] 3.5.5 글꼴 처리 옵션: 폰트 스택 / 웹폰트 링크 / "텍스트를 윤곽선으로 변환하여 출력" 중 선택 (SVG·HTML 공통)
 

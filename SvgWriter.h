@@ -11,6 +11,7 @@ class PathNode;
 class GroupNode;
 class LayerNode;
 class TextNode;
+class ImageNode;
 
 // SVG 출력 용도
 //  - Snapshot: Undo/Redo 용 내부 스냅샷. 모든 M2 메타데이터 포함, 이미지는 리소스 참조 ID 만 기록 (이미지 중복 보관 방지)
@@ -28,7 +29,7 @@ struct SvgWriteOptions {
 	explicit SvgWriteOptions(SvgWriteMode m) : mode(m), nativeShapes(m == SvgWriteMode::Clean) {}
 
 	bool IncludeMetadata() const { return mode != SvgWriteMode::Clean; }      // m2:/inkscape:/sodipodi: 포함 여부
-	bool EmbedImages() const     { return mode != SvgWriteMode::Snapshot; }  // 이미지 base64 임베드 여부
+	bool EmbedImages() const     { return true; }  // 이미지는 항상 base64 로 임베드 (Undo 스냅샷도: 복원된 문서가 이미지 바이트를 다시 얻어야 하므로)
 };
 
 // M2Draw 확장 SVG 작성기 (Visitor 패턴 구현체)
@@ -49,6 +50,7 @@ public:
 	void Visit(GroupNode& node) override;
 	void Visit(LayerNode& node) override;
 	void Visit(TextNode& node) override;
+	void Visit(ImageNode& node) override;
 
 private:
 	void AppendIndent();

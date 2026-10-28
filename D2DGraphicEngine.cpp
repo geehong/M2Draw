@@ -1,4 +1,6 @@
 #include "pch.h"
+#include <wincodec.h>
+#pragma comment(lib, "windowscodecs.lib")
 #include "D2DGraphicEngine.h"
 #include "GeNodeVisitor.h"
 
@@ -126,6 +128,25 @@ Matrix2D Node::GetWorldTransform() const
 }
 
 // ---- PathNode ---------------------------------------------------------------
+// ---------------- ImageNode ----------------
+std::unique_ptr<Node> ImageNode::Clone() const
+{
+	auto copy = std::make_unique<ImageNode>(*this);
+	copy->ResetIdentity();
+	return copy;
+}
+
+void ImageNode::Accept(INodeVisitor& visitor)
+{
+	visitor.Visit(*this);
+}
+
+bool ImageNode::GetLocalBounds(Rect2& out)
+{
+	out = Rect2{ 0.0f, 0.0f, m_w, m_h };
+	return true;
+}
+
 // ---------------- TextNode ----------------
 std::unique_ptr<Node> TextNode::Clone() const
 {
@@ -2044,6 +2065,7 @@ bool D2DRenderer::Initialize(ID2D1RenderTarget* rt, ID2D1Factory* factory)
 	m_strokeStyleCache.clear();   // 팩터리/렌더 타깃이 바뀔 수 있으므로 이전 리소스 폐기
 	m_gradientCache.clear();
 	m_brush.Reset();
+	m_imageCache.clear();   // 비트맵은 렌더 타깃에 종속
 	if (!m_rt) return false;
 	return SUCCEEDED(m_rt->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 1), &m_brush));
 }
@@ -2101,11 +2123,63 @@ void D2DRenderer::DrawNode(Node& node, const Matrix2D& parentXf, const Viewport&
 	switch (node.Kind()) {
 	case NodeKind::Path:  DrawPath(static_cast<PathNode&>(node), worldXf, view); break;
 	case NodeKind::Text:  DrawTextNode(static_cast<TextNode&>(node), worldXf, view); break;
+	case NodeKind::Image: DrawImageNode(static_cast<ImageNode&>(node), worldXf, view); break;
 	case NodeKind::Group:
 	case NodeKind::Layer: DrawGroup(static_cast<GroupNode&>(node), worldXf, view); break;
 	}
 
 	if (needLayer) m_rt->PopLayer();
+}
+
+// WIC 로 이미지 바이트를 디코딩 (공통 헬퍼)
+static ComPtr<IWICBitmapSource> DecodeImageBytes(const std::vector<uint8_t>& bytes, int* outW, int* outH)
+{
+	if (bytes.empty()) return nullptr;
+	ComPtr<IWICImagingFactory> wic;
+	if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))) return nullptr;
+	ComPtr<IWICStream> stream;
+	if (FAILED(wic->CreateStream(&stream))) return nullptr;
+	if (FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(bytes.data()), static_cast<DWORD>(bytes.size())))) return nullptr;
+	ComPtr<IWICBitmapDecoder> decoder;
+	if (FAILED(wic->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, &decoder))) return nullptr;
+	ComPtr<IWICBitmapFrameDecode> frame;
+	if (FAILED(decoder->GetFrame(0, &frame))) return nullptr;
+	UINT w = 0, h = 0;
+	frame->GetSize(&w, &h);
+	if (outW) *outW = static_cast<int>(w);
+	if (outH) *outH = static_cast<int>(h);
+	ComPtr<IWICFormatConverter> conv;
+	if (FAILED(wic->CreateFormatConverter(&conv))) return nullptr;
+	if (FAILED(conv->Initialize(frame.Get(), GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeMedianCut))) return nullptr;
+	ComPtr<IWICBitmapSource> src;
+	conv.As(&src);
+	return src;
+}
+
+bool PathOp::DecodeImageInfo(const std::vector<uint8_t>& bytes, int& w, int& h)
+{
+	w = h = 0;
+	return DecodeImageBytes(bytes, &w, &h) != nullptr && w > 0 && h > 0;
+}
+
+void D2DRenderer::DrawImageNode(ImageNode& node, const Matrix2D& worldXf, const Viewport& view)
+{
+	if (!m_rt || !node.GetData()) return;
+	const ImageData* key = node.GetData().get();
+	auto it = m_imageCache.find(key);
+	if (it == m_imageCache.end()) {
+		ImageCacheEntry e;
+		e.keep = node.GetData();
+		if (ComPtr<IWICBitmapSource> src = DecodeImageBytes(key->bytes, nullptr, nullptr))
+			m_rt->CreateBitmapFromWicBitmap(src.Get(), nullptr, &e.bitmap);
+		if (m_imageCache.size() > 128) m_imageCache.clear();
+		it = m_imageCache.emplace(key, std::move(e)).first;
+	}
+	if (!it->second.bitmap) return;   // 디코딩 실패: 아무것도 그리지 않음
+
+	m_rt->SetTransform((worldXf * view.ToMatrix()).ToD2D());
+	m_rt->DrawBitmap(it->second.bitmap.Get(), D2D1::RectF(0.0f, 0.0f, node.GetWidth(), node.GetHeight()), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+	m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
 }
 
 void D2DRenderer::DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Viewport& view)
@@ -2389,7 +2463,7 @@ ComPtr<ID2D1PathGeometry> D2DRenderer::BuildGeometry(const PathNode& node)
 static bool HitNode(Node& n, Vec2 sp, float tol, const Viewport& view, D2DRenderer& r, HitResult& out)
 {
 	if (!n.IsVisible() || n.IsLocked()) return false;
-	if (n.Kind() == NodeKind::Text) return false;   // 텍스트 히트는 선택 도구가 글자 상자로 처리
+	if (n.Kind() == NodeKind::Text || n.Kind() == NodeKind::Image) return false;   // 텍스트/이미지 히트는 선택 도구가 상자로 처리
 	if (n.Kind() != NodeKind::Path) {
 		const auto& ch = static_cast<GroupNode&>(n).GetChildren();
 		for (int i = (int)ch.size() - 1; i >= 0; --i)

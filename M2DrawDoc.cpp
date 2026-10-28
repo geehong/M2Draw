@@ -48,6 +48,7 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_RELEASE_MASK, &CM2DrawDoc::OnUpdateObjectReleaseMask)
 	ON_COMMAND_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnAlignCommand)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnUpdateAlignCommand)
+	ON_COMMAND(ID_FILE_PLACE_IMAGE, &CM2DrawDoc::OnFilePlaceImage)
 	ON_COMMAND(ID_TEXT_TO_PATH, &CM2DrawDoc::OnTextToPath)
 	ON_UPDATE_COMMAND_UI(ID_TEXT_TO_PATH, &CM2DrawDoc::OnUpdateTextToPath)
 	ON_COMMAND(ID_PATH_OUTLINE, &CM2DrawDoc::OnPathOutline)
@@ -810,6 +811,51 @@ bool CM2DrawDoc::ConvertTextToPath()
 }
 
 void CM2DrawDoc::OnTextToPath() { ConvertTextToPath(); }
+
+// 이미지 파일을 읽어 문서 중앙에(문서 크기의 60% 이내로 맞춰) ImageNode 로 추가
+void CM2DrawDoc::OnFilePlaceImage()
+{
+	CFileDialog dlg(TRUE, nullptr, nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
+		_T("이미지 파일 (*.png;*.jpg;*.jpeg;*.gif;*.bmp)|*.png;*.jpg;*.jpeg;*.gif;*.bmp|모든 파일 (*.*)|*.*||"));
+	if (dlg.DoModal() != IDOK) return;
+
+	auto data = std::make_shared<ge::ImageData>();
+	{
+		CFile f;
+		if (!f.Open(dlg.GetPathName(), CFile::modeRead | CFile::shareDenyWrite)) { AfxMessageBox(_T("이미지 파일을 열 수 없습니다.")); return; }
+		const ULONGLONG len = f.GetLength();
+		if (len == 0 || len > 256ull * 1024 * 1024) { AfxMessageBox(_T("이미지 파일 크기가 올바르지 않습니다.")); return; }
+		data->bytes.resize(static_cast<size_t>(len));
+		f.Read(data->bytes.data(), static_cast<UINT>(len));
+	}
+	int pw = 0, ph = 0;
+	if (!ge::PathOp::DecodeImageInfo(data->bytes, pw, ph)) { AfxMessageBox(_T("지원하지 않는 이미지 형식이거나 손상된 파일입니다.")); return; }
+	data->pixelW = pw; data->pixelH = ph;
+	CString ext = dlg.GetFileExt(); ext.MakeLower();
+	data->mime = (ext == _T("jpg") || ext == _T("jpeg")) ? "image/jpeg" : ext == _T("gif") ? "image/gif" : ext == _T("bmp") ? "image/bmp" : "image/png";
+
+	float w = static_cast<float>(pw), h = static_cast<float>(ph);
+	const float maxW = m_doc.width * 0.6f, maxH = m_doc.height * 0.6f;
+	const float sc = (std::min)(1.0f, (std::min)(maxW / w, maxH / h));
+	w *= sc; h *= sc;
+
+	auto im = std::make_unique<ge::ImageNode>();
+	im->SetData(data);
+	im->SetSize(w, h);
+	im->SetName((LPCTSTR)dlg.GetFileTitle());
+	im->SetTransform(ge::Matrix2D::Translation((m_doc.width - w) * 0.5f, (m_doc.height - h) * 0.5f));
+	ge::Node* added = m_doc.AddShape(std::move(im));
+	if (!added) return;
+	m_doc.SetSelection({ added });
+	SetModifiedFlag(TRUE);
+	CommitUndoPoint(L"이미지 가져오기");
+	LogAppEvent(_T("[이미지] 이미지 가져오기 완료"));
+	UpdateShapePropertiesSelection(added, this);
+	UpdateAllViews(nullptr);
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+}
 void CM2DrawDoc::OnUpdateTextToPath(CCmdUI* pCmdUI) { pCmdUI->Enable(CanConvertTextToPath()); }
 
 bool CM2DrawDoc::SmoothPath(float tolerance)
