@@ -284,8 +284,8 @@
 > 2.9 완료 후 진행 (외부 SVG 를 가져와 다시 내보내며 품질 검증). 좌표계(2.0.1)가 정리된 뒤 상하 방향을 반드시 브라우저로 확인
 - [x] 2.8.1 파라메트릭 도형의 네이티브 SVG 태그(`<rect rx>`, `<circle>`, `<ellipse>`, `<polygon>`) 출력 옵션 — (완료 2026-10-28) `SvgWriteOptions::nativeShapes`: Clean 출력에서 Rect→`<rect rx ry>`, Ellipse→`<ellipse>`/`<circle>` (File/Snapshot 은 M2 메타데이터용 `<path>` 유지)
 - [x] 2.8.2 중복 그라디언트, 클립마스크의 `<defs>` 통합 관리 및 ID 참조 최적화 — (완료) 내용이 같은 그라디언트는 `<defs>` 에 한 번만 정의하고 공유 참조. 클립마스크 정의 통합은 도형마다 고유해 해당 없음
-- [x] 2.8.3 순수 표준 SVG(Clean SVG) 내보내기 대화상자 옵션: `xmlns:m2`/`m2:*` 속성뿐 아니라 `inkscape:*`/`sodipodi:*` 네임스페이스도 제거 (`SvgWriteOptions::Clean`, 2.0.4) — (완료) Clean 은 m2:/inkscape:/sodipodi: 속성·네임스페이스·namedview 제거 (자체 검증 7, 21). 내보내기 대화상자 UI 는 미구현
-- [ ] 2.8.4 빌드 확인 및 타 벡터 툴(Illustrator, Inkscape, Figma) 불러오기 호환성 점검 — (미완료) 자체 검증과 앱 재읽기까지만 확인, Illustrator/Inkscape/Figma 에서 직접 열어 보는 점검은 수행하지 않음
+- [x] 2.8.3 순수 표준 SVG(Clean SVG) 내보내기 대화상자 옵션: `xmlns:m2`/`m2:*` 속성뿐 아니라 `inkscape:*`/`sodipodi:*` 네임스페이스도 제거 (`SvgWriteOptions::Clean`, 2.0.4) — (완료) Clean 은 m2:/inkscape:/sodipodi: 속성·네임스페이스·namedview 제거 (자체 검증 7, 21). 내보내기 대화상자 UI 는 미구현 — (2026-10-28 추가) 파일 > SVG 내보내기(Ctrl+Shift+E): 순수 SVG 저장 + 텍스트 윤곽선 옵션 대화상자. 파일 대화상자 경로는 자동 테스트하지 못함
+- [ ] 2.8.4 빌드 확인 및 타 벡터 툴(Illustrator, Inkscape, Figma) 불러오기 호환성 점검 — (미완료) 자체 검증과 앱 재읽기까지만 확인, Illustrator/Inkscape/Figma 에서 직접 열어 보는 점검은 수행하지 않음 — (부분) 브라우저(Edge)에서 렌더링 확인 완료(3.5.4). Illustrator/Inkscape/Figma 에서 직접 열어 보는 점검은 미수행
 
 ### Step 2.9 외부 SVG 가져오기
 - [x] 2.9.1 표준 기본 도형(`<rect>`, `<circle>`, `<line>` 등)의 `PathNode` 변환 파서 — (완료) rect(rx/ry), circle, ellipse, line, polyline, polygon → PathNode
@@ -339,8 +339,8 @@
 - [ ] 3.5.1 `SvgWriter`에 `TextNode` 직렬화 연동 (`<text>`, `<tspan>`, 글꼴 속성 매핑) — (부분 완료) `<text>`/`<tspan>` 쓰기·읽기 왕복(자체 검증 22, 외부 SVG `<text>` 읽기 포함). 폰트 스택/웹폰트/윤곽선 변환 옵션은 3.5.5 에서
 - [x] 3.5.2 Area Text의 줄바꿈 계산 결과를 다중 `<tspan>` 또는 윤곽선 출력으로 지원 — (완료) 영역 텍스트는 DirectWrite 줄바꿈 결과를 `<tspan>` 으로 출력(Clean 도 동일 줄 나눔). File/Snapshot 은 m2:boxW + m2:text(원본 문자열)로 왕복
 - [x] 3.5.3 `ImageNode`를 `<image href="data:image/png;base64,...">` 인라인 또는 상대 경로로 직렬화 — (완료) `<image xlink:href="data:...;base64,...">` 출력/읽기 (외부 파일 참조는 읽지 않음). 루트에 xmlns:xlink 선언
-- [ ] 3.5.4 빌드 확인 및 브라우저에서 텍스트/이미지가 포함된 SVG 파일 렌더링 검증
-- [ ] 3.5.5 글꼴 처리 옵션: 폰트 스택 / 웹폰트 링크 / "텍스트를 윤곽선으로 변환하여 출력" 중 선택 (SVG·HTML 공통)
+- [x] 3.5.4 빌드 확인 및 브라우저에서 텍스트/이미지가 포함된 SVG 파일 렌더링 검증 — (완료 2026-10-28) Clean 내보내기 결과를 Edge(headless)로 렌더링해 확인: 텍스트(글꼴 스택/영역 줄바꿈/윤곽선), PNG/JPEG(회전·투명도), 이미지 맞춤 3종, 프레임 클립, 클리핑 마스크, 외부 SVG(CSS/호/상대 곡선/변환) 모두 앱 화면과 같게 표시. 확인용 샘플은 환경변수 M2_EXPORT_SAMPLES 로 자체 검증이 생성
+- [x] 3.5.5 글꼴 처리 옵션: 폰트 스택 / 웹폰트 링크 / "텍스트를 윤곽선으로 변환하여 출력" 중 선택 (SVG·HTML 공통) — (부분 완료) 글꼴 스택(글꼴 + serif/monospace/sans-serif 대체) 항상 출력, "텍스트를 윤곽선으로 변환하여 출력" 옵션(File > SVG 내보내기 대화상자, SvgWriteOptions::textAsOutlines). 웹폰트 링크 옵션은 미구현
 
 ---
 

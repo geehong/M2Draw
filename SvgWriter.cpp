@@ -549,7 +549,43 @@ void SvgWriter::Visit(ImageNode& node) {
 	m_output += " xlink:href=\"data:" + node.GetData()->mime + ";base64," + Base64Encode(node.GetData()->bytes) + "\" />\n";
 }
 
+static ID2D1Factory* SharedD2DFactory()
+{
+	static ComPtr<ID2D1Factory> f;
+	if (!f) D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, f.GetAddressOf());
+	return f.Get();
+}
+
+// 글꼴 스택: 지정한 글꼴이 없는 환경에서 대체되도록 마지막에 일반 계열(serif/monospace/sans-serif)을 덧붙임
+static std::string FontStack(const std::wstring& family)
+{
+	std::wstring lower = family;
+	for (auto& c : lower) c = static_cast<wchar_t>(towlower(c));
+	static const wchar_t* serifs[] = { L"times", L"georgia", L"garamond", L"batang", L"gungsuh", L"palatino", L"cambria", L"serif" };
+	static const wchar_t* monos[] = { L"courier", L"consolas", L"mono", L"lucida console", L"gulimche", L"monospace" };
+	const char* generic = "sans-serif";
+	for (const wchar_t* k : monos) if (lower.find(k) != std::wstring::npos) generic = "monospace";
+	if (std::string(generic) == "sans-serif")
+		for (const wchar_t* k : serifs) if (lower.find(k) != std::wstring::npos && lower.find(L"sans") == std::wstring::npos) generic = "serif";
+	return "'" + EscapeXml(WideToUtf8(family)) + "', " + generic;   // 작은따옴표는 큰따옴표 속성 안이라 그대로 둠 (이름 안의 특수문자만 이스케이프)
+}
+
 void SvgWriter::Visit(TextNode& node) {
+	// 텍스트 윤곽선 출력: 글리프를 패스로 바꿔 그 패스를 출력 (글꼴/DirectWrite 와 무관하게 같은 모양)
+	if (m_options.textAsOutlines) {
+		if (auto path = PathOp::TextToPath(node, SharedD2DFactory())) {
+			path->SetName(node.GetName());
+			path->SetVisible(node.IsVisible());
+			path->SetLocked(node.IsLocked());
+			path->SetBlendMode(node.GetBlendMode());
+			const size_t from = m_output.size();
+			path->Accept(*this);
+			// 임시 패스의 id(path_0) 가 여러 텍스트에서 겹치지 않도록 텍스트 id 로 교체
+			const size_t at = m_output.find("path_0\"", from);
+			if (at != std::string::npos) m_output.replace(at, 6, "text_" + std::to_string(node.GetId()));
+			return;
+		}
+	}
 	AppendIndent();
 	m_output += "<text id=\"text_" + std::to_string(node.GetId()) + "\"";
 	if (Meta()) {
@@ -569,7 +605,7 @@ void SvgWriter::Visit(TextNode& node) {
 		m_output += " m2:boxW=\"" + FormatFloat(node.GetBoxWidth()) + "\" m2:text=\"" + enc + "\"";
 	}
 	m_output += " x=\"" + axs + "\" y=\"" + FormatFloat(size * TextNode::kAscentRatio) + "\"";
-	m_output += " font-family=\"" + EscapeXml(WideToUtf8(node.GetFontFamily())) + "\" font-size=\"" + FormatFloat(size) + "\"";
+	m_output += " font-family=\"" + FontStack(node.GetFontFamily()) + "\" font-size=\"" + FormatFloat(size) + "\"";
 	if (node.IsBold()) m_output += " font-weight=\"bold\"";
 	if (node.IsItalic()) m_output += " font-style=\"italic\"";
 	if (node.GetAlign() == TextAlign::Center) m_output += " text-anchor=\"middle\"";

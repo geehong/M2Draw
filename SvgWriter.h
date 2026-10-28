@@ -24,6 +24,8 @@ struct SvgWriteOptions {
 	SvgWriteMode mode = SvgWriteMode::File;
 	// 파라메트릭 도형(Rect/Ellipse)을 <rect rx ry>/<ellipse>/<circle> 네이티브 태그로 출력. Clean 출력의 기본값 (File/Snapshot 은 M2 메타데이터를 읽는 <path> 유지)
 	bool nativeShapes = false;
+	// 텍스트를 글꼴 없이도 같게 보이도록 윤곽선(<path>)으로 출력 (3.5.5 "텍스트를 윤곽선으로 변환하여 출력"). 기본 꺼짐
+	bool textAsOutlines = false;
 
 	SvgWriteOptions() = default;
 	explicit SvgWriteOptions(SvgWriteMode m) : mode(m), nativeShapes(m == SvgWriteMode::Clean) {}

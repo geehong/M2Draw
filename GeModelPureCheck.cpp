@@ -1323,6 +1323,69 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(clean.find("m2:") == std::string::npos && clean.find("<tspan") != std::string::npos, L"Clean 영역 텍스트 출력이 틀림");
 	}
 
+	// ---- 26. 글꼴 처리 옵션 (3.5.5): 글꼴 스택 / 텍스트 윤곽선 출력 / 브라우저 확인용 샘플 ----------------
+	{
+		Document d;
+		auto make = [&](const wchar_t* txt, const wchar_t* fam, float x, float y, float size, bool area) {
+			auto tn = std::make_unique<TextNode>();
+			tn->SetText(txt); tn->SetFontFamily(fam); tn->SetFontSize(size);
+			tn->SetTransform(Matrix2D::Translation(x, y));
+			if (area) tn->SetBoxWidth(220.0f);
+			return static_cast<TextNode*>(d.AddShape(std::move(tn)));
+		};
+		TextNode* tA = make(L"Segoe UI 글꼴 스택", L"Segoe UI", 20.0f, 20.0f, 24.0f, false);
+		TextNode* tB = make(L"Times serif Georgia", L"Times New Roman", 20.0f, 60.0f, 24.0f, false);
+		TextNode* tC = make(L"Consolas monospace 0O1l", L"Consolas", 20.0f, 100.0f, 22.0f, false);
+		TextNode* tD = make(L"영역 텍스트는 상자 폭에 맞춰 자동으로 줄이 바뀝니다. Area text wraps inside the box.", L"Malgun Gothic", 20.0f, 140.0f, 18.0f, true);
+		(void)tA; (void)tB; (void)tC; (void)tD;
+
+		SvgWriter ow;
+		const std::string plain = ow.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(plain.find("font-family=\"'Segoe UI', sans-serif\"") != std::string::npos, L"산세리프 글꼴 스택이 출력되지 않음");
+		GE_CHECK(plain.find("font-family=\"'Times New Roman', serif\"") != std::string::npos, L"세리프 글꼴 스택이 출력되지 않음");
+		GE_CHECK(plain.find("font-family=\"'Consolas', monospace\"") != std::string::npos, L"고정폭 글꼴 스택이 출력되지 않음");
+
+		// 글꼴 스택 왕복: 첫 글꼴만 읽어 글꼴 이름이 그대로
+		Document back;
+		GE_CHECK(reader.ReadFromString(plain, back), L"글꼴 스택 SVG 읽기 실패");
+
+		SvgWriteOptions oo(SvgWriteMode::Clean);
+		oo.textAsOutlines = true;
+		const std::string outlined = ow.WriteString(d, oo);
+		GE_CHECK(outlined.find("<text") == std::string::npos && outlined.find("<path") != std::string::npos, L"텍스트 윤곽선 출력에 <text> 가 남아 있음");
+		GE_CHECK(outlined.find("id=\"path_0\"") == std::string::npos && outlined.find("id=\"text_") != std::string::npos, L"윤곽선 출력의 id 가 텍스트 id 로 바뀌지 않음");
+		Document back2;
+		GE_CHECK(reader.ReadFromString(outlined, back2), L"텍스트 윤곽선 SVG 읽기 실패");
+
+		// 브라우저 확인용 샘플 파일 (환경변수 M2_EXPORT_SAMPLES 가 지정된 경우에만 기록; 일반 실행에는 영향 없음)
+		char* dir = nullptr;
+		size_t len = 0;
+		if (_dupenv_s(&dir, &len, "M2_EXPORT_SAMPLES") == 0 && dir && *dir) {
+			auto save = [&](const std::string& name, const std::string& body) {
+				std::string path = std::string(dir) + "\\" + name;
+				FILE* fp = nullptr;
+				if (fopen_s(&fp, path.c_str(), "wb") == 0 && fp) { fwrite(body.data(), 1, body.size(), fp); fclose(fp); }
+			};
+			save("text_plain.svg", plain);
+			save("text_outlined.svg", outlined);
+			save("text_file.svg", ow.WriteString(d, SvgWriteOptions(SvgWriteMode::File)));
+			// 입력 폴더(in 하위)의 SVG 를 읽어 Clean 으로 다시 써서 브라우저 호환을 비교 (이미지/프레임/클립/외부 SVG)
+			for (const char* name : { "image_test.svg", "frame_test.svg", "clip_test.svg", "text_test.svg", "fit_test.svg", "ext_test.svg" }) {
+				std::string ip = std::string(dir) + "\\in\\" + name;
+				FILE* fi = nullptr;
+				if (fopen_s(&fi, ip.c_str(), "rb") != 0 || !fi) continue;
+				std::string body;
+				char buf[4096];
+				size_t n;
+				while ((n = fread(buf, 1, sizeof(buf), fi)) > 0) body.append(buf, n);
+				fclose(fi);
+				Document rd;
+				if (reader.ReadFromString(body, rd)) save(std::string(name) + ".clean.svg", ow.WriteString(rd, SvgWriteOptions(SvgWriteMode::Clean)));
+			}
+		}
+		free(dir);
+	}
+
 #undef GE_CHECK
 
 	return true;

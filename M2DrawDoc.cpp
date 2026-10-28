@@ -49,6 +49,7 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_COMMAND_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnAlignCommand)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnUpdateAlignCommand)
 	ON_COMMAND(ID_FILE_PLACE_IMAGE, &CM2DrawDoc::OnFilePlaceImage)
+	ON_COMMAND(ID_FILE_EXPORT_SVG, &CM2DrawDoc::OnFileExportSvg)
 	ON_COMMAND(ID_TEXT_TO_PATH, &CM2DrawDoc::OnTextToPath)
 	ON_UPDATE_COMMAND_UI(ID_TEXT_TO_PATH, &CM2DrawDoc::OnUpdateTextToPath)
 	ON_COMMAND(ID_PATH_OUTLINE, &CM2DrawDoc::OnPathOutline)
@@ -866,6 +867,85 @@ bool CM2DrawDoc::PlaceImageFile(const CString& path)
 	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
 		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
 	return true;
+}
+
+// 내보내기 옵션 대화상자 (메모리 템플릿): 텍스트를 윤곽선으로 변환할지 선택
+namespace {
+class CExportOptionsDlg : public CDialog
+{
+public:
+	bool m_outlineText = false;
+
+	INT_PTR Run(CWnd* parent)
+	{
+		std::vector<WORD> w;
+		auto add32 = [&](DWORD v) { w.push_back(LOWORD(v)); w.push_back(HIWORD(v)); };
+		auto addStr = [&](const wchar_t* s) { while (*s) w.push_back(*s++); w.push_back(0); };
+		auto align = [&]() { if (w.size() % 2) w.push_back(0); };
+		add32(DS_MODALFRAME | DS_SETFONT | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+		add32(0);
+		w.push_back(4);
+		w.push_back(0); w.push_back(0); w.push_back(250); w.push_back(104);
+		w.push_back(0); w.push_back(0);
+		addStr(L"SVG 내보내기");
+		w.push_back(9); addStr(L"Segoe UI");
+		auto item = [&](DWORD style, short x, short y, short cx, short cy, WORD id, WORD atom, const wchar_t* title) {
+			align();
+			add32(style | WS_CHILD | WS_VISIBLE);
+			add32(0);
+			w.push_back(x); w.push_back(y); w.push_back(cx); w.push_back(cy);
+			w.push_back(id);
+			w.push_back(0xFFFF); w.push_back(atom);
+			addStr(title);
+			w.push_back(0);
+		};
+		item(SS_LEFT, 8, 8, 234, 30, 0xFFFF, 0x0082, L"순수 SVG(Illustrator, Inkscape, Figma, 브라우저 호환)로 내보냅니다. M2Draw 전용 속성은 포함하지 않으며, 글꼴에는 대체 글꼴 목록이 붙습니다.");
+		item(BS_AUTOCHECKBOX | WS_TABSTOP, 8, 46, 234, 12, 1001, 0x0080, L"텍스트를 윤곽선으로 변환하여 출력 (글꼴이 없어도 똑같이 보임)");
+		item(BS_DEFPUSHBUTTON | WS_TABSTOP, 136, 80, 50, 14, IDOK, 0x0080, L"내보내기");
+		item(BS_PUSHBUTTON | WS_TABSTOP, 192, 80, 50, 14, IDCANCEL, 0x0080, L"취소");
+		if (!InitModalIndirect(reinterpret_cast<LPCDLGTEMPLATE>(w.data()), parent)) return IDCANCEL;
+		return DoModal();
+	}
+protected:
+	BOOL OnInitDialog() override
+	{
+		CDialog::OnInitDialog();
+		CheckDlgButton(1001, m_outlineText ? BST_CHECKED : BST_UNCHECKED);
+		return TRUE;
+	}
+	void OnOK() override
+	{
+		m_outlineText = IsDlgButtonChecked(1001) == BST_CHECKED;
+		CDialog::OnOK();
+	}
+};
+} // namespace
+
+void CM2DrawDoc::OnFileExportSvg()
+{
+	CExportOptionsDlg opt;
+	opt.m_outlineText = AfxGetApp()->GetProfileInt(_T("Export"), _T("OutlineText"), 0) != 0;
+	if (opt.Run(AfxGetMainWnd()) != IDOK) return;
+	AfxGetApp()->WriteProfileInt(_T("Export"), _T("OutlineText"), opt.m_outlineText ? 1 : 0);
+
+	CString suggested = GetTitle();
+	const int dot = suggested.ReverseFind(_T('.'));
+	if (dot > 0) suggested = suggested.Left(dot);
+	CFileDialog dlg(FALSE, _T("svg"), suggested + _T(".svg"), OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY, _T("SVG 파일 (*.svg)|*.svg||"));
+	if (dlg.DoModal() != IDOK) return;
+
+	ge::SvgWriteOptions options(ge::SvgWriteMode::Clean);
+	options.textAsOutlines = opt.m_outlineText;
+	ge::SvgWriter writer;
+	if (!writer.WriteToFile(m_doc, (LPCTSTR)dlg.GetPathName(), options))
+	{
+		AfxMessageBox(_T("SVG 파일을 저장하지 못했습니다."));
+		return;
+	}
+	CString log;
+	log.Format(_T("[내보내기] 순수 SVG 저장: %s%s"), (LPCTSTR)dlg.GetPathName(), opt.m_outlineText ? _T(" (텍스트 윤곽선)") : _T(""));
+	LogAppEvent(log);
+	SetAppStatusText(log);
 }
 
 void CM2DrawDoc::OnFilePlaceImage()
