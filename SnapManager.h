@@ -21,6 +21,8 @@ enum class SnapTargets : uint32_t
 	Anchor     = 1 << 2, // 도형의 앵커/정점 스냅
 	Midpoint   = 1 << 3, // 선분/에지의 중간점 스냅
 	Center     = 1 << 4, // 도형 바운딩 중심점 스냅
+	Edge       = 1 << 5, // 선(선분/곡선) 위의 가장 가까운 점 스냅 (5.1.0)
+	Intersection = 1 << 6, // 두 선이 만나는 교차점 스냅 (5.1.0)
 	All        = 0xFFFFFFFF
 };
 
@@ -74,6 +76,18 @@ public:
 			m_targets = static_cast<SnapTargets>(static_cast<uint32_t>(m_targets) & ~static_cast<uint32_t>(t));
 	}
 
+	// 그리드 스냅이 실제로 켜져 있는지 (모든 도구 공통 판정: 마스터 스냅 + Grid 타깃 + 그리드 표시 + "Snap to Grid" 체크)
+	bool IsGridSnapActive(const GridRenderer& grid) const
+	{
+		return m_enabled && HasSnapTarget(m_targets, SnapTargets::Grid) && grid.enabled && grid.snapToGrid;
+	}
+
+	// 스마트 가이드(붉은 가이드선 + 가장자리/가운데 맞춤)와 같은 간격 맞춤은 오브젝트 스냅 계열이라 마스터 스냅(IsEnabled)을 따르되 따로 끌 수 있다 (5.1.0)
+	void SetSmartGuides(bool b) { m_smartGuides = b; }
+	bool IsSmartGuidesEnabled() const { return m_enabled && m_smartGuides; }
+	void SetEqualSpacing(bool b) { m_equalSpacing = b; }
+	bool IsEqualSpacingEnabled() const { return m_enabled && m_smartGuides && m_equalSpacing; }
+
 	void SetTolerancePx(float px) { m_tolerancePx = px; }
 	float GetTolerancePx() const { return m_tolerancePx; }
 
@@ -101,4 +115,6 @@ private:
 	bool        m_enabled;
 	SnapTargets m_targets;
 	float       m_tolerancePx;
+	bool        m_smartGuides = true;
+	bool        m_equalSpacing = true;
 };

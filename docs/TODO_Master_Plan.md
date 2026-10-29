@@ -402,6 +402,148 @@
 - [x] 4.5.7.8 **SVG 저장/읽기**: 컴포넌트 정보를 `m2:component="table"`, `m2:rows`, `m2:cols`, `m2:cell` 등으로 저장·복원하고 Undo 스냅샷에서도 유지한다. 기본 노드는 기존 경로/글자 출력을 그대로 쓴다. — 완료: `m2:component/cols/rows/border/pad/bcolor/header/calign/merges` 저장·복원(Undo 포함).
 - [x] 4.5.7.9 **검증**: `GeModelPureCheck`에 3x3 생성, 칸 좌표 계산, 병합 셀, 저장/복원 왕복, HtmlExporter `<table>` 출력 테스트를 추가하고 빌드 확인. — 완료: GeModelPureCheck 섹션 28, 30 (병합/격자선/행·열 편집/리사이즈/왕복/`<table>`·Grid 출력).
 
+### Step 4.5.8 프레임 역할(Role) 속성 + 캔버스 라벨 + 내보내기 태그 매핑 (1순위)
+> 프레임이 화면에서도, HTML 내보내기에서도 모두 똑같은 `<div>`로만 취급되어 헤더·사이드바·본문·푸터 등 컨테이너의 역할을 구별할 수 없는 문제를 해결한다.
+- [x] 4.5.8.1 **모델 & 시맨틱 태그 매핑**: 프레임 역할(`div`(기본), `header`, `nav`, `main`, `aside`(사이드바), `section`, `article`, `footer`)을 `Node::m_htmlTag`(또는 역할 헬퍼)와 일관되게 연결하고, `SvgWriter`/`SvgReader`(`m2:tag`) 및 `Clone()`/Undo 왕복 보존 확인 — 완료 (2026-10-29): 역할은 별도 필드 없이 기존 `htmlTag` 를 그대로 사용(`m2:htmlTag` 저장 기존재). 값이 둘로 갈라지지 않게 함. 복제/왕복 검증 포함.
+- [x] 4.5.8.2 **속성 패널 UI (`CD2DPropertyView`)**: 프레임 섹션에 **역할(Role / HTML Tag) 콤보박스**(`div (기본)`, `header (상단 헤더)`, `nav (네비게이션)`, `main (본문)`, `aside (사이드바)`, `section (섹션)`, `footer (하단 푸터)`) 추가 및 선택 즉시 모델/Undo 반영 — 완료: 프레임 섹션에 Role 콤보(div/header/nav/main/aside/section/article/footer), 선택 즉시 반영 + Undo 기록.
+- [x] 4.5.8.3 **캔버스 프레임 라벨/배지 표시**: 최상위 Artboard 뿐 아니라 내부 컨테이너 `FrameNode`(역할이 지정되었거나 선택/배치된 프레임)에도 역할 배지(예: `[header] 상단바`, `[aside] 사이드바`)를 캔버스에 표시하여 시각적으로 즉시 구별 가능하게 개선 — 완료(범위 제한): 최상위 프레임 라벨 앞에 `[역할]`, 내부 프레임은 **역할이 지정된 경우에만** 좌상단 파란 배지 `[header] 이름` 표시. "선택된 프레임" 배지는 미구현(렌더러가 선택 상태를 모름).
+- [x] 4.5.8.4 **`HtmlExporter` 연동 & 검증**: 역할에 맞는 시맨틱 태그(`<header>`, `<nav>`, `<main>`, `<aside>`, `<section>`, `<footer>`, `<div>`) 출력 확인, `GeModelPureCheck` 왕복/출력 검증 추가 및 빌드 확인 — 완료: `<header>/<nav>/<main>/<aside>/<section>/<article>/<footer>` 출력, 자체 검증 31(a).
+
+### Step 4.5.9 `Fill` 사이징 (`FrameSizingMode::Fill`) — 헤더/사이드바/본문/푸터 구획 (2순위)
+> 현재 `Fixed`/`Hug`만 지원하여 "가로 꽉 찬 헤더 + 고정 폭 사이드바 + 남은 공간을 채우는 본문" 구조를 만들 수 없는 레이아웃 병목을 해결한다.
+- [x] 4.5.9.1 **모델 확장**: `FrameSizingMode`에 `Fill`(부모 가용 공간을 채움) 추가 (`Fixed` / `Hug` / `Fill`), `SvgWriter`/`SvgReader`(`m2:sizingW="fill"`, `m2:sizingH="fill"`) 왕복 지원 — 완료: `FrameSizingMode::Fill`, `m2:sizingW/H="fill"` (자동 배치가 아닌 프레임도 저장되도록 레이아웃 속성 밖으로 분리).
+- [x] 4.5.9.2 **`FrameNode::ApplyLayout()` 계산 확장**: — 완료: 주축 남은 공간 균등 분배 / 교차축 stretch / 부모 Hug 시 폴백. 채워진 자식은 `ResizeFrame` 으로 재귀 재배치.
+  - **주축(Main Axis) `Fill`**: 부모 프레임의 가용 크기에서 고정(`Fixed`/`Hug`) 자식들과 `gap` 합을 뺀 남은 공간을 `Fill` 자식들이 균등 분배 (`flex: 1 1 0%`)
+  - **교차축(Cross Axis) `Fill`**: 부모 프레임의 교차축 가용 크기(`frameCross - 2 * padding`)에 맞춰 자식 크기 자동 확장 (`align-self: stretch`)
+  - 부모가 `Hug`일 때 자식이 `Fill`이면 순환 참조 방지를 위해 자식의 현재 크기(`Fixed` 취급)로 폴백
+- [x] 4.5.9.3 **속성창 UI (`CD2DPropertyView`)**: Sizing (W | H) 콤보에 `Fill` 항목 추가 및 자식 요소(프레임/도형/텍스트)가 부모 Auto Layout 프레임 안에 있을 때 `Fill` 선택 지원 — 완료: Sizing 콤보에 Fill 추가. 자기 레이아웃이 없어도 **부모가 자동 배치면** 표시.
+- [x] 4.5.9.4 **`HtmlExporter` CSS 매핑**: 주축 `Fill` → `flex: 1 1 0%; min-width: 0;`(또는 `min-height: 0;`), 교차축 `Fill` → `align-self: stretch;` (또는 `width: 100%` / `height: 100%`) 출력 — 완료: 부모 주축 Fill → `flex: 1 1 0%; min-width/height: 0`, 교차축 → `align-self: stretch`, 자유 배치 부모 → `width/height: 100%`.
+- [x] 4.5.9.5 **검증**: `GeModelPureCheck`에 헤더+사이드바+본문+푸터 복합 레이아웃 계산 및 SVG/HTML 왕복 테스트 추가, 빌드 및 앱 확인 — 완료: 자체 검증 31(b) (헤더+[사이드바|본문]+푸터 계산, 부모 리사이즈, Hug 폴백, 왕복, flex CSS).
+
+### Step 4.5.10 4방향 여백(Padding) / 테두리(Border) / 모서리 반경(Corner Radius) (3순위)
+> `border-bottom`만 있는 헤더, 상하/좌우 비대칭 패딩, 위쪽만 둥근 탭/카드 등 웹 UI의 비대칭 컨테이너 스타일을 지원한다. 기존 단일 값 저장 파일과의 하위 호환을 유지한다.
+- [x] 4.5.10.1 **모델 확장**: — 완료: `PaddingEdges`/`CornerRadii`/`BorderSide` 비트. `GetPadding()`은 위쪽 값(대표값), `SetPadding/SetCornerRadius`는 4방향 모두 설정.
+  - 패딩: `PaddingEdges { top, right, bottom, left }` (기존 `GetPadding()`/`SetPadding(float)`은 4방향 일괄 설정/조회로 호환 유지)
+  - 테두리 방향: `BorderSides` 비트플래그 (`Top | Right | Bottom | Left`, 기본 `All`)
+  - 모서리 반경: `CornerRadii { tl, tr, br, bl }` (기존 `GetCornerRadius()`/`SetCornerRadius(float)` 호환 유지)
+- [x] 4.5.10.2 **`ApplyLayout` & 렌더러 반영**: — 완료: `ApplyLayout` 비대칭 여백, 렌더러 4모서리 경로 지오메트리 + 선택 변 직선 테두리(부분 테두리일 때 둥근 모서리 호는 안 그림).
+  - `FrameNode::ApplyLayout()`에서 `padLeft/padRight`, `padTop/padBottom` 비대칭 여백 적용
+  - `D2DRenderer`에서 4모서리 개별 반경 PathGeometry 렌더링 및 선택된 변(`BorderSides`)에만 테두리 선 렌더링
+- [x] 4.5.10.3 **속성창 UI**: 패딩(가로/세로 또는 상/우/하/좌), 테두리 방향 토글(`[All][T][R][B][L]`), 모서리 반경 입력 UI 추가 — 완료: 모서리 4칸(◤◥◢◣), 테두리 변 체크 T/R/B/L, 여백 4칸 (자동 배치일 때).
+- [x] 4.5.10.4 **SVG 저장/읽기 & `HtmlExporter` 연동**: — 완료: `m2:padding4/radius4/borderSides`, 기존 `m2:pad/radius` 호환, 비대칭 모서리는 `<path>`, HTML `padding/border-radius/border-top...`.
+  - 기존 `m2:pad`, `m2:radius` 단일 값 파일 읽기 완벽 호환 + 비대칭일 때 4값 직렬화
+  - `HtmlExporter`에서 `padding: T R B L`, `border-top/right/bottom/left`, `border-radius: TL TR BR BL` 출력
+- [x] 4.5.10.5 **검증**: `GeModelPureCheck` 하위 호환 및 4방향 레이아웃/직렬화/HTML 출력 검증, 빌드 및 앱 확인 — 완료: 자체 검증 31(c) (배치, 하위 호환 단일 값 파일, 왕복, CSS, Clean 출력).
+
+### Step 4.5.11 자유 배치(`LayoutMode::None`) Constraints (좌/우/상/하 고정) (4순위 — 후순위)
+> Fill과 4방향 속성이 자리 잡은 뒤 진행. 자유 배치 프레임 크기를 조절할 때 자식 요소의 좌/우/상/하 상대 위치를 유지한다.
+- [x] 4.5.11.1 가로(`Left`/`Right`/`LeftRight`/`Center`) 및 세로(`Top`/`Bottom`/`TopBottom`/`Center`) 제약 모델 및 프레임 리사이즈 시 자식 위치/크기 보정 — 완료: 노드 단위 `ConstraintH/V`(`m2:cx/cy`), `FrameNode::ResizeFrame` 이 자유 배치 자식을 보정. 속성창 W/H 입력과 크기 핸들 드래그가 프레임이면 이 경로 사용(회전/스케일 없는 프레임만).
+- [x] 4.5.11.2 속성창 Constraints 선택 UI 및 `HtmlExporter`의 `left`/`right`/`top`/`bottom` CSS 매핑 — 완료: 속성창 Constraints 콤보(부모가 자유 배치 프레임일 때 표시), HTML `left/right/top/bottom` + 가운데는 `calc(50% + n)` + `translate`.
+
+### Step 4.5.12 생성 시 프레임 자동 부모 (Figma 방식)
+> 새 요소를 그릴 때 드래그를 시작한 점 아래의 가장 안쪽 프레임이 부모가 된다. 이전에는 항상 활성 레이어 최상위에 들어가 프레임 안에 그려도 겹쳐 보이기만 했다.
+- [x] 4.5.12.1 `Document::FindFrameAt/AddShapeAt/AddShapeAuto`: 월드 점 아래의 가장 안쪽 프레임(보이고 잠기지 않은 프레임, 표/클리핑 그룹 제외) 탐색, 새 노드 변환을 부모 로컬 좌표로 보정, 자동 배치 부모는 추가 후 재배치 — 완료 (2026-10-29)
+- [x] 4.5.12.2 생성 도구 연결: 프레임/표/헤딩/버튼/구분선/간격/텍스트 = 시작점 기준, 도형(사각/원/별 등)·펜 패스 = 월드 경계 중심 기준. (이미지 불러오기는 미적용)
+- [x] 4.5.12.3 검증: 자체 검증 32 (가장 안쪽 프레임 판정, 로컬 좌표 보정, 프레임 밖은 레이어 직속, 자동 배치 부모 재배치)
+
+### Step 4.5.13 이동 시 부모 변경 (프레임 안으로 넣기/밖으로 빼기)
+- [x] 4.5.13.1 `Document::ReparentAt` (`MoveNodeTo` 재사용): 월드 위치 유지, 자기/후손 안으로는 불가, 그룹/표 안의 자식은 구조 유지, 같은 부모면 무동작, 옛/새 부모 체인 재배치
+- [x] 4.5.13.2 `SelectTool::OnUp` 이동 드래그 종료 시(2px 초과 이동) 놓은 위치의 프레임으로 선택 노드들의 부모 변경. 클릭만 하면 변경 없음
+- [x] 4.5.13.3 검증: 자체 검증 32 (프레임 위에 놓기 = 자식, 월드 위치 유지, 밖으로 놓기 = 레이어, 그룹 자식 유지)
+- [ ] 4.5.13.4 (미구현) 부모가 자동 배치 프레임일 때 놓은 위치에 맞는 순서 삽입(현재는 맨 위로 들어가 레이아웃이 재배치됨), 이미지 불러오기 자동 부모
+
+### Step 4.5.15 내부 프레임 윤곽선 / 크기 배지
+> 흰 배경 위의 흰 내부 프레임은 범위와 크기를 알 수 없던 문제를 해결한다.
+- [x] 4.5.15.1 내부(중첩) 프레임에 항상 얇은 파란 윤곽선(편집용, 저장/내보내기 제외) — 완료 (2026-10-29)
+- [x] 4.5.15.2 좌상단 배지 `[역할] 이름  W × H` (화면에서 폭 90px/높이 34px 미만이면 윤곽선만) — 완료
+- [ ] 4.5.15.3 (일부 구현) 선택한 요소 아래 `W × H` 알약은 4.5.14.3 에서 구현됨. **미구현**: 호버 시 배지 강조, 윤곽선 표시 on/off 설정
+
+### Step 4.5.16 자식은 부모 프레임 범위를 벗어나지 못함
+- [x] 4.5.16.1 `FrameNode::ClampChild/ClampChildren/ClampNode`: 자유 배치 프레임의 자식 위치를 범위 안으로, 부모보다 큰 자식은 부모 크기로 축소(프레임은 `ResizeFrame`, 도형/이미지는 스케일, 글자/표는 위치만) — 완료
+- [x] 4.5.16.2 적용 지점: 이동 드래그(포인터가 부모 안에 있는 동안만 — 밖으로 끌어내면 부모 변경 허용), 크기 핸들 드래그(넘친 쪽만 잘림, 반대쪽 모서리 고정), 회전, 속성창 X/Y/W/H, 생성, 부모 변경, 부모 프레임 축소(`ResizeFrame`)
+- [x] 4.5.16.3 검증: 자체 검증 33
+- [ ] 4.5.16.4 (미적용) 자동 배치(Row/Column) 부모는 레이아웃이 위치를 결정하므로 클램프하지 않음(내용이 넘치면 Hug/Fill 로 해결), 파일 읽기 시에는 보정하지 않음, 선 굵기/그림자 등 스트로크 바깥쪽은 범위 계산에 포함하지 않음
+
+### Step 4.5.14 스마트 가이드 / 스냅선 (Figma 붉은 선)
+> 부모 프레임 가장자리·가운데, 형제 요소의 가장자리·가운데·같은 간격에 맞춰 달라붙고 선을 보여준다. 정렬을 돕는 기능이며 부모를 정하지는 않는다(4.5.12~13).
+- [x] 4.5.14.1 스냅 후보 수집(부모 프레임 안쪽 변/중심, 형제 변/중심, 같은 간격) 순수 모델 함수 + 자체 검증 — 완료 (2026-10-29): `SmartGuides.h/.cpp` (D2D 없음). 부모 프레임의 왼쪽/가운데/오른쪽·위/가운데/아래와 형제 요소의 같은 변을 후보로, 6px(화면) 이내 가장 가까운 변을 선택. 자체 검증 34.
+- [x] 4.5.14.2 이동/크기 조절/생성 드래그에서 임계값(화면 픽셀) 안이면 스냅 적용 — 완료(범위 제한): **이동**(선택 전체 상자의 왼쪽/가운데/오른쪽·위/가운데/아래)과 **크기 조절 핸들**(움직이는 변만)에 적용. **후보는 같은 레이어의 모든 보이는 노드(형제/사촌/손자 등 계층 무관)** — 자기 자신과 후손은 제외, 표 칸 내용은 제외(표 자체만). **생성 드래그**(프레임/표/헤딩/버튼/구분선/간격 도구)에도 시작점·끝점에 적용하고 클릭 전 호버 중에도 가이드 표시. 도형/펜 도구 생성과 같은 간격 스냅은 미구현.
+- [x] 4.5.14.3 `DrawOverlay` 에 붉은 가이드 선과 간격 표시 — 완료(범위 제한): 붉은 가이드선 + 끝점/가운데 x 표시, 선택 요소 아래 파란 `W × H` 알약. 점선 거리 표시(부모 가장자리까지 거리)는 미구현.
+- [x] 4.5.14.4 Alt/Ctrl 로 일시 해제, 기존 격자 스냅 설정과의 우선순위 정리 — 완료: Alt 로 일시 해제, 마스터 스냅 꺼짐이면 사용 안 함, 그리드 스냅 위에 가이드가 덮어쓰므로 같은 축에서는 가이드가 우선.
+
+### Step 4.5.17 표준 HTML UI 컴포넌트 확장 (단일 오브젝트 + 전용 속성창)
+> **공통 설계 원칙**
+> 1. **단일 원자 오브젝트(Atomic Object)**: 모든 컴포넌트는 캔버스에서 클릭·이동·크기 조절 시 내부 요소(박스, 벡터 아이콘, 글자)가 낱개로 쪼개지지 않고 **항상 하나의 단일 오브젝트**로 선택·조작된다 (버튼과 동일한 선택 정책).
+> 2. **기본 벡터/프레임/텍스트 노드 조합 활용**: 엔진에 별도 D2D 그리기 함수를 늘리지 않고, 기존 `FrameNode`/`GroupNode` + `PathNode`(체크 마크, 화살표, 바 트랙/핸들, 불릿 등 벡터 도형) + `TextNode`를 조합하여 컴포넌트 모듈(`HtmlComponents/`)이 내부 노드를 생성·갱신한다.
+> 3. **객체별 맞춤형 전용 속성창 (`CD2DPropertyView`)**: 컴포넌트를 선택하면 해당 컴포넌트 종류에 맞는 전용 속성 섹션이 Transform 위에 표시되어, 값을 바꾸면 내부 벡터/텍스트 모양과 HTML 메타데이터가 즉시 함께 갱신된다.
+> 4. **시맨틱 HTML 출력 + SVG 왕복**: `m2:component` 및 전용 `m2:*` 속성으로 저장/복원(Undo 포함)하고, `HtmlExporter`에서 실제 표준 HTML 태그로 1:1 변환한다.
+
+- [ ] 4.5.17.1 **텍스트 박스 / 타이포그래피 컴포넌트 (`TextBox`: 일반 본문 `P`, 제목 `H1` ~ `H6`, 인용구 `Blockquote`)**
+  - **모델/형태**: 영역 텍스트(`TextNode`) 또는 여백/강조선을 가진 컨테이너 + 텍스트 단일 오브젝트
+  - **전용 속성창**: 텍스트 역할/레벨 선택(`본문 (P)`, `H1`, `H2`, `H3`, `H4`, `H5`, `H6`, `인용구 (Blockquote)`), 레벨 변경 시 권장 폰트 크기/굵기 자동 프리셋 적용 옵션, 내용 입력, 정렬, 줄간격
+  - **HTML 내보내기**: `<p>`, `<h1>`~`<h6>`, `<blockquote>` 시맨틱 태그 출력
+
+- [ ] 4.5.17.2 **텍스트 입력창 (`TextInput` / `Textarea`)**
+  - **모델/형태**: 외곽 입력 박스(`FrameNode` 또는 사각 `PathNode`) + 안내/입력 문구(`TextNode`) + 선택적 아이콘(벡터 돋보기 등)을 묶은 단일 오브젝트
+  - **전용 속성창**: 입력 종류(`한 줄 텍스트(text)`, `비밀번호(password)`, `이메일(email)`, `검색(search)`, `숫자(number)`, `여러 줄(textarea)`), 안내 문구(`Placeholder`), 기본 입력값(`Value`), 비활성화(`Disabled`) 토글
+  - **HTML 내보내기**: `<input type="..." placeholder="..." value="...">` 또는 `<textarea placeholder="...">...</textarea>`
+
+- [ ] 4.5.17.3 **체크박스 / 라디오 버튼 / 토글 스위치 (`Checkbox` / `Radio` / `Switch`)**
+  - **모델/형태**: 벡터 도형(`PathNode`: 사각 박스 + 체크 `✓` 패스 / 원형 라디오 + 중심 점 / 캡슐 트랙 + 원형 스위치 노브) + 우측 라벨(`TextNode`)로 구성된 단일 오브젝트
+  - **전용 속성창**: 종류 전환(`Checkbox` / `Radio` / `Switch`), 체크 상태(`Checked` On/Off — 변경 즉시 벡터 체크 마크/노브 위치 갱신), 라벨 문구, 강조 색(Accent Color)
+  - **HTML 내보내기**: `<label><input type="checkbox|radio" checked> <span>라벨</span></label>`
+
+- [ ] 4.5.17.4 **콤보박스 / 드롭다운 (`ComboBox` / `Select`)**
+  - **모델/형태**: 선택 상자 프레임 + 현재 선택 항목 텍스트(`TextNode`) + 우측 구분선 및 아래 화살표 벡터(`PathNode` `▾`)로 구성된 단일 오브젝트
+  - **전용 속성창**: 항목 목록 입력(예: 줄바꿈/쉼표로 구분된 옵션 목록), 현재 표시할 기본 선택 항목(인덱스), 안내 문구
+  - **HTML 내보내기**: `<select><option value="..." selected>항목1</option><option>항목2</option>...</select>`
+
+- [ ] 4.5.17.5 **리스트 (`List`: 불릿 목록 `ul` / 번호 목록 `ol` / 목록 그룹)**
+  - **모델/형태**: 각 행마다 벡터 불릿(`PathNode`: 원점 `•`, 체크, 사각) 또는 번호(`TextNode`: `1.`, `2.`) + 항목 텍스트(`TextNode`)가 세로 간격에 맞춰 자동 배치되는 단일 오브젝트
+  - **전용 속성창**: 리스트 종류(`순서 없는 목록(ul)`, `순서 있는 목록(ol)`, `구분선 박스 리스트`), 마커 스타일(점/숫자/체크/없음), 항목 추가·삭제·문구 편집, 행 간격(Gap)
+  - **HTML 내보내기**: `<ul><li>...</li></ul>` 또는 `<ol><li>...</li></ol>`
+
+- [ ] 4.5.17.6 **바 컴포넌트 (`Bar`: 진행률 바 `Progress` / 슬라이더 `Range` / 구분선 `Divider`)**
+  - **모델/형태**: 전체 트랙 사각형(`PathNode`) + 비율(`value / max`)만큼 채워지는 전경 바(`PathNode`) + (슬라이더일 때) 원형 손잡이 노브(`PathNode`) + 선택적 퍼센트 텍스트(`TextNode`)
+  - **전용 속성창**: 바 종류(`Progress Bar` / `Range Slider`), 현재 값(`Value`), 최소/최대값(`Min`/`Max`), 퍼센트 라벨 표시 On/Off, 트랙 색 / 채움 색 / 바 두께
+  - **HTML 내보내기**: `<progress value="..." max="...">` 또는 `<input type="range" min="..." max="..." value="...">`
+
+- [ ] 4.5.17.7 **추가 웹 UI 컴포넌트 후보 (필요 순으로 확장)**
+  - **탭 바 (`Tabs`)**: 가로 탭 버튼 배열 + 활성 탭 강조선/배경 (속성: 탭 이름 목록, 활성 탭 번호)
+  - **배지 / 태그 (`Badge` / `Chip`)**: 알약 모양 배경 + 짧은 상태 문구 + 선택적 닫기(`×`) 벡터 아이콘
+  - **카드 (`Card`)**: 상단 이미지 영역 + 제목(`H3`) + 본문(`P`) + 하단 액션이 하나로 묶인 프리셋 컨테이너
+  - **페이지네이션 / 빵부스러기 (`Pagination` / `Breadcrumb`)**: 페이지 번호 버튼 열 또는 경로(`홈 > 카테고리 > 상세`) 단일 오브젝트
+
+- [ ] 4.5.17.8 **공통 검증**: 각 컴포넌트 생성, 단일 오브젝트 클릭/이동/크기 조절(내부 요소 분리 방지), 전용 속성창 실시간 갱신, SVG(`m2:component`) 저장/복원 왕복, Undo/Redo, `HtmlExporter` 태그 출력(`GeModelPureCheck`) 검증
+
+### Step 4.5.18 공통 외형(Appearance) & 그림자(Shadow) 통합 구조
+> **배경**: 새 컴포넌트(헤딩, 카드, 입력창 등)가 늘어날 때마다 외형 코드와 속성창 UI를 중복 작성하지 않도록, **모델 · 속성창 · HTML/SVG 내보내기** 세 곳의 외형 처리를 하나로 모은다.
+> **핵심 주의사항**: 요소마다 CSS/SVG 대응 방식이 다르므로(프레임/박스 = `box-shadow`, 글자 = `text-shadow`, 경로/인라인 SVG = `filter: drop-shadow(...)`), **공통 모델을 두되 요소별 출력 변환은 작은 어댑터로 분리**한다. 또한 D2D 화면 그림자(블러)는 렌더 타깃 제약이 있으므로 **1단계(모델 + 속성창 + SVG/HTML 내보내기)와 2단계(D2D 화면 렌더링)로 분리**해 안전하게 진행한다.
+
+- [x] 4.5.18.1 **모델 — 공통 외형 묶음 & 그림자(`Shadow`) 추가**: — 완료 (2026-10-30): `Node::GetShadow/SetShadow`(복제 포함, 기본 꺼짐) + `Shadow.inset`·음수 spread. 별도 "외형 구조체"로 묶지는 않고 `Node` 필드로 둠(불투명도/혼합 모드/선은 기존 위치 그대로).
+  - `Style`(또는 `Node` 외형 구조체)에 `Shadow { bool enabled = false; float offsetX = 0, offsetY = 4, blur = 8, spread = 0; Color color = {0,0,0,0.25f}; }` 추가
+  - 기존 공통 외형(불투명도 `opacity`, 혼합 모드 `blendMode`, 선 굵기·대시·색 `stroke`)과 함께 모든 노드가 공유하며, 요소 고유 속성(프레임의 4모서리·테두리 변·여백, 표의 셀 테두리)은 각 노드에 그대로 유지
+- [x] 4.5.18.2 **속성창 (`CD2DPropertyView`) — 공용 "Appearance" 섹션 일원화**: — 완료(범위 제한): 모든 요소에서 같은 구역(Drop Shadow, Inset, X/Y/Blur/Spread, 프리셋 6종 + 16색 팔레트 + % alpha, 경로/프레임/표는 Line 굵기·종류). **불투명도/혼합 모드는 아직 이 구역으로 옮기지 않음**(기존 위치).
+  - 그림자 컨트롤(사용 체크, X/Y 오프셋, Blur, Spread, 색상/알파)과 불투명도·혼합 모드를 하나의 공용 Appearance 구역으로 구성하여, 도형·프레임·텍스트·이미지·컴포넌트 무엇을 선택하든 동일한 UI 재사용
+- [x] 4.5.18.3 **HTML 내보내기 (`HtmlExporter`) — `BuildAppearanceDecls` 확장 + 요소별 어댑터**: — 완료: 함수 이름은 기존 `BuildCommonStyleDecls` 를 확장(별도 `BuildAppearanceDecls` 는 만들지 않음). 프레임/이미지/표/사각형·원=`box-shadow`(inset·spread), 글자=`text-shadow`, 벡터=`filter: drop-shadow`, 대시→`solid/dashed/dotted`(표 테두리 포함). 벡터의 inset 은 CSS 에 없어 무시.
+  - 기존 `BuildCommonStyleDecls`를 확장해 `opacity`, `mix-blend-mode`, `border` 굵기·종류(`solid`/`dashed`/`dotted` — `Stroke::dashArray` 기반) 및 그림자 선언을 공통 생성
+  - 요소별 그림자 어댑터 분리:
+    - 프레임/박스형 컴포넌트/이미지: `box-shadow: <x> <y> <blur> <spread> <color>;`
+    - 텍스트(`TextNode`): `text-shadow: <x> <y> <blur> <color>;` (`spread` 제외)
+    - 벡터 경로(`PathNode`/인라인 SVG): `filter: drop-shadow(<x> <y> <blur> <color>);`
+- [x] 4.5.18.4 **SVG 저장/읽기 (`SvgWriter` / `SvgReader`)**: — 완료(방식 차이): `m2:shadow="x,y,blur,spread,#rrggbb,alpha,inset"` 저장(6개 값의 이전 형식도 읽음). 외부 뷰어용은 `<defs><filter>` 대신 **표준 `style="filter:drop-shadow(...)"`** 로 출력/복원(inset 은 제외). `<defs>` 의 `feDropShadow` 출력은 미구현.
+  - 무손실 왕복용 `m2:shadow="x y blur spread #rrggbbaa"` 속성 직렬화 및 복원 (Undo 스냅샷 포함)
+  - 외부 뷰어/브라우저 호환을 위해 `<defs>`에 표준 SVG `<filter>`(`feDropShadow` 또는 `feGaussianBlur` + `feOffset`)를 생성하고 `filter="url(#shadow_N)"` 함께 출력
+- [x] 4.5.18.5 **검증 (1차 — 모델/UI/입출력)**: `GeModelPureCheck`에 그림자 왕복, 프레임 `box-shadow` / 텍스트 `text-shadow` / SVG `filter` 출력 검증 추가 및 빌드 확인 — 완료: 자체 검증 37(그림자 왕복/복제/두 형식 읽기/HTML), 38(inset·음수 spread·표 테두리 종류), 빌드 확인.
+- [x] 4.5.18.6 **D2D 화면 그림자 렌더링 (2차 — 별도 단계)**: — 완료(1차 근사): `D2DShadowRender.cpp`(엔진 본체엔 호출만). 윤곽 최대 12겹 + 글자는 8방향 겹침, inset 은 클립 안에서 구멍 반전. 앱에서 바깥/안쪽/글자 그림자와 점선 표 렌더링 확인. **`ID2D1DeviceContext` 전환 후 `CLSID_D2D1Shadow` 이펙트 연결은 미구현(별도 단계).**
+  - `ID2D1DeviceContext` 전환(Step 2.2.6) 전까지는 다중 알파 레이어/오프셋 근사 또는 WIC 비트맵 블러 캐시로 미리보기를 제공하고, `ID2D1DeviceContext` 전환 후 `CLSID_D2D1Shadow` / `CLSID_D2D1GaussianBlur` 이펙트로 고품질 렌더링 연결
+
+### Step 4.5.19 공통 외형 후속 (4.5.18 에서 남긴 항목)
+- [x] 4.5.19.1 **안쪽(inset) 그림자 + 음수 spread**: `Shadow.inset`, SVG `m2:shadow` 7번째 값, HTML `box-shadow: inset ...` / 음수 spread, D2D 렌더링(클립 안에서 구멍 반전 + 경계 블러 겹치기, 음수 spread 는 윤곽 축소) — 완료 (2026-10-30): `Shadow.inset`, `m2:shadow` 7번째 값, HTML `inset`·음수 spread, 클립 안 구멍 반전 렌더링(프레임은 배경 위·자식 아래), 음수 spread 는 윤곽 축소.
+- [x] 4.5.19.2 **그림자 임의 색**: 16색 팔레트 + 투명도(%) 입력 (기존 프리셋 콤보 유지) — 완료: 16색 팔레트 + `% alpha`.
+- [x] 4.5.19.3 **선 굵기/종류 공통 구역**: Appearance 구역에 `Line (Width | Kind)` — 경로/프레임/표에 같은 UI, 요소별 어댑터(스타일 선 / 표 테두리)로 적용 — 완료: Appearance 구역 `Line (Width | Kind)`. 경로/프레임=스타일 선, 표=표 테두리. 기존 Fill/Stroke 탭의 선 UI 는 그대로(중복 제거는 미구현).
+- [x] 4.5.19.4 **표 테두리 종류**: `TableNode` 테두리 `solid/dashed/dotted` — 렌더링, SVG(`m2:bstyle` + stroke-dasharray), HTML `border-style`, 자체 검증 — 완료: `TableNode::BorderStyle`, 렌더링 + `m2:bstyle` + stroke-dasharray + HTML `border-style`.
+
 ### Step 4.6 WebView2 미리보기
 - [ ] 4.6.0 **선행 점검**: `Microsoft.Web.WebView2` NuGet 패키지 추가(프로젝트 설정 변경)와 Evergreen 런타임 존재 확인/안내. 런타임이 없을 때의 대체 경로(시스템 브라우저로 열기 + 파일 변경 감시) 정의
 - [ ] 4.6.1 도킹 윈도우 또는 모달 다이얼로그에 Microsoft Edge WebView2 컨트롤 임베딩
@@ -423,87 +565,204 @@
 ### Step 5.1 스마트 가이드 & 오브젝트 스냅
 > 현재 상태 (2026-10-27 확인): `SnapManager`에 정점(Anchor) 스냅만 기본 켜짐(UI 없음).
 > 중간점/중심점 스냅은 코드만 있고 꺼짐, 선(Edge) 위 최근접점·교차점 스냅은 없음.
-- [ ] 5.1.0 **오브젝트 스냅 설정 UI** (사용자 요청): 그리드 설정 창 등에 스냅 대상(정점/중간점/중심/선 위/교차점) 켜고 끄기 표시, 스냅 전체 On/Off
-- [ ] 5.1.1 드래그 이동 시 인접 오브젝트의 경계(Edge), 중심(Center), 앵커(Anchor) 근접 탐색
-- [ ] 5.1.2 스냅 발생 시 자석 정렬(좌표 보정) 및 화면에 자홍색(Magenta) 보조 가이드라인 렌더링
-- [ ] 5.1.3 다중 오브젝트 간 동일 간격(Equal Spacing) 탐지 및 간격 인디케이터 표시
-- [ ] 5.1.4 빌드 확인 및 도형 이동 중 스마트 가이드 작동 검증
+- [x] 5.1.0 **오브젝트 스냅 설정 UI** (사용자 요청): 그리드 설정 창 등에 스냅 대상(정점/중간점/중심/선 위/교차점) 켜고 끄기 표시, 스냅 전체 On/Off — 완료 (2026-10-30): Grid Settings 창에 Object Snap 구역(Snap On / Smart Guides / Equal Spacing / Anchor / Midpoint / Center / On Edge / Intersection / Origin Axis). 그리드 스냅은 기존 Snap to Grid 가 모든 도구 공통. **선 위(Edge)·교차점(Intersection) 스냅 신규**(기본 꺼짐, 곡선은 12단계로 근사). 설정은 저장하지 않음(실행할 때마다 기본값).
+- [x] 5.1.1 드래그 이동 시 인접 오브젝트의 경계(Edge), 중심(Center), 앵커(Anchor) 근접 탐색 — 완료: 4.5.14 의 스마트 가이드(같은 레이어의 모든 노드 변·가운데) + 위 스냅 대상. 정점/중점/중심/선 위/교차점은 포인터 스냅(`FindSnapPoint`)으로 동작.
+- [x] 5.1.2 스냅 발생 시 자석 정렬(좌표 보정) 및 화면에 자홍색(Magenta) 보조 가이드라인 렌더링 — 완료(색 차이): 자석 정렬 + 가이드선은 **붉은색**(요청에 맞춰 Figma 식), 포인터 스냅 마커는 정점=청록, 중점=보라, 중심=노랑, 선 위=연두, 교차점=자홍.
+- [x] 5.1.3 다중 오브젝트 간 동일 간격(Equal Spacing) 탐지 및 간격 인디케이터 표시 — 완료: 같은 간격 맞춤(이웃 간격과 같게 오른쪽/왼쪽/아래/위에 붙이기, 두 요소 사이 가운데) + 간격 값(px) 알약 표시. 이동 드래그에서만 동작(크기 조절/생성 제외). 자체 검증 39.
+- [x] 5.1.4 빌드 확인 및 도형 이동 중 스마트 가이드 작동 검증 — 완료: 빌드 + 자체 검증(순수 39, 런타임 Edge/Intersection) 통과. 앱에서 Object Snap 구역 표시 확인.
 
 ### Step 5.2 다중 선택 공통 변환
-- [ ] 5.2.1 2개 이상 선택된 오브젝트들의 전체 결합 AABB 바운딩 박스 계산
-- [ ] 5.2.2 공통 바운딩 박스 변환 기즈모 핸들(스케일, 중심 회전, 전단/Skew) 렌더링
-- [ ] 5.2.3 기즈모 드래그 시 각 자식 도형의 로컬 변환(`m_xf`)에 비례 행렬 일괄 합성
-- [ ] 5.2.4 빌드 확인 및 다중 선택 일괄 크기 조절/회전 검증
+- [x] 5.2.1 2개 이상 선택된 오브젝트들의 전체 결합 AABB 바운딩 박스 계산 — 완료 (2026-10-30): `UnionWorldBounds` (`GroupTransform.cpp`, D2D 없음).
+- [x] 5.2.2 공통 바운딩 박스 변환 기즈모 핸들(스케일, 중심 회전, 전단/Skew) 렌더링 — 완료: 다중 선택 시 개별 핸들 대신 결합 기즈모 1개(8핸들 + 회전 핸들 + `W × H (개수)` 알약). 스케일(Shift=비율 유지, Alt=가운데 기준), 회전(Shift=15° 단위), **Ctrl+가장자리 핸들 = 전단(Skew)**.
+- [x] 5.2.3 기즈모 드래그 시 각 자식 도형의 로컬 변환(`m_xf`)에 비례 행렬 일괄 합성 — 완료: `ApplyWorldTransform` — `newLocal = initLocal * (parentWorld * T * parentWorld^-1)` 로 부모가 이동/스케일된 노드도 월드 기준으로 일괄 변환. 자체 검증 41.
+- [x] 5.2.4 빌드 확인 및 다중 선택 일괄 크기 조절/회전 검증 — 완료: 자체 검증(스케일/회전/가로·세로 전단) + 앱에서 마키 선택 후 모서리 핸들 드래그 확인(그룹+도형이 함께 비례 확대). **회전/전단의 실제 드래그는 앱에서 직접 해보지 않음(계산은 자체 검증).**
 
 ### Step 5.3 그룹 격리 편집 (Isolation Mode)
 > 선행: 2.0.2(그룹 선택), 2.0.3(계층 트리)
-- [ ] 5.3.1 그룹 더블클릭 시 해당 그룹 내부로 진입하는 격리 모드 상태 머신 추가
-- [ ] 5.3.2 캔버스 상단에 격리 네비게이션 바(빵부스러기: Breadcrumbs) 표시
-- [ ] 5.3.3 격리 대상 외 나머지 객체들은 딤(Dimming/반투명) 처리 및 마우스 인터랙션 차단
-- [ ] 5.3.4 ESC 키 또는 캔버스 바깥 더블클릭 시 상위 레벨로 복귀
-- [ ] 5.3.5 빌드 확인 및 그룹 내부 도형 직접 편집 검증
+- [x] 5.3.1 그룹 더블클릭 시 해당 그룹 내부로 진입하는 격리 모드 상태 머신 추가 — 완료 (2026-10-30): `Document` 에 격리 상태(`EnterIsolation/ExitIsolation/GetIsolationGroup`, NodeId 로 보관해 Undo/삭제 시 자동 해제). 일반 그룹을 더블클릭하면 진입(프레임/표/클리핑 그룹 제외). 중첩 진입 가능.
+- [x] 5.3.2 캔버스 상단에 격리 네비게이션 바(빵부스러기: Breadcrumbs) 표시 — 완료: 캔버스 상단 브레드크럼 막대 `Layer › Group › …` (조상 그룹 클릭으로 이동, 레이어 클릭으로 전체 종료).
+- [x] 5.3.3 격리 대상 외 나머지 객체들은 딤(Dimming/반투명) 처리 및 마우스 인터랙션 차단 — 완료: 격리 밖은 반투명 덮개로 딤 처리하고 격리 그룹만 다시 그림. 히트 테스트/마키는 격리 그룹의 직속 자식만 대상(밖은 선택 불가).
+- [x] 5.3.4 ESC 키 또는 캔버스 바깥 더블클릭 시 상위 레벨로 복귀 — 완료: Esc = 한 단계 위로, 빈 곳 더블클릭 = 한 단계 위로(캔버스 "바깥"이 아니라 선택이 없는 빈 곳 기준).
+- [x] 5.3.5 빌드 확인 및 그룹 내부 도형 직접 편집 검증 — 완료: 자체 검증 40 + 앱에서 진입/딤/브레드크럼/내부 개별 선택/Esc 복귀 확인.
 
 ### Step 5.4 클립보드 (SVG 교환)
 > 선행: 2.0.5(`ImportNodes` — 붙여넣을 때 NodeId 중복 방지), 2.9(외부 SVG 해석). 복사는 `SvgWriteOptions::File`(이미지 임베드)로 직렬화
-- [ ] 5.4.1 선택된 노드들을 메모리 상의 SVG 문자열로 직렬화하여 Windows 클립보드(`CF_UNICODETEXT` 및 `image/svg+xml`)에 복사(Ctrl+C)
-- [ ] 5.4.2 클립보드에서 SVG 데이터를 읽어와 현재 문서 캔버스에 붙여넣기(Ctrl+V)
-- [ ] 5.4.3 Illustrator, Figma, 브라우저 등 외부 애플리케이션과의 양방향 복사/붙여넣기 테스트
-- [ ] 5.4.4 빌드 확인 및 외부 툴 연동 검증
+- [x] 5.4.1 선택된 노드들을 메모리 상의 SVG 문자열로 직렬화하여 Windows 클립보드(`CF_UNICODETEXT` 및 `image/svg+xml`)에 복사(Ctrl+C) — 완료 (2026-10-30): Ctrl+C/X → 선택 노드를 월드 변환으로 구워 SVG(File 형식, M2 메타 포함)로 직렬화해 `image/svg+xml` + `CF_UNICODETEXT` 로 클립보드에 넣음. 조상이 함께 선택되면 중복 제외.
+- [x] 5.4.2 클립보드에서 SVG 데이터를 읽어와 현재 문서 캔버스에 붙여넣기(Ctrl+V) — 완료: Ctrl+V → 클립보드 SVG 를 읽어 `ImportNodes` 로 붙여넣기(NodeId 새로 발급), 연속 붙여넣기는 위치를 어긋나게, 선택이 프레임이면 그 프레임 안으로. 앱에서 PowerShell 로 넣은 SVG 텍스트 붙여넣기 확인.
+- [ ] 5.4.3 Illustrator, Figma, 브라우저 등 외부 애플리케이션과의 양방향 복사/붙여넣기 테스트 — **부분**: 클립보드 SVG 텍스트(외부 형식과 같은 `image/svg+xml`/텍스트)로 주고받는 경로는 확인. **Illustrator/Figma/브라우저 실제 앱과의 양방향 복사/붙여넣기는 이 환경에서 테스트하지 못함.**
+- [x] 5.4.4 빌드 확인 및 외부 툴 연동 검증 — 완료: 빌드 + 자체 검증(직렬화 왕복, 조상 중복 제외, 월드 위치 구움, 비 SVG 거부) + 앱에서 붙여넣기/복사 내용 확인.
 
 ### Step 5.5 PNG/JPG/PDF 래스터 출력
-- [ ] 5.5.1 해상도(DPI) 및 배율(1x, 2x, 4x) 지정이 가능한 내보내기 대화상자 구현
-- [ ] 5.5.2 WIC 기반 오프스크린 렌더 타깃(`ID2D1BitmapRenderTarget`)에 고해상도 렌더링
-- [ ] 5.5.3 WIC 인코더를 통해 투명 배경 PNG 및 무손실 JPG 파일 저장
-- [ ] 5.5.4 (선택) PDF 출력: Step 4.6.5(WebView2 `PrintToPdf`)로 해결 가능하면 별도 Direct2D Print Control 구현은 생략
-- [ ] 5.5.5 빌드 확인 및 출력된 고해상도 이미지 파일 품질 검증
+- [x] 5.5.1 해상도(DPI) 및 배율(1x, 2x, 4x) 지정이 가능한 내보내기 대화상자 구현 — 완료 (2026-10-30): 파일 → 이미지 내보내기(PNG/JPG) 대화상자: 형식, 배율(1x/2x/4x/8x), DPI, 투명 배경, 선택 영역만. 설정 기억.
+- [x] 5.5.2 WIC 기반 오프스크린 렌더 타깃(`ID2D1BitmapRenderTarget`)에 고해상도 렌더링 — 완료: WIC 비트맵 + `CreateWicBitmapRenderTarget` 오프스크린 렌더링(기존 `D2DRenderer` 재사용, 한 변 최대 16384px).
+- [x] 5.5.3 WIC 인코더를 통해 투명 배경 PNG 및 무손실 JPG 파일 저장 — 완료: WIC 인코더로 투명 PNG(32bpp BGRA) / JPG(24bpp, 품질 92, 문서 배경색 합성), DPI 메타데이터 기록.
+- [ ] 5.5.4 (선택) PDF 출력: Step 4.6.5(WebView2 `PrintToPdf`)로 해결 가능하면 별도 Direct2D Print Control 구현은 생략 — **건너뜀**: Step 4.6.5(WebView2 PrintToPdf)에 의존하며 4.6 은 이번에 진행하지 않음.
+- [x] 5.5.5 빌드 확인 및 출력된 고해상도 이미지 파일 품질 검증 — 완료: 자체 검증(2x 크기 200x100, 빨간 픽셀 색, PNG 투명/JPG 흰 배경, 영역 지정, 과대 출력 거부) + 앱에서 대화상자→저장 실행해 1800x1200 RGBA PNG 생성/선 색 확인.
 
 ### Step 5.6 페인트통 도구 (PaintBucketTool)
 > **후순위/선택 사항**: 닫힌 영역 탐지(평면 분할)가 필요한데 D2D 에 Divide 가 없어 구현 비용이 큼 (2.5.7 과 동일한 문제). 목표(SVG 일러스트 + HTML 디자인) 달성에 필수가 아니므로 마지막에 판단
-- [ ] 5.6.1 캔버스 클릭 지점의 닫힌 교차 영역 탐색 (불리언 Divide 또는 지오메트리 패스 분석)
-- [ ] 5.6.2 탐색된 경계 영역을 독립된 신규 폐곡선 `PathNode`로 생성
-- [ ] 5.6.3 현재 활성화된 채우기 스타일(Fill Paint)을 즉시 적용하여 문서에 추가
-- [ ] 5.6.4 빌드 확인 및 선으로 둘러싸인 빈 공간 클릭 채우기 검증
+- [x] 5.6.1 캔버스 클릭 지점의 닫힌 교차 영역 탐색 (불리언 Divide 또는 지오메트리 패스 분석) — 완료 (2026-10-30): `RegionFill.cpp` — Divide 없이 **래스터 플러드 필**(윤곽을 오프스크린에 그려 선 픽셀을 벽으로, 틈 2px 이하는 막힘, 가장자리에 닿으면 열린 영역으로 실패).
+- [x] 5.6.2 탐색된 경계 영역을 독립된 신규 폐곡선 `PathNode`로 생성 — 완료: 채워진 영역의 바깥 윤곽을 따라가 다각형으로 만들고 RDP(허용 1.3px)로 단순화 → 닫힌 `PathNode`(꼭짓점 직선). 안쪽 섬/구멍은 무시, 정밀도는 약 0.5 단위(래스터 해상도 한계).
+- [x] 5.6.3 현재 활성화된 채우기 스타일(Fill Paint)을 즉시 적용하여 문서에 추가 — 완료: 페인트통(K) 클릭 → 속성창의 현재 채우기 색으로 새 도형 추가 + 선택 + Undo 기록. 선 위 클릭/열린 영역은 상태 표시줄 안내.
+- [x] 5.6.4 빌드 확인 및 선으로 둘러싸인 빈 공간 클릭 채우기 검증 — 완료: 자체 검증(상자, 대각선 4등분 삼각형 2곳, 이동된 도형, 열린 U 자 실패, 막으면 성공, 선 위 실패) + 앱에서 X 자 상자의 두 삼각형 채우기 확인. 곡선 경계에서도 같은 방식이나 이번에 시각 확인은 하지 않음.
 
 ---
 
-## Phase 6 — 최적화 & 리팩토링
+## Phase 6 — 최적화, 리팩토링 & 표준 일러스트 앱(Inkscape / Illustrator) 벤치마킹 보완
 
-> 기능 구현(Phase 1~5) 과정에서 누적된 결합도를 낮추고, 대용량 문서·고해상도 이미지·다수 컴포넌트 환경에서의 메모리/렌더링 성능과 유지보수성을 개선하는 단계.
+> 기능 구현(Phase 1~5) 과정에서 누적된 결합도와 핫패스(Hot-path) 병목을 해소하고, 상용 벡터 일러스트 앱(Adobe Illustrator, Inkscape 등)과 비교해 구조적으로 달랐던 설계(바운딩 박스 정의, 객체 선택과 노드 편집의 분리, 라이브 도형 핸들, 복합 패스 등)를 벤치마킹하여 보완하는 단계.
+
+---
+
+### Part A. 코드 구조 리팩토링 및 아키텍처 정합성 개선 (기존 6.1 ~ 6.5 구체화)
 
 ### Step 6.1 `CD2DPropertyView` 섹션별 메소드 분리 및 레이아웃 재구성 최적화
-> 현재 `InitControls()`, `SyncControlsFromData()`, `UpdateLayout()` 한 함수 안에 도형·그라디언트·그룹·텍스트·이미지·프레임·버튼·그리드·캔버스 로직이 모두 모여 있고, 창 크기 변경(`AdjustLayout`) 시 컨트롤 전체를 재생성하는 비용(0.3.4 메모)이 남아 있음.
+> **대상 파일**: `D2DPropertyView.h`, `D2DPropertyView.cpp`
+> **현황 및 문제점**: `InitControls()`, `SyncControlsFromData()`, `UpdateLayout()` 단일 거대 함수 안에 도형·그라디언트·그룹·텍스트·이미지·프레임·버튼·그리드·캔버스 로직이 혼재되어 있으며, 창 크기 변경(`OnSize` → `AdjustLayout`)이나 `SetPaneMode()` 호출 시 컨트롤 전체(`DestroyWindow` + `Create`)를 재생성하는 오버헤드(0.3.4 메모)와 깜빡임이 남아 있음.
 - [ ] 6.1.1 섹션별 초기화 메소드 분리: `InitShapeStyleSection()`, `InitGradientSection()`, `InitTextSection()`, `InitImageSection()`, `InitFrameSection()`, `InitTableSection()`, `InitGridModeControls()`, `InitCanvasModeControls()`
-- [ ] 6.1.2 섹션별 데이터 동기화 메소드 분리: `SyncTextSection()`, `SyncImageSection()`, `SyncFrameSection()`, `SyncGradientSection()`, `SyncStrokeSection()` (`SyncTableControls` 패턴으로 통일)
-- [ ] 6.1.3 섹션별 배치/가시성 메소드 분리: `LayoutTextSection(y)`, `LayoutImageSection(y)`, `LayoutFrameSection(y)`, `LayoutStyleSection(y)` (`LayoutGroupPanel` 패턴으로 통일하여 `UpdateLayout` 본문을 흐름 제어 위주로 단순화)
-- [ ] 6.1.4 불필요한 컨트롤 재생성 방지: `SetPaneMode(mode)` 호출 시 모드가 실제로 바뀔 때만 `InitControls()`를 수행하고, 단순 리사이즈(`AdjustLayout`)에서는 `UpdateLayout()`만 호출하도록 개선
+- [ ] 6.1.2 섹션별 데이터 동기화 메소드 분리: `SyncTextSection()`, `SyncImageSection()`, `SyncFrameSection()`, `SyncGradientSection()`, `SyncStrokeSection()` (기존 `SyncTableControls()` 패턴으로 통일)
+- [ ] 6.1.3 섹션별 배치/가시성 메소드 분리: `LayoutTextSection(int& y)`, `LayoutImageSection(int& y)`, `LayoutFrameSection(int& y)`, `LayoutStyleSection(int& y)` (기존 `LayoutGroupPanel(int& y)` 패턴으로 통일하여 `UpdateLayout()` 본문을 섹션 호출 흐름 제어 위주로 단순화)
+- [ ] 6.1.4 불필요한 컨트롤 재생성 방지: `SetPaneMode(PaneMode mode)` 호출 시 `m_paneMode != mode`이거나 최초 초기화(`!m_bInitialized`)일 때만 컨트롤 생성을 수행하고, 단순 리사이즈(`AdjustLayout`)에서는 `UpdateLayout()`만 호출하도록 개선
 - [ ] 6.1.5 빌드 확인 및 모든 선택 대상(도형/그룹/텍스트/이미지/프레임/테이블/그리드/캔버스) 속성창 회귀 검증
 
 ### Step 6.2 노드/컴포넌트 타입 판별 일원화 (문자열/다중 `dynamic_cast` 제거)
-> `HitTestSingleNode`, `HitTestTopShape`, `CD2DPropertyView` 등에서 `GetName() == L"버튼"`, `GetHtmlTag() == "button"`, 다중 `dynamic_cast<FrameNode*/TableNode*>` 조합으로 타입을 판별하고 있어 컴포넌트가 늘어날수록 조건문이 취약해짐.
-- [ ] 6.2.1 `Node` 또는 `GroupNode`에 명시적 컴포넌트 식별자(`ComponentKind`: `None`, `Frame`, `Button`, `Table` 등) 및 선택/히트 정책 쿼리 함수(`IsAtomicComponent()`, `AllowsChildSelection()`) 도입
-- [ ] 6.2.2 `ITool.cpp`(`HitTestSingleNode`, `HitTestTopShape`), `CD2DPropertyView`, `LayerWnd`에서 한글 이름(`L"버튼"`) 비교 및 중복 `dynamic_cast` 분기를 정책 쿼리/식별자 기반으로 교체
-- [ ] 6.2.3 `m2:component` 속성과 `ComponentKind` 직렬화 매핑 일원화 (`SvgWriter`/`SvgReader` 왕복 보장)
+> **대상 파일**: `D2DGraphicEngine.h`, `D2DGraphicEngine.cpp`, `ITool.cpp`, `D2DPropertyView.cpp`, `LayerWnd.cpp`, `SvgWriter.cpp`, `SvgReader.cpp`
+> **현황 및 문제점**: `HitTestSingleNode`(`ITool.cpp`), `HitTestTopShape`(`ITool.cpp`), `CD2DPropertyView::SyncControlsFromData`, `LayerWnd` 등에서 `GetName() == L"버튼"`, `GetHtmlTag() == "button"`, 다중 `dynamic_cast<FrameNode*/TableNode*/GroupNode*>` 조합으로 타입을 판별하고 있어 레이어 이름을 바꾸면 버튼 속성이 풀리거나 컴포넌트가 늘어날수록 조건문이 취약해짐.
+- [ ] 6.2.1 `ge::Node`(또는 `ge::GroupNode`)에 명시적 컴포넌트 식별자(`enum class ComponentKind { None, Frame, Button, Table, SymbolInstance }`) 및 선택/히트 정책 가상·헬퍼 함수(`IsAtomicComponent()`, `AllowsChildSelection()`) 도입
+- [ ] 6.2.2 `ITool.cpp`(`HitTestSingleNode`, `HitTestTopShape`, `HitTestDeepNode`), `CD2DPropertyView`, `LayerWnd`에서 한글 이름(`L"버튼"`) 비교 및 중복 `dynamic_cast` 분기를 `GetComponentKind()` / `IsAtomicComponent()` 정책 쿼리 기반으로 교체
+- [ ] 6.2.3 SVG 직렬화(`SvgWriter`/`SvgReader`)에서 `m2:component` 속성과 `ComponentKind` 열거형 매핑 일원화 (레이어 이름 `m2:name` 변경과 무관하게 컴포넌트 정체성 왕복 보장)
 - [ ] 6.2.4 빌드 확인 + `RunPureModelVerification()`에 컴포넌트 판별/선택 규칙 검증 추가
 
-### Step 6.3 Undo 스냅샷 메모리 최적화 (이미지 리소스 참조화)
-> 현재 `ImageNode`의 바이너리가 Undo 스냅샷(SVG 문자열)마다 Base64 데이터 URI로 인라인 직렬화되어, 고해상도 이미지가 포함된 문서에서 편집을 반복하면 메모리 사용량과 직렬화 시간이 크게 증가함.
-- [ ] 6.3.1 프로세스 내 이미지 데이터 약한/공유 레지스트리(메모리 키 → `shared_ptr<const ImageData>`) 도입
-- [ ] 6.3.2 `SvgWriteOptions::Snapshot`(Undo 전용) 모드에서는 Base64 인코딩 대신 경량 참조 URI(예: `m2mem://image/<id>`)만 기록하고, `File`/`Clean` 모드에서만 Base64 데이터 URI로 인라인 출력
-- [ ] 6.3.3 `SvgReader`에서 `m2mem://` 참조를 레지스트리의 `shared_ptr<const ImageData>`와 즉시 연결하여 Base64 인코딩/디코딩 오버헤드 제거
-- [ ] 6.3.4 빌드 확인 + 대용량 이미지 포함 문서의 Undo/Redo 속도 및 메모리/왕복 무결성 검증
+### Step 6.3 Undo 스냅샷 메모리 최적화 (이미지 리소스 인메모리 레지스트리 참조화)
+> **대상 파일**: `D2DGraphicEngine.h`, `UndoManager.h/.cpp`, `SvgWriter.h/.cpp`, `SvgReader.h/.cpp`
+> **현황 및 문제점**: `UndoManager::SaveState()`가 매 편집마다 전체 문서를 SVG 문자열로 직렬화할 때, `ImageNode`의 원본 바이너리가 매 스냅샷마다 Base64 데이터 URI(`data:image/png;base64,...`)로 인라인 인코딩되어 고해상도 이미지 포함 문서에서 Undo 스택(최대 50단계) 메모리 폭증 및 드래그 종료 시 멈칫거림(Hitch)이 발생함.
+- [ ] 6.3.1 프로세스 내 이미지 리소스 공유 레지스트리(`ge::ImageResourceRegistry`: `uint64_t imageId` ↔ `std::shared_ptr<const ImageData>`) 및 `ImageNode::m_imageResourceId` 도입
+- [ ] 6.3.2 `SvgWriteMode::Snapshot`(Undo/Redo 전용) 모드에서는 Base64 인코딩 대신 경량 참조 URI(`m2mem://image/<resourceId>`)만 기록하고, `SvgWriteMode::Standard`/`ExportOnly` 모드에서만 표준 Base64 데이터 URI로 인라인 출력
+- [ ] 6.3.3 `SvgReader`에서 `xlink:href` / `href`가 `m2mem://image/<id>`인 경우 레지스트리의 `shared_ptr<const ImageData>` 및 WIC 비트맵 캐시를 즉시 재연결하여 Base64 인코딩/디코딩 및 PNG 재디코딩 오버헤드 완전 제거
+- [ ] 6.3.4 빌드 확인 + 대용량 이미지 포함 문서의 Undo/Redo 응답 속도 및 메모리/왕복 무결성 검증
 
 ### Step 6.4 클리핑 마스크 참조 안정화 (Z-Order 변경 보호)
-> 현재 `GroupNode::GetMaskNode()`는 관례상 "그룹의 마지막 자식(`m_children.back()`)"을 마스크로 간주하여, 그룹 내부 Z-Order 변경이나 레이어 패널 드래그 시 마스크 도형이 바뀌는 위험(2.4.6 주의사항)이 있음.
-- [ ] 6.4.1 `GroupNode`에 명시적 마스크 노드 ID(`m_maskNodeId`) 도입 또는 마스크 노드의 Z-Order 고정 규칙 적용
-- [ ] 6.4.2 레이어 패널 드래그(`MoveNodeTo`) 및 `ArrangeSelection` 수행 시 클립 그룹의 마스크 역할이 깨지지 않도록 보호
-- [ ] 6.4.3 `SvgWriter`/`SvgReader`에서 마스크 노드 복원 후 명시적 마스크 참조 유지 검증
+> **대상 파일**: `D2DGraphicEngine.h/.cpp`, `LayerWnd.cpp`, `SvgWriter.cpp`, `SvgReader.cpp`
+> **현황 및 문제점**: `GroupNode::GetMaskNode()`(`D2DGraphicEngine.h#L1079`)는 관례상 "그룹의 마지막 자식(`m_children.back()`)"을 마스크로 간주하여, 레이어 패널 드래그(`MoveNodeTo`)나 그룹 내부 Z-Order 변경 시 마스크 도형이 다른 자식으로 뒤바뀌는 취약점(2.4.6 주의사항)이 있음.
+- [ ] 6.4.1 `GroupNode`에 명시적 마스크 노드 ID(`NodeId m_maskNodeId = 0`) 도입 (`GetMaskNode()`는 `m_maskNodeId`가 유효하면 해당 자식을 반환하고, 미지정 시 하위 호환으로 `m_children.back()` 폴백)
+- [ ] 6.4.2 `Document::MakeClippingMask()` 시 `m_maskNodeId`를 명시 기록하고, 레이어 패널 드래그(`MoveNodeTo`) 및 `ArrangeSelection` 수행 시에도 마스크 역할이 깨지지 않도록 보호 (레이어 트리에 `[마스크]` 배지 표시 연동)
+- [ ] 6.4.3 `SvgWriter`/`SvgReader`에서 `m2:mask-id` 또는 `<clipPath>` 참조 복원 후 `m_maskNodeId` 명시적 연결 유지 검증
 - [ ] 6.4.4 빌드 확인 + 클립 그룹 내 자식 순서 변경 시 렌더링 및 저장 왕복 검증
 
 ### Step 6.5 렌더링 캐시 수명 관리 및 뷰포트 컬링 (대규모 문서 성능)
-> 문서를 닫거나 도형을 대량 삭제해도 `D2DRenderer`의 `m_geoCache`, `m_gradientCache`(키: `NodeId`)에 이전 노드의 엔트리가 남을 수 있으며, 화면 밖 객체도 매 프레임 그리기 호출을 거침.
-- [ ] 6.5.1 새 문서/문서 열기 시 및 주기적(또는 삭제 시) 렌더러 캐시(`m_geoCache`, `m_gradientCache`, 텍스트 레이아웃 캐시) 정리 연동
-- [ ] 6.5.2 `D2DRenderer::DrawNode`에서 노드의 월드 바운딩 박스와 현재 뷰포트 화면 영역의 교차 판정(Frustum/Viewport Culling)을 수행하여 화면 밖 노드의 D2D 드로우콜 생략
+> **대상 파일**: `D2DGraphicEngine.h`, `D2DGraphicEngine.cpp`, `M2DrawDoc.cpp`, `M2DrawView.cpp`
+> **현황 및 문제점**: 문서를 닫거나 도형을 대량 삭제/Undo 복원해도 `D2DRenderer`의 `m_geoCache`, `m_gradientCache`, `m_bitmapCache`, `m_textCache`(키: `NodeId`)에 삭제된 노드의 D2D 리소스가 무기한 잔류하며, 화면 밖(Off-screen) 객체도 매 프레임 D2D 드로우콜을 거침.
+- [ ] 6.5.1 `D2DRenderer::PruneCaches(const Document& doc)` 및 `ClearCaches()` 메소드 추가: 새 문서/문서 열기(`OnNewDocument`/`OnOpenDocument`) 시 전체 캐시 초기화, Undo/Redo 및 노드 삭제 시 현존하지 않는 `NodeId` 엔트리 정리
+- [ ] 6.5.2 `D2DRenderer::DrawNode`(`D2DGraphicEngine.cpp#L3045`) 진입부에서 노드의 월드 시각적 경계(그림자·선 두께 여유분 포함 `WorldBounds`)와 현재 뷰포트 월드 영역(`ViewportState` 역변환 사각형)의 AABB 교차 판정(Viewport Frustum Culling)을 수행하여 화면 밖 노드의 D2D 드로우콜 생략
 - [ ] 6.5.3 빌드 확인 + 수백 개 이상의 도형/텍스트가 있는 문서에서 패닝/줌 프레임레이트 및 렌더링 정확도 검증
+
+---
+
+### Part B. 핫패스(Hot-path) 성능 최적화 및 잠재 버그/레거시 코드 정리 (코드 정밀 점검 결과)
+
+### Step 6.6 히트테스트·스냅·그림자·배경 체커보드 핫패스 최적화 (Critical Performance)
+> **대상 파일**: `D2DGraphicEngine.cpp`, `ITool.cpp`, `SnapManager.h/.cpp`, `M2DrawView.cpp`, `D2DShadowRender.cpp`
+> **현황 및 문제점 (코드 정밀 진단)**:
+> 1. **매 마우스 이동마다 임시 `D2DRenderer` 생성 및 기하 재생성**: `PathNode::HitTestScreenSpace`(`D2DGraphicEngine.cpp#L3663`), `ComputeGradientGizmo`(`ITool.cpp#L206`), `ComputePathBounds`(`ITool.cpp#L291`), `BaseShapeTool::DrawOverlay`(`ITool.cpp#L1530`), `BoxShapeTool::DrawOverlay`(`ITool.cpp#L1933`)에서 매 호출마다 스택에 지역 변수 `ge::D2DRenderer renderer; renderer.Initialize(...)`를 새로 생성함. 지역 렌더러는 `m_geoCache`가 비어 있으므로 `WM_MOUSEMOVE`마다 모든 패스의 `ID2D1PathGeometry`와 브러시를 처음부터 다시 빌드하고 즉시 파괴함. 또한 `HitTestScreenSpace`(`L3694`)는 D2D 판정 실패 시 모든 곡선 구간을 24분할 샘플링하는 `FindClosestSegment`까지 중복 수행함.
+> 2. **유휴 마우스 이동 시 전체 씬 곡선 분할 및 $O(N^2)$ 교차점 연산**: `CM2DrawView::OnMouseMove`(`M2DrawView.cpp#L724`)는 `SelectTool`이 아무것도 드래그하지 않는 유휴(`Mode::None`) 상태일 때도 매 픽셀 이동마다 `SnapManager::FindSnapPoint`(`SnapManager.cpp#L45`)를 호출함. 이 함수는 모든 `PathNode`의 곡선을 12분할 선분으로 테셀레이션하고 선분 간 $O(N^2)$ 교차 판정(`L180-L203`)을 수행하며, `excludeNode`가 전달되지 않아 도형 이동 중 자기 자신의 정점/모서리에 셀프 스냅되는 문제와 잠긴 노드(`IsEffectivelyLocked()`) 스냅 누락이 있음.
+> 3. **그림자 및 프레임 배지 매 프레임 재계산**: `D2DShadowRender.cpp`의 `BuildShadowGeometry`(`L16`)는 `D2DRenderer::GetGeometry` 캐시를 쓰지 않고 매 프레임 패스를 재빌드하며, 내부 그림자(`DrawNodeInsetShadow`, `L117`)는 매 프레임 `CombineWithGeometry(D2D1_COMBINE_MODE_EXCLUDE)`를 실행함. 또한 `D2DRenderer::DrawGroup`(`D2DGraphicEngine.cpp#L3277`)은 중첩 프레임마다 매 프레임 `CreateTextLayout`을 호출함.
+> 4. **투명 체커보드 수천 회 `FillRectangle` 루프**: `CM2DrawView::OnDraw`(`M2DrawView.cpp#L1026-L1048`)에서 8px 격자를 2중 `for`문 `FillRectangle`로 그려 고해상도/줌아웃 시 매 프레임 수천~수만 번의 D2D 드로우콜이 발생함.
+- [ ] 6.6.1 `PathNode::HitTestScreenSpace`, `ComputeGradientGizmo`, `ComputePathBounds`, `BaseShapeTool::DrawOverlay`에서 스택 지역 `D2DRenderer` 생성을 제거하고, 뷰의 공유 `D2DRenderer`(또는 `PathNode` 내부 버저닝된 공유 `ID2D1PathGeometry` 캐시)를 재사용하도록 리팩토링
+- [ ] 6.6.2 `HitTestSingleNode` / `PathNode::HitTestScreenSpace` 진입 시 월드 AABB(선 두께 절반 + 히트 공차 포함) 사전 필터링(Early-out)을 수행하고, D2D `FillContainsPoint`/`StrokeContainsPoint` 판정 후 불필요한 `FindClosestSegment` 이중 폴백 제거
+- [ ] 6.6.3 `CM2DrawView::OnMouseMove`에서 드래그/그리기 작업 중이 아닌 단순 커서 이동(`SelectTool`의 `Mode::None`, `PanTool`, `ZoomTool`) 시 `SnapManager::FindSnapPoint` 호출 생략; 드래그 중에는 선택된 노드 집합(`excludeNodes`)과 잠긴 노드(`IsEffectivelyLocked()`)를 스냅 대상에서 제외하고 노드별 월드 AABB로 곡선 테셀레이션 사전 필터링 적용
+- [ ] 6.6.4 `D2DShadowRender.cpp`에서 `renderer.GetGeometry(PathNode&)` 캐시를 공유하고, 프레임 4-코너 개별 반경(`!cr.IsUniform()`) 그림자 기하 지원 및 내부 그림자(Inset Shadow) 마스크 기하·프레임 배지 `IDWriteTextLayout`을 `(NodeId, version)` 기준으로 캐싱
+- [ ] 6.6.5 `CM2DrawView::OnDraw`(`M2DrawView.cpp#L1026-L1048`)의 투명 배경 체커보드 2중 루프를 2×2 타일 `ID2D1BitmapBrush`(`D2D1_EXTEND_MODE_WRAP`) 단 1회 `FillRectangle` 호출로 교체
+- [ ] 6.6.6 빌드 확인 + 복잡한 패스/그림자 다수 포함 문서에서 마우스 이동 CPU 점유율 및 FPS 향상 검증
+
+### Step 6.7 미사용 레거시 코드 제거 및 그룹 내 로컬/월드 좌표계 버그 수정
+> **대상 파일**: `D2DGraphicEngine.h/.cpp`, `M2DrawDoc.h`, `ITool.h/.cpp`
+> **현황 및 문제점 (코드 정밀 진단)**:
+> 1. **그룹 내부 패스의 앵커/핸들 오버레이 좌표 오차 버그**: `SelectTool::DrawOverlay`(`ITool.cpp#L1421, L1425, L1435`) 및 `BaseShapeTool::DrawCommittedShapeAnchors`(`ITool.cpp#L1627`)에서 패스 노드의 베지에 앵커/핸들 화면 좌표를 계산할 때 `pathShape->GetWorldTransform()` 대신 로컬 변환인 `pathShape->GetTransform()`을 사용하여, 이동/회전/스케일된 그룹(`GroupNode`)이나 프레임(`FrameNode`) 내부의 패스를 선택하면 앵커 포인트가 도형과 동떨어진 위치에 그려지고 조작됨 (`OnLButtonDown`의 `L479`는 `GetWorldTransform()`을 쓰고 있어 그리기와 클릭 위치가 불일치함).
+> 2. **중복 히트테스터**: `D2DGraphicEngine.h#L1462`의 `ge::HitTester` 클래스와 `ITool.cpp` 내부의 정적 함수(`HitTestSingleNode`, `HitTestDeepNode`, `HitTestTopShape`)가 이원화되어 있음.
+> 3. **미사용 데드 코드**:
+>    - `ge::ICommand` 및 `ge::CommandStack`(`D2DGraphicEngine.h#L1476-L1496`, `D2DGraphicEngine.cpp#L3601-L3631`): `ge::UndoManager` 도입 이후 전혀 사용되지 않는 구형 커맨드 스택.
+>    - `CM2DrawDoc::m_currentPathNode`(`M2DrawDoc.h#L28, L32`): `m_currentPath`(`L40`)와 중복 선언된 미사용 멤버.
+>    - `BaseShapeTool::m_previewNode`(`ITool.h#L299`, `ITool.cpp#L1786-L1861, L1931-L1939`): `m_previewShape`와 중복 유지되던 사각형 전용 테스트 코드.
+- [ ] 6.7.1 `SelectTool::DrawOverlay`(`ITool.cpp#L1421-L1436`), `SelectTool::OnMouseMove`(`ITool.cpp#L688`), `BaseShapeTool::DrawCommittedShapeAnchors`(`ITool.cpp#L1627`) 등 모든 앵커/핸들 좌표 변환을 `GetWorldTransform()` 기반으로 통일하여 그룹/프레임 내부 패스 편집 정합성 수정
+- [ ] 6.7.2 `BaseShapeTool::m_previewNode` 분기 코드 제거(`m_previewShape`로 완전 일원화), `CM2DrawDoc::m_currentPathNode` 및 미사용 `ge::ICommand`/`ge::CommandStack` 제거
+- [ ] 6.7.3 `ITool.cpp`에 흩어진 히트테스트 헬퍼들을 `ge::HitTester`의 정적/멤버 인터페이스로 통합 정리
+- [ ] 6.7.4 빌드 확인 + 회전/이동된 그룹 및 프레임 내부 패스의 노드 편집 정확도 검증
+
+---
+
+### Part C. 표준 벡터 일러스트 앱(Inkscape / Adobe Illustrator) 설계 비교 및 벤치마킹 기능 보강
+
+> **설계 비교 요약**:
+> | 영역 | 현재 M2Draw 설계 | Inkscape / Illustrator 표준 설계 | 보완 방향 |
+> | :--- | :--- | :--- | :--- |
+> | **바운딩 박스 계산** | `PathNode::GetLocalBounds`가 오프커브 핸들(`hIn`/`hOut`) 끝점까지 단순 포함하여 바운딩 박스가 실제 곡선보다 부풀려짐 | 3차 베지에 도함수($B'(t)=0$) 극값 기반의 **정밀 기하 경계(Tight Geometric Bounds)** 와 선 두께를 포함한 **시각적 경계(Visual Bounds)** 구분 | Step 6.8 |
+> | **선택 도구 vs 노드 편집** | `SelectTool`(`V`) 하나가 바운딩 박스 변형과 모든 베지에 앵커/핸들 표시·편집을 동시에 수행하여 복잡한 패스 선택 시 화면이 핸들로 뒤덮임 | **선택 도구(`V`/`S`: 객체 바운딩 박스 변형)** 와 **직접 선택/노드 도구(`A`/`N`: 다중 앵커 드래그·타입 변환·세그먼트 편집)** 를 명확히 분리 | Step 6.9 |
+> | **파라메트릭 도형 조작** | 생성 후 상단 옵션바 수치 입력으로만 파라미터 변경 가능; 사각형 스케일 시 둥근 모서리(`rx`,`ry`)가 행렬 스케일로 찌그러짐 | 캔버스 위 **라이브 도형 위젯(Live Shape Handles)** 드래그로 모서리 반경·별 내경비 등 즉시 조절 + 스케일 시 모서리 반경 비율 보존 | Step 6.10 |
+> | **복합 패스 & 오프셋** | 불리언 결과나 기어 도형만 내부적으로 다중 `SubPath`를 가지며, 사용자가 임의 도형을 구멍 뚫린 복합 패스로 묶거나 풀 수 없음 | **복합 패스 만들기/풀기(`Ctrl+8` / `Ctrl+Alt+8`)**, **패스 이동(Offset Path)**, **화살표 키 미세 이동(Nudge)**, **대칭 반전(Flip)** 기본 제공 | Step 6.11 |
+> | **가이드라인 & 스타일 복제** | 눈금자(`RulerRenderer`)가 눈금 표시만 하고 가이드라인이 없음; 객체 간 스타일을 복사하는 스포이드 도구 부재 | 눈금자에서 드래그해 만드는 **가이드라인(Ruler Guides)**, 클릭 한 번으로 채우기/선/폰트 스타일을 복제하는 **스포이드 도구(`I`)**, **문서 스와치** 제공 | Step 6.12 |
+
+### Step 6.8 정밀 기하 바운딩 박스(Tight Bezier Bounds) 및 시각적 경계(Visual Bounds) 도입
+> **대상 파일**: `D2DGraphicEngine.h`, `D2DGraphicEngine.cpp`, `SmartGuides.cpp`
+> **현황 및 문제점**: `PathNode::GetLocalBounds`(`D2DGraphicEngine.cpp#L206-L227`)가 곡선의 실제 궤적이 아닌 제어 핸들(`AbsIn()`, `AbsOut()`)의 최대/최소 좌표를 합산하고 최소 폭/높이 2px을 강제 부과함. 이로 인해 긴 핸들을 가진 곡선 도형을 선택하거나 정렬(`AlignSelection`)·배분(`DistributeSelection`)·스마트 가이드 스냅을 수행할 때 실제 도형 외곽선과 바운딩 박스 사이에 큰 유격이 발생함.
+- [ ] 6.8.1 `PathNode::GetLocalBounds(Rect2& out)` 개선: 각 3차 베지에 세그먼트($P_0, P_1, P_2, P_3$)에 대해 $x(t), y(t)$의 1차 도함수 $B'(t) = 3(1-t)^2(P_1-P_0) + 6(1-t)t(P_2-P_1) + 3t^2(P_3-P_2) = 0$ ($t \in (0,1)$)의 해(극값)와 양 끝점($P_0, P_3$)만을 계산하여 D2D 의존성 없는 순수 수학 기반의 **정밀 기하 경계(Tight Geometric Bounds)** 산출
+- [ ] 6.8.2 `PathNode`에 더티 플래그 연동 로컬 바운딩 박스 캐시(`mutable Rect2 m_cachedLocalBounds`, `mutable bool m_boundsDirty = true`)를 추가하여 `Invalidate()` 호출 전까지 $O(1)$로 반환
+- [ ] 6.8.3 `Node::GetVisualWorldBounds(Rect2& out)` 추가: 기하학적 월드 경계에 선 두께 절반(`stroke.width * 0.5f`)을 반영한 시각적 경계를 산출하여 `Document::AlignSelection`, `DistributeSelection`, `SmartGuides`에서 정밀한 외곽선 맞춤 지원
+- [ ] 6.8.4 빌드 확인 + `RunPureModelVerification()`에 곡선 핸들이 돌출된 베지에 패스의 Tight Bounds 정확도 테스트 추가
+
+### Step 6.9 직접 선택 / 노드 편집 도구(`NodeTool`, 단축키 `A`) 분리 및 다중 앵커 편집 고도화
+> **대상 파일**: `ITool.h`, `ITool.cpp`, `ToolManager.h`, `ToolOptionBar.h/.cpp`, `M2DrawView.cpp`, `MainFrm.cpp`
+> **현황 및 문제점**: 현재 `SelectTool`(`ITool.cpp#L1414-L1448`)은 도형 선택 시 8개 스케일 핸들과 모든 베지에 앵커/핸들을 한꺼번에 표시함. 또한 단일 앵커(`m_editSubPath`, `m_editNodeIdx`)만 드래그할 수 있어, 여러 정점을 드래그 박스로 한 번에 선택해 이동하거나 정점 타입(뾰족점 `Corner` ↔ 부드러운점 `Smooth` ↔ 대칭점 `Symmetric`)을 전환하는 Illustrator(`A`)/Inkscape(`N`) 수준의 노드 편집이 불가능함.
+- [ ] 6.9.1 **선택 도구(`SelectTool`, `V`)와 직접 선택/노드 도구(`NodeTool` 또는 `SelectTool`의 명시적 노드 편집 서브모드, 단축키 `A` / 더블클릭 진입) 역할 분리**:
+  - 일반 `SelectTool`(`V`) 상태에서는 객체/그룹의 바운딩 박스 핸들(및 그라디언트/라이브 도형 기즈모)만 깔끔하게 표시
+  - 패스 더블클릭 또는 단축키 `A`(툴바 '직접 선택/노드 편집' 도구) 전환 시 베지에 앵커/핸들 편집 활성화
+- [ ] 6.9.2 **다중 앵커 선택 및 일괄 조작**:
+  - 마키(Marquee) 드래그 및 `Shift+클릭`으로 복수 앵커(`std::vector<NodeRef> m_selectedAnchors`) 동시 선택
+  - 선택된 복수 앵커의 동시 드래그 이동, 화살표 키 미세 이동, `Delete`/`Backspace` 키를 통한 선택 앵커 일괄 삭제(패스 연속성 유지)
+- [ ] 6.9.3 **앵커 타입 전환 및 곡선 세그먼트 직접 드래그**:
+  - 선택된 앵커를 `Corner`(꺾임점), `Smooth`(부드러운 곡선점), `Symmetric`(대칭 핸들점)으로 전환하는 액션 및 `CToolOptionBar` 버튼(`Alt+클릭` 토글 포함) 추가
+  - 두 앵커 사이의 곡선 세그먼트를 직접 드래그하여 양쪽 핸들(`hOut`, `hIn`)을 자연스럽게 휘게 하는 세그먼트 리셰이프(Segment Dragging) 지원
+- [ ] 6.9.4 **앵커 분할/결합 액션**: 선택한 앵커에서 패스 끊기(Break Path at Selected Nodes) 및 두 열린 끝점 앵커를 하나로 잇기(Join Selected End Nodes) 지원
+- [ ] 6.9.5 빌드 확인 + 다중 정점 선택 이동/삭제/타입 전환 및 Undo 왕복 검증
+
+### Step 6.10 캔버스 라이브 도형 위젯(Live Shape Handles) 및 모서리 반경 보존 스케일링
+> **대상 파일**: `D2DGraphicEngine.h/.cpp`, `ITool.h/.cpp`, `M2DrawView.cpp`
+> **현황 및 문제점**: Illustrator의 Live Shapes나 Inkscape의 도형 핸들처럼 캔버스 위에서 직접 마우스로 둥근 사각형의 모서리 반경(`rx`), 별의 안쪽 반경 비율(`innerRatio`), 기어의 톱니 깊이(`depthRatio`)/내경(`boreRatio`)을 조절하는 직관적 위젯이 없음. 또한 둥근 사각형을 `SelectTool`로 비균등 스케일(`ApplyScale`)하면 아핀 행렬(`m_xf`)만 늘어났다가 모서리 원호가 타원형으로 찌그러짐.
+- [ ] 6.10.1 **파라메트릭 사각형 스케일 시 모서리 반경 보존**: `SelectTool::ApplyScale`(`ITool.cpp#L106`)에서 `FrameNode::ResizeFrame`과 마찬가지로, 파라메트릭 도형(`IsParametric() == true`, 특히 `ShapeKind::Rect`)을 스케일할 때 행렬 스케일 왜곡 대신 `ShapeParams`의 폭/높이(`w`, `h`)를 갱신하고 `RebuildFromParams()`를 호출하여 모서리 반경(`rx`, `ry`)이 찌그러지지 않고 유지되도록 개선
+- [ ] 6.10.2 **캔버스 라이브 도형 핸들(Live Shape Widgets) 렌더링 및 드래그**:
+  - `ShapeKind::Rect`: 우상단 모서리 안쪽에 다이아몬드/원형 라이브 코너 핸들을 표시하고 드래그 시 `rx`/`ry` 실시간 조절
+  - `ShapeKind::Star` / `Polygon`: 내경 정점에 라이브 핸들을 표시하고 드래그 시 `innerRatio` 실시간 조절
+  - `ShapeKind::Gear`: 톱니 깊이(`depthRatio`) 및 중심 구멍 반경(`boreRatio`) 조절 핸들 지원
+- [ ] 6.10.3 빌드 확인 + 둥근 사각형 비균등 리사이즈 시 코너 원형 유지 및 라이브 핸들 드래그 Undo 검증
+
+### Step 6.11 복합 패스(Compound Path, `Ctrl+8`), 패스 이동(Offset Path) 및 키보드 정밀 변형
+> **대상 파일**: `D2DGraphicEngine.h/.cpp`, `M2DrawView.cpp`, `MainFrm.cpp`
+> **현황 및 문제점**:
+> 1. `PathNode`는 이미 다중 `SubPath`(`std::vector<SubPath> m_paths`)와 `FillMode`(`Alternate`/`Winding`)를 완벽히 지원하지만, 사용자가 선택한 여러 도형을 하나의 복합 패스로 묶어 도넛처럼 구멍을 뚫거나(`Ctrl+8`), 반대로 복합 패스(또는 불리언 연산 결과물)를 개별 도형으로 분리(`Ctrl+Alt+8`)하는 명령이 없음.
+> 2. 일러스트 작업에서 가장 빈번히 쓰이는 **방향키 미세 이동(Nudge)** 이 `CM2DrawView::OnKeyDown`(`M2DrawView.cpp#L810`)에 구현되어 있지 않으며, **좌우/상하 대칭 반전(Flip Horizontal/Vertical)** 과 **패스 이동(Offset Path, 안쪽/바깥쪽 여백 패스 생성)** 기능이 부재함.
+- [ ] 6.11.1 **복합 패스 만들기(`Document::MakeCompoundPath`, `Ctrl+8`) 및 풀기(`Document::ReleaseCompoundPath`, `Ctrl+Alt+8`)**:
+  - 만들기: 선택된 복수의 `PathNode`들의 서브패스들을 최상위 도형의 로컬 좌표계로 변환하여 단일 `PathNode`(`FillMode::Alternate`)의 `m_paths`로 병합
+  - 풀기(Break Apart): 다중 `SubPath`를 가진 `PathNode`를 각각의 독립된 단일 서브패스 `PathNode`들로 분리
+- [ ] 6.11.2 **패스 이동(`PathOp::OffsetPath`) 구현**: 선택된 패스를 지정한 거리($\pm d$ px)만큼 바깥쪽 확장 또는 안쪽 축소한 신규 `PathNode`를 생성 (D2D `Widen` + 윤곽선 추출/불리언 조합 활용)하여 스티커 외곽선·테두리 제작 지원
+- [ ] 6.11.3 **키보드 방향키 미세 이동(Nudge) 및 대칭 반전(Flip) / 90° 회전**:
+  - `CM2DrawView::OnKeyDown`(`M2DrawView.cpp#L810`)에서 텍스트 편집 중이 아닐 때 `VK_LEFT`/`VK_RIGHT`/`VK_UP`/`VK_DOWN` 입력 시 선택 객체를 1px(`Shift` 누름 시 10px) 이동하고 연속 키 입력을 단일 Undo 스냅샷으로 병합
+  - `Transformer::FlipHorizontal(Document&)`, `Transformer::FlipVertical(Document&)`, `Rotate90CW/CCW` 구현 및 상단 정렬/변형 툴바·우클릭 메뉴 연동
+- [ ] 6.11.4 빌드 확인 + 복합 패스 구멍 뚫기/분리, 오프셋 패스, 화살표 키 이동 및 반전 검증
+
+### Step 6.12 눈금자 가이드라인(Ruler Guides), 스포이드 도구(`EyedropperTool`, `I`), 문서 스와치(Swatches)
+> **대상 파일**: `D2DGraphicEngine.h/.cpp`, `RulerRenderer.h/.cpp`, `SnapManager.h/.cpp`, `ITool.h/.cpp`, `D2DPropertyView.h/.cpp`, `M2DrawView.cpp`, `SvgWriter.cpp`, `SvgReader.cpp`
+> **현황 및 문제점**:
+> 1. 상단/좌측 눈금자(`RulerRenderer`, 20px 두께)가 눈금만 표시할 뿐, Illustrator/Inkscape처럼 눈금자에서 캔버스로 드래그하여 수평/수직 안내선(Guide Line)을 끌어다 놓는 기능이 없음.
+> 2. 다른 도형의 채우기(단색/그라디언트)·선 두께/색상·그림자·폰트 스타일을 한 번의 클릭으로 추출해 적용하는 **스포이드 도구(Eyedropper Tool, 단축키 `I`)** 가 없음.
+> 3. 문서 내에서 자주 쓰는 색상/그라디언트를 재사용하는 **문서 스와치(Document Swatches / 최근 사용 색상)** 가 없어 매번 색상환이나 HEX 코드를 다시 입력해야 함.
+- [ ] 6.12.1 **눈금자 드래그 가이드라인(Ruler Guides) 도입**:
+  - `ge::Document`에 가이드라인 모델(`struct GuideLine { bool isHorizontal; float worldPos; bool locked; }`, `std::vector<GuideLine> m_guides`) 추가
+  - `CM2DrawView`에서 상단/좌측 눈금자 영역(0~20px)에서 마우스를 드래그하면 수평/수직 가이드라인 생성, 기존 가이드라인 드래그 이동(눈금자 밖으로 드래그하거나 `Delete`로 삭제), `SnapManager` 및 `SmartGuides`에 가이드라인 스냅 연동
+  - `SvgWriter`/`SvgReader`에서 `<sodipodi:guide>` 및 `m2:guides`로 가이드라인 저장·복원 왕복 지원
+- [ ] 6.12.2 **스포이드 도구(`EyedropperTool`, 단축키 `I`) 구현**:
+  - 캔버스 위 임의의 노드를 클릭하면 해당 노드의 `Style`(`Paint` 단색/그라디언트, `Stroke`, `Shadow`, `Opacity`) 및 `TextNode` 폰트 속성을 추출하여 현재 선택된 노드들(선택이 없으면 `ToolCreationSetting` 기본 스타일)에 즉시 적용 (`Shift+클릭` 시 선 색상만 적용 옵션)
+- [ ] 6.12.3 **문서 색상/그라디언트 스와치(Document Swatches) 및 최근 색상 팔레트**:
+  - `CD2DPropertyView`의 고정 16색 팔레트 하단에 '문서 사용 색상(Document Colors) / 사용자 등록 스와치' 슬롯을 추가하고 SVG `<defs>` 스와치와 연동
+- [ ] 6.12.4 빌드 확인 + 눈금자 가이드라인 생성/스냅/저장 왕복 및 스포이드 스타일 복제 검증
 
 ---
 

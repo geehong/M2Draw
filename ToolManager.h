@@ -109,6 +109,7 @@ public:
 	const wchar_t* GetName() const override { return L"페인트 통 도구 (Paint Bucket)"; }
 	wchar_t GetShortcut() const override { return L'K'; }
 	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+	void OnDown(const ToolEvent& e) override;   // PaintBucket.cpp: 클릭한 닫힌 영역을 채움 (5.6)
 };
 
 

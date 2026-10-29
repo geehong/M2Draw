@@ -231,6 +231,11 @@
     <ClInclude Include="UndoManager.h" />
     <ClInclude Include="LayerWnd.h" />
     <ClInclude Include="HtmlExporter.h" />
+    <ClInclude Include="SmartGuides.h" />
+    <ClInclude Include="RegionFill.h" />
+    <ClInclude Include="GroupTransform.h" />
+    <ClInclude Include="ClipboardSvg.h" />
+    <ClInclude Include="RasterExport.h" />
     <ClInclude Include="HtmlComponents\TableComponent.h" />
   </ItemGroup>
   <ItemGroup>
@@ -238,6 +243,14 @@
     <ClCompile Include="D2DColorWheel.cpp" />
     <ClCompile Include="D2DGraphicEngine.cpp" />
     <ClCompile Include="D2DTableRender.cpp" />
+    <ClCompile Include="SmartGuides.cpp" />
+    <ClCompile Include="RegionFill.cpp" />
+    <ClCompile Include="PaintBucket.cpp" />
+    <ClCompile Include="GroupTransform.cpp" />
+    <ClCompile Include="ClipboardSvg.cpp" />
+    <ClCompile Include="RasterExport.cpp" />
+    <ClCompile Include="RuntimeVerification.cpp" />
+    <ClCompile Include="D2DShadowRender.cpp" />
     <ClCompile Include="HtmlComponents\TableComponent.cpp" />
     <ClCompile Include="D2DPropertyView.cpp" />
     <ClCompile Include="D2DLayer.cpp" />

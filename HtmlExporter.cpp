@@ -71,6 +71,16 @@ static std::string Base64Encode(const std::vector<uint8_t>& in)
 	return out;
 }
 
+// 테두리 종류: 대시 설정을 CSS border-style 로 (4.5.17)
+static const char* CssBorderStyleName(const Stroke& s)
+{
+	switch (ClassifyDashArray(s.dashArray, s.width)) {
+	case DashStyle::Solid: return "solid";
+	case DashStyle::Dot:   return "dotted";
+	default:               return "dashed";
+	}
+}
+
 HtmlExporter::HtmlExporter() = default;
 
 std::string HtmlExporter::FormatUnit(float pxVal) const {
@@ -150,6 +160,37 @@ std::string HtmlExporter::RegisterCssRule(const std::string& desiredPrefix, cons
 	return uniqueCls;
 }
 
+std::string HtmlExporter::PositionDecls(const Node& node, bool& omitW, bool& omitH)
+{
+	omitW = omitH = false;
+	auto* pf = dynamic_cast<FrameNode*>(node.GetParent());
+	if (!pf || pf->GetLayoutMode() != FrameLayoutMode::None) return "";
+
+	const Matrix2D& xf = node.GetTransform();
+	Rect2 lb{};
+	Rect2 b{ xf.dx, xf.dy, xf.dx, xf.dy };
+	if (const_cast<Node&>(node).GetLocalBounds(lb)) b = xf.TransformRect(lb);
+	const float pw = pf->GetWidth(), ph = pf->GetHeight();
+
+	std::ostringstream s;
+	s << "position: absolute; ";
+	std::string tfm;
+	switch (node.GetConstraintH()) {
+	case ConstraintH::Left:      s << "left: " << FormatUnit(xf.dx) << "; "; break;
+	case ConstraintH::Right:     s << "right: " << FormatUnit(pw - b.right) << "; "; break;
+	case ConstraintH::LeftRight: s << "left: " << FormatUnit(b.left) << "; right: " << FormatUnit(pw - b.right) << "; "; omitW = true; break;
+	case ConstraintH::Center:    s << "left: calc(50% + " << FormatUnit(b.left + b.Width() * 0.5f - pw * 0.5f) << "); "; tfm += "translateX(-50%) "; break;
+	}
+	switch (node.GetConstraintV()) {
+	case ConstraintV::Top:       s << "top: " << FormatUnit(xf.dy) << "; "; break;
+	case ConstraintV::Bottom:    s << "bottom: " << FormatUnit(ph - b.bottom) << "; "; break;
+	case ConstraintV::TopBottom: s << "top: " << FormatUnit(b.top) << "; bottom: " << FormatUnit(ph - b.bottom) << "; "; omitH = true; break;
+	case ConstraintV::Center:    s << "top: calc(50% + " << FormatUnit(b.top + b.Height() * 0.5f - ph * 0.5f) << "); "; tfm += "translateY(-50%) "; break;
+	}
+	if (!tfm.empty()) s << "transform: " << tfm << "; ";
+	return s.str();
+}
+
 std::string HtmlExporter::BuildCommonStyleDecls(const Node& node) {
 	std::ostringstream ss;
 	if (!node.IsVisible()) ss << "display: none; ";
@@ -163,6 +204,18 @@ std::string HtmlExporter::BuildCommonStyleDecls(const Node& node) {
 		if (bIdx >= 0 && bIdx < 16) {
 			ss << "mix-blend-mode: " << kBlends[bIdx] << "; ";
 		}
+	}
+
+	// 그림자 (4.5.17): 요소 종류에 맞는 CSS 로 변환 — 글자 = text-shadow, 벡터 <svg> = filter: drop-shadow, 그 외(프레임/이미지/표/사각형/원) = box-shadow
+	const Shadow& sd = node.GetShadow();
+	if (sd.enabled && sd.color.a > 0.001f) {
+		const std::string off = FormatUnit(sd.x) + " " + FormatUnit(sd.y) + " " + FormatUnit(sd.blur);
+		const std::string col = ColorToCss(sd.color);
+		const auto* pn = dynamic_cast<const PathNode*>(&node);
+		const bool vectorSvg = pn && pn->GetShapeKind() != ShapeKind::Rect && pn->GetShapeKind() != ShapeKind::Ellipse;
+		if (node.Kind() == NodeKind::Text) ss << "text-shadow: " << off << " " << col << "; ";
+		else if (vectorSvg) ss << "filter: drop-shadow(" << off << " " << col << "); ";
+		else ss << "box-shadow: " << (sd.inset ? "inset " : "") << off << " " << FormatUnit(sd.spread) << " " << col << "; ";
 	}
 	return ss.str();
 }
@@ -292,21 +345,47 @@ void HtmlExporter::Visit(GroupNode& node) {
 		std::ostringstream style;
 		style << BuildCommonStyleDecls(*frame);
 
+		// 자유 배치 부모 안이면 absolute + 제약, 자동 배치(flex) 부모 안이면 Fill 을 flex/stretch 로 출력 (4.5.9, 4.5.11)
+		bool omitW = false, omitH = false;
+		const std::string pos = PositionDecls(*frame, omitW, omitH);
+		style << pos;
+		auto* parentFrame = dynamic_cast<FrameNode*>(frame->GetParent());
+		const bool inFlex = parentFrame && parentFrame->GetLayoutMode() != FrameLayoutMode::None;
+		const bool parentRow = inFlex && parentFrame->GetLayoutMode() == FrameLayoutMode::Row;
+		const bool fillW = frame->GetSizingW() == FrameSizingMode::Fill, fillH = frame->GetSizingH() == FrameSizingMode::Fill;
+		if (inFlex) {
+			if (fillW) style << (parentRow ? "flex: 1 1 0%; min-width: 0; " : "align-self: stretch; ");
+			if (fillH) style << (parentRow ? "align-self: stretch; " : "flex: 1 1 0%; min-height: 0; ");
+		}
+		else if (pos.empty()) {
+			if (fillW) style << "width: 100%; ";
+			if (fillH) style << "height: 100%; ";
+		}
 		// 크기 및 클리핑
-		style << "width: " << FormatUnit(frame->GetWidth()) << "; ";
-		style << "height: " << FormatUnit(frame->GetHeight()) << "; ";
+		if (!omitW && !(fillW && (inFlex || pos.empty()))) style << "width: " << FormatUnit(frame->GetWidth()) << "; ";
+		if (!omitH && !(fillH && (inFlex || pos.empty()))) style << "height: " << FormatUnit(frame->GetHeight()) << "; ";
 		if (frame->IsClip()) style << "overflow: hidden; ";
-		if (frame->GetCornerRadius() > 0.001f) {
-			style << "border-radius: " << FormatUnit(frame->GetCornerRadius()) << "; ";
+		if (!frame->GetCornerRadii().IsZero()) {
+			const CornerRadii& cr = frame->GetCornerRadii();
+			if (cr.IsUniform()) style << "border-radius: " << FormatUnit(cr.tl) << "; ";
+			else style << "border-radius: " << FormatUnit(cr.tl) << " " << FormatUnit(cr.tr) << " " << FormatUnit(cr.br) << " " << FormatUnit(cr.bl) << "; ";
 		}
 
-		// 배경 및 테두리
+		// 배경 및 테두리 (일부 변만 지정되면 border-top/right/bottom/left)
 		const Style& st = frame->GetStyle();
 		if (st.fill.type == PaintType::Solid && st.fill.color.a > 0.001f) {
 			style << "background-color: " << ColorToCss(st.fill.color) << "; ";
 		}
-		if (st.stroke.width > 0.001f && st.stroke.color.a > 0.001f) {
-			style << "border: " << FormatUnit(st.stroke.width) << " solid " << ColorToCss(st.stroke.color) << "; ";
+		if (st.stroke.width > 0.001f && st.stroke.color.a > 0.001f && frame->GetBorderSides() != 0) {
+			const std::string bdr = FormatUnit(st.stroke.width) + " " + CssBorderStyleName(st.stroke) + " " + ColorToCss(st.stroke.color) + "; ";
+			const uint8_t sd = frame->GetBorderSides();
+			if (sd == BorderAll) style << "border: " << bdr;
+			else {
+				if (sd & BorderTop)    style << "border-top: " << bdr;
+				if (sd & BorderRight)  style << "border-right: " << bdr;
+				if (sd & BorderBottom) style << "border-bottom: " << bdr;
+				if (sd & BorderLeft)   style << "border-left: " << bdr;
+			}
 		}
 
 		// Flexbox Auto Layout 또는 Free Layout
@@ -314,7 +393,9 @@ void HtmlExporter::Visit(GroupNode& node) {
 			style << "display: flex; ";
 			style << (frame->GetLayoutMode() == FrameLayoutMode::Row ? "flex-direction: row; " : "flex-direction: column; ");
 			style << "gap: " << FormatUnit(frame->GetGap()) << "; ";
-			style << "padding: " << FormatUnit(frame->GetPadding()) << "; ";
+			const PaddingEdges& pe = frame->GetPaddingEdges();
+			if (pe.IsUniform()) style << "padding: " << FormatUnit(pe.top) << "; ";
+			else style << "padding: " << FormatUnit(pe.top) << " " << FormatUnit(pe.right) << " " << FormatUnit(pe.bottom) << " " << FormatUnit(pe.left) << "; ";
 
 			// 주축 정렬 (justify-content)
 			switch (frame->GetMainAlign()) {
@@ -331,7 +412,7 @@ void HtmlExporter::Visit(GroupNode& node) {
 			}
 		} else {
 			// Free Layout: 자식들은 absolute 좌표로 배치되므로 컨테이너는 relative
-			style << "position: relative; ";
+			if (pos.empty()) style << "position: relative; ";
 		}
 
 		std::string cls = RegisterCssRule("frame", style.str(), frame);
@@ -416,7 +497,7 @@ void HtmlExporter::ExportTable(TableNode& t)
 	const Color bc = t.GetBorderColor();
 	std::ostringstream cell;
 	cell << "padding: " << FormatUnit(t.GetCellPadding()) << "; text-align: " << kAlign[t.GetCellAlign()] << "; vertical-align: top; ";
-	if (t.GetBorderWidth() > 0.001f) cell << "border: " << FormatUnit(t.GetBorderWidth()) << " solid " << ColorToCss(bc) << "; ";
+	if (t.GetBorderWidth() > 0.001f) cell << "border: " << FormatUnit(t.GetBorderWidth()) << " " << (t.GetBorderStyle() == 1 ? "dashed" : t.GetBorderStyle() == 2 ? "dotted" : "solid") << " " << ColorToCss(bc) << "; ";
 	const std::string cellAttr = StyleOrClassAttr("cell", cell.str(), nullptr);
 
 	std::ostringstream hcell;
@@ -504,11 +585,8 @@ void HtmlExporter::Visit(TextNode& node) {
 	style << BuildCommonStyleDecls(node);
 
 	// Free layout 부모 안에 있으면 position: absolute 로 배치
-	auto* parentFrame = dynamic_cast<FrameNode*>(node.GetParent());
-	if (parentFrame && parentFrame->GetLayoutMode() == FrameLayoutMode::None) {
-		const Matrix2D& xf = node.GetTransform();
-		style << "position: absolute; left: " << FormatUnit(xf.dx) << "; top: " << FormatUnit(xf.dy) << "; ";
-	}
+	bool omitW = false, omitH = false;
+		style << PositionDecls(node, omitW, omitH);
 
 	// 폰트 속성
 	if (!node.GetFontFamily().empty()) {
@@ -570,12 +648,10 @@ void HtmlExporter::Visit(ImageNode& node) {
 	std::ostringstream style;
 	style << BuildCommonStyleDecls(node);
 
-	auto* parentFrame = dynamic_cast<FrameNode*>(node.GetParent());
-	if (parentFrame && parentFrame->GetLayoutMode() == FrameLayoutMode::None) {
-		const Matrix2D& xf = node.GetTransform();
-		style << "position: absolute; left: " << FormatUnit(xf.dx) << "; top: " << FormatUnit(xf.dy) << "; ";
-	}
-	style << "width: " << FormatUnit(node.GetWidth()) << "; height: " << FormatUnit(node.GetHeight()) << "; ";
+	bool omitW = false, omitH = false;
+		style << PositionDecls(node, omitW, omitH);
+	if (!omitW) style << "width: " << FormatUnit(node.GetWidth()) << "; ";
+	if (!omitH) style << "height: " << FormatUnit(node.GetHeight()) << "; ";
 
 	static const char* kFits[] = { "contain", "cover", "fill" };
 	style << "object-fit: " << kFits[static_cast<int>(node.GetFit())] << "; ";
@@ -625,19 +701,17 @@ void HtmlExporter::Visit(PathNode& node) {
 			std::ostringstream style;
 			style << BuildCommonStyleDecls(node);
 
-			auto* parentFrame = dynamic_cast<FrameNode*>(node.GetParent());
-			if (parentFrame && parentFrame->GetLayoutMode() == FrameLayoutMode::None) {
-				const Matrix2D& xf = node.GetTransform();
-				style << "position: absolute; left: " << FormatUnit(xf.dx) << "; top: " << FormatUnit(xf.dy) << "; ";
-			}
-			style << "width: " << FormatUnit(w) << "; height: " << FormatUnit(h) << "; ";
+			bool omitW = false, omitH = false;
+		style << PositionDecls(node, omitW, omitH);
+			if (!omitW) style << "width: " << FormatUnit(w) << "; ";
+			if (!omitH) style << "height: " << FormatUnit(h) << "; ";
 
 			const Style& st = node.GetStyle();
 			if (st.fill.type == PaintType::Solid && st.fill.color.a > 0.001f) {
 				style << "background-color: " << ColorToCss(st.fill.color) << "; ";
 			}
 			if (st.stroke.width > 0.001f && st.stroke.color.a > 0.001f) {
-				style << "border: " << FormatUnit(st.stroke.width) << " solid " << ColorToCss(st.stroke.color) << "; ";
+				style << "border: " << FormatUnit(st.stroke.width) << " " << CssBorderStyleName(st.stroke) << " " << ColorToCss(st.stroke.color) << "; ";
 			}
 
 			if (sk == ShapeKind::Ellipse) {
@@ -671,12 +745,10 @@ void HtmlExporter::Visit(PathNode& node) {
 	std::ostringstream style;
 	style << BuildCommonStyleDecls(node);
 
-	auto* parentFrame = dynamic_cast<FrameNode*>(node.GetParent());
-	if (parentFrame && parentFrame->GetLayoutMode() == FrameLayoutMode::None) {
-		const Matrix2D& xf = node.GetTransform();
-		style << "position: absolute; left: " << FormatUnit(xf.dx) << "; top: " << FormatUnit(xf.dy) << "; ";
-	}
-	style << "width: " << FormatUnit(w) << "; height: " << FormatUnit(h) << "; ";
+	bool omitW = false, omitH = false;
+		style << PositionDecls(node, omitW, omitH);
+	if (!omitW) style << "width: " << FormatUnit(w) << "; ";
+			if (!omitH) style << "height: " << FormatUnit(h) << "; ";
 
 	std::string cls = RegisterCssRule("vector", style.str(), &node);
 

@@ -31,6 +31,7 @@ public:
 	// 타깃 도형 설정 및 적용
 	void SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape);
 	void ApplyToShape();
+	D2D1_COLOR_F GetActiveFillColor() const { return m_fillColor; }   // 페인트통 등이 쓰는 현재 채우기 색
 	// bLive: 슬라이더 드래그 중 미리보기 - undo 기록/패널 동기화 없이 현재 문서 뷰만 갱신
 	// bForceCommit: 값이 이미 반영되어 있어도 undo 지점을 확정 (드래그 종료 시)
 	void ApplyCanvasSettings(bool bLive = false, bool bForceCommit = false);
@@ -189,7 +190,36 @@ protected:
 	std::shared_ptr<M2DrawLabel>        m_lblFrameSizing;      // "Sizing (W | H)"
 	std::shared_ptr<M2DrawComboBox>     m_cboFrameSizingW;     // Fixed, Hug
 	std::shared_ptr<M2DrawComboBox>     m_cboFrameSizingH;     // Fixed, Hug
-	void ApplyFrameProps(const std::function<void(ge::FrameNode&)>& fn);
+	void ApplyFrameProps(const std::function<void(ge::FrameNode&)>& fn, const wchar_t* undoName = nullptr);
+
+	// 프레임 역할 / 4방향 모서리·여백·테두리 변 (4.5.8, 4.5.10) 와 제약 (4.5.11)
+	std::shared_ptr<M2DrawComboBox>     m_cboFrameRole;
+	std::shared_ptr<M2DrawNumericInput> m_spinRadTL, m_spinRadTR, m_spinRadBR, m_spinRadBL;
+	std::shared_ptr<M2DrawNumericInput> m_spinPadT, m_spinPadR, m_spinPadB, m_spinPadL;
+	std::shared_ptr<M2DrawCheckBox>     m_chkBdrT, m_chkBdrR, m_chkBdrB, m_chkBdrL;
+	std::shared_ptr<M2DrawLabel>        m_lblConstraint;
+	std::shared_ptr<M2DrawComboBox>     m_cboConstraintH, m_cboConstraintV;
+	void ApplyConstraintProps(const std::function<void(ge::Node&)>& fn);
+	// 버튼 라벨 정렬 (가로 왼/가운데/오른, 세로 위/가운데/아래) — 프레임의 Row 자동 배치 정렬로 구현
+	std::shared_ptr<M2DrawLabel>        m_lblButtonAlign;
+	std::shared_ptr<M2DrawComboBox>     m_cboButtonAlignH, m_cboButtonAlignV;
+	void SyncFrameExtraControls();
+
+	// 공통 외형(Appearance): 모든 요소가 같은 그림자 UI 를 쓴다 (4.5.17.4)
+	std::shared_ptr<M2DrawLabel>        m_lblShadow;
+	std::shared_ptr<M2DrawCheckBox>     m_chkShadow;
+	std::shared_ptr<M2DrawComboBox>     m_cboShadowColor;
+	std::shared_ptr<M2DrawNumericInput> m_spinShX, m_spinShY, m_spinShBlur, m_spinShSpread;
+	std::shared_ptr<M2DrawCheckBox>     m_chkShadowInset;
+	std::shared_ptr<M2DrawColorPalette> m_palShadow;
+	std::shared_ptr<M2DrawNumericInput> m_spinShAlpha;
+	// 선 굵기/종류 공통 구역 (4.5.18.3): 경로/프레임/표에 같은 UI, 요소별로 스타일 선 또는 표 테두리에 적용
+	std::shared_ptr<M2DrawLabel>        m_lblLine;
+	std::shared_ptr<M2DrawNumericInput> m_spinLineW;
+	std::shared_ptr<M2DrawComboBox>     m_cboLineKind;
+	void ApplyLineProps(const std::function<void(ge::Node&)>& fn);
+	void ApplyShadowProps(const std::function<void(ge::Shadow&)>& fn);
+	void SyncAppearanceControls();
 
 	// 테이블 전용 (Step 4.5.7.7) — 값 변경은 TableComponent 함수를 거친다
 	std::shared_ptr<M2DrawLabel>        m_lblTable;
@@ -218,6 +248,10 @@ protected:
 	std::shared_ptr<M2DrawLabel>        m_lblGridHeader;
 	std::shared_ptr<M2DrawCheckBox>     m_chkGridView;         // View (Grid) Checkbox
 	std::shared_ptr<M2DrawCheckBox>     m_chkGridSnap;         // Snap Checkbox
+	// 오브젝트 스냅 설정 (5.1.0): 마스터 스냅 + 대상별 켜고 끄기. 그리드 스냅은 위의 Snap to Grid 가 모든 도구 공통으로 관장
+	std::shared_ptr<M2DrawLabel>        m_lblObjSnap;
+	std::shared_ptr<M2DrawCheckBox>     m_chkSnapMaster, m_chkSmartGuides, m_chkEqualSpacing;
+	std::shared_ptr<M2DrawCheckBox>     m_chkSnapAnchor, m_chkSnapMid, m_chkSnapCenter, m_chkSnapEdge, m_chkSnapInter, m_chkSnapAxis;
 	std::shared_ptr<M2DrawCheckBox>     m_chkRulerView;        // View (Ruler) Checkbox
 	std::shared_ptr<M2DrawLabel>        m_lblUnit;             // "Unit"
 	std::shared_ptr<M2DrawComboBox>     m_cboUnit;             // Unit ComboBox (px, mm, cm, in, rem)

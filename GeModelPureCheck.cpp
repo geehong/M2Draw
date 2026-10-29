@@ -12,6 +12,8 @@
 #include "SvgWriter.h"
 #include "SvgReader.h"
 #include "HtmlExporter.h"
+#include "SmartGuides.h"
+#include "GroupTransform.h"
 #include "HtmlComponents/TableComponent.h"
 #include "UndoManager.h"
 #include "GeModelPureCheck.h"
@@ -1654,6 +1656,716 @@ bool RunPureModelVerification(std::wstring* failure)
 		opt.tableAsGrid = true;
 		const std::string gridHtml = ex.Export(d4, opt).html;
 		GE_CHECK(gridHtml.find("display: grid") != std::string::npos && gridHtml.find("grid-column: 1 / span 2") != std::string::npos, L"CSS Grid 출력 누락");
+	}
+
+	// ---- 31. 프레임 역할/Fill/4방향 속성/Constraints (4.5.8 ~ 4.5.11) ----------------------------------
+	{
+		// (a) 역할 태그: 저장/복원 + <header>/<aside>/<footer> 출력
+		{
+			Document d;
+			auto f = std::make_unique<FrameNode>();
+			f->SetFrameSize(100.0f, 40.0f);
+			f->SetHtmlTag("header");
+			FrameNode* fr = static_cast<FrameNode*>(d.AddShape(std::move(f)));
+			d.AssignIds(*fr);
+			SvgWriter w;
+			Document back;
+			GE_CHECK(reader.ReadFromString(w.WriteString(d, SvgWriteOptions(SvgWriteMode::File)), back), L"역할 프레임 읽기 실패");
+			auto* b0 = dynamic_cast<FrameNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+			GE_CHECK(b0 && b0->GetHtmlTag() == "header", L"프레임 역할(htmlTag) 왕복 실패");
+			GE_CHECK(b0->Clone()->GetHtmlTag() == "header", L"프레임 복제가 역할을 보존하지 못함");
+			HtmlExporter ex;
+			const std::string html = ex.Export(d, HtmlExportOptions()).html;
+			GE_CHECK(html.find("<header") != std::string::npos && html.find("</header>") != std::string::npos, L"역할 태그 <header> 출력 누락");
+		}
+
+		// (b) Fill: 헤더(상) + [사이드바(좌) | 본문(우)] + 푸터(하)
+		{
+			Document d;
+			auto outerP = std::make_unique<FrameNode>();
+			outerP->SetFrameSize(400.0f, 300.0f);
+			outerP->SetLayoutMode(FrameLayoutMode::Column);
+			FrameNode* outer = static_cast<FrameNode*>(d.AddShape(std::move(outerP)));
+			auto mk = [](float w, float h) { auto f = std::make_unique<FrameNode>(); f->SetFrameSize(w, h); return f; };
+			FrameNode* header = static_cast<FrameNode*>(outer->AddChild(mk(10.0f, 50.0f)));
+			FrameNode* mid = static_cast<FrameNode*>(outer->AddChild(mk(10.0f, 10.0f)));
+			FrameNode* footer = static_cast<FrameNode*>(outer->AddChild(mk(10.0f, 40.0f)));
+			mid->SetLayoutMode(FrameLayoutMode::Row);
+			FrameNode* side = static_cast<FrameNode*>(mid->AddChild(mk(100.0f, 10.0f)));
+			FrameNode* mainF = static_cast<FrameNode*>(mid->AddChild(mk(10.0f, 10.0f)));
+			header->SetSizingW(FrameSizingMode::Fill);
+			footer->SetSizingW(FrameSizingMode::Fill);
+			mid->SetSizingW(FrameSizingMode::Fill); mid->SetSizingH(FrameSizingMode::Fill);
+			side->SetSizingH(FrameSizingMode::Fill);
+			mainF->SetSizingW(FrameSizingMode::Fill); mainF->SetSizingH(FrameSizingMode::Fill);
+			d.AssignIds(*outer);
+			outer->ApplyLayout();
+			GE_CHECK(std::fabs(header->GetWidth() - 380.0f) < 0.01f && std::fabs(footer->GetWidth() - 380.0f) < 0.01f, L"교차축 Fill 이 부모 폭을 채우지 못함");
+			GE_CHECK(std::fabs(mid->GetHeight() - 170.0f) < 0.01f && std::fabs(mid->GetWidth() - 380.0f) < 0.01f, L"주축 Fill 이 남은 높이를 채우지 못함");
+			GE_CHECK(std::fabs(side->GetHeight() - 150.0f) < 0.01f && std::fabs(side->GetWidth() - 100.0f) < 0.01f, L"사이드바(폭 고정/높이 Fill) 크기가 틀림");
+			GE_CHECK(std::fabs(mainF->GetWidth() - 250.0f) < 0.01f && std::fabs(mainF->GetHeight() - 150.0f) < 0.01f, L"본문(Fill/Fill)이 남은 공간을 채우지 못함");
+
+			// 부모를 키우면 Fill 자식도 따라 늘어남
+			outer->ResizeFrame(500.0f, 400.0f);
+			GE_CHECK(std::fabs(header->GetWidth() - 480.0f) < 0.01f && std::fabs(mainF->GetWidth() - 350.0f) < 0.01f && std::fabs(mid->GetHeight() - 270.0f) < 0.01f, L"부모 크기 변경이 Fill 자식에 반영되지 않음");
+
+			// 부모가 Hug 이면 Fill 자식은 현재 크기 유지 (순환 방지)
+			outer->SetSizingH(FrameSizingMode::Hug);
+			const float midH = mid->GetHeight();
+			outer->ApplyLayout();
+			GE_CHECK(std::fabs(mid->GetHeight() - midH) < 0.01f, L"부모 Hug 일 때 Fill 자식이 폴백하지 않음");
+			outer->SetSizingH(FrameSizingMode::Fixed);
+			outer->ResizeFrame(400.0f, 300.0f);
+
+			// 저장/복원 + HTML(flex)
+			SvgWriter w;
+			Document back;
+			GE_CHECK(reader.ReadFromString(w.WriteString(d, SvgWriteOptions(SvgWriteMode::File)), back), L"Fill 레이아웃 읽기 실패");
+			auto* o2 = dynamic_cast<FrameNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+			auto* h2 = o2 ? dynamic_cast<FrameNode*>(o2->GetChildren()[0].get()) : nullptr;
+			GE_CHECK(h2 && h2->GetSizingW() == FrameSizingMode::Fill, L"Fill 크기 규칙 왕복 실패");
+			HtmlExporter ex;
+			const std::string html = ex.Export(d, HtmlExportOptions()).html;
+			GE_CHECK(html.find("flex: 1 1 0%;") != std::string::npos && html.find("align-self: stretch;") != std::string::npos, L"Fill 의 flex/stretch CSS 출력 누락");
+		}
+
+		// (c) 4방향 여백/모서리/테두리 변
+		{
+			Document d;
+			auto f = std::make_unique<FrameNode>();
+			f->SetFrameSize(200.0f, 100.0f);
+			f->SetLayoutMode(FrameLayoutMode::Row);
+			f->SetPaddingEdges(PaddingEdges{ 5.0f, 10.0f, 15.0f, 20.0f });
+			f->SetCornerRadii(CornerRadii{ 8.0f, 8.0f, 0.0f, 0.0f });
+			f->SetBorderSides(BorderBottom);
+			f->GetStyleRef().stroke.width = 2.0f;
+			f->GetStyleRef().stroke.color = Color(0.1f, 0.2f, 0.3f, 1.0f);
+			FrameNode* fr = static_cast<FrameNode*>(d.AddShape(std::move(f)));
+			auto cp = std::make_unique<FrameNode>(); cp->SetFrameSize(30.0f, 20.0f);
+			fr->AddChild(std::move(cp));
+			d.AssignIds(*fr);
+			fr->ApplyLayout();
+			GE_CHECK(std::fabs(fr->GetChildren()[0]->GetTransform().dx - 20.0f) < 0.01f && std::fabs(fr->GetChildren()[0]->GetTransform().dy - 5.0f) < 0.01f, L"비대칭 여백(좌 20/상 5)이 배치에 반영되지 않음");
+			GE_CHECK(fr->GetPadding() == 5.0f && !fr->GetPaddingEdges().IsUniform(), L"대표 여백/균일 판정이 틀림");
+			fr->SetPadding(7.0f);
+			GE_CHECK(fr->GetPaddingEdges().IsUniform() && fr->GetPaddingEdges().left == 7.0f, L"SetPadding 이 4방향을 모두 설정하지 않음");
+			fr->SetPaddingEdges(PaddingEdges{ 5.0f, 10.0f, 15.0f, 20.0f });
+
+			SvgWriter w;
+			const std::string svg = w.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+			Document back;
+			GE_CHECK(reader.ReadFromString(svg, back), L"4방향 속성 읽기 실패");
+			auto* b0 = dynamic_cast<FrameNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+			GE_CHECK(b0 && b0->GetPaddingEdges().left == 20.0f && b0->GetPaddingEdges().bottom == 15.0f, L"4방향 여백 왕복 실패");
+			GE_CHECK(b0->GetCornerRadii().tl == 8.0f && b0->GetCornerRadii().br == 0.0f && !b0->GetCornerRadii().IsUniform(), L"4방향 모서리 왕복 실패");
+			GE_CHECK(b0->GetBorderSides() == BorderBottom && b0->GetStyle().stroke.width == 2.0f, L"테두리 변/스타일 왕복 실패");
+			GE_CHECK(b0->GetChildren().size() == 1, L"프레임 배경/테두리 요소가 자식 노드로 읽힘");
+
+			// 기존 파일 호환: 4방향 속성(m2:padding4/radius4/borderSides)이 없고 단일 m2:pad / m2:radius 만 있는 저장본
+			{
+				std::string legacy = svg;
+				auto strip = [&](const char* name) {
+					const std::string key = std::string(" ") + name + "=\"";
+					const size_t p0 = legacy.find(key);
+					if (p0 == std::string::npos) return;
+					const size_t p1 = legacy.find('"', p0 + key.size());
+					if (p1 != std::string::npos) legacy.erase(p0, p1 - p0 + 1);
+				};
+				strip("m2:padding4"); strip("m2:radius4"); strip("m2:borderSides");
+				Document old;
+				GE_CHECK(reader.ReadFromString(legacy, old), L"단일 값 프레임 읽기 실패");
+				auto* o0 = dynamic_cast<FrameNode*>(old.GetLayers()[0]->GetChildren()[0].get());
+				GE_CHECK(o0 && o0->GetPaddingEdges().IsUniform() && o0->GetPadding() == 5.0f && o0->GetCornerRadii().IsUniform() && o0->GetCornerRadius() == 8.0f && o0->GetBorderSides() == BorderAll,
+					L"단일 값 파일이 4방향 모델로 호환되지 않음");
+			}
+
+			HtmlExporter ex;
+			const std::string html = ex.Export(d, HtmlExportOptions()).html;
+			GE_CHECK(html.find("padding: 5px 10px 15px 20px;") != std::string::npos, L"4방향 padding CSS 출력 누락");
+			GE_CHECK(html.find("border-radius: 8px 8px 0px 0px;") != std::string::npos, L"4방향 border-radius CSS 출력 누락");
+			GE_CHECK(html.find("border-bottom: 2px solid") != std::string::npos && html.find("border-top:") == std::string::npos, L"변별 border CSS 출력이 틀림");
+			const std::string clean = w.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+			GE_CHECK(clean.find("m2:") == std::string::npos && clean.find(" A ") != std::string::npos, L"Clean 출력에서 4방향 모서리 경로/표준 형식이 틀림");
+		}
+
+		// (d) Constraints: 자유 배치 프레임 크기 변경 시 자식 보정
+		{
+			Document d;
+			auto f = std::make_unique<FrameNode>();
+			f->SetFrameSize(200.0f, 100.0f);
+			FrameNode* fr = static_cast<FrameNode*>(d.AddShape(std::move(f)));
+			auto mk = [](float x, float y, float w, float h) {
+				auto c = std::make_unique<FrameNode>(); c->SetFrameSize(w, h); c->SetTransform(Matrix2D::Translation(x, y)); return c; };
+			FrameNode* a = static_cast<FrameNode*>(fr->AddChild(mk(150.0f, 10.0f, 40.0f, 20.0f)));   // 오른쪽 고정
+			FrameNode* b = static_cast<FrameNode*>(fr->AddChild(mk(10.0f, 40.0f, 100.0f, 20.0f)));   // 좌우 고정
+			FrameNode* c = static_cast<FrameNode*>(fr->AddChild(mk(90.0f, 0.0f, 20.0f, 20.0f)));     // 가운데
+			FrameNode* e = static_cast<FrameNode*>(fr->AddChild(mk(10.0f, 70.0f, 30.0f, 20.0f)));    // 아래 고정
+			a->SetConstraintH(ConstraintH::Right);
+			b->SetConstraintH(ConstraintH::LeftRight);
+			c->SetConstraintH(ConstraintH::Center);
+			e->SetConstraintV(ConstraintV::Bottom);
+			d.AssignIds(*fr);
+			fr->ResizeFrame(300.0f, 150.0f);
+			GE_CHECK(std::fabs(a->GetTransform().dx - 250.0f) < 0.01f && std::fabs(a->GetWidth() - 40.0f) < 0.01f, L"오른쪽 고정 자식이 부모 확장만큼 이동하지 않음");
+			GE_CHECK(std::fabs(b->GetTransform().dx - 10.0f) < 0.01f && std::fabs(b->GetWidth() - 200.0f) < 0.01f, L"좌우 고정 자식이 늘어나지 않음");
+			GE_CHECK(std::fabs(c->GetTransform().dx - 140.0f) < 0.01f, L"가운데 고정 자식이 부모 확장의 절반만큼 이동하지 않음");
+			GE_CHECK(std::fabs(e->GetTransform().dy - 120.0f) < 0.01f, L"아래 고정 자식이 부모 확장만큼 이동하지 않음");
+
+			SvgWriter w;
+			Document back;
+			GE_CHECK(reader.ReadFromString(w.WriteString(d, SvgWriteOptions(SvgWriteMode::File)), back), L"Constraints 읽기 실패");
+			auto* r2 = dynamic_cast<FrameNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+			GE_CHECK(r2 && r2->GetChildren().size() == 4, L"Constraints 프레임 자식 수가 틀림");
+			auto* ra = dynamic_cast<FrameNode*>(r2->GetChildren()[0].get());
+			auto* rb = dynamic_cast<FrameNode*>(r2->GetChildren()[1].get());
+			GE_CHECK(ra && ra->GetConstraintH() == ConstraintH::Right && rb && rb->GetConstraintH() == ConstraintH::LeftRight, L"Constraints 왕복 실패");
+			GE_CHECK(ra->Clone()->GetConstraintH() == ConstraintH::Right, L"복제가 Constraints 를 보존하지 못함");
+
+			HtmlExporter ex;
+			const std::string html = ex.Export(d, HtmlExportOptions()).html;
+			GE_CHECK(html.find("right: 10px;") != std::string::npos && html.find("position: absolute;") != std::string::npos, L"Constraints 의 right/absolute CSS 출력 누락");
+			GE_CHECK(html.find("translateX(-50%)") != std::string::npos, L"가운데 제약 CSS 출력 누락");
+		}
+	}
+
+	// ---- 32. 프레임 자동 부모 / 이동 시 부모 변경 (4.5.12, 4.5.13) -----------------------------------
+	{
+		Document d;
+		auto outerP = std::make_unique<FrameNode>();
+		outerP->SetFrameSize(400.0f, 300.0f);
+		outerP->SetTransform(Matrix2D::Translation(100.0f, 50.0f));
+		FrameNode* outer = static_cast<FrameNode*>(d.AddShape(std::move(outerP)));
+		auto innerP = std::make_unique<FrameNode>();
+		innerP->SetFrameSize(100.0f, 100.0f);
+		innerP->SetTransform(Matrix2D::Translation(20.0f, 20.0f));
+		FrameNode* inner = static_cast<FrameNode*>(outer->AddChild(std::move(innerP)));
+		d.AssignIds(*outer);
+
+		// 점 아래의 가장 안쪽 프레임
+		GE_CHECK(d.FindFrameAt(Vec2{ 150.0f, 100.0f }) == inner, L"가장 안쪽 프레임을 찾지 못함 (안쪽 프레임 위)");
+		GE_CHECK(d.FindFrameAt(Vec2{ 400.0f, 300.0f }) == outer, L"바깥 프레임 위의 점이 바깥 프레임으로 판정되지 않음");
+		GE_CHECK(d.FindFrameAt(Vec2{ 10.0f, 10.0f }) == nullptr, L"프레임 밖의 점이 프레임으로 판정됨");
+		GE_CHECK(d.FindFrameAt(Vec2{ 150.0f, 100.0f }, inner) == outer, L"exclude 한 프레임이 제외되지 않음");
+
+		// 생성: 월드 좌표 (150,100) 에 놓은 새 프레임 -> 바깥 프레임의 자식 (안쪽 프레임 위가 아닌 점은 바깥 프레임)
+		auto nf = std::make_unique<FrameNode>();
+		nf->SetFrameSize(40.0f, 30.0f);
+		nf->SetTransform(Matrix2D::Translation(300.0f, 200.0f));
+		Node* added = d.AddShapeAt(std::move(nf), Vec2{ 300.0f, 200.0f });
+		GE_CHECK(added && added->GetParent() == outer, L"프레임 안에 만든 프레임이 자식이 되지 않음");
+		GE_CHECK(std::fabs(added->GetTransform().dx - 200.0f) < 0.01f && std::fabs(added->GetTransform().dy - 150.0f) < 0.01f, L"자식 변환이 부모 로컬 좌표로 보정되지 않음");
+
+		// 프레임 밖: 레이어 직속
+		auto nf2 = std::make_unique<FrameNode>();
+		nf2->SetTransform(Matrix2D::Translation(10.0f, 10.0f));
+		Node* out = d.AddShapeAt(std::move(nf2), Vec2{ 10.0f, 10.0f });
+		GE_CHECK(out && out->GetParent() == d.GetActiveLayer(), L"프레임 밖에 만든 도형이 레이어 직속이 아님");
+
+		// 자동 배치 부모: 추가 후 다시 배치됨
+		outer->SetLayoutMode(FrameLayoutMode::Column);
+		auto nf3 = std::make_unique<FrameNode>();
+		nf3->SetFrameSize(30.0f, 30.0f);
+		nf3->SetTransform(Matrix2D::Translation(130.0f, 70.0f));
+		Node* laid = d.AddShapeAt(std::move(nf3), Vec2{ 330.0f, 300.0f });
+		GE_CHECK(laid && laid->GetParent() == outer && std::fabs(laid->GetTransform().dx - 10.0f) < 0.01f, L"자동 배치 부모에 추가한 자식이 배치되지 않음");
+		outer->SetLayoutMode(FrameLayoutMode::None);
+
+		// 이동: 레이어 직속 노드를 프레임 위에 놓으면 자식이 되고 월드 위치는 유지
+		auto mp = std::make_unique<FrameNode>();
+		mp->SetFrameSize(20.0f, 20.0f);
+		mp->SetTransform(Matrix2D::Translation(350.0f, 250.0f));
+		Node* mv = d.AddShape(std::move(mp));
+		const Matrix2D wBefore = mv->GetWorldTransform();
+		GE_CHECK(d.ReparentAt(mv, Vec2{ 360.0f, 260.0f }) && mv->GetParent() == outer, L"프레임 위에 놓은 노드가 자식이 되지 않음");
+		const Matrix2D wAfter = mv->GetWorldTransform();
+		GE_CHECK(std::fabs(wBefore.dx - wAfter.dx) < 0.01f && std::fabs(wBefore.dy - wAfter.dy) < 0.01f, L"부모 변경 후 월드 위치가 바뀜");
+		// 같은 프레임 위에서 놓으면 변화 없음
+		GE_CHECK(!d.ReparentAt(mv, Vec2{ 360.0f, 260.0f }), L"같은 부모로는 부모 변경이 일어나지 않아야 함");
+		// 프레임 밖으로 끌어내면 레이어 직속
+		GE_CHECK(d.ReparentAt(mv, Vec2{ 700.0f, 700.0f }) && mv->GetParent() == d.GetActiveLayer(), L"프레임 밖으로 놓은 노드가 레이어로 돌아가지 않음");
+		GE_CHECK(std::fabs(mv->GetWorldTransform().dx - wBefore.dx) < 0.01f, L"레이어로 돌아간 뒤 월드 위치가 바뀜");
+		// 자기 자신/후손 안으로는 들어가지 않음
+		GE_CHECK(!d.ReparentAt(outer, Vec2{ 150.0f, 100.0f }) || outer->GetParent() != inner, L"프레임이 자기 후손 안으로 들어감");
+		// 그룹 안의 자식은 구조 유지
+		auto gp = std::make_unique<GroupNode>();
+		GroupNode* grp = static_cast<GroupNode*>(d.AddShape(std::move(gp)));
+		Node* gc = grp->AddChild(MakePath(L"g", 5.0f, 5.0f));
+		d.AssignIds(*grp);
+		GE_CHECK(!d.ReparentAt(gc, Vec2{ 150.0f, 100.0f }) && gc->GetParent() == grp, L"그룹 안의 자식이 부모 변경됨");
+	}
+
+	// ---- 33. 자식은 부모 프레임 범위를 벗어나지 못함 (ClampChild) ------------------------------------
+	{
+		Document d;
+		auto pp = std::make_unique<FrameNode>();
+		pp->SetFrameSize(200.0f, 100.0f);
+		FrameNode* parent = static_cast<FrameNode*>(d.AddShape(std::move(pp)));
+		auto mk = [](float x, float y, float w, float h) {
+			auto c = std::make_unique<FrameNode>(); c->SetFrameSize(w, h); c->SetTransform(Matrix2D::Translation(x, y)); return c; };
+		d.AssignIds(*parent);
+
+		// 이동: 오른쪽으로 넘친 자식은 안쪽으로 밀려 들어옴 (크기 유지)
+		FrameNode* a = static_cast<FrameNode*>(parent->AddChild(mk(150.0f, 10.0f, 100.0f, 50.0f)));
+		d.AssignIds(*parent);
+		GE_CHECK(parent->ClampChild(a, false), L"범위를 넘은 자식이 보정되지 않음");
+		GE_CHECK(std::fabs(a->GetTransform().dx - 100.0f) < 0.01f && std::fabs(a->GetWidth() - 100.0f) < 0.01f, L"이동 보정이 위치만 옮기지 않음 (x=100, w=100 이어야 함)");
+		a->SetTransform(Matrix2D::Translation(-30.0f, -20.0f));
+		parent->ClampChild(a, false);
+		GE_CHECK(std::fabs(a->GetTransform().dx) < 0.01f && std::fabs(a->GetTransform().dy) < 0.01f, L"왼쪽/위로 넘친 자식이 0,0 으로 보정되지 않음");
+
+		// 크기 조절(shrink): 위치는 두고 넘친 쪽만 잘림 (반대쪽 모서리 고정)
+		a->SetTransform(Matrix2D::Translation(150.0f, 10.0f));
+		a->SetFrameSize(100.0f, 50.0f);
+		parent->ClampChild(a, true);
+		GE_CHECK(std::fabs(a->GetTransform().dx - 150.0f) < 0.01f && std::fabs(a->GetWidth() - 50.0f) < 0.01f, L"크기 조절 보정이 넘친 폭만 자르지 않음");
+
+		// 부모보다 큰 자식은 부모 크기로 줄어듦
+		FrameNode* big = static_cast<FrameNode*>(parent->AddChild(mk(50.0f, 50.0f, 300.0f, 300.0f)));
+		d.AssignIds(*parent);
+		parent->ClampChild(big, false);
+		GE_CHECK(std::fabs(big->GetWidth() - 200.0f) < 0.01f && std::fabs(big->GetHeight() - 100.0f) < 0.01f && std::fabs(big->GetTransform().dx) < 0.01f, L"부모보다 큰 자식이 부모 크기로 줄지 않음");
+
+		// 부모를 줄이면 자식도 안으로
+		FrameNode* c = static_cast<FrameNode*>(parent->AddChild(mk(150.0f, 10.0f, 40.0f, 20.0f)));
+		d.AssignIds(*parent);
+		parent->ResizeFrame(100.0f, 100.0f);
+		GE_CHECK(std::fabs(c->GetTransform().dx - 60.0f) < 0.01f, L"부모 축소 시 자식이 범위 안으로 들어오지 않음");
+
+		// 생성/부모 변경: 프레임 밖으로 넘치게 만든 자식은 보정됨
+		Document d2;
+		auto op = std::make_unique<FrameNode>();
+		op->SetFrameSize(200.0f, 100.0f);
+		FrameNode* outer = static_cast<FrameNode*>(d2.AddShape(std::move(op)));
+		auto nf = std::make_unique<FrameNode>();
+		nf->SetFrameSize(80.0f, 40.0f);
+		nf->SetTransform(Matrix2D::Translation(180.0f, 80.0f));
+		Node* added = d2.AddShapeAt(std::move(nf), Vec2{ 185.0f, 85.0f });
+		GE_CHECK(added && added->GetParent() == outer && std::fabs(added->GetTransform().dx - 120.0f) < 0.01f && std::fabs(added->GetTransform().dy - 60.0f) < 0.01f, L"생성한 자식이 부모 범위 안으로 보정되지 않음");
+
+		// 자동 배치 부모는 레이아웃이 위치를 결정하므로 클램프하지 않음
+		outer->SetLayoutMode(FrameLayoutMode::Column);
+		GE_CHECK(!outer->ClampChild(added, false), L"자동 배치 부모에서 클램프가 동작함");
+
+		// 글자: 크기는 두고 위치만 보정
+		outer->SetLayoutMode(FrameLayoutMode::None);
+		auto tn = std::make_unique<TextNode>();
+		tn->SetText(L"hello");
+		tn->SetTransform(Matrix2D::Translation(190.0f, 95.0f));
+		Node* tx = outer->AddChild(std::move(tn));
+		d2.AssignIds(*outer);
+		outer->ClampChild(tx, false);
+		Rect2 lbT;
+		GE_CHECK(tx->GetLocalBounds(lbT), L"글자 경계를 얻지 못함");
+		const Rect2 bT = tx->GetTransform().TransformRect(lbT);
+		GE_CHECK(bT.right <= 200.01f && bT.bottom <= 100.01f && bT.left >= -0.01f, L"글자가 부모 범위 안으로 보정되지 않음");
+	}
+
+	// ---- 34. 스마트 가이드 (4.5.14.1): 부모 가운데/가장자리, 형제 정렬 ------------------------------
+	{
+		Document d;
+		auto pp = std::make_unique<FrameNode>();
+		pp->SetFrameSize(400.0f, 300.0f);
+		pp->SetTransform(Matrix2D::Translation(100.0f, 50.0f));
+		FrameNode* parent = static_cast<FrameNode*>(d.AddShape(std::move(pp)));
+		auto mk = [](float x, float y, float w, float h) {
+			auto c = std::make_unique<FrameNode>(); c->SetFrameSize(w, h); c->SetTransform(Matrix2D::Translation(x, y)); return c; };
+		FrameNode* mover = static_cast<FrameNode*>(parent->AddChild(mk(145.0f, 10.0f, 100.0f, 50.0f)));
+		FrameNode* sib = static_cast<FrameNode*>(parent->AddChild(mk(20.0f, 200.0f, 60.0f, 40.0f)));
+		d.AssignIds(*parent);
+
+		const GuideTargets tg = CollectGuideTargets({ mover });
+		GE_CHECK(tg.hasParent && std::fabs(tg.parent.left - 100.0f) < 0.01f && std::fabs(tg.parent.right - 500.0f) < 0.01f, L"부모 프레임 월드 상자 수집이 틀림");
+		GE_CHECK(tg.rects.size() == 2, L"후보 상자 수집이 틀림 (자기 자신 제외, 부모+형제 2개)");
+
+		// 월드 상자: 이동 요소 = (245..345, 60..110). 부모 가운데 x = 300, 요소 가운데 x = 295 -> dx = +5 로 맞춤
+		Rect2 mw;
+		GE_CHECK(GuideWorldBounds(*mover, mw) && std::fabs(mw.left - 245.0f) < 0.01f, L"월드 경계 계산이 틀림");
+		GuideResult r = SnapToGuides(mw, tg, 6.0f);
+		GE_CHECK(r.snappedX && std::fabs(r.dx - 5.0f) < 0.01f, L"부모 세로 가운데선에 맞춰지지 않음");
+		bool centerLine = false;
+		for (const auto& l : r.lines) if (l.vertical && std::fabs(l.pos - 300.0f) < 0.01f) centerLine = (l.marks.size() >= 3 && l.from <= 60.0f + 0.01f && l.to >= 350.0f - 0.01f);
+		GE_CHECK(centerLine, L"가운데 가이드선이 부모 높이 전체(위~아래)와 표시점을 포함하지 않음");
+
+		// 허용 오차 밖이면 맞추지 않음
+		Rect2 far = mw; far.left += 20.0f; far.right += 20.0f; far.top += 7.0f; far.bottom += 7.0f;
+		GuideResult none = SnapToGuides(far, tg, 6.0f);
+		GE_CHECK(!none.snappedX && !none.snappedY && none.lines.empty(), L"허용 오차 밖인데 맞춰짐");
+
+		// 부모 가장자리: 왼쪽 변이 부모 왼쪽(100)에서 4 떨어지면 맞춰짐
+		Rect2 edge{ 104.0f, 200.0f, 204.0f, 250.0f };
+		GuideResult er = SnapToGuides(edge, tg, 6.0f);
+		GE_CHECK(er.snappedX && std::fabs(er.dx + 4.0f) < 0.01f, L"부모 왼쪽 가장자리에 맞춰지지 않음");
+
+		// 형제 정렬: 형제 위쪽(250) 에서 3 아래 -> dy = -3
+		GuideResult sr = SnapToGuides(Rect2{ 300.0f, 253.0f, 340.0f, 280.0f }, tg, 6.0f);
+		GE_CHECK(sr.snappedY && std::fabs(sr.dy + 3.0f) < 0.01f, L"형제 위쪽 변에 맞춰지지 않음");
+
+		// 변 제한: 위쪽 변만 허용하면 가로 맞춤은 일어나지 않음
+		GuideFlags onlyTop; onlyTop.left = onlyTop.centerX = onlyTop.right = onlyTop.centerY = onlyTop.bottom = false;
+		GuideResult ot = SnapToGuides(mw, tg, 6.0f, onlyTop);
+		GE_CHECK(!ot.snappedX, L"flags 로 제한했는데 가로 맞춤이 일어남");
+		(void)sib;
+	}
+
+	// ---- 35. 스마트 가이드: 계층에 상관없이(손자/사촌 포함) 서로의 영역에 맞춤 (4.5.14) ----------------
+	{
+		Document d;
+		auto mk = [](float x, float y, float w, float h) {
+			auto c = std::make_unique<FrameNode>(); c->SetFrameSize(w, h); c->SetTransform(Matrix2D::Translation(x, y)); return c; };
+		// 부모 P(0,0 400x300) > 사이드 S(0,50 100x200), 상단 T(0,0 400x50) > 손자 TG(150,10 60x30), 하단 B(0,250 400x50)
+		FrameNode* P = static_cast<FrameNode*>(d.AddShape(mk(0.0f, 0.0f, 400.0f, 300.0f)));
+		FrameNode* S = static_cast<FrameNode*>(P->AddChild(mk(0.0f, 50.0f, 100.0f, 200.0f)));
+		FrameNode* T = static_cast<FrameNode*>(P->AddChild(mk(0.0f, 0.0f, 400.0f, 50.0f)));
+		FrameNode* TG = static_cast<FrameNode*>(T->AddChild(mk(150.0f, 10.0f, 60.0f, 30.0f)));
+		FrameNode* B = static_cast<FrameNode*>(P->AddChild(mk(0.0f, 250.0f, 400.0f, 50.0f)));
+		FrameNode* M = static_cast<FrameNode*>(P->AddChild(mk(300.0f, 100.0f, 40.0f, 40.0f)));
+		d.AssignIds(*P);
+
+		// 손자(TG) 도 후보에 포함됨: 이동 요소 M 의 왼쪽(300)을 TG 오른쪽(210) 근처로 가져가면 맞춰짐
+		const GuideTargets tg = CollectGuideTargets({ M });
+		bool hasGrand = false;
+		for (const Rect2& r : tg.rects) if (std::fabs(r.left - 150.0f) < 0.01f && std::fabs(r.right - 210.0f) < 0.01f) hasGrand = true;
+		GE_CHECK(hasGrand, L"손자 프레임이 스냅 후보에 포함되지 않음");
+		GE_CHECK(tg.rects.size() >= 4, L"사이드/상단/하단/손자가 모두 후보여야 함");
+		GuideResult gr = SnapToGuides(Rect2{ 213.0f, 100.0f, 253.0f, 140.0f }, tg, 6.0f);
+		GE_CHECK(gr.snappedX && std::fabs(gr.dx + 3.0f) < 0.01f, L"손자 오른쪽 변에 맞춰지지 않음");
+
+		// 사이드 S 의 오른쪽(100)을 상단/하단의 왼쪽 선과 맞추는 것이 아니라, 새 요소의 왼쪽이 S 오른쪽(100)에 맞춰짐
+		GuideResult sr = SnapToGuides(Rect2{ 104.0f, 100.0f, 144.0f, 140.0f }, tg, 6.0f);
+		GE_CHECK(sr.snappedX && std::fabs(sr.dx + 4.0f) < 0.01f, L"형제 사이드의 오른쪽 변에 맞춰지지 않음");
+		// 이동 요소가 S 일 때: S 의 오른쪽(100)이 손자나 다른 요소에 맞는 후보가 있는지 (T 의 중심 200 은 멀어서 맞지 않음)
+		const GuideTargets tgS = CollectGuideTargets({ S });
+		GuideResult s2 = SnapToGuides(Rect2{ 0.0f, 50.0f, 100.0f, 250.0f }, tgS, 6.0f);
+		GE_CHECK(s2.snappedX && std::fabs(s2.dx) < 0.01f, L"사이드의 왼쪽이 상단/하단/부모 왼쪽(0)과 이미 일치로 판정되지 않음");
+		bool leftLine = false;
+		for (const auto& l : s2.lines) if (l.vertical && std::fabs(l.pos) < 0.01f) leftLine = true;
+		GE_CHECK(leftLine, L"사이드 왼쪽과 상단/하단 왼쪽을 잇는 세로 가이드선이 없음");
+
+		// 자기 자신과 후손은 후보에서 제외: T 를 옮길 때 TG 는 후보가 아님
+		const GuideTargets tgT = CollectGuideTargets({ T });
+		bool hasOwnChild = false;
+		for (const Rect2& r : tgT.rects) if (std::fabs(r.left - 150.0f) < 0.01f && std::fabs(r.right - 210.0f) < 0.01f) hasOwnChild = true;
+		GE_CHECK(!hasOwnChild, L"이동 요소의 자식이 후보에 포함됨");
+
+		// 새로 만들 요소(노드 없음): 점이 B 의 위쪽(250) 근처면 맞춰짐, 프레임 안이면 부모 상자 포함
+		const GuideTargets at = CollectGuideTargetsAt(d, Vec2{ 120.0f, 245.0f });
+		GE_CHECK(at.hasParent, L"새 요소 위치의 부모 프레임을 찾지 못함");
+		GuideFlags fl; fl.centerX = fl.right = fl.centerY = fl.bottom = false;
+		GuideResult ar = SnapToGuides(Rect2{ 120.0f, 245.0f, 120.0f, 245.0f }, at, 6.0f, fl);
+		GE_CHECK(ar.snappedY && std::fabs(ar.dy - 5.0f) < 0.01f, L"새 요소 점이 아래 프레임 위쪽 변에 맞춰지지 않음");
+		(void)B;
+	}
+
+	// ---- 36. 버튼 라벨 정렬: Row 자동 배치의 가로/세로 정렬 (좌/중/우 x 위/중/아래) ------------------------
+	{
+		Document d;
+		auto fp = std::make_unique<FrameNode>();
+		fp->SetFrameSize(120.0f, 40.0f);
+		fp->SetHtmlTag("button");
+		fp->SetLayoutMode(FrameLayoutMode::Row);
+		fp->SetPadding(8.0f);
+		FrameNode* btn = static_cast<FrameNode*>(d.AddShape(std::move(fp)));
+		auto tn = std::make_unique<TextNode>();
+		tn->SetText(L"OK");
+		tn->SetFontSize(12.0f);   // 버튼 안쪽 높이(24)보다 작아야 위/가운데/아래 정렬 차이가 생김
+		tn->SetAlign(TextAlign::Left);
+		Node* label = btn->AddChild(std::move(tn));
+		d.AssignIds(*btn);
+		auto bounds = [&]() { Rect2 lb; label->GetLocalBounds(lb); return label->GetTransform().TransformRect(lb); };
+
+		btn->SetMainAlign(LayoutMainAlign::Center); btn->SetCrossAlign(LayoutCrossAlign::Center); btn->ApplyLayout();
+		Rect2 b = bounds();
+		GE_CHECK(std::fabs((b.left + b.right) * 0.5f - 60.0f) < 0.6f && std::fabs((b.top + b.bottom) * 0.5f - 20.0f) < 0.6f, L"라벨 가운데/가운데 정렬이 틀림");
+		btn->SetMainAlign(LayoutMainAlign::Start); btn->SetCrossAlign(LayoutCrossAlign::Start); btn->ApplyLayout();
+		b = bounds();
+		GE_CHECK(std::fabs(b.left - 8.0f) < 0.6f && std::fabs(b.top - 8.0f) < 0.6f, L"라벨 왼쪽/위 정렬이 틀림");
+		btn->SetMainAlign(LayoutMainAlign::End); btn->SetCrossAlign(LayoutCrossAlign::End); btn->ApplyLayout();
+		b = bounds();
+		GE_CHECK(std::fabs(b.right - 112.0f) < 0.6f && std::fabs(b.bottom - 32.0f) < 0.6f, L"라벨 오른쪽/아래 정렬이 틀림");
+
+		// 버튼 크기를 바꿔도 정렬이 유지됨 (가운데)
+		btn->SetMainAlign(LayoutMainAlign::Center); btn->SetCrossAlign(LayoutCrossAlign::Center);
+		btn->ResizeFrame(200.0f, 60.0f);
+		b = bounds();
+		GE_CHECK(std::fabs((b.left + b.right) * 0.5f - 100.0f) < 0.6f && std::fabs((b.top + b.bottom) * 0.5f - 30.0f) < 0.6f, L"버튼 크기 변경 후 라벨이 가운데를 유지하지 않음");
+
+		// 저장/복원
+		SvgWriter w;
+		Document back;
+		GE_CHECK(reader.ReadFromString(w.WriteString(d, SvgWriteOptions(SvgWriteMode::File)), back), L"버튼 읽기 실패");
+		auto* b2 = dynamic_cast<FrameNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+		GE_CHECK(b2 && b2->GetLayoutMode() == FrameLayoutMode::Row && b2->GetMainAlign() == LayoutMainAlign::Center && b2->GetCrossAlign() == LayoutCrossAlign::Center, L"버튼 라벨 정렬 왕복 실패");
+	}
+
+	// ---- 37. 공통 외형: 그림자 (4.5.17) — 모델/복제/SVG 두 형식/HTML 변환/대시 border-style --------------
+	{
+		Document d;
+		auto fp = std::make_unique<FrameNode>();
+		fp->SetFrameSize(100.0f, 50.0f);
+		fp->GetStyleRef().stroke.width = 2.0f;
+		fp->GetStyleRef().stroke.color = Color(0.1f, 0.2f, 0.3f, 1.0f);
+		fp->GetStyleRef().stroke.dashArray = MakeDashArray(DashStyle::Dash, 2.0f);
+		Shadow sd;
+		sd.enabled = true; sd.x = 2.0f; sd.y = 6.0f; sd.blur = 12.0f; sd.spread = 1.0f; sd.color = Color(0.0f, 0.0f, 0.0f, 0.5f);
+		fp->SetShadow(sd);
+		FrameNode* fr = static_cast<FrameNode*>(d.AddShape(std::move(fp)));
+		auto tp = std::make_unique<TextNode>();
+		tp->SetText(L"hi");
+		tp->SetShadow(sd);
+		Node* tx = fr->AddChild(std::move(tp));
+		d.AssignIds(*fr);
+
+		GE_CHECK(fr->GetShadow() == sd && fr->Clone()->GetShadow() == sd, L"그림자 설정/복제가 값을 보존하지 못함");
+		GE_CHECK(!Shadow().enabled, L"그림자 기본값은 꺼져 있어야 함");
+
+		// 저장/복원: File (m2:shadow)
+		SvgWriter w;
+		const std::string svg = w.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(svg.find("m2:shadow=") != std::string::npos, L"m2:shadow 저장 누락");
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"그림자 SVG 읽기 실패");
+		auto* b0 = dynamic_cast<FrameNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+		GE_CHECK(b0 && b0->GetShadow().enabled && std::fabs(b0->GetShadow().blur - 12.0f) < 0.01f && std::fabs(b0->GetShadow().y - 6.0f) < 0.01f &&
+			std::fabs(b0->GetShadow().color.a - 0.5f) < 0.01f && std::fabs(b0->GetShadow().spread - 1.0f) < 0.01f, L"그림자 왕복 실패 (File)");
+		auto* bt = b0 ? dynamic_cast<TextNode*>(b0->GetChildren()[0].get()) : nullptr;
+		GE_CHECK(bt && bt->GetShadow().enabled, L"글자 그림자 왕복 실패");
+
+		// Clean: 표준 filter:drop-shadow 만 있어도 복원됨 (m2: 없음)
+		const std::string clean = w.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("m2:") == std::string::npos && clean.find("drop-shadow(") != std::string::npos, L"Clean 그림자 출력이 틀림");
+		Document back2;
+		GE_CHECK(reader.ReadFromString(clean, back2), L"Clean 그림자 읽기 실패");
+		// Clean 출력은 레이어도 일반 그룹으로 읽히므로 계층을 따라 내려가며 찾는다
+		bool foundShadow = false;
+		std::function<void(const GroupNode&)> findShadow = [&](const GroupNode& g) {
+			for (const auto& c : g.GetChildren()) {
+				if (!c) continue;
+				if (c->GetShadow().enabled && std::fabs(c->GetShadow().blur - 12.0f) < 0.01f && std::fabs(c->GetShadow().color.a - 0.5f) < 0.01f) foundShadow = true;
+				if (auto* gc = dynamic_cast<const GroupNode*>(c.get())) findShadow(*gc);
+			}
+		};
+		findShadow(*back2.GetLayers()[0]);
+		GE_CHECK(foundShadow, L"표준 filter:drop-shadow 에서 그림자가 복원되지 않음");
+
+		// HTML: 프레임 = box-shadow(+spread), 글자 = text-shadow, 테두리 종류 = dashed
+		HtmlExporter ex;
+		const std::string html = ex.Export(d, HtmlExportOptions()).html;
+		GE_CHECK(html.find("box-shadow: 2px 6px 12px 1px rgba(0, 0, 0, 0.50);") != std::string::npos, L"프레임 box-shadow 출력이 틀림");
+		GE_CHECK(html.find("text-shadow: 2px 6px 12px rgba(0, 0, 0, 0.50);") != std::string::npos, L"글자 text-shadow 출력이 틀림");
+		GE_CHECK(html.find("border: 2px dashed") != std::string::npos, L"대시 설정이 border-style dashed 로 출력되지 않음");
+		(void)tx;
+	}
+
+	// ---- 38. 공통 외형 후속 (4.5.18): 안쪽 그림자/음수 spread/표 테두리 종류 --------------------------
+	{
+		Document d;
+		auto fp = std::make_unique<FrameNode>();
+		fp->SetFrameSize(100.0f, 50.0f);
+		Shadow sd;
+		sd.enabled = true; sd.inset = true; sd.x = 0.0f; sd.y = 2.0f; sd.blur = 6.0f; sd.spread = -3.0f; sd.color = Color(0.2f, 0.4f, 0.8f, 0.6f);
+		fp->SetShadow(sd);
+		FrameNode* fr = static_cast<FrameNode*>(d.AddShape(std::move(fp)));
+		auto tp = TableComponent::Create(2, 2, 100.0f, 40.0f);
+		tp->SetBorderStyle(1);
+		TableNode* tb = static_cast<TableNode*>(d.AddShape(std::move(tp)));
+		d.AssignIds(*fr);
+		d.AssignIds(*tb);
+
+		GE_CHECK(fr->Clone()->GetShadow().inset && fr->Clone()->GetShadow().spread == -3.0f, L"inset/음수 spread 복제 실패");
+		GE_CHECK(tb->Clone() != nullptr && static_cast<TableNode*>(tb->Clone().get())->GetBorderStyle() == 1, L"표 테두리 종류 복제 실패");
+		tb->SetBorderStyle(9);
+		GE_CHECK(tb->GetBorderStyle() == 2, L"표 테두리 종류 범위 보정이 틀림");
+		tb->SetBorderStyle(2);
+
+		SvgWriter w;
+		const std::string svg = w.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"4.5.18 SVG 읽기 실패");
+		FrameNode* bf = nullptr; TableNode* bt = nullptr;
+		for (const auto& c : back.GetLayers()[0]->GetChildren()) {
+			if (auto* f = dynamic_cast<FrameNode*>(c.get())) bf = f;
+			if (auto* t2 = dynamic_cast<TableNode*>(c.get())) bt = t2;
+		}
+		GE_CHECK(bf && bf->GetShadow().enabled && bf->GetShadow().inset && std::fabs(bf->GetShadow().spread + 3.0f) < 0.01f, L"inset 그림자 왕복 실패");
+		GE_CHECK(bt && bt->GetBorderStyle() == 2, L"표 테두리 종류 왕복 실패");
+		GE_CHECK(svg.find("stroke-dasharray") != std::string::npos, L"표 격자선 dasharray 출력 누락");
+
+		// 이전 형식(6개 값)의 m2:shadow 도 읽힘: inset 없음
+		std::string old = svg;
+		const size_t k = old.find("m2:shadow=\"");
+		GE_CHECK(k != std::string::npos, L"m2:shadow 가 저장되지 않음");
+		const size_t e = old.find('"', k + 11);
+		std::string val = old.substr(k + 11, e - (k + 11));
+		val = val.substr(0, val.rfind(','));   // 마지막 값(inset) 제거
+		old.replace(k + 11, e - (k + 11), val);
+		Document back2;
+		GE_CHECK(reader.ReadFromString(old, back2), L"6개 값 m2:shadow 읽기 실패");
+		bool oldOk = false;
+		for (const auto& c : back2.GetLayers()[0]->GetChildren())
+			if (c && c->GetShadow().enabled && !c->GetShadow().inset) oldOk = true;
+		GE_CHECK(oldOk, L"이전 형식 그림자가 inset 없이 복원되지 않음");
+
+		HtmlExporter ex;
+		const std::string html = ex.Export(d, HtmlExportOptions()).html;
+		GE_CHECK(html.find("box-shadow: inset 0px 2px 6px -3px rgba(51, 102, 204, 0.60);") != std::string::npos, L"inset/음수 spread box-shadow 출력이 틀림");
+		GE_CHECK(html.find("dotted") != std::string::npos, L"표 테두리 점선 border-style 출력 누락");
+		const std::string clean = w.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("drop-shadow(") == std::string::npos, L"inset 그림자가 표준 filter 로 잘못 출력됨");
+	}
+
+	// ---- 39. 같은 간격(Equal Spacing) 스냅 (5.1.3) ---------------------------------------------------
+	{
+		GuideTargets tg;
+		tg.rects.push_back(Rect2{ 0.0f, 0.0f, 50.0f, 50.0f });       // A
+		tg.rects.push_back(Rect2{ 100.0f, 0.0f, 150.0f, 50.0f });    // B (A 와 간격 50)
+		GuideFlags fl; fl.equalSpacing = true;
+
+		// (1) 이동 요소(폭 50)를 B 오른쪽에 같은 간격 50 으로: 왼쪽이 200 이어야 함 (현재 203 -> -3)
+		GuideResult r1 = SnapToGuides(Rect2{ 203.0f, 0.0f, 253.0f, 50.0f }, tg, 6.0f, fl);
+		GE_CHECK(r1.snappedX && std::fabs(r1.dx + 3.0f) < 0.01f, L"이웃 간격과 같은 간격으로 맞춰지지 않음");
+		GE_CHECK(r1.gaps.size() >= 2, L"같은 간격 표시(기준 간격 + 새 간격)가 없음");
+		bool allFifty = true;
+		for (const auto& g : r1.gaps) if (std::fabs(g.value - 50.0f) > 0.01f || !g.horizontal) allFifty = false;
+		GE_CHECK(allFifty, L"같은 간격 표시 값/방향이 틀림");
+
+		// 끄면 간격 맞춤 없음 (이 위치는 다른 변과도 안 맞음)
+		GuideFlags off; off.equalSpacing = false;
+		GuideResult r0 = SnapToGuides(Rect2{ 203.0f, 7.0f, 253.0f, 57.0f }, tg, 3.0f, off);
+		GE_CHECK(!r0.snappedX && r0.gaps.empty(), L"equalSpacing 이 꺼져 있는데 간격 맞춤이 일어남");
+
+		// (2) 왼쪽에 같은 간격: A 왼쪽에 폭 50, 간격 50 -> 오른쪽 끝이 -50
+		GuideResult r2 = SnapToGuides(Rect2{ -103.0f, 0.0f, -53.0f, 50.0f }, tg, 6.0f, fl);
+		GE_CHECK(r2.snappedX && std::fabs(r2.dx - 3.0f) < 0.01f, L"왼쪽에 같은 간격으로 맞춰지지 않음");
+
+		// (3) 두 요소 사이 가운데: A(0~50), C(200~250) 사이 폭 50 -> 양쪽 간격 50 이 되려면 왼쪽이 100
+		GuideTargets t3;
+		t3.rects.push_back(Rect2{ 0.0f, 0.0f, 50.0f, 50.0f });
+		t3.rects.push_back(Rect2{ 200.0f, 0.0f, 250.0f, 50.0f });
+		GuideResult r3 = SnapToGuides(Rect2{ 98.0f, 0.0f, 148.0f, 50.0f }, t3, 6.0f, fl);
+		GE_CHECK(r3.snappedX && std::fabs(r3.dx - 2.0f) < 0.01f && r3.gaps.size() == 2, L"두 요소 사이 양쪽 같은 간격 맞춤이 틀림");
+
+		// 세로 방향
+		GuideTargets t4;
+		t4.rects.push_back(Rect2{ 0.0f, 0.0f, 50.0f, 40.0f });
+		t4.rects.push_back(Rect2{ 0.0f, 70.0f, 50.0f, 110.0f });   // 간격 30
+		GuideResult r4 = SnapToGuides(Rect2{ 0.0f, 143.0f, 50.0f, 183.0f }, t4, 6.0f, fl);
+		GE_CHECK(r4.snappedY && std::fabs(r4.dy + 3.0f) < 0.01f, L"세로 같은 간격 맞춤이 틀림");
+
+		// 주축에서 겹치는 큰 요소(부모 프레임 등)는 이웃으로 보지 않음
+		GuideTargets t5;
+		t5.rects.push_back(Rect2{ -500.0f, -500.0f, 500.0f, 500.0f });
+		GuideResult r5 = SnapToGuides(Rect2{ 10.0f, 7.0f, 60.0f, 57.0f }, t5, 3.0f, fl);
+		GE_CHECK(r5.gaps.empty(), L"겹치는 큰 요소가 이웃 간격으로 취급됨");
+	}
+
+	// ---- 40. 그룹 격리 편집 (5.3): 진입/종료/경로/사라진 노드 자동 해제 ------------------------------
+	{
+		Document d;
+		auto outerU = std::make_unique<GroupNode>();
+		outerU->SetName(L"Outer");
+		GroupNode* outer = static_cast<GroupNode*>(d.AddShape(std::move(outerU)));
+		auto innerU = std::make_unique<GroupNode>();
+		innerU->SetName(L"Inner");
+		GroupNode* inner = static_cast<GroupNode*>(outer->AddChild(std::move(innerU)));
+		Node* leaf = inner->AddChild(MakePath(L"leaf", 5.0f, 5.0f));
+		auto fr = std::make_unique<FrameNode>();
+		FrameNode* frame = static_cast<FrameNode*>(d.AddShape(std::move(fr)));
+		d.AssignIds(*outer);
+		d.AssignIds(*frame);
+
+		GE_CHECK(Document::CanIsolate(outer) && Document::CanIsolate(inner), L"일반 그룹은 격리 가능해야 함");
+		GE_CHECK(!Document::CanIsolate(frame) && !Document::CanIsolate(leaf) && !Document::CanIsolate(d.GetActiveLayer()) && !Document::CanIsolate(nullptr), L"프레임/도형/레이어는 격리 대상이 아니어야 함");
+		GE_CHECK(d.GetIsolationGroup() == nullptr && d.IsolationPath().empty(), L"처음에는 격리 상태가 아니어야 함");
+
+		d.SetSelection({ leaf });
+		GE_CHECK(d.EnterIsolation(outer) && d.GetIsolationGroup() == outer && d.GetSelection().empty(), L"격리 진입이 선택을 비우지 않음");
+		GE_CHECK(!d.EnterIsolation(frame) && d.GetIsolationGroup() == outer, L"프레임으로 격리 진입이 허용됨");
+
+		// 중첩 진입 -> 경로 = 레이어, Outer, Inner
+		GE_CHECK(d.EnterIsolation(inner), L"중첩 그룹 진입 실패");
+		auto path = d.IsolationPath();
+		GE_CHECK(path.size() == 3 && path[0] == d.GetActiveLayer() && path[1] == outer && path[2] == inner, L"격리 경로(브레드크럼)가 틀림");
+
+		// 한 단계씩 종료
+		d.ExitIsolation();
+		GE_CHECK(d.GetIsolationGroup() == outer, L"한 단계 위로 복귀하지 않음");
+		d.ExitIsolation();
+		GE_CHECK(d.GetIsolationGroup() == nullptr, L"최상위에서 격리가 해제되지 않음");
+
+		// 격리 대상이 삭제되면 자동 해제
+		d.EnterIsolation(inner);
+		GE_CHECK(d.GetIsolationGroup() == inner, L"재진입 실패");
+		d.RemoveNode(inner);
+		GE_CHECK(d.GetIsolationGroup() == nullptr, L"삭제된 격리 대상이 자동으로 해제되지 않음");
+
+		// 저장/복원(NodeId 보존)된 문서에서도 id 로 같은 그룹을 찾음
+		Document d2;
+		auto g2 = std::make_unique<GroupNode>();
+		GroupNode* grp = static_cast<GroupNode*>(d2.AddShape(std::move(g2)));
+		d2.AssignIds(*grp);
+		d2.EnterIsolation(grp);
+		SvgWriter w;
+		Document back;
+		GE_CHECK(reader.ReadFromString(w.WriteString(d2, SvgWriteOptions(SvgWriteMode::File)), back), L"격리용 그룹 왕복 읽기 실패");
+		back.EnterIsolation(static_cast<GroupNode*>(back.GetLayers()[0]->GetChildren()[0].get()));
+		GE_CHECK(back.GetIsolationGroup() != nullptr, L"복원된 그룹을 격리할 수 없음");
+		d2.ClearIsolation();
+		GE_CHECK(d2.GetIsolationGroup() == nullptr, L"ClearIsolation 이 해제하지 않음");
+	}
+
+	// ---- 41. 다중 선택 공통 변환 (5.2): 결합 경계 상자의 스케일/회전/전단을 각 노드에 일괄 합성 ----------
+	{
+		Document d;
+		auto fp = std::make_unique<FrameNode>();
+		fp->SetFrameSize(400.0f, 300.0f);
+		fp->SetTransform(Matrix2D::Translation(100.0f, 50.0f));      // 부모가 이동된 상태에서도 월드 기준으로 변환되어야 함
+		FrameNode* parent = static_cast<FrameNode*>(d.AddShape(std::move(fp)));
+		auto mk = [](float x, float y, float w, float h) {
+			auto c = std::make_unique<FrameNode>(); c->SetFrameSize(w, h); c->SetTransform(Matrix2D::Translation(x, y)); return c; };
+		Node* a = parent->AddChild(mk(10.0f, 10.0f, 40.0f, 20.0f));    // 월드 (110,60)~(150,80)
+		Node* b = parent->AddChild(mk(110.0f, 60.0f, 40.0f, 40.0f));   // 월드 (210,110)~(250,150)
+		d.AssignIds(*parent);
+		std::vector<Node*> sel{ a, b };
+
+		Rect2 u;
+		GE_CHECK(UnionWorldBounds(sel, u) && std::fabs(u.left - 110.0f) < 0.01f && std::fabs(u.top - 60.0f) < 0.01f && std::fabs(u.right - 250.0f) < 0.01f && std::fabs(u.bottom - 150.0f) < 0.01f, L"결합 경계 상자(월드)가 틀림");
+		std::vector<Matrix2D> init{ a->GetTransform(), b->GetTransform() };
+
+		// 스케일: 왼쪽 위(110,60) 고정, 2배 -> 결합 상자 (110,60)~(390,240)
+		ApplyWorldTransform(sel, init, MakeWorldScale(2.0f, 2.0f, Vec2{ u.left, u.top }));
+		Rect2 u2;
+		GE_CHECK(UnionWorldBounds(sel, u2) && std::fabs(u2.left - 110.0f) < 0.05f && std::fabs(u2.top - 60.0f) < 0.05f && std::fabs(u2.right - 390.0f) < 0.05f && std::fabs(u2.bottom - 240.0f) < 0.05f, L"다중 스케일 결과 상자가 틀림 (기준점 고정, 2배)");
+		// 노드 간 상대 위치 비례: a 의 오른쪽 아래 / b 의 왼쪽 위 간격도 2배 (원래 a.right=150,b.left=210 -> 110+2*(150-110)=190, 110+2*(210-110)=310)
+		Rect2 la, lb2;
+		a->GetLocalBounds(la); b->GetLocalBounds(lb2);
+		const Rect2 wa = a->GetWorldTransform().TransformRect(la), wb = b->GetWorldTransform().TransformRect(lb2);
+		GE_CHECK(std::fabs(wa.right - 190.0f) < 0.05f && std::fabs(wb.left - 310.0f) < 0.05f, L"다중 스케일이 노드 간 상대 위치를 비례시키지 않음");
+
+		// 원래 상태로 되돌린 뒤 회전: 결합 상자 중심 (180,105) 기준 90도 -> 상자 폭/높이 교환 (140x90 -> 90x140), 중심 유지
+		ApplyWorldTransform(sel, init, Matrix2D::Identity());
+		GE_CHECK(UnionWorldBounds(sel, u2) && std::fabs(u2.left - 110.0f) < 0.05f, L"항등 변환 후 원상 복구가 안 됨");
+		ApplyWorldTransform(sel, init, MakeWorldRotation(90.0f, Vec2{ 180.0f, 105.0f }));
+		GE_CHECK(UnionWorldBounds(sel, u2) && std::fabs((u2.right - u2.left) - 90.0f) < 0.1f && std::fabs((u2.bottom - u2.top) - 140.0f) < 0.1f &&
+			std::fabs((u2.left + u2.right) * 0.5f - 180.0f) < 0.1f && std::fabs((u2.top + u2.bottom) * 0.5f - 105.0f) < 0.1f, L"다중 회전(90도) 결과가 틀림");
+
+		// 가로 전단: 아래쪽(150) 고정, k=0.5 -> 위쪽 y=60 은 x 가 0.5*(60-150)=-45 이동 (결합 상자 left 110-45=65)
+		ApplyWorldTransform(sel, init, MakeWorldSkewX(0.5f, Vec2{ 180.0f, 150.0f }));
+		GE_CHECK(UnionWorldBounds(sel, u2) && std::fabs(u2.left - 65.0f) < 0.5f && std::fabs(u2.bottom - 150.0f) < 0.1f, L"다중 가로 전단 결과가 틀림");
+		// 세로 전단
+		ApplyWorldTransform(sel, init, MakeWorldSkewY(0.5f, Vec2{ 110.0f, 105.0f }));
+		GE_CHECK(UnionWorldBounds(sel, u2) && std::fabs(u2.left - 110.0f) < 0.1f && u2.bottom > 150.0f, L"다중 세로 전단 결과가 틀림");
+
+		// 부모 변환이 없는 레이어 직속 노드도 같은 방식으로 동작
+		ApplyWorldTransform(sel, init, Matrix2D::Identity());
+		Document d2;
+		Node* p1 = d2.AddShape(mk(0.0f, 0.0f, 10.0f, 10.0f));
+		Node* p2 = d2.AddShape(mk(30.0f, 0.0f, 10.0f, 10.0f));
+		std::vector<Node*> s2{ p1, p2 };
+		std::vector<Matrix2D> i2{ p1->GetTransform(), p2->GetTransform() };
+		ApplyWorldTransform(s2, i2, MakeWorldScale(3.0f, 1.0f, Vec2{ 0.0f, 0.0f }));
+		Rect2 u3;
+		GE_CHECK(UnionWorldBounds(s2, u3) && std::fabs(u3.right - 120.0f) < 0.05f && std::fabs(u3.bottom - 10.0f) < 0.05f, L"레이어 직속 노드의 다중 스케일이 틀림");
+		GE_CHECK(!UnionWorldBounds({}, u3), L"빈 목록의 경계 상자가 있다고 판정됨");
 	}
 
 #undef GE_CHECK

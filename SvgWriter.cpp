@@ -179,6 +179,12 @@ std::string BuildCommonState(const Node& n, bool includeVisibleLocked, bool meta
 	if (!n.GetAlt().empty())         s += " m2:alt=\"" + EscapeXml(n.GetAlt()) + "\"";
 	if (!n.GetAriaLabel().empty())   s += " m2:ariaLabel=\"" + EscapeXml(n.GetAriaLabel()) + "\"";
 	if (!n.GetCustomClass().empty()) s += " m2:customClass=\"" + EscapeXml(n.GetCustomClass()) + "\"";
+	if (n.GetConstraintH() != ConstraintH::Left) s += " m2:cx=\"" + std::to_string(static_cast<int>(n.GetConstraintH())) + "\"";
+	if (n.GetConstraintV() != ConstraintV::Top)  s += " m2:cy=\"" + std::to_string(static_cast<int>(n.GetConstraintV())) + "\"";
+	if (n.GetShadow().enabled) {
+		const Shadow& sd = n.GetShadow();
+		s += " m2:shadow=\"" + FormatFloat(sd.x) + "," + FormatFloat(sd.y) + "," + FormatFloat(sd.blur) + "," + FormatFloat(sd.spread) + "," + ColorToHex(sd.color) + "," + FormatFloat(sd.color.a) + "," + (sd.inset ? "1" : "0") + "\"";
+	}
 	return s;
 }
 
@@ -190,6 +196,14 @@ std::string BuildCssStyle(const Node& n) {
 	if (n.GetBlendMode() != LayerBlendMode::Normal) {
 		if (!css.empty()) css += ";";
 		css += std::string("mix-blend-mode:") + BlendModeCssName(n.GetBlendMode());
+	}
+	if (n.GetShadow().enabled && !n.GetShadow().inset) {
+		// 표준 뷰어용 그림자 (안쪽 그림자는 표준 filter 로 표현할 수 없어 m2:shadow 에만 저장) (읽을 때 m2:shadow 가 없으면 이 값을 사용)
+		const Shadow& sd = n.GetShadow();
+		const int r = static_cast<int>(std::round(sd.color.r * 255.0f)), g = static_cast<int>(std::round(sd.color.g * 255.0f)), b = static_cast<int>(std::round(sd.color.b * 255.0f));
+		if (!css.empty()) css += ";";
+		css += "filter:drop-shadow(" + FormatFloat(sd.x) + "px " + FormatFloat(sd.y) + "px " + FormatFloat(sd.blur) + "px rgba(" +
+			std::to_string(r) + "," + std::to_string(g) + "," + std::to_string(b) + "," + FormatFloat(sd.color.a) + "))";
 	}
 	return css.empty() ? std::string() : " style=\"" + css + "\"";
 }
@@ -461,6 +475,7 @@ void SvgWriter::Visit(GroupNode& node) {
 			for (size_t i = 0; i < table->RowHeights().size(); ++i) rows += std::string(i ? "," : "") + FormatFloat(table->RowHeights()[i]);
 			m_output += " m2:component=\"table\" m2:cols=\"" + cols + "\" m2:rows=\"" + rows + "\" m2:border=\"" + FormatFloat(table->GetBorderWidth()) +
 				"\" m2:pad=\"" + FormatFloat(table->GetCellPadding()) + "\" m2:bcolor=\"" + ColorToHex(table->GetBorderColor()) + "\"";
+				if (table->GetBorderStyle() != 0) m_output += " m2:bstyle=\"" + std::to_string(table->GetBorderStyle()) + "\"";
 				m_output += " m2:header=\"" + std::to_string(table->GetHeaderRows()) + "\" m2:calign=\"" + std::to_string(table->GetCellAlign()) + "\"";
 				if (!table->Merges().empty()) {
 					std::string mg;
@@ -478,9 +493,20 @@ void SvgWriter::Visit(GroupNode& node) {
 		if (Meta()) {
 			m_output += " m2:frame=\"true\" m2:w=\"" + FormatFloat(frame->GetWidth()) + "\" m2:h=\"" + FormatFloat(frame->GetHeight()) +
 				"\" m2:clip=\"" + std::string(frame->IsClip() ? "true" : "false") + "\" m2:radius=\"" + FormatFloat(frame->GetCornerRadius()) + "\"";
+				if (!frame->GetCornerRadii().IsUniform()) {
+					const CornerRadii& cr4 = frame->GetCornerRadii();
+					m_output += " m2:radius4=\"" + FormatFloat(cr4.tl) + "," + FormatFloat(cr4.tr) + "," + FormatFloat(cr4.br) + "," + FormatFloat(cr4.bl) + "\"";
+				}
+				if (frame->GetBorderSides() != BorderAll) m_output += " m2:borderSides=\"" + std::to_string(static_cast<int>(frame->GetBorderSides())) + "\"";
+				if (frame->GetSizingW() == FrameSizingMode::Fill) m_output += " m2:sizingW=\"fill\"";
+				if (frame->GetSizingH() == FrameSizingMode::Fill) m_output += " m2:sizingH=\"fill\"";
 			if (frame->GetLayoutMode() != FrameLayoutMode::None) {
 				m_output += " m2:layout=\"" + std::string(frame->GetLayoutMode() == FrameLayoutMode::Row ? "row" : "column") + "\" m2:gap=\"" +
 					FormatFloat(frame->GetGap()) + "\" m2:pad=\"" + FormatFloat(frame->GetPadding()) + "\"";
+					if (!frame->GetPaddingEdges().IsUniform()) {
+						const PaddingEdges& pe = frame->GetPaddingEdges();
+						m_output += " m2:padding4=\"" + FormatFloat(pe.top) + "," + FormatFloat(pe.right) + "," + FormatFloat(pe.bottom) + "," + FormatFloat(pe.left) + "\"";
+					}
 				static const char* kMainAlignStr[] = { "start", "center", "end", "space-between" };
 				static const char* kCrossAlignStr[] = { "start", "center", "end" };
 				m_output += " m2:mainAlign=\"" + std::string(kMainAlignStr[static_cast<int>(frame->GetMainAlign())]) + "\"";
@@ -531,26 +557,55 @@ void SvgWriter::Visit(GroupNode& node) {
 			}
 			AppendIndent();
 			m_output += std::string("<path") + (Meta() ? " m2:tableGrid=\"true\"" : "") + " d=\"" + d + "\" fill=\"none\" stroke=\"" +
-				ColorToHex(table->GetBorderColor()) + "\" stroke-width=\"" + FormatFloat(table->GetBorderWidth()) + "\" />\n";
+				ColorToHex(table->GetBorderColor()) + "\" stroke-width=\"" + FormatFloat(table->GetBorderWidth()) + "\"" +
+				(table->GetBorderStyle() == 0 ? std::string() : " stroke-dasharray=\"" + FormatFloat(table->GetBorderWidth() * (table->GetBorderStyle() == 1 ? 4.0f : 1.0f)) + " " +
+					FormatFloat(table->GetBorderWidth() * (table->GetBorderStyle() == 1 ? 2.0f : 1.0f)) + "\"") + " />\n";
 		}
 	}
 	if (frame) {
-		// 표준 뷰어에서도 보이도록: 클립 영역 + 배경 사각형을 그룹 안 첫 요소로 출력 (읽을 때 m2:frameBg 로 프레임 스타일 복원)
-		const std::string geom = " x=\"0\" y=\"0\" width=\"" + FormatFloat(frame->GetWidth()) + "\" height=\"" + FormatFloat(frame->GetHeight()) + "\"" +
-			(frame->GetCornerRadius() > 0.0f ? " rx=\"" + FormatFloat(frame->GetCornerRadius()) + "\" ry=\"" + FormatFloat(frame->GetCornerRadius()) + "\"" : std::string());
+		// 표준 뷰어에서도 보이도록: 클립 영역 + 배경 도형을 그룹 안 첫 요소로 출력 (읽을 때 m2:frameBg 로 프레임 스타일 복원)
+		// 4모서리 반경이 같으면 <rect>, 다르면 <path> (4.5.10). 일부 변만 테두리면 배경은 fill 만, 테두리는 별도 <path>
+		const CornerRadii cr = frame->ClampedRadii();
+		const float FW = frame->GetWidth(), FH = frame->GetHeight();
+		const bool partial = frame->GetBorderSides() != BorderAll;
+		auto shapeOpen = [&](const std::string& extra) -> std::string {
+			if (cr.IsUniform()) {
+				return "<rect" + extra + " x=\"0\" y=\"0\" width=\"" + FormatFloat(FW) + "\" height=\"" + FormatFloat(FH) + "\"" +
+					(cr.tl > 0.0f ? " rx=\"" + FormatFloat(cr.tl) + "\" ry=\"" + FormatFloat(cr.tl) + "\"" : std::string());
+			}
+			auto arc = [&](float r, float x, float y) { return r > 0.0f ? " A " + FormatFloat(r) + " " + FormatFloat(r) + " 0 0 1 " + FormatFloat(x) + " " + FormatFloat(y) : std::string(); };
+			std::string d = "M " + FormatFloat(cr.tl) + " 0 H " + FormatFloat(FW - cr.tr) + arc(cr.tr, FW, cr.tr) +
+				" V " + FormatFloat(FH - cr.br) + arc(cr.br, FW - cr.br, FH) +
+				" H " + FormatFloat(cr.bl) + arc(cr.bl, 0.0f, FH - cr.bl) +
+				" V " + FormatFloat(cr.tl) + arc(cr.tl, cr.tl, 0.0f) + " Z";
+			return "<path" + extra + " d=\"" + d + "\"";
+		};
 		if (frame->IsClip()) {
 			AppendIndent();
-			m_output += "<clipPath id=\"frame_clip_" + std::to_string(node.GetId()) + "\"><rect" + geom + " /></clipPath>\n";
+			m_output += "<clipPath id=\"frame_clip_" + std::to_string(node.GetId()) + "\">" + shapeOpen("") + " /></clipPath>\n";
 		}
 		const Style& fs = frame->GetStyle();
 		const bool hasFill = fs.fill.type == PaintType::Solid && fs.fill.color.a > 0.0f;
-		const bool hasStroke = fs.stroke.width > 0.0f && fs.stroke.color.a > 0.0f;
+		const bool hasStroke = fs.stroke.width > 0.0f && fs.stroke.color.a > 0.0f && frame->GetBorderSides() != 0;
 		if (hasFill || hasStroke || Meta()) {
 			AppendIndent();
-			m_output += std::string("<rect") + (Meta() ? " m2:frameBg=\"true\"" : "") + geom;
+			m_output += shapeOpen(Meta() ? " m2:frameBg=\"true\"" : "");
 			m_output += hasFill ? " fill=\"" + ColorToHex(fs.fill.color) + "\"" + (fs.fill.color.a < 0.999f ? " fill-opacity=\"" + FormatFloat(fs.fill.color.a) + "\"" : std::string()) : std::string(" fill=\"none\"");
-			m_output += hasStroke ? " stroke=\"" + ColorToHex(fs.stroke.color) + "\" stroke-width=\"" + FormatFloat(fs.stroke.width) + "\"" : std::string(" stroke=\"none\"");
+			if (hasStroke && !partial) m_output += " stroke=\"" + ColorToHex(fs.stroke.color) + "\" stroke-width=\"" + FormatFloat(fs.stroke.width) + "\"";
+			else m_output += " stroke=\"none\"";
+			if (Meta() && partial && fs.stroke.width > 0.0f) m_output += " m2:bstroke=\"" + ColorToHex(fs.stroke.color) + "\" m2:bwidth=\"" + FormatFloat(fs.stroke.width) + "\"";
 			m_output += " />\n";
+		}
+		if (hasStroke && partial) {
+			const uint8_t sd = frame->GetBorderSides();
+			std::string d;
+			if (sd & BorderTop)    d += " M 0 0 H " + FormatFloat(FW);
+			if (sd & BorderRight)  d += " M " + FormatFloat(FW) + " 0 V " + FormatFloat(FH);
+			if (sd & BorderBottom) d += " M 0 " + FormatFloat(FH) + " H " + FormatFloat(FW);
+			if (sd & BorderLeft)   d += " M 0 0 V " + FormatFloat(FH);
+			AppendIndent();
+			m_output += std::string("<path") + (Meta() ? " m2:frameBorder=\"true\"" : "") + " d=\"" + d.substr(1) + "\" fill=\"none\" stroke=\"" + ColorToHex(fs.stroke.color) +
+				"\" stroke-width=\"" + FormatFloat(fs.stroke.width) + "\" />\n";
 		}
 	}
 	const Node* maskNode = isMask ? node.GetMaskNode() : nullptr;

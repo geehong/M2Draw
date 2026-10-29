@@ -27,6 +27,21 @@ static bool IsInteractive(const ge::Node* n)
 template <typename Fn>
 static void ForEachSelectableTopDown(CM2DrawDoc* pDoc, Fn fn)
 {
+	// 격리 편집(5.3) 중에는 격리 그룹의 직속 자식만 선택 단위가 되고, 나머지는 선택/히트되지 않는다
+	if (ge::GroupNode* iso = pDoc->GetDoc().GetIsolationGroup())
+	{
+		if (iso->IsEffectivelyVisible() && !iso->IsEffectivelyLocked())
+		{
+			const auto& kids = iso->GetChildren();
+			for (int i = static_cast<int>(kids.size()) - 1; i >= 0; --i)
+			{
+				ge::Node* n = kids[i].get();
+				if (!n || !n->IsVisible() || n->IsLocked()) continue;
+				if (fn(n)) return;
+			}
+		}
+		return;
+	}
 	const auto& layers = pDoc->GetDoc().GetLayers();
 	for (int li = static_cast<int>(layers.size()) - 1; li >= 0; --li)
 	{
@@ -116,6 +131,7 @@ static ge::Node* HitTestDeepNode(ge::Node* n, D2D1_POINT_2F screenPt, const View
 static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
 {
 	ge::Node* hitTarget = nullptr;
+	ge::GroupNode* isoGroup = pDoc->GetDoc().GetIsolationGroup();
 	ForEachSelectableTopDown(pDoc, [&](ge::Node* topNode) {
 		ge::Node* deep = HitTestDeepNode(topNode, screenPt, view, f);
 		if (!deep) return false;
@@ -143,7 +159,7 @@ static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const
 				hitTarget = curr;
 				return true;
 			}
-			if (parent->Kind() == ge::NodeKind::Layer)
+			if (parent->Kind() == ge::NodeKind::Layer || parent == isoGroup)   // 격리 중에는 격리 그룹의 직속 자식 단위
 			{
 				hitTarget = curr;
 				return true;
@@ -433,6 +449,8 @@ HCURSOR SelectTool::GetCursor() const
 
 	if (m_mode == Mode::TableResize)
 		return ::LoadCursor(nullptr, m_tblCol ? IDC_SIZEWE : IDC_SIZENS);
+	if (m_mode == Mode::MultiRotate)
+		return ::LoadCursor(nullptr, IDC_CROSS);
 	if (m_mode == Mode::None && m_hoverTbl != 0)
 		return ::LoadCursor(nullptr, m_hoverTbl == 1 ? IDC_SIZEWE : IDC_SIZENS);
 
@@ -493,6 +511,89 @@ bool SelectTool::GetHandleScreenPositions(ge::Node* shape, const ViewportTransfo
 		outHandles[i] = CoordinateSpace::LocalToScreen(localHandles[i], shape->GetWorldTransform(), view);
 	}
 	return true;
+}
+
+bool SelectTool::MultiHandlePositions(const std::vector<ge::Node*>& sel, const ViewportTransform& view, D2D1_POINT_2F out[9], ge::Rect2& rect) const
+{
+	if (sel.size() < 2 || !ge::UnionWorldBounds(sel, rect)) return false;
+	if (rect.right - rect.left < 1e-3f && rect.bottom - rect.top < 1e-3f) return false;
+	const float cx = (rect.left + rect.right) * 0.5f, cy = (rect.top + rect.bottom) * 0.5f;
+	out[0] = view.WorldToScreen(D2D1::Point2F(rect.left, rect.top));
+	out[1] = view.WorldToScreen(D2D1::Point2F(cx, rect.top));
+	out[2] = view.WorldToScreen(D2D1::Point2F(rect.right, rect.top));
+	out[3] = view.WorldToScreen(D2D1::Point2F(rect.right, cy));
+	out[4] = view.WorldToScreen(D2D1::Point2F(rect.right, rect.bottom));
+	out[5] = view.WorldToScreen(D2D1::Point2F(cx, rect.bottom));
+	out[6] = view.WorldToScreen(D2D1::Point2F(rect.left, rect.bottom));
+	out[7] = view.WorldToScreen(D2D1::Point2F(rect.left, cy));
+	out[8] = D2D1::Point2F(out[1].x, out[1].y - 26.0f);   // 회전 핸들: 위쪽 가운데에서 26px 위
+	return true;
+}
+
+void SelectTool::ApplyMultiTransform(const ToolEvent& e)
+{
+	if (m_multiNodes.empty()) return;
+	const ge::Vec2 cur{ e.worldPt.x, e.worldPt.y };
+	const ge::Vec2 start{ m_dragStartWorld.x, m_dragStartWorld.y };
+	const ge::Rect2& rc = m_multiRect;
+	const float cx = (rc.left + rc.right) * 0.5f, cy = (rc.top + rc.bottom) * 0.5f;
+	const Handle h = m_multiHandle;
+	const bool left = (h == Handle::TL || h == Handle::L || h == Handle::BL);
+	const bool right = (h == Handle::TR || h == Handle::R || h == Handle::BR);
+	const bool top = (h == Handle::TL || h == Handle::T || h == Handle::TR);
+	const bool bottom = (h == Handle::BL || h == Handle::B || h == Handle::BR);
+	m_hoverHandle = h;   // 커서 표시용
+
+	ge::Matrix2D T = ge::Matrix2D::Identity();
+	if (m_mode == Mode::MultiRotate)
+	{
+		const float a0 = std::atan2(start.y - cy, start.x - cx), a1 = std::atan2(cur.y - cy, cur.x - cx);
+		float deg = (a1 - a0) * 180.0f / 3.14159265f;
+		if (e.shiftDown) deg = std::round(deg / 15.0f) * 15.0f;   // Shift: 15도 단위
+		T = ge::MakeWorldRotation(deg, ge::Vec2{ cx, cy });
+	}
+	else if (m_mode == Mode::MultiScale)
+	{
+		const float hx = left ? rc.left : right ? rc.right : cx;
+		const float hy = top ? rc.top : bottom ? rc.bottom : cy;
+		float ax = left ? rc.right : right ? rc.left : cx;
+		float ay = top ? rc.bottom : bottom ? rc.top : cy;
+		if (e.altDown) { ax = cx; ay = cy; }   // Alt: 가운데 기준
+		float sx = 1.0f, sy = 1.0f;
+		if ((left || right) && std::fabs(hx - ax) > 1e-3f) sx = (cur.x - ax) / (hx - ax);
+		if ((top || bottom) && std::fabs(hy - ay) > 1e-3f) sy = (cur.y - ay) / (hy - ay);
+		if (e.shiftDown && (left || right) && (top || bottom))   // Shift + 모서리: 비율 유지
+		{
+			const float s = (std::fabs(sx) > std::fabs(sy)) ? sx : sy;
+			sx = sy = s;
+		}
+		auto clampS = [](float s) { return std::fabs(s) < 0.01f ? (s < 0.0f ? -0.01f : 0.01f) : s; };
+		T = ge::MakeWorldScale(clampS(sx), clampS(sy), ge::Vec2{ ax, ay });
+	}
+	else if (m_mode == Mode::MultiSkew)
+	{
+		if (top || bottom)
+		{
+			const float ay = top ? rc.bottom : rc.top, hy = top ? rc.top : rc.bottom;
+			const float d = hy - ay;
+			if (std::fabs(d) > 1e-3f) T = ge::MakeWorldSkewX((cur.x - start.x) / d, ge::Vec2{ cx, ay });
+		}
+		else
+		{
+			const float ax = left ? rc.right : rc.left, hx = left ? rc.left : rc.right;
+			const float d = hx - ax;
+			if (std::fabs(d) > 1e-3f) T = ge::MakeWorldSkewY((cur.y - start.y) / d, ge::Vec2{ ax, cy });
+		}
+	}
+	ge::ApplyWorldTransform(m_multiNodes, m_multiInitial, T);
+
+	static DWORD s_lastTick = 0;
+	const DWORD tick = ::GetTickCount();
+	if (tick - s_lastTick >= 30 && e.pDoc)
+	{
+		s_lastTick = tick;
+		UpdateShapePropertiesLight(m_multiNodes.front(), e.pDoc);
+	}
 }
 
 bool SelectTool::HitTableLine(ge::TableNode* tb, D2D1_POINT_2F sp, const ViewportTransform& view, bool& isCol, int& idx)
@@ -564,6 +665,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 
 	auto& doc = e.pDoc->GetDoc();
 	const std::vector<ge::Node*> sel = doc.GetSelection();
+	m_viewZoom = e.view.zoom;
 	m_dragStartWorld = e.worldPt;
 	m_dragCurrentWorld = e.worldPt;
 	D2D1_POINT_2F screenPt = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
@@ -606,8 +708,36 @@ void SelectTool::OnDown(const ToolEvent& e)
 		}
 	}
 
+	// 0-multi. 2개 이상 선택: 결합 경계 상자 기즈모 (스케일 / 회전 / Ctrl+가장자리 = 전단) (5.2)
+	if (sel.size() >= 2)
+	{
+		bool allOk = true;
+		for (ge::Node* n : sel) if (!IsInteractive(n)) { allOk = false; break; }
+		D2D1_POINT_2F hp[9];
+		ge::Rect2 rc;
+		if (allOk && MultiHandlePositions(sel, e.view, hp, rc))
+		{
+			const Handle hit = HitHandle(screenPt, hp, 8.0f);
+			if (hit != Handle::None)
+			{
+				m_multiNodes = sel;
+				m_multiRect = rc;
+				m_multiHandle = hit;
+				m_handle = hit;
+				m_multiInitial.clear();
+				for (ge::Node* n : sel) m_multiInitial.push_back(n->GetTransform());
+				const bool edge = (hit == Handle::T || hit == Handle::R || hit == Handle::B || hit == Handle::L);
+				m_mode = (hit == Handle::Rotate) ? Mode::MultiRotate : ((e.ctrlDown && edge) ? Mode::MultiSkew : Mode::MultiScale);
+				LogAppEvent(m_mode == Mode::MultiRotate ? _T("[선택 도구] 다중 선택 회전 시작") : m_mode == Mode::MultiSkew ? _T("[선택 도구] 다중 선택 전단(Skew) 시작") : _T("[선택 도구] 다중 선택 크기 조절 시작"));
+				return;
+			}
+		}
+	}
+	// 다중 선택일 때는 개별 도형의 앵커/크기 핸들을 쓰지 않는다 (결합 기즈모만)
+	const std::vector<ge::Node*> perNode = (sel.size() >= 2) ? std::vector<ge::Node*>() : sel;
+
 	// 1. 이미 선택된 패스 도형의 노드(앵커, 핸들 In/Out) 클릭 여부 최우선 검사
-	for (ge::Node* n : sel)
+	for (ge::Node* n : perNode)
 	{
 		ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
 		if (!ps || !IsInteractive(ps)) continue;
@@ -630,7 +760,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 	}
 
 	// 2. 이미 선택된 도형 중 닫힌 도형(열린 곡선/직선 제외)의 바운딩 박스 핸들 클릭 여부 검사
-	for (ge::Node* n : sel)
+	for (ge::Node* n : perNode)
 	{
 		if (!IsInteractive(n) || IsOpenPath(n)) continue;
 		D2D1_POINT_2F handles[9];
@@ -738,6 +868,7 @@ void SelectTool::OnMove(const ToolEvent& e)
 	if (!e.pDoc) return;
 
 	const std::vector<ge::Node*> sel = e.pDoc->GetDoc().GetSelection();
+	m_viewZoom = e.view.zoom;
 	m_dragCurrentWorld = e.worldPt;
 	D2D1_POINT_2F screenPt = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
 
@@ -774,8 +905,21 @@ void SelectTool::OnMove(const ToolEvent& e)
 			}
 		}
 
+		// 0) 다중 선택: 결합 기즈모 핸들 호버 (5.2)
+		if (sel.size() >= 2)
+		{
+			D2D1_POINT_2F hp[9];
+			ge::Rect2 rc;
+			if (MultiHandlePositions(sel, e.view, hp, rc))
+			{
+				const Handle hh = HitHandle(screenPt, hp, 8.0f);
+				if (hh != Handle::None) { m_hoverHandle = hh; return; }
+			}
+		}
+		const std::vector<ge::Node*> perNodeHover = (sel.size() >= 2) ? std::vector<ge::Node*>() : sel;
+
 		// 1) 선택된 도형의 노드(앵커/핸들) 및 바운딩 박스 핸들 호버 검사
-		for (ge::Node* n : sel)
+		for (ge::Node* n : perNodeHover)
 		{
 			if (!IsInteractive(n)) continue;
 			ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
@@ -853,6 +997,12 @@ void SelectTool::OnMove(const ToolEvent& e)
 		return;
 	}
 
+	if (m_mode == Mode::MultiScale || m_mode == Mode::MultiRotate || m_mode == Mode::MultiSkew)
+	{
+		ApplyMultiTransform(e);
+		return;
+	}
+
 	if (sel.empty())
 		return;
 
@@ -902,6 +1052,16 @@ void SelectTool::ApplyNodeEdit(ge::PathNode* shape, const ToolEvent& e)
 }
 
 // 엔진에 평행 이동 위임! (선택된 모든 도형 일괄 이동)
+void SelectTool::RefreshGuidesFor(ge::Node* node)
+{
+	m_guides.clear();
+	if (!node) return;
+	ge::Rect2 wb;
+	if (!ge::GuideWorldBounds(*node, wb)) return;
+	const ge::GuideTargets targets = ge::CollectGuideTargets({ node });
+	m_guides = ge::SnapToGuides(wb, targets, 0.05f).lines;   // 이미 맞춰진 변에만 선을 표시
+}
+
 void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 {
 	float dx = m_dragCurrentWorld.x - m_dragStartWorld.x;
@@ -909,27 +1069,66 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 
 	const auto& grid = GetApp()->GetGrid();
 	const auto& snapMgr = GetApp()->GetSnapManager();
-	if (snapMgr.IsEnabled() && HasSnapTarget(snapMgr.GetTargets(), SnapTargets::Grid) && grid.enabled && !selection.empty())
+	// 그리드 스냅: 모든 도구 공통 토글("Snap to Grid")을 따른다. 꺼져 있으면 그리드에 붙지 않음
+	if (snapMgr.IsGridSnapActive(grid) && !selection.empty())
 	{
-		// 기준(대표) 도형의 첫 앵커를 그리드에 맞춰 스냅 거리 계산
+		// 기준(대표) 노드의 기준점을 월드 좌표에서 격자에 맞춤: 패스는 첫 앵커, 그 외(프레임/표/글자/이미지)는 경계 좌상단
 		ge::Node* primary = selection.front();
 		auto itP = m_initialXfs.find(primary);
-		ge::PathNode* ps = dynamic_cast<ge::PathNode*>(primary);
-		if (ps && itP != m_initialXfs.end() && !ps->GetPaths().empty() && !ps->GetPaths()[0].nodes.empty())
+		const ge::Matrix2D initXf = (itP != m_initialXfs.end()) ? ge::Matrix2D(itP->second) : primary->GetTransform();
+		ge::Matrix2D parentWorld;
+		if (ge::GroupNode* par = primary->GetParent()) parentWorld = par->GetWorldTransform();
+
+		ge::Vec2 localRef{ 0.0f, 0.0f };
+		bool haveRef = false;
+		if (auto* ps = dynamic_cast<ge::PathNode*>(primary); ps && !ps->GetPaths().empty() && !ps->GetPaths()[0].nodes.empty())
 		{
-			D2D1_POINT_2F p0 = itP->second.TransformPoint(ps->GetPaths()[0].nodes[0].anchor);
-			D2D1_POINT_2F targetP0 = grid.SnapPoint(D2D1::Point2F(p0.x + dx, p0.y + dy));
-			dx = targetP0.x - p0.x;
-			dy = targetP0.y - p0.y;
+			localRef = ps->GetPaths()[0].nodes[0].anchor;
+			haveRef = true;
 		}
 		else
 		{
-			float step = grid.GetStepPx();
-			if (step > 0.001f)
-			{
-				dx = static_cast<float>(std::round(dx / step)) * step;
-				dy = static_cast<float>(std::round(dy / step)) * step;
-			}
+			ge::Rect2 lb;
+			if (primary->GetLocalBounds(lb)) { localRef = ge::Vec2{ lb.left, lb.top }; haveRef = true; }
+		}
+		if (haveRef)
+		{
+			const ge::Vec2 p0 = parentWorld.TransformPoint(initXf.TransformPoint(localRef));
+			const D2D1_POINT_2F target = grid.SnapPoint(D2D1::Point2F(p0.x + dx, p0.y + dy));
+			dx = target.x - p0.x;
+			dy = target.y - p0.y;
+		}
+	}
+
+	// 스마트 가이드: 부모 프레임/형제의 가장자리·가운데에 맞춤 (Alt 로 일시 해제, 마스터 스냅이 꺼져 있으면 사용 안 함)
+	m_guides.clear();
+	m_gaps.clear();
+	if (snapMgr.IsSmartGuidesEnabled() && !selection.empty() && !(::GetKeyState(VK_MENU) & 0x8000))
+	{
+		bool any = false;
+		ge::Rect2 mr{};
+		for (ge::Node* n : selection)
+		{
+			auto it = m_initialXfs.find(n);
+			const ge::Matrix2D ix = (it != m_initialXfs.end()) ? ge::Matrix2D(it->second) : n->GetTransform();
+			ge::Rect2 lb;
+			if (!n->GetLocalBounds(lb)) continue;
+			ge::Matrix2D pw;
+			if (ge::GroupNode* par = n->GetParent()) pw = par->GetWorldTransform();
+			const ge::Rect2 wr = pw.TransformRect(ix.TransformRect(lb));
+			if (!any) { mr = wr; any = true; } else mr.Union(wr);
+		}
+		if (any)
+		{
+			const ge::GuideTargets targets = ge::CollectGuideTargets(selection);
+			const ge::Rect2 moved{ mr.left + dx, mr.top + dy, mr.right + dx, mr.bottom + dy };
+			ge::GuideFlags gf;
+			gf.equalSpacing = snapMgr.IsEqualSpacingEnabled();
+			const ge::GuideResult gr = ge::SnapToGuides(moved, targets, 6.0f / (std::max)(m_viewZoom, 0.01f), gf);
+			dx += gr.dx;
+			dy += gr.dy;
+			m_guides = gr.lines;
+			m_gaps = gr.gaps;
 		}
 	}
 
@@ -961,6 +1160,18 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 			n->SetTransform(ge::Transformer::Translate(ge::Vec2{ dx, dy }, baseInitXf));
 		}
 		if (n->Kind() != ge::NodeKind::Text) n->Invalidate();   // 텍스트 배치 캐시 보존
+
+			// pointer inside the parent frame: child cannot leave the parent's range (dragging the pointer out allows re-parenting)
+			if (auto* pf = dynamic_cast<ge::FrameNode*>(n->GetParent()))
+			{
+				ge::Matrix2D inv = pf->GetWorldTransform();
+				if (inv.Invert())
+				{
+					const ge::Vec2 lp = inv.TransformPoint(ge::Vec2{ m_dragCurrentWorld.x, m_dragCurrentWorld.y });
+					if (lp.x >= 0.0f && lp.y >= 0.0f && lp.x <= pf->GetWidth() && lp.y <= pf->GetHeight())
+						pf->ClampChild(n, false);
+				}
+			}
 	}
 }
 
@@ -970,6 +1181,35 @@ void SelectTool::ApplyScale(ge::Node* shape)
 	if (!shape) return;
 	// curWorld 를 부모 좌표계로 역변환하여 로컬/월드 일치 유지
 	D2D1_POINT_2F curWorld = D2D1::Point2F(m_dragCurrentWorld.x, m_dragCurrentWorld.y);
+
+	// 스마트 가이드: 움직이는 변만 부모 프레임/형제에 맞춤 (Alt 로 일시 해제)
+	const bool guidesOn = GetApp()->GetSnapManager().IsSmartGuidesEnabled() && !(::GetKeyState(VK_MENU) & 0x8000);
+	if (guidesOn)
+	{
+		ge::GuideFlags fl;
+		fl.left = fl.centerX = fl.right = fl.top = fl.centerY = fl.bottom = false;
+		switch (m_handle)
+		{
+		case Handle::TL: fl.left = fl.top = true; break;
+		case Handle::T:  fl.top = true; break;
+		case Handle::TR: fl.left = fl.top = true; break;
+		case Handle::R:  fl.left = true; break;
+		case Handle::BR: fl.left = fl.top = true; break;
+		case Handle::B:  fl.top = true; break;
+		case Handle::BL: fl.left = fl.top = true; break;
+		case Handle::L:  fl.left = true; break;
+		default: break;
+		}
+		if (fl.left || fl.top)
+		{
+			const ge::GuideTargets targets = ge::CollectGuideTargets({ shape });
+			// 가로/세로 중 해당 핸들이 움직이는 축만 보정 (한 점이므로 left/top 하나로 대표)
+			const ge::GuideResult gr = ge::SnapToGuides(ge::Rect2{ curWorld.x, curWorld.y, curWorld.x, curWorld.y }, targets, 6.0f / (std::max)(m_viewZoom, 0.01f), fl);
+			if (m_handle != Handle::T && m_handle != Handle::B) curWorld.x += gr.dx;
+			if (m_handle != Handle::L && m_handle != Handle::R) curWorld.y += gr.dy;
+		}
+	}
+	struct GuideRefresh { SelectTool* tool; ge::Node* node; ~GuideRefresh() { tool->RefreshGuidesFor(node); } } guideRefresh{ this, guidesOn ? shape : nullptr };
 	ge::GroupNode* parent = shape->GetParent();
 	if (parent && parent->Kind() != ge::NodeKind::Layer)
 	{
@@ -983,9 +1223,27 @@ void SelectTool::ApplyScale(ge::Node* shape)
 	auto newXf = ge::Transformer::ScaleByHandle(static_cast<int>(m_handle), curWorld, m_initialLocalBounds, m_initialXf);
 	if (newXf)
 	{
+		// 프레임: 변환 스케일 대신 실제 프레임 크기를 바꿔 자식 제약(Constraints)/자동 배치가 반영되게 함 (4.5.11).
+		// 이동/스케일만 있는(회전 없는) 프레임일 때만 적용하고, 그 외에는 기존처럼 변환으로 처리
+		if (auto* fr = dynamic_cast<ge::FrameNode*>(shape))
+		{
+			const bool plainStart = std::fabs(m_initialXf._11 - 1.0f) < 1e-4f && std::fabs(m_initialXf._22 - 1.0f) < 1e-4f &&
+			                        std::fabs(m_initialXf._12) < 1e-4f && std::fabs(m_initialXf._21) < 1e-4f;
+			const bool plainEnd = std::fabs(newXf->m12) < 1e-4f && std::fabs(newXf->m21) < 1e-4f && newXf->m11 > 1e-4f && newXf->m22 > 1e-4f;
+			if (plainStart && plainEnd)
+			{
+				const float w0 = m_initialLocalBounds.right - m_initialLocalBounds.left;
+				const float h0 = m_initialLocalBounds.bottom - m_initialLocalBounds.top;
+				fr->SetTransform(ge::Matrix2D::Translation(newXf->dx, newXf->dy));
+				fr->ResizeFrame(w0 * newXf->m11, h0 * newXf->m22);
+				ge::FrameNode::ClampNode(fr, true);
+				return;
+			}
+		}
 		shape->SetTransform(*newXf);
 		// 텍스트는 변환만 바뀌므로 Invalidate 하면 안 됨: 버전이 매 프레임 바뀌어 글자 배치 캐시가 계속 무효화됨 (크기 조절이 버벅거림)
 		if (shape->Kind() != ge::NodeKind::Text) shape->Invalidate();
+		ge::FrameNode::ClampNode(shape, true);   // clip overflowing side (opposite edge fixed)
 	}
 }
 
@@ -1010,6 +1268,7 @@ void SelectTool::ApplyRotate(ge::Node* shape)
 	auto newXf = ge::Transformer::RotateAboutCenter(startWorld, curWorld, m_initialLocalBounds, m_initialXf);
 	shape->SetTransform(newXf);
 	if (shape->Kind() != ge::NodeKind::Text) shape->Invalidate();   // 텍스트 배치 캐시 보존
+	ge::FrameNode::ClampNode(shape, false);
 }
 
 void SelectTool::OnUp(const ToolEvent& e)
@@ -1072,6 +1331,21 @@ void SelectTool::OnUp(const ToolEvent& e)
 	}
 	else if (m_mode != Mode::None && e.pDoc)
 	{
+		// 끌어서 놓은 위치의 프레임으로 부모 변경 (프레임 안으로 넣거나 밖으로 빼기, 4.5.13)
+		if (m_mode == Mode::Moving)
+		{
+			const float ddx = e.worldPt.x - m_dragStartWorld.x, ddy = e.worldPt.y - m_dragStartWorld.y;
+			if (ddx * ddx + ddy * ddy > 4.0f)
+			{
+				auto& doc = e.pDoc->GetDoc();
+				const std::vector<ge::Node*> sel = doc.GetSelection();
+				bool any = false;
+				for (ge::Node* n : sel)
+					any |= doc.ReparentAt(n, ge::Vec2{ e.worldPt.x, e.worldPt.y });
+				for (ge::Node* n : sel) ge::FrameNode::ClampNode(n, false);
+				if (any) LogAppEvent(_T("[선택 도구] 부모 프레임 변경"));
+			}
+		}
 		e.pDoc->SetModifiedFlag(TRUE);
 		UpdateShapePropertiesSelection(e.pDoc->GetPrimarySelection(), e.pDoc);
 		CString str;
@@ -1086,7 +1360,92 @@ void SelectTool::OnUp(const ToolEvent& e)
 	m_gradShape = nullptr;
 	m_gradHandle = GradHandle::None;
 	m_tbl = nullptr;
+	m_guides.clear();
+	m_gaps.clear();
+	m_multiNodes.clear();
+	m_multiInitial.clear();
 	m_initialXfs.clear();
+}
+
+ge::Vec2 SnapCreationPoint(const ToolEvent& e, ge::Vec2 p, std::vector<ge::GuideLine>& out)
+{
+	out.clear();
+	if (!e.pDoc || e.altDown || !GetApp()->GetSnapManager().IsSmartGuidesEnabled()) return p;
+	const ge::GuideTargets t = ge::CollectGuideTargetsAt(e.pDoc->GetDoc(), p);
+	ge::GuideFlags fl;
+	fl.centerX = fl.right = fl.centerY = fl.bottom = false;   // 한 점이므로 left/top 으로 대표
+	const ge::GuideResult r = ge::SnapToGuides(ge::Rect2{ p.x, p.y, p.x, p.y }, t, 6.0f / (std::max)(e.view.zoom, 0.01f), fl);
+	out = r.lines;
+	return ge::Vec2{ p.x + r.dx, p.y + r.dy };
+}
+
+void DrawGuideLines(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const std::vector<ge::GuideLine>& guides, float zoom, D2D1_POINT_2F pan)
+{
+	if (!rt || !brush || guides.empty()) return;
+	const ViewportTransform view = { zoom, { pan.x, pan.y } };
+	brush->SetColor(D2D1::ColorF(1.0f, 0.27f, 0.20f, 1.0f));
+	for (const ge::GuideLine& g : guides)
+	{
+		auto pt = [&](float along) { return g.vertical ? view.WorldToScreen(D2D1::Point2F(g.pos, along)) : view.WorldToScreen(D2D1::Point2F(along, g.pos)); };
+		rt->DrawLine(pt(g.from), pt(g.to), brush, 1.0f);
+		for (float mk : g.marks)
+		{
+			const D2D1_POINT_2F p = pt(mk);
+			rt->DrawLine(D2D1::Point2F(p.x - 3.0f, p.y - 3.0f), D2D1::Point2F(p.x + 3.0f, p.y + 3.0f), brush, 1.0f);
+			rt->DrawLine(D2D1::Point2F(p.x - 3.0f, p.y + 3.0f), D2D1::Point2F(p.x + 3.0f, p.y - 3.0f), brush, 1.0f);
+		}
+	}
+}
+
+void DrawGapMarks(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const std::vector<ge::GapMark>& gaps, float zoom, D2D1_POINT_2F pan)
+{
+	if (!rt || !brush || gaps.empty()) return;
+	const ViewportTransform view = { zoom, { pan.x, pan.y } };
+	static IDWriteFactory* s_dw = nullptr;
+	static IDWriteTextFormat* s_fmt = nullptr;
+	if (!s_dw)
+	{
+		DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&s_dw));
+		if (s_dw)
+		{
+			s_dw->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 10.0f, L"ko-kr", &s_fmt);
+			if (s_fmt)
+			{
+				s_fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+				s_fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+				s_fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+			}
+		}
+	}
+	for (const ge::GapMark& g : gaps)
+	{
+		const D2D1_POINT_2F A = g.horizontal ? view.WorldToScreen(D2D1::Point2F(g.a, g.cross)) : view.WorldToScreen(D2D1::Point2F(g.cross, g.a));
+		const D2D1_POINT_2F B = g.horizontal ? view.WorldToScreen(D2D1::Point2F(g.b, g.cross)) : view.WorldToScreen(D2D1::Point2F(g.cross, g.b));
+		brush->SetColor(D2D1::ColorF(1.0f, 0.27f, 0.20f, 1.0f));
+		rt->DrawLine(A, B, brush, 1.0f);
+		if (g.horizontal)
+		{
+			rt->DrawLine(D2D1::Point2F(A.x, A.y - 4.0f), D2D1::Point2F(A.x, A.y + 4.0f), brush, 1.0f);
+			rt->DrawLine(D2D1::Point2F(B.x, B.y - 4.0f), D2D1::Point2F(B.x, B.y + 4.0f), brush, 1.0f);
+		}
+		else
+		{
+			rt->DrawLine(D2D1::Point2F(A.x - 4.0f, A.y), D2D1::Point2F(A.x + 4.0f, A.y), brush, 1.0f);
+			rt->DrawLine(D2D1::Point2F(B.x - 4.0f, B.y), D2D1::Point2F(B.x + 4.0f, B.y), brush, 1.0f);
+		}
+		if (s_fmt)
+		{
+			wchar_t buf[24];
+			swprintf_s(buf, L"%d", static_cast<int>(std::round(g.value)));
+			const D2D1_POINT_2F c = D2D1::Point2F((A.x + B.x) * 0.5f, (A.y + B.y) * 0.5f);
+			const float tw = static_cast<float>(wcslen(buf)) * 6.4f + 10.0f;
+			const D2D1_RECT_F pill = D2D1::RectF(c.x - tw * 0.5f, c.y - 8.0f, c.x + tw * 0.5f, c.y + 8.0f);
+			brush->SetColor(D2D1::ColorF(1.0f, 0.27f, 0.20f, 1.0f));
+			rt->FillRoundedRectangle(D2D1::RoundedRect(pill, 3.0f, 3.0f), brush);
+			brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+			rt->DrawText(buf, static_cast<UINT32>(wcslen(buf)), s_fmt, pill, brush);
+		}
+	}
 }
 
 void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
@@ -1124,6 +1483,18 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	for (ge::Node* shape : sel)
 	{
 		if (!shape || !shape->IsEffectivelyVisible()) continue;
+		if (sel.size() >= 2)
+		{
+			// 다중 선택: 각 도형은 옅은 윤곽만, 핸들은 아래의 결합 기즈모 하나로
+			ge::Rect2 wb;
+			if (ge::GuideWorldBounds(*shape, wb))
+			{
+				const D2D1_POINT_2F a0 = view.WorldToScreen(D2D1::Point2F(wb.left, wb.top)), b0 = view.WorldToScreen(D2D1::Point2F(wb.right, wb.bottom));
+				brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.45f));
+				rt->DrawRectangle(D2D1::RectF(a0.x, a0.y, b0.x, b0.y), brush, 1.0f);
+			}
+			continue;
+		}
 		D2D1_POINT_2F handles[9];
 		D2D1_RECT_F localBounds;
 		if (!GetHandleScreenPositions(shape, view, f, handles, &localBounds))
@@ -1223,6 +1594,106 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 		}
 	}
 
+	// 다중 선택 결합 기즈모 (5.2): 경계 상자 + 8핸들 + 회전 핸들 + 크기 알약
+	if (sel.size() >= 2)
+	{
+		D2D1_POINT_2F hp[9];
+		ge::Rect2 rc;
+		if (MultiHandlePositions(sel, view, hp, rc))
+		{
+			brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.95f));
+			rt->DrawLine(hp[0], hp[2], brush, 1.2f);
+			rt->DrawLine(hp[2], hp[4], brush, 1.2f);
+			rt->DrawLine(hp[4], hp[6], brush, 1.2f);
+			rt->DrawLine(hp[6], hp[0], brush, 1.2f);
+			rt->DrawLine(hp[1], hp[8], brush, 1.0f);
+			const bool rotActive = (m_mode == Mode::MultiRotate);
+			brush->SetColor(rotActive ? D2D1::ColorF(0.12f, 0.55f, 0.95f, 1.0f) : D2D1::ColorF(D2D1::ColorF::White));
+			rt->FillEllipse(D2D1::Ellipse(hp[8], 4.5f, 4.5f), brush);
+			brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 1.0f));
+			rt->DrawEllipse(D2D1::Ellipse(hp[8], 4.5f, 4.5f), brush, 1.5f);
+			for (int i = 0; i < 8; ++i)
+			{
+				const bool active = (m_handle == static_cast<Handle>(i + 1)) && (m_mode == Mode::MultiScale || m_mode == Mode::MultiSkew);
+				const D2D1_RECT_F r = D2D1::RectF(hp[i].x - 3.5f, hp[i].y - 3.5f, hp[i].x + 3.5f, hp[i].y + 3.5f);
+				brush->SetColor(active ? D2D1::ColorF(0.10f, 0.50f, 0.95f, 1.0f) : D2D1::ColorF(D2D1::ColorF::White));
+				rt->FillRectangle(r, brush);
+				brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 1.0f));
+				rt->DrawRectangle(r, brush, 1.2f);
+			}
+			// 크기 알약
+			static IDWriteFactory* s_dwM = nullptr;
+			static IDWriteTextFormat* s_fmtM = nullptr;
+			if (!s_dwM)
+			{
+				DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&s_dwM));
+				if (s_dwM)
+				{
+					s_dwM->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 11.0f, L"ko-kr", &s_fmtM);
+					if (s_fmtM)
+					{
+						s_fmtM->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+						s_fmtM->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+						s_fmtM->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+					}
+				}
+			}
+			if (s_fmtM)
+			{
+				wchar_t buf[48];
+				swprintf_s(buf, L"%d \u00D7 %d  (%d)", static_cast<int>(std::round(rc.right - rc.left)), static_cast<int>(std::round(rc.bottom - rc.top)), static_cast<int>(sel.size()));
+				const float tw = static_cast<float>(wcslen(buf)) * 6.8f + 14.0f;
+				const D2D1_RECT_F pill = D2D1::RectF(hp[5].x - tw * 0.5f, hp[5].y + 10.0f, hp[5].x + tw * 0.5f, hp[5].y + 28.0f);
+				brush->SetColor(D2D1::ColorF(0.10f, 0.55f, 0.98f, 1.0f));
+				rt->FillRoundedRectangle(D2D1::RoundedRect(pill, 3.0f, 3.0f), brush);
+				brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+				rt->DrawText(buf, static_cast<UINT32>(wcslen(buf)), s_fmtM, pill, brush);
+			}
+		}
+	}
+
+	// 스마트 가이드: 붉은 선과 x 표시 (Figma 방식)
+	DrawGuideLines(rt, brush, m_guides, zoom, pan);
+	DrawGapMarks(rt, brush, m_gaps, zoom, pan);
+
+	// 선택된 요소 아래 크기 알약 "W × H"
+	if (sel.size() == 1 && m_mode != Mode::Marquee && sel[0] && sel[0]->IsEffectivelyVisible())
+	{
+		ge::Rect2 wb;
+		if (ge::GuideWorldBounds(*sel[0], wb))
+		{
+			static IDWriteFactory* s_dw = nullptr;
+			static IDWriteTextFormat* s_fmt = nullptr;
+			if (!s_dw)
+			{
+				DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&s_dw));
+				if (s_dw)
+				{
+					s_dw->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+						DWRITE_FONT_STRETCH_NORMAL, 11.0f, L"ko-kr", &s_fmt);
+					if (s_fmt)
+					{
+						s_fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+						s_fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+						s_fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+					}
+				}
+			}
+			if (s_fmt)
+			{
+				wchar_t buf[48];
+				swprintf_s(buf, L"%d \u00D7 %d", static_cast<int>(std::round(wb.Width())), static_cast<int>(std::round(wb.Height())));
+				const D2D1_POINT_2F p = view.WorldToScreen(D2D1::Point2F((wb.left + wb.right) * 0.5f, wb.bottom));
+				const float tw = static_cast<float>(wcslen(buf)) * 6.8f + 14.0f;
+				const D2D1_RECT_F pill = D2D1::RectF(p.x - tw * 0.5f, p.y + 10.0f, p.x + tw * 0.5f, p.y + 28.0f);
+				brush->SetColor(D2D1::ColorF(0.10f, 0.55f, 0.98f, 1.0f));
+				rt->FillRoundedRectangle(D2D1::RoundedRect(pill, 3.0f, 3.0f), brush);
+				brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+				rt->DrawText(buf, static_cast<UINT32>(wcslen(buf)), s_fmt, pill, brush);
+			}
+		}
+	}
+
 	// 그라디언트 기즈모: 단일 선택된 그라디언트 도형의 시작/끝(방사형: 중심/초점/반지름) 핸들과 컬러 스톱 위치
 	if (sel.size() == 1)
 	{
@@ -1287,7 +1758,7 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 	m_previewNode = nullptr;
 	m_previewShape->SetStyle(m_setting.ToGeStyle());
 	const std::wstring name = m_previewShape->GetName();
-	ge::Node* pAdded = pDoc->GetDoc().AddShape(std::move(m_previewShape));
+	ge::Node* pAdded = pDoc->GetDoc().AddShapeAuto(std::move(m_previewShape));   // 프레임 안에서 그렸으면 그 프레임의 자식
 	m_previewShape = nullptr;
 	if (!pAdded) return false;
 
@@ -2423,7 +2894,7 @@ void FrameTool::OnDown(const ToolEvent& e)
 	// 이번 2번째 클릭으로 프레임 생성 완료!
 	if (m_waitingSecondClick)
 	{
-		m_curW = e.worldPt;
+		{ const ge::Vec2 sp_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides); m_curW = D2D1::Point2F(sp_.x, sp_.y); }
 		m_curS = e.screenPt;
 		const float x = (std::min)(m_startW.x, m_curW.x), y = (std::min)(m_startW.y, m_curW.y);
 		const float w = std::fabs(m_curW.x - m_startW.x), h = std::fabs(m_curW.y - m_startW.y);
@@ -2434,7 +2905,7 @@ void FrameTool::OnDown(const ToolEvent& e)
 			fn->SetFrameSize(w, h);
 			fn->SetTransform(ge::Matrix2D::Translation(x, y));
 			fn->SetName(e.pDoc->GetDoc().GenerateFrameName());
-			ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(fn));
+			ge::Node* added = e.pDoc->GetDoc().AddShapeAt(std::move(fn), ge::Vec2{ m_startW.x, m_startW.y });   // 시작점 아래 프레임의 자식
 			if (added)
 			{
 				e.pDoc->GetDoc().SetSelection({ added });
@@ -2455,14 +2926,15 @@ void FrameTool::OnDown(const ToolEvent& e)
 	// 1. 첫 번째 클릭(다운): 시작점 기록 및 드래그 시작
 	m_drag = true;
 	m_waitingSecondClick = false;
-	m_startW = m_curW = e.worldPt;
+	{ const ge::Vec2 sp_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides); m_startW = m_curW = D2D1::Point2F(sp_.x, sp_.y); }
 	m_startS = m_curS = e.screenPt;
 }
 
 void FrameTool::OnMove(const ToolEvent& e)
 {
+	const ge::Vec2 hv_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides);   // 호버 중에도 가이드 표시
 	if (!m_drag && !m_waitingSecondClick) return;
-	m_curW = e.worldPt;
+	m_curW = D2D1::Point2F(hv_.x, hv_.y);
 	m_curS = e.screenPt;
 }
 
@@ -2470,11 +2942,11 @@ void FrameTool::OnUp(const ToolEvent& e)
 {
 	if (!m_drag) return;
 	m_drag = false;
-	m_curW = e.worldPt;
+	{ const ge::Vec2 sp_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides); m_curW = D2D1::Point2F(sp_.x, sp_.y); }
 	m_curS = e.screenPt;
 
-	const float dx = e.worldPt.x - m_startW.x;
-	const float dy = e.worldPt.y - m_startW.y;
+	const float dx = m_curW.x - m_startW.x;
+	const float dy = m_curW.y - m_startW.y;
 
 	// 1. 드래그 방식: 마우스를 누른 채 충분히 이동(4px 초과)하여 뗐다면 즉시 완성!
 	if ((dx * dx + dy * dy) > 16.0f)
@@ -2487,7 +2959,7 @@ void FrameTool::OnUp(const ToolEvent& e)
 		fn->SetFrameSize(w, h);
 		fn->SetTransform(ge::Matrix2D::Translation(x, y));
 		fn->SetName(e.pDoc->GetDoc().GenerateFrameName());
-		ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(fn));
+		ge::Node* added = e.pDoc->GetDoc().AddShapeAt(std::move(fn), ge::Vec2{ m_startW.x, m_startW.y });   // 시작점 아래 프레임의 자식
 		if (!added) return;
 		e.pDoc->GetDoc().SetSelection({ added });
 		e.pDoc->SetModifiedFlag(TRUE);
@@ -2513,15 +2985,17 @@ void FrameTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
 	{
 		m_drag = false;
 		m_waitingSecondClick = false;
+		m_guides.clear();
 		if (pDoc) pDoc->UpdateAllViews(nullptr);
 	}
 }
 
-void FrameTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float /*zoom*/, D2D1_POINT_2F /*pan*/, CM2DrawDoc* /*pDoc*/)
+void FrameTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* /*pDoc*/)
 {
-	if ((!m_drag && !m_waitingSecondClick) || !rt || !brush) return;
-	const D2D1_RECT_F rc = D2D1::RectF(static_cast<float>((std::min)(m_startS.x, m_curS.x)), static_cast<float>((std::min)(m_startS.y, m_curS.y)),
-		static_cast<float>((std::max)(m_startS.x, m_curS.x)), static_cast<float>((std::max)(m_startS.y, m_curS.y)));
+	if (!rt || !brush) return;
+	DrawGuideLines(rt, brush, m_guides, zoom, pan);
+	if (!m_drag && !m_waitingSecondClick) return;
+	const D2D1_RECT_F rc = WorldRectToScreen(m_startW, m_curW, zoom, pan);
 	brush->SetColor(D2D1::ColorF(0.20f, 0.45f, 0.85f, 0.12f));
 	rt->FillRectangle(rc, brush);
 	brush->SetColor(D2D1::ColorF(0.20f, 0.45f, 0.85f, 1.0f));
@@ -2532,14 +3006,15 @@ void FrameTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, 
 void TableTool::OnDown(const ToolEvent& e)
 {
 	m_drag = true;
-	m_startW = m_curW = e.worldPt;
+	{ const ge::Vec2 sp_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides); m_startW = m_curW = D2D1::Point2F(sp_.x, sp_.y); }
 	m_startS = m_curS = e.screenPt;
 }
 
 void TableTool::OnMove(const ToolEvent& e)
 {
+	const ge::Vec2 hv_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides);
 	if (!m_drag) return;
-	m_curW = e.worldPt;
+	m_curW = D2D1::Point2F(hv_.x, hv_.y);
 	m_curS = e.screenPt;
 }
 
@@ -2548,7 +3023,7 @@ void TableTool::OnUp(const ToolEvent& e)
 	if (!m_drag) return;
 	m_drag = false;
 	if (!e.pDoc) return;
-	m_curW = e.worldPt;
+	{ const ge::Vec2 sp_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides); m_curW = D2D1::Point2F(sp_.x, sp_.y); }
 
 	float x = (std::min)(m_startW.x, m_curW.x), y = (std::min)(m_startW.y, m_curW.y);
 	float w = std::fabs(m_curW.x - m_startW.x), h = std::fabs(m_curW.y - m_startW.y);
@@ -2556,7 +3031,7 @@ void TableTool::OnUp(const ToolEvent& e)
 
 	auto tb = ge::TableComponent::Create(3, 3, w, h);
 	tb->SetTransform(ge::Matrix2D::Translation(x, y));
-	ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(tb));
+	ge::Node* added = e.pDoc->GetDoc().AddShapeAt(std::move(tb), ge::Vec2{ m_startW.x, m_startW.y });
 	if (!added) return;
 	e.pDoc->GetDoc().SetSelection({ added });
 	e.pDoc->SetModifiedFlag(TRUE);
@@ -2569,11 +3044,12 @@ void TableTool::OnUp(const ToolEvent& e)
 	pDoc->UpdateAllViews(nullptr);
 }
 
-void TableTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float /*zoom*/, D2D1_POINT_2F /*pan*/, CM2DrawDoc* /*pDoc*/)
+void TableTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* /*pDoc*/)
 {
-	if (!m_drag || !rt || !brush) return;
-	const D2D1_RECT_F rc = D2D1::RectF(static_cast<float>((std::min)(m_startS.x, m_curS.x)), static_cast<float>((std::min)(m_startS.y, m_curS.y)),
-		static_cast<float>((std::max)(m_startS.x, m_curS.x)), static_cast<float>((std::max)(m_startS.y, m_curS.y)));
+	if (!rt || !brush) return;
+	DrawGuideLines(rt, brush, m_guides, zoom, pan);
+	if (!m_drag) return;
+	const D2D1_RECT_F rc = WorldRectToScreen(m_startW, m_curW, zoom, pan);
 	brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.45f, 0.10f));
 	rt->FillRectangle(rc, brush);
 	brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.45f, 1.0f));

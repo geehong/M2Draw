@@ -6,6 +6,8 @@
 #include <map>
 #include <memory>
 #include "D2DGraphicEngine.h"
+#include "SmartGuides.h"
+#include "GroupTransform.h"
 
 class CM2DrawDoc;
 class CM2DrawView;
@@ -167,7 +169,7 @@ public:
 	ToolType GetType() const override { return ToolType::Select; }
 	const wchar_t* GetName() const override { return L"선택 도구 (Select)"; }
 	wchar_t GetShortcut() const override { return L'V'; }
-	enum class Mode { None, Moving, Scaling, Rotating, EditNode, Marquee, GradientHandle, TableResize };
+	enum class Mode { None, Moving, Scaling, Rotating, EditNode, Marquee, GradientHandle, TableResize, MultiScale, MultiRotate, MultiSkew };
 	enum class Handle { None, TL, T, TR, R, BR, B, BL, L, Rotate };
 
 	HCURSOR GetCursor() const override;
@@ -183,7 +185,7 @@ public:
 	// 문서 선택만 해제 (패널 갱신은 호출 측 책임)
 	void ClearSelection(CM2DrawDoc* pDoc);
 	// 진행 중인 드래그/편집 상태 폐기 (문서가 교체되어 노드 포인터가 무효가 된 경우)
-	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; m_gradShape = nullptr; m_gradHandle = GradHandle::None; m_tbl = nullptr; m_hoverTbl = 0; }
+	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; m_gradShape = nullptr; m_gradHandle = GradHandle::None; m_tbl = nullptr; m_hoverTbl = 0; m_guides.clear(); m_gaps.clear(); m_multiNodes.clear(); m_multiInitial.clear(); }
 
 	Handle GetActiveHandle() const { return m_handle; }
 	void SetActiveHandle(Handle h) { m_handle = h; }
@@ -220,6 +222,19 @@ private:
 	float          m_tblStartSize = 0.0f;
 	float          m_tblStartLocal = 0.0f;
 	int            m_hoverTbl = 0;   // 0=없음 1=열 경계 2=행 경계
+
+	// 스마트 가이드 (4.5.14): 이동/크기 조절 중 부모 프레임·형제의 가장자리/가운데에 맞추고 붉은 선을 표시
+	std::vector<ge::GuideLine> m_guides;
+	// 다중 선택 결합 기즈모 (5.2): 선택 전체의 경계 상자로 스케일/회전/Ctrl+가장자리=전단
+	std::vector<ge::Node*>    m_multiNodes;
+	std::vector<ge::Matrix2D> m_multiInitial;   // 드래그 시작 시점의 각 노드 로컬 변환
+	ge::Rect2                 m_multiRect{};    // 드래그 시작 시점의 결합 경계 상자 (월드)
+	Handle                    m_multiHandle = Handle::None;
+	bool MultiHandlePositions(const std::vector<ge::Node*>& sel, const ViewportTransform& view, D2D1_POINT_2F out[9], ge::Rect2& rect) const;
+	void ApplyMultiTransform(const ToolEvent& e);
+	std::vector<ge::GapMark>   m_gaps;     // 같은 간격 표시 (5.1.3)
+	float m_viewZoom = 1.0f;
+	void RefreshGuidesFor(ge::Node* node);
 	static bool HitTableLine(ge::TableNode* tb, D2D1_POINT_2F screenPt, const ViewportTransform& view, bool& isCol, int& idx);
 	static float TableLocalAxis(ge::TableNode* tb, D2D1_POINT_2F worldPt, bool isCol);
 
@@ -485,6 +500,20 @@ private:
 // 6. 돋보기 도구 (ZoomTool / ZoomInTool / ZoomOutTool)
 //    - 클릭 시 클릭 지점 기준 Zoom In/Out
 //    - 드래그 시 지정 영역을 화면 가득 맞춤 확대 (Marquee Zoom)
+// 생성 도구 공통 스마트 가이드: 점(월드)을 같은 레이어의 모든 노드 가장자리/가운데에 맞추고 붉은 가이드선을 out 에 채운다.
+// Alt 를 누르고 있거나 마스터 스냅이 꺼져 있으면 그대로 돌려준다
+ge::Vec2 SnapCreationPoint(const ToolEvent& e, ge::Vec2 p, std::vector<ge::GuideLine>& out);
+// 가이드선(붉은 선 + x 표시)을 화면에 그린다
+void DrawGuideLines(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const std::vector<ge::GuideLine>& guides, float zoom, D2D1_POINT_2F pan);
+// 같은 간격(Equal Spacing) 표시: 간격 구간에 붉은 선과 양끝 눈금, 가운데에 간격 값(px) 알약 (5.1.3)
+void DrawGapMarks(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const std::vector<ge::GapMark>& gaps, float zoom, D2D1_POINT_2F pan);
+// 월드 두 점으로 이루어진 사각형을 화면 좌표 사각형으로
+inline D2D1_RECT_F WorldRectToScreen(D2D1_POINT_2F a, D2D1_POINT_2F b, float zoom, D2D1_POINT_2F pan)
+{
+	return D2D1::RectF((std::min)(a.x, b.x) * zoom + pan.x, (std::min)(a.y, b.y) * zoom + pan.y,
+	                   (std::max)(a.x, b.x) * zoom + pan.x, (std::max)(a.y, b.y) * zoom + pan.y);
+}
+
 // ============================================================================
 // 프레임(아트보드) 도구: 드래그한 사각형 크기로 FrameNode 를 만들고 선택 도구로 돌아감
 class FrameTool : public ITool
@@ -508,6 +537,7 @@ private:
 	bool          m_waitingSecondClick = false; // 클릭-이동-클릭 모드 플래그
 	D2D1_POINT_2F m_startW{}, m_curW{};
 	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
+	std::vector<ge::GuideLine> m_guides;       // 생성 중 스마트 가이드
 };
 
 // HTML 기본 컴포넌트 도구 종류
@@ -535,6 +565,7 @@ private:
 	bool          m_drag = false;
 	D2D1_POINT_2F m_startW{}, m_curW{};
 	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
+	std::vector<ge::GuideLine> m_guides;
 };
 
 // 테이블 도구: 드래그한 크기의 3x3 표를 만들고 선택 도구로 돌아감 (클릭만 하면 300x150 기본 크기)
@@ -557,6 +588,7 @@ private:
 	bool          m_drag = false;
 	D2D1_POINT_2F m_startW{}, m_curW{};
 	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
+	std::vector<ge::GuideLine> m_guides;
 };
 
 class ZoomInTool : public ITool

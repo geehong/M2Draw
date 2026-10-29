@@ -297,8 +297,112 @@ BOOL CM2DrawView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	return CView::OnMouseWheel(nFlags, zDelta, pt);
 }
 
+// ---- 그룹 격리 편집 (Step 5.3): 브레드크럼 막대 / 진입·종료 ----
+void CM2DrawView::RefreshAfterIsolationChange()
+{
+	if (CM2DrawDoc* pDoc = GetDocument())
+	{
+		UpdateShapePropertiesSelection(nullptr, pDoc);
+		CWnd* pMain = AfxGetMainWnd();
+		if (pMain && pMain->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+			static_cast<CMainFrame*>(pMain)->GetLayerWnd().RefreshLayers();
+	}
+	Invalidate(FALSE);
+}
+
+void CM2DrawView::DrawIsolationBar(float width, float top)
+{
+	m_isoCrumbs.clear();
+	m_isoBarRect = D2D1::RectF(0, 0, 0, 0);
+	CM2DrawDoc* pDoc = GetDocument();
+	if (!pDoc || !m_pRenderTarget || !m_pSolidBrush) return;
+	const std::vector<ge::GroupNode*> path = pDoc->GetDoc().IsolationPath();
+	if (path.empty()) return;
+
+	static IDWriteFactory* s_dw = nullptr;
+	static IDWriteTextFormat* s_fmt = nullptr;
+	if (!s_dw)
+	{
+		DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&s_dw));
+		if (s_dw)
+		{
+			s_dw->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0f, L"ko-kr", &s_fmt);
+			if (s_fmt)
+			{
+				s_fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+				s_fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+			}
+		}
+	}
+	if (!s_fmt) return;
+
+	const float barH = 26.0f;
+	m_isoBarRect = D2D1::RectF(0.0f, top, width, top + barH);
+	m_pSolidBrush->SetColor(D2D1::ColorF(0.13f, 0.15f, 0.20f, 0.94f));
+	m_pRenderTarget->FillRectangle(m_isoBarRect, m_pSolidBrush);
+
+	auto measure = [&](const std::wstring& s) -> float {
+		float w = static_cast<float>(s.size()) * 7.0f;
+		IDWriteTextLayout* lay = nullptr;
+		if (SUCCEEDED(s_dw->CreateTextLayout(s.c_str(), static_cast<UINT32>(s.size()), s_fmt, 2000.0f, 20.0f, &lay)) && lay)
+		{
+			DWRITE_TEXT_METRICS tm{};
+			if (SUCCEEDED(lay->GetMetrics(&tm))) w = tm.widthIncludingTrailingWhitespace;
+			lay->Release();
+		}
+		return w;
+	};
+	auto drawText = [&](const std::wstring& s, float x, float w, const D2D1_COLOR_F& c) {
+		m_pSolidBrush->SetColor(c);
+		m_pRenderTarget->DrawText(s.c_str(), static_cast<UINT32>(s.size()), s_fmt, D2D1::RectF(x, top, x + w + 2.0f, top + barH), m_pSolidBrush);
+	};
+
+	float x = 10.0f;
+	// 맨 앞: 레이어(= 격리 종료로 이동)
+	for (size_t i = 0; i < path.size(); ++i)
+	{
+		ge::GroupNode* g = path[i];
+		std::wstring label = g->Kind() == ge::NodeKind::Layer ? (L"◂ " + (g->GetName().empty() ? std::wstring(L"Layer") : g->GetName()))
+		                                                       : (g->GetName().empty() ? std::wstring(L"Group") : g->GetName());
+		const float w = measure(label);
+		const bool last = (i + 1 == path.size());
+		const bool clickable = (g->Kind() == ge::NodeKind::Layer) || (ge::Document::CanIsolate(g) && !last);
+		const D2D1_RECT_F hit = D2D1::RectF(x - 4.0f, top, x + w + 4.0f, top + barH);
+		if (clickable) m_isoCrumbs.push_back({ hit, g->Kind() == ge::NodeKind::Layer ? 0 : g->GetId() });
+		drawText(label, x, w, last ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f) : D2D1::ColorF(0.62f, 0.78f, 1.0f, 1.0f));
+		x += w + 8.0f;
+		if (!last)
+		{
+			drawText(L"›", x, 8.0f, D2D1::ColorF(0.6f, 0.62f, 0.7f, 1.0f));
+			x += 16.0f;
+		}
+	}
+	const std::wstring hint = L"Esc / 바깥 더블클릭: 격리 종료";
+	const float hw = measure(hint);
+	drawText(hint, (std::max)(x + 20.0f, width - hw - 12.0f), hw, D2D1::ColorF(0.65f, 0.68f, 0.75f, 1.0f));
+}
+
+bool CM2DrawView::HandleIsolationBarClick(CPoint point)
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	if (!pDoc || !pDoc->GetDoc().GetIsolationGroup()) return false;
+	const D2D1_POINT_2F p = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
+	if (p.x < m_isoBarRect.left || p.x > m_isoBarRect.right || p.y < m_isoBarRect.top || p.y > m_isoBarRect.bottom) return false;
+	for (const auto& c : m_isoCrumbs)
+	{
+		if (p.x < c.first.left || p.x > c.first.right) continue;
+		auto& doc = pDoc->GetDoc();
+		if (c.second == 0) doc.ClearIsolation();
+		else if (auto* g = dynamic_cast<ge::GroupNode*>(doc.FindById(c.second))) doc.EnterIsolation(g);
+		RefreshAfterIsolationChange();
+		break;
+	}
+	return true;   // 막대 위 클릭은 캔버스 선택으로 전달하지 않음
+}
+
 void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 {
+	if (HandleIsolationBarClick(point)) return;
 	if (IsTextInlineEditing())
 	{
 		CommitTextInlineEdit();
@@ -385,6 +489,27 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 {
 	CM2DrawDoc* pDoc = GetDocument();
 	ToolType activeType = GetApp()->GetToolManager().GetActiveType();
+
+	// 0-iso. 선택 도구: 일반 그룹을 더블클릭하면 그 그룹 내부 격리 편집으로 진입, 격리 중 빈 곳을 더블클릭하면 한 단계 위로 (Step 5.3)
+	if (activeType == ToolType::Select && pDoc)
+	{
+		auto& gdoc = pDoc->GetDoc();
+		ge::Node* selN = pDoc->GetPrimarySelection();
+		if (gdoc.GetSelection().size() == 1 && ge::Document::CanIsolate(selN))
+		{
+			gdoc.EnterIsolation(static_cast<ge::GroupNode*>(selN));
+			LogAppEvent(_T("[격리 편집] 그룹 내부로 진입"));
+			RefreshAfterIsolationChange();
+			return;
+		}
+		if (gdoc.GetIsolationGroup() && gdoc.GetSelection().empty())
+		{
+			gdoc.ExitIsolation();
+			LogAppEvent(_T("[격리 편집] 상위로 복귀"));
+			RefreshAfterIsolationChange();
+			return;
+		}
+	}
 
 	// 0-a. 선택 도구: 선택된 텍스트를 더블클릭하면 캔버스 위에서 직접 인라인 편집
 	if (activeType == ToolType::Select && pDoc && pDoc->GetDoc().GetSelection().size() == 1)
@@ -684,6 +809,19 @@ BOOL CM2DrawView::PreTranslateMessage(MSG* pMsg)
 
 void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
+	// 격리 편집 중 Esc: 한 단계 위로 (Step 5.3)
+	if (nChar == VK_ESCAPE)
+	{
+		CM2DrawDoc* pIsoDoc = GetDocument();
+		if (pIsoDoc && pIsoDoc->GetDoc().GetIsolationGroup())
+		{
+			pIsoDoc->GetDoc().ExitIsolation();
+			LogAppEvent(_T("[격리 편집] Esc 로 상위 복귀"));
+			RefreshAfterIsolationChange();
+			return;
+		}
+	}
+
 	// 0. Delete / Backspace 키: 선택된 오브젝트 삭제
 	if (nChar == VK_DELETE || nChar == VK_BACK)
 	{
@@ -939,6 +1077,16 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 	ge::Viewport view = { m_fZoom, { m_ptPan.x, m_ptPan.y } };
 	m_renderer.DrawDocument(pDoc->GetDoc(), view);
 
+	// 격리 편집(5.3): 격리 대상 밖은 반투명 덮개로 흐리게 하고, 격리 그룹만 다시 위에 그려 또렷하게 보인다
+	ge::GroupNode* isoGroup = pDoc->GetDoc().GetIsolationGroup();
+	if (isoGroup)
+	{
+		m_pSolidBrush->SetColor(D2D1::ColorF(0.93f, 0.94f, 0.97f, 0.72f));
+		m_pRenderTarget->FillRectangle(D2D1::RectF(0.0f, 0.0f, width, height), m_pSolidBrush);
+		const ge::Matrix2D parentWorld = isoGroup->GetParent() ? isoGroup->GetParent()->GetWorldTransform() : ge::Matrix2D::Identity();
+		m_renderer.DrawNode(*isoGroup, parentWorld, view);
+	}
+
 	// 2. 활성 도구의 오버레이(작성 중인 선, 사각형, 펜 핸들 등) 렌더링
 	ITool* pActiveTool = GetApp()->GetToolManager().GetActiveTool();
 	if (pActiveTool)
@@ -959,6 +1107,8 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 	{
 		GetApp()->GetSnapManager().DrawSnapIndicator(m_pRenderTarget, m_pSolidBrush, m_lastSnap, m_fZoom, m_ptPan);
 	}
+
+	DrawIsolationBar(width, rulerT);
 
 	if (rulerT > 0.0f)
 	{

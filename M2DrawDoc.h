@@ -81,6 +81,15 @@ public:
 	afx_msg void OnFilePlaceImage();
 	afx_msg void OnFileExportSvg();   // 순수 SVG 내보내기 (옵션: 텍스트 윤곽선 변환)
 	afx_msg void OnFileExportHtml();  // 시맨틱 HTML/CSS 내보내기 (Step 4.5)
+	afx_msg void OnFileExportImage(); // PNG/JPG 래스터 내보내기 (Step 5.5)
+	// --- 클립보드 (Step 5.4): SVG 로 교환 (CF_UNICODETEXT + image/svg+xml) ---
+	bool CopySelectionToClipboard();
+	bool PasteFromClipboard();
+	afx_msg void OnEditCopy();
+	afx_msg void OnEditCut();
+	afx_msg void OnEditPaste();
+	afx_msg void OnUpdateEditCopy(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateEditPaste(CCmdUI* pCmdUI);
 	bool PlaceImageFile(const CString& path);          // 이미지 파일을 문서 중앙에 배치 (메뉴/드래그 앤 드롭 공용)
 	bool ReplaceSelectedImage();                       // 선택된 이미지의 내용을 다른 파일로 교체 (크기/위치/맞춤 유지)
 	bool CanConvertTextToPath() const { return m_doc.CanConvertTextToPath(); }
@@ -129,6 +138,7 @@ public:
 
 private:
 	ge::UndoManager m_undoMgr;
+	int m_pasteCount = 0;   // 같은 내용을 연속 붙여넣을 때 겹치지 않게 위치를 어긋나게 하는 횟수
 
 // 재정의입니다.
 public:

@@ -25,13 +25,21 @@ void D2DRenderer::DrawTableGrid(TableNode& node, const Matrix2D& worldXf, const 
 		m_brush->SetColor(D2D1::ColorF(c.r, c.g, c.b, c.a));
 	}
 
-	m_rt->DrawRectangle(D2D1::RectF(b.left, b.top, b.right, b.bottom), m_brush.Get(), bw);
+	// 테두리 종류: 파선 {4,2}, 점선 {1,1} (선 굵기의 배수)
+	ComPtr<ID2D1StrokeStyle> dashStyle;
+	if (node.GetBorderStyle() != 0 && m_factory) {
+		const float dashes[2] = { node.GetBorderStyle() == 1 ? 4.0f : 1.0f, node.GetBorderStyle() == 1 ? 2.0f : 1.0f };
+		D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_CUSTOM, 0.0f);
+		m_factory->CreateStrokeStyle(sp, dashes, 2, &dashStyle);
+	}
+	ID2D1StrokeStyle* ss = dashStyle.Get();
+	m_rt->DrawRectangle(D2D1::RectF(b.left, b.top, b.right, b.bottom), m_brush.Get(), bw, ss);
 
 	// 안쪽 격자선: 병합된 칸 내부는 그리지 않음
 	std::vector<TableNode::Seg> segs;
 	node.GridSegments(segs);
 	for (const auto& s : segs)
-		m_rt->DrawLine(D2D1::Point2F(s.x0, s.y0), D2D1::Point2F(s.x1, s.y1), m_brush.Get(), bw);
+		m_rt->DrawLine(D2D1::Point2F(s.x0, s.y0), D2D1::Point2F(s.x1, s.y1), m_brush.Get(), bw, ss);
 
 	// 편집 중인 칸 강조
 	int ar, ac;

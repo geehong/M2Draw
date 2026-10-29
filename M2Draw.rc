@@ -184,6 +184,7 @@ BEGIN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
         MENUITEM "SVG 내보내기(&E)...\tCtrl+Shift+E", ID_FILE_EXPORT_SVG
         MENUITEM "HTML 내보내기(&H)...",             ID_FILE_EXPORT_HTML
+        MENUITEM "이미지 내보내기(&J)... (PNG/JPG)",    ID_FILE_EXPORT_IMAGE
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM SEPARATOR
         MENUITEM "인쇄 설정(&R)...",             ID_FILE_PRINT_SETUP
@@ -227,6 +228,7 @@ BEGIN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
         MENUITEM "SVG 내보내기(&E)...\tCtrl+Shift+E", ID_FILE_EXPORT_SVG
         MENUITEM "HTML 내보내기(&H)...",             ID_FILE_EXPORT_HTML
+        MENUITEM "이미지 내보내기(&J)... (PNG/JPG)",    ID_FILE_EXPORT_IMAGE
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM "저장(&S)\tCtrl+S",               ID_FILE_SAVE
         MENUITEM "다른 이름으로 저장(&A)...",                 ID_FILE_SAVE_AS
@@ -572,6 +574,7 @@ BEGIN
     ID_FILE_PLACE_IMAGE      "이미지 파일을 캔버스에 가져옵니다.\n이미지 가져오기"
     ID_FILE_EXPORT_SVG       "순수 SVG(Illustrator/Inkscape/Figma/브라우저 호환)로 내보냅니다.\nSVG 내보내기"
     ID_FILE_EXPORT_HTML      "시맨틱 HTML/CSS 반응형 웹 파일로 내보냅니다.\nHTML 내보내기"
+    ID_FILE_EXPORT_IMAGE     "배율/해상도를 지정해 PNG 또는 JPG 이미지로 내보냅니다.\n이미지 내보내기"
     ID_SUB_SIMPLIFY          "정점을 줄여 패스를 단순화합니다. 허용 오차를 입력한 뒤 적용하세요.
 단순화"
     ID_SUB_APPLY             "입력한 값으로 적용합니다.

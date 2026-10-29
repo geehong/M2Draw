@@ -424,6 +424,10 @@ struct SubPath {
 	bool closed = false;
 };
 
+// 자유 배치(LayoutMode::None) 프레임의 크기를 바꿀 때 자식이 따르는 제약 (Step 4.5.11)
+enum class ConstraintH : uint8_t { Left = 0, Right = 1, LeftRight = 2, Center = 3 };
+enum class ConstraintV : uint8_t { Top = 0, Bottom = 1, TopBottom = 2, Center = 3 };
+
 enum class NodeKind : uint8_t { Path, Group, Layer, Text, Image };
 
 // 혼합 모드 (SVG/CSS mix-blend-mode 와 1:1 대응). 모든 노드에 지정 가능, 렌더링 적용은 Phase 2
@@ -513,6 +517,20 @@ using NodeId = uint64_t;
 
 // 히트테스트/노드 편집에서 공용으로 쓰는 부위 종류
 enum class HitPart { None, Fill, Stroke, Anchor, HandleIn, HandleOut };
+
+// 그림자 (Step 4.5.17): 모든 노드가 공유하는 외형 속성. 단위는 문서 px
+struct Shadow {
+	bool  enabled = false;
+	float x = 0.0f, y = 4.0f;
+	float blur = 8.0f, spread = 0.0f;
+	Color color = Color(0.0f, 0.0f, 0.0f, 0.25f);
+	bool  inset = false;       // 안쪽 그림자 (CSS box-shadow: inset). 글자/벡터 filter 에서는 무시
+	bool operator==(const Shadow& o) const {
+		return enabled == o.enabled && inset == o.inset && x == o.x && y == o.y && blur == o.blur && spread == o.spread &&
+			color.r == o.color.r && color.g == o.color.g && color.b == o.color.b && color.a == o.color.a;
+	}
+	bool operator!=(const Shadow& o) const { return !(*this == o); }
+};
 
 class Node;
 
@@ -627,6 +645,20 @@ public:
 	const std::string& GetCustomClass() const    { return m_customClass; }
 	void SetCustomClass(const std::string& c)    { m_customClass = c; Invalidate(); }
 
+	// 부모가 자유 배치 프레임일 때 부모 크기 변화에 따르는 방식 (4.5.11)
+	ConstraintH GetConstraintH() const           { return m_constraintH; }
+	void SetConstraintH(ConstraintH c)           { m_constraintH = c; ChangeTracker::Bump(); }
+	ConstraintV GetConstraintV() const           { return m_constraintV; }
+	void SetConstraintV(ConstraintV c)           { m_constraintV = c; ChangeTracker::Bump(); }
+
+	// 공통 외형: 그림자 (4.5.17)
+	const Shadow& GetShadow() const              { return m_shadow; }
+	void SetShadow(const Shadow& s) {
+		m_shadow = s;
+		m_shadow.blur = (std::max)(0.0f, s.blur);   // spread 는 음수 허용(그림자 축소)
+		ChangeTracker::Bump();
+	}
+
 	virtual const wchar_t* GetShapeTypeName() const { return L"쉐이프"; }
 
 protected:
@@ -637,6 +669,8 @@ protected:
 		m_blendMode = o.m_blendMode;
 		m_htmlTag = o.m_htmlTag; m_href = o.m_href; m_alt = o.m_alt;
 		m_ariaLabel = o.m_ariaLabel; m_customClass = o.m_customClass;
+		m_constraintH = o.m_constraintH; m_constraintV = o.m_constraintV;
+		m_shadow = o.m_shadow;
 	}
 	void ResetIdentity() { m_id = 0; m_parent = nullptr; m_version = NextVersion(); m_dirty = true; }
 
@@ -661,6 +695,9 @@ protected:
 	std::string  m_alt;                    // 대체 텍스트
 	std::string  m_ariaLabel;              // 접근성 라벨
 	std::string  m_customClass;            // 사용자 정의 CSS 클래스
+	ConstraintH  m_constraintH = ConstraintH::Left;
+	ConstraintV  m_constraintV = ConstraintV::Top;
+	Shadow       m_shadow;
 	bool         m_dirty   = true;
 };
 
@@ -877,8 +914,22 @@ enum class LayoutCrossAlign : uint8_t {
 
 enum class FrameSizingMode : uint8_t {
 	Fixed = 0,
-	Hug = 1
+	Hug = 1,
+	Fill = 2    // 부모 자동 배치 프레임의 가용 공간을 채움 (Step 4.5.9)
 };
+
+// 4방향 값 (Step 4.5.10)
+struct PaddingEdges {
+	float top = 10.0f, right = 10.0f, bottom = 10.0f, left = 10.0f;
+	bool IsUniform() const { return top == right && right == bottom && bottom == left; }
+};
+struct CornerRadii {
+	float tl = 0.0f, tr = 0.0f, br = 0.0f, bl = 0.0f;
+	bool IsUniform() const { return tl == tr && tr == br && br == bl; }
+	bool IsZero() const { return tl == 0.0f && tr == 0.0f && br == 0.0f && bl == 0.0f; }
+};
+// 테두리를 그릴 변 (비트 플래그)
+enum BorderSide : uint8_t { BorderTop = 1, BorderRight = 2, BorderBottom = 4, BorderLeft = 8, BorderAll = 15 };
 
 class FrameNode : public GroupNode {
 public:
@@ -897,15 +948,31 @@ public:
 	void  SetFrameSize(float w, float h) { m_w = (std::max)(1.0f, w); m_h = (std::max)(1.0f, h); Invalidate(); }
 	bool  IsClip() const    { return m_clip; }
 	void  SetClip(bool v)   { m_clip = v; Invalidate(); }
-	float GetCornerRadius() const { return m_radius; }
-	void  SetCornerRadius(float v) { m_radius = (std::max)(0.0f, v); Invalidate(); }
+	// 모서리: 4개가 같으면 단일 값. GetCornerRadius()는 대표값(좌상), SetCornerRadius()는 4개 모두 설정 (기존 호환)
+	float GetCornerRadius() const { return m_radii.tl; }
+	void  SetCornerRadius(float v) { v = (std::max)(0.0f, v); m_radii = CornerRadii{ v, v, v, v }; Invalidate(); }
+	const CornerRadii& GetCornerRadii() const { return m_radii; }
+	void  SetCornerRadii(const CornerRadii& r) {
+		m_radii = CornerRadii{ (std::max)(0.0f, r.tl), (std::max)(0.0f, r.tr), (std::max)(0.0f, r.br), (std::max)(0.0f, r.bl) };
+		Invalidate();
+	}
+	// 변 길이에 맞게 줄인 반경 (이웃한 두 모서리 합이 변 길이를 넘지 않도록)
+	CornerRadii ClampedRadii() const;
+	uint8_t GetBorderSides() const { return m_borderSides; }
+	void  SetBorderSides(uint8_t s) { m_borderSides = static_cast<uint8_t>(s & BorderAll); Invalidate(); }
 
 	FrameLayoutMode GetLayoutMode() const { return m_layoutMode; }
 	void SetLayoutMode(FrameLayoutMode m) { m_layoutMode = m; Invalidate(); }
 	float GetGap() const { return m_gap; }
 	void SetGap(float g) { m_gap = (std::max)(0.0f, g); Invalidate(); }
-	float GetPadding() const { return m_padding; }
-	void SetPadding(float p) { m_padding = (std::max)(0.0f, p); Invalidate(); }
+	// 여백: GetPadding()은 대표값(위), SetPadding()은 4방향 모두 설정 (기존 호환)
+	float GetPadding() const { return m_pad.top; }
+	void SetPadding(float p) { p = (std::max)(0.0f, p); m_pad = PaddingEdges{ p, p, p, p }; Invalidate(); }
+	const PaddingEdges& GetPaddingEdges() const { return m_pad; }
+	void SetPaddingEdges(const PaddingEdges& e) {
+		m_pad = PaddingEdges{ (std::max)(0.0f, e.top), (std::max)(0.0f, e.right), (std::max)(0.0f, e.bottom), (std::max)(0.0f, e.left) };
+		Invalidate();
+	}
 
 	LayoutMainAlign GetMainAlign() const { return m_mainAlign; }
 	void SetMainAlign(LayoutMainAlign a) { m_mainAlign = a; Invalidate(); }
@@ -920,13 +987,27 @@ public:
 	// SizingMode 가 Hug 인 축은 자식 총합에 맞춰 프레임 크기를 자동 조정. 모드가 None 이면 아무것도 하지 않음. 변경이 있었으면 true
 	bool ApplyLayout();
 
+	// 프레임 크기를 바꾼다. 자유 배치(None)면 자식이 자신의 제약(ConstraintH/V)에 따라 위치/크기가 보정되고,
+	// 자동 배치(Row/Column)면 다시 배치한다 (4.5.11)
+	void ResizeFrame(float w, float h);
+
+	// 자식이 부모 프레임 범위(0,0,w,h)를 벗어나지 못하게 한다 (자유 배치 프레임만; 자동 배치는 레이아웃이 결정).
+	// shrink=false: 위치를 안으로 옮기고 부모보다 큰 자식은 부모 크기로 줄임 (이동/생성/부모 축소)
+	// shrink=true : 위치는 두고 넘친 쪽만 잘라 크기를 줄임 (크기 조절 드래그: 반대쪽 모서리 고정)
+	// 글자/표는 줄이지 않고 위치만 보정. 변경이 있었으면 true
+	bool ClampChild(Node* child, bool shrink = false);
+	void ClampChildren();
+	// child 의 부모가 프레임이면 ClampChild 호출 (아니면 false)
+	static bool ClampNode(Node* child, bool shrink = false);
+
 private:
 	float m_w = 100.0f, m_h = 100.0f;
 	bool  m_clip = true;
-	float m_radius = 0.0f;
+	CornerRadii m_radii;
+	uint8_t m_borderSides = BorderAll;
 	FrameLayoutMode m_layoutMode = FrameLayoutMode::None;
 	float m_gap = 10.0f;
-	float m_padding = 10.0f;
+	PaddingEdges m_pad;
 	LayoutMainAlign m_mainAlign = LayoutMainAlign::Start;
 	LayoutCrossAlign m_crossAlign = LayoutCrossAlign::Start;
 	FrameSizingMode m_sizingW = FrameSizingMode::Fixed;
@@ -959,6 +1040,9 @@ public:
 	void SetColWidth(int c, float w);
 	void SetRowHeight(int r, float h);
 
+	// 테두리 종류: 0=실선 1=파선 2=점선 (4.5.18.4)
+	int   GetBorderStyle() const { return m_borderStyle; }
+	void  SetBorderStyle(int s) { m_borderStyle = (std::max)(0, (std::min)(2, s)); Invalidate(); }
 	float GetBorderWidth() const { return m_border; }
 	void  SetBorderWidth(float v) { m_border = (std::max)(0.0f, v); Invalidate(); }
 	Color GetBorderColor() const { return m_borderColor; }
@@ -1007,6 +1091,7 @@ private:
 	std::vector<Span>  m_merges;
 	int   m_headerRows = 0;
 	int   m_cellAlign = 0;
+	int   m_borderStyle = 0;
 	int   m_actR = -1, m_actC = -1;
 	float m_border = 1.0f;
 	float m_pad = 6.0f;
@@ -1048,11 +1133,30 @@ public:
 
 	// 도형 추가 : 항상 활성 레이어의 최상단 (기존 push_back 대체 지점)
 	Node* AddShape(std::unique_ptr<Node> node);
+	// 프레임 자동 부모 (4.5.12): 월드 점 아래의 가장 안쪽 프레임을 찾는다 (exclude 와 그 후손은 제외). 없으면 nullptr
+	FrameNode* FindFrameAt(Vec2 worldPt, const Node* exclude = nullptr) const;
+	// 월드 좌표에 놓인 새 노드를 worldPt 아래의 프레임의 자식으로 추가 (없으면 활성 레이어). 변환은 부모 로컬로 보정됨
+	Node* AddShapeAt(std::unique_ptr<Node> node, Vec2 worldPt);
+	// 노드의 월드 경계 중심 기준으로 AddShapeAt (시작점을 모르는 도구용)
+	Node* AddShapeAuto(std::unique_ptr<Node> node);
+	// 노드를 월드 점 아래의 프레임(없으면 소속 레이어)으로 옮긴다 (4.5.13). 부모가 바뀌면 true
+	bool ReparentAt(Node* node, Vec2 worldPt);
+	// 자동 배치 프레임 체인을 다시 배치 (자식 프레임 -> 조상 순)
+	static void RelayoutFrameChain(GroupNode* from);
 
 	// 선택 (인덱스가 아닌 포인터/ID 기반)
 	const std::vector<Node*>& GetSelection() const { return m_selection; }
 	void SetSelection(const std::vector<Node*>& nodes) { m_selection = nodes; }
 	void ClearSelection()                               { m_selection.clear(); }
+
+	// ---- 그룹 격리 편집 (Isolation Mode, Step 5.3) ----
+	// 격리 대상은 NodeId 로 보관한다 (Undo/문서 교체로 노드가 다시 만들어져도 id 로 찾고, 사라졌으면 자동 해제)
+	static bool CanIsolate(const Node* n);                 // 일반 그룹만 (프레임/표/클리핑 마스크 그룹/레이어 제외)
+	GroupNode*  GetIsolationGroup();                       // 현재 격리 대상 (없거나 사라졌으면 nullptr)
+	bool        EnterIsolation(GroupNode* g);              // 선택을 비우고 g 내부 편집으로 진입
+	void        ExitIsolation();                           // 한 단계 위로 (부모가 격리 가능한 그룹이면 그 그룹, 아니면 해제)
+	void        ClearIsolation()                           { m_isolationId = 0; }
+	std::vector<GroupNode*> IsolationPath();               // 레이어 -> ... -> 현재 격리 그룹 (브레드크럼 표시용)
 
 	// 그룹화 & 프레임 감싸기
 	GroupNode* GroupSelection();
@@ -1141,6 +1245,7 @@ private:
 	std::vector<std::unique_ptr<LayerNode>> m_layers;   // 0 = 최하단 레이어
 	int                                      m_activeLayer = 0;
 	std::vector<Node*>                       m_selection;
+	NodeId                                   m_isolationId = 0;
 	NodeId                                   m_nextId = 0;
 };
 
@@ -1323,6 +1428,10 @@ private:
 	void DrawImageNode(ImageNode& node, const Matrix2D& worldXf, const Viewport& view);
 	// 테이블 격자선 (D2DTableRender.cpp). 칸 내용은 DrawGroup 이 자식으로 그린다
 	void DrawTableGrid(TableNode& node, const Matrix2D& worldXf, const Viewport& view);
+	// 공통 그림자 (4.5.17, D2DShadowRender.cpp): 노드 윤곽 뒤에 블러 근사 그림자. 글자는 레이아웃 모양대로
+	void DrawNodeShadow(Node& node, const Matrix2D& worldXf, const Viewport& view);
+	void DrawNodeInsetShadow(Node& node, const Matrix2D& worldXf, const Viewport& view);   // 안쪽 그림자: 노드 위에 클립 안에서
+	void DrawTextShadow(IDWriteTextLayout* layout, float x0, const Shadow& sh, const Matrix2D& worldXf, const Viewport& view);
 
 	// 디코딩한 비트맵 캐시 (렌더 타깃에 종속이라 Initialize/Shutdown 에서 비움). 키 데이터를 함께 잡아 주소 재사용을 막음
 	struct ImageCacheEntry { std::shared_ptr<const ImageData> keep; ComPtr<ID2D1Bitmap> bitmap; };

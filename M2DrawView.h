@@ -37,6 +37,12 @@ protected:
 	BOOL          m_bIsPanning;
 	CPoint        m_ptLastMouse;
 	bool          m_bCenteredOriginOnLoad = false; // 최초 로드 시 중앙 원점 맞춤 여부
+	// 격리 편집(5.3) 브레드크럼 막대: 클릭 영역 (id 0 = 격리 종료)
+	std::vector<std::pair<D2D1_RECT_F, ge::NodeId>> m_isoCrumbs;
+	D2D1_RECT_F   m_isoBarRect{ 0, 0, 0, 0 };
+	void DrawIsolationBar(float width, float top);
+	bool HandleIsolationBarClick(CPoint point);
+	void RefreshAfterIsolationChange();
 	SnapResult    m_lastSnap;                      // 마우스 포인터의 최신 스냅 결과 (인디케이터 표시용)
 
 public:

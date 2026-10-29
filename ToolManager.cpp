@@ -124,7 +124,7 @@ static void CommitPenPath(CM2DrawDoc* pDoc)
 	path->SetName(pDoc->GetDoc().GenerateNodeName(ge::ShapeKind::Path));
 	path->SetKind(ge::ShapeKind::Path);
 	path->Invalidate();
-	ge::Node* pAdded = pDoc->GetDoc().AddShape(std::move(path));
+	ge::Node* pAdded = pDoc->GetDoc().AddShapeAuto(std::move(path));
 	path = nullptr;
 	if (pAdded) pDoc->GetDoc().SetSelection({ pAdded });
 	pDoc->SetModifiedFlag(TRUE);
@@ -519,7 +519,7 @@ void TextTool::OnUp(const ToolEvent& e)
 	ge::PathOp::MeasureText(*tn);
 	tn->SetName(L"텍스트");
 
-	ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(tn));
+	ge::Node* added = e.pDoc->GetDoc().AddShapeAt(std::move(tn), ge::Vec2{ m_startW.x, m_startW.y });
 	if (!added) return;
 
 	e.pDoc->GetDoc().SetSelection({ added });
@@ -562,14 +562,15 @@ const wchar_t* ComponentTool::GetName() const
 void ComponentTool::OnDown(const ToolEvent& e)
 {
 	m_drag = true;
-	m_startW = m_curW = e.worldPt;
+	{ const ge::Vec2 sp_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides); m_startW = m_curW = D2D1::Point2F(sp_.x, sp_.y); }
 	m_startS = m_curS = e.screenPt;
 }
 
 void ComponentTool::OnMove(const ToolEvent& e)
 {
+	const ge::Vec2 hv_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides);
 	if (!m_drag) return;
-	m_curW = e.worldPt;
+	m_curW = D2D1::Point2F(hv_.x, hv_.y);
 	m_curS = e.screenPt;
 }
 
@@ -578,7 +579,7 @@ void ComponentTool::OnUp(const ToolEvent& e)
 	if (!m_drag) return;
 	m_drag = false;
 	if (!e.pDoc) return;
-	m_curW = e.worldPt;
+	{ const ge::Vec2 sp_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides); m_curW = D2D1::Point2F(sp_.x, sp_.y); }
 	CM2DrawDoc* pDoc = e.pDoc;
 
 	float x0 = (std::min)(m_startW.x, m_curW.x), y0 = (std::min)(m_startW.y, m_curW.y);
@@ -604,7 +605,7 @@ void ComponentTool::OnUp(const ToolEvent& e)
 		tn->SetName(L"헤딩");
 		tn->SetTransform(ge::Matrix2D::Translation(m_startW.x, m_startW.y));
 		ge::PathOp::MeasureText(*tn);
-		added = pDoc->GetDoc().AddShape(std::move(tn));
+		added = pDoc->GetDoc().AddShapeAt(std::move(tn), ge::Vec2{ m_startW.x, m_startW.y });
 		undo = L"헤딩 추가";
 		break;
 	}
@@ -638,8 +639,14 @@ void ComponentTool::OnUp(const ToolEvent& e)
 		tn->SetTransform(ge::Matrix2D::Translation(w * 0.5f, (h - tn->MeasuredHeight()) * 0.5f));
 		tn->SetName(L"버튼 텍스트");
 		fr->AddChild(std::move(tn));
+		// 라벨 정렬은 자동 배치(Row)의 가로(주축)/세로(교차축) 정렬로 처리: 기본 가운데/가운데. 버튼 크기를 바꿔도 라벨이 따라감
+		fr->SetLayoutMode(ge::FrameLayoutMode::Row);
+		fr->SetMainAlign(ge::LayoutMainAlign::Center);
+		fr->SetCrossAlign(ge::LayoutCrossAlign::Center);
+		fr->SetPadding(8.0f);
+		fr->ApplyLayout();
 
-		added = pDoc->GetDoc().AddShape(std::move(fr));
+		added = pDoc->GetDoc().AddShapeAt(std::move(fr), ge::Vec2{ m_startW.x, m_startW.y });
 		undo = L"버튼 추가";
 		break;
 	}
@@ -660,7 +667,7 @@ void ComponentTool::OnUp(const ToolEvent& e)
 		pn->SetStyle(ps);
 		pn->SetName(L"구분선");
 		pn->SetTransform(ge::Matrix2D::Translation(x0, y0));
-		added = pDoc->GetDoc().AddShape(std::move(pn));
+		added = pDoc->GetDoc().AddShapeAt(std::move(pn), ge::Vec2{ m_startW.x, m_startW.y });
 		undo = L"구분선 추가";
 		break;
 	}
@@ -676,7 +683,7 @@ void ComponentTool::OnUp(const ToolEvent& e)
 		fr->SetStyle(fs);
 		fr->SetName(L"간격");
 		fr->SetTransform(ge::Matrix2D::Translation(x0, y0));
-		added = pDoc->GetDoc().AddShape(std::move(fr));
+		added = pDoc->GetDoc().AddShapeAt(std::move(fr), ge::Vec2{ m_startW.x, m_startW.y });
 		undo = L"간격 추가";
 		break;
 	}
@@ -692,11 +699,12 @@ void ComponentTool::OnUp(const ToolEvent& e)
 	pDoc->UpdateAllViews(nullptr);
 }
 
-void ComponentTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float /*zoom*/, D2D1_POINT_2F /*pan*/, CM2DrawDoc* /*pDoc*/)
+void ComponentTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* /*pDoc*/)
 {
-	if (!m_drag || !rt || !brush) return;
-	const D2D1_RECT_F rc = D2D1::RectF(static_cast<float>((std::min)(m_startS.x, m_curS.x)), static_cast<float>((std::min)(m_startS.y, m_curS.y)),
-		static_cast<float>((std::max)(m_startS.x, m_curS.x)), static_cast<float>((std::max)(m_startS.y, m_curS.y)));
+	if (!rt || !brush) return;
+	DrawGuideLines(rt, brush, m_guides, zoom, pan);
+	if (!m_drag) return;
+	const D2D1_RECT_F rc = WorldRectToScreen(m_startW, m_curW, zoom, pan);
 	brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.45f, 0.10f));
 	rt->FillRectangle(rc, brush);
 	brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.45f, 1.0f));

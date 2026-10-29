@@ -17,6 +17,8 @@
 #include "SvgWriter.h"
 #include "SvgReader.h"
 #include "HtmlExporter.h"
+#include "ClipboardSvg.h"
+#include "RasterExport.h"
 #include <algorithm>
 #include <vector>
 
@@ -54,6 +56,13 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_COMMAND(ID_FILE_PLACE_IMAGE, &CM2DrawDoc::OnFilePlaceImage)
 	ON_COMMAND(ID_FILE_EXPORT_SVG, &CM2DrawDoc::OnFileExportSvg)
 	ON_COMMAND(ID_FILE_EXPORT_HTML, &CM2DrawDoc::OnFileExportHtml)
+	ON_COMMAND(ID_FILE_EXPORT_IMAGE, &CM2DrawDoc::OnFileExportImage)
+	ON_COMMAND(ID_EDIT_COPY, &CM2DrawDoc::OnEditCopy)
+	ON_COMMAND(ID_EDIT_CUT, &CM2DrawDoc::OnEditCut)
+	ON_COMMAND(ID_EDIT_PASTE, &CM2DrawDoc::OnEditPaste)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_COPY, &CM2DrawDoc::OnUpdateEditCopy)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_CUT, &CM2DrawDoc::OnUpdateEditCopy)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_PASTE, &CM2DrawDoc::OnUpdateEditPaste)
 	ON_COMMAND(ID_TEXT_TO_PATH, &CM2DrawDoc::OnTextToPath)
 	ON_UPDATE_COMMAND_UI(ID_TEXT_TO_PATH, &CM2DrawDoc::OnUpdateTextToPath)
 	ON_COMMAND(ID_PATH_OUTLINE, &CM2DrawDoc::OnPathOutline)
@@ -981,6 +990,272 @@ void CM2DrawDoc::OnFileExportSvg()
 	}
 	CString log;
 	log.Format(_T("[내보내기] 순수 SVG 저장: %s%s"), (LPCTSTR)dlg.GetPathName(), opt.m_outlineText ? _T(" (텍스트 윤곽선)") : _T(""));
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
+
+// ============================================================================
+// 클립보드 (Step 5.4): SVG 문자열로 교환. 형식: "image/svg+xml"(UTF-8 바이트) + CF_UNICODETEXT
+// ============================================================================
+static UINT SvgClipboardFormat()
+{
+	static const UINT f = ::RegisterClipboardFormatW(L"image/svg+xml");
+	return f;
+}
+
+static std::string ReadClipboardSvgText()
+{
+	std::string out;
+	CWnd* wnd = AfxGetMainWnd();
+	if (!wnd || !wnd->OpenClipboard()) return out;
+	auto readBytes = [&](UINT fmt, bool wide) -> std::string {
+		HANDLE h = ::GetClipboardData(fmt);
+		if (!h) return std::string();
+		const void* p = ::GlobalLock(h);
+		if (!p) return std::string();
+		std::string r;
+		if (wide) {
+			const wchar_t* w = static_cast<const wchar_t*>(p);
+			const int n = ::WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+			if (n > 1) { r.resize(static_cast<size_t>(n) - 1); ::WideCharToMultiByte(CP_UTF8, 0, w, -1, r.data(), n, nullptr, nullptr); }
+		} else {
+			r.assign(static_cast<const char*>(p));
+		}
+		::GlobalUnlock(h);
+		return r;
+	};
+	if (::IsClipboardFormatAvailable(SvgClipboardFormat())) out = readBytes(SvgClipboardFormat(), false);
+	if (!ge::LooksLikeSvg(out) && ::IsClipboardFormatAvailable(CF_UNICODETEXT)) out = readBytes(CF_UNICODETEXT, true);
+	::CloseClipboard();
+	return out;
+}
+
+bool CM2DrawDoc::CopySelectionToClipboard()
+{
+	const std::string svg = ge::SerializeNodesToSvg(m_doc, m_doc.GetSelection());
+	if (svg.empty()) return false;
+	CWnd* wnd = AfxGetMainWnd();
+	if (!wnd || !wnd->OpenClipboard()) return false;
+	::EmptyClipboard();
+
+	HGLOBAL hSvg = ::GlobalAlloc(GMEM_MOVEABLE, svg.size() + 1);
+	if (hSvg) {
+		if (void* p = ::GlobalLock(hSvg)) { memcpy(p, svg.c_str(), svg.size() + 1); ::GlobalUnlock(hSvg); }
+		if (!::SetClipboardData(SvgClipboardFormat(), hSvg)) ::GlobalFree(hSvg);
+	}
+	const int n = ::MultiByteToWideChar(CP_UTF8, 0, svg.c_str(), -1, nullptr, 0);
+	if (n > 0) {
+		HGLOBAL hText = ::GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(n) * sizeof(wchar_t));
+		if (hText) {
+			if (void* p = ::GlobalLock(hText)) { ::MultiByteToWideChar(CP_UTF8, 0, svg.c_str(), -1, static_cast<wchar_t*>(p), n); ::GlobalUnlock(hText); }
+			if (!::SetClipboardData(CF_UNICODETEXT, hText)) ::GlobalFree(hText);
+		}
+	}
+	::CloseClipboard();
+	m_pasteCount = 0;
+	CString log;
+	log.Format(_T("[클립보드] SVG 복사 (%d개 선택)"), static_cast<int>(m_doc.GetSelection().size()));
+	LogAppEvent(log);
+	return true;
+}
+
+bool CM2DrawDoc::PasteFromClipboard()
+{
+	const std::string svg = ReadClipboardSvgText();
+	if (svg.empty()) return false;
+	ge::Document tmp;
+	std::vector<const ge::Node*> src;
+	if (!ge::ParseSvgNodes(svg, tmp, src)) return false;
+
+	// 선택이 프레임(또는 프레임 안)이면 그 프레임에 붙여넣기, 아니면 활성 레이어
+	ge::FrameNode* targetFrame = nullptr;
+	if (ge::Node* sel = GetPrimarySelection())
+		for (ge::Node* p = sel; p; p = p->GetParent())
+			if (auto* fr = dynamic_cast<ge::FrameNode*>(p)) { targetFrame = fr; break; }
+
+	std::vector<ge::Node*> imported = m_doc.ImportNodes(src);
+	if (imported.empty()) return false;
+
+	++m_pasteCount;
+	const float off = 16.0f * static_cast<float>(((m_pasteCount - 1) % 6) + 1);   // 연속 붙여넣기 시 겹치지 않게
+	for (ge::Node* n : imported)
+		n->SetTransform(n->GetTransform() * ge::Matrix2D::Translation(off, off));
+	if (targetFrame)
+		for (ge::Node* n : imported) {
+			if (m_doc.MoveNodeTo(n, targetFrame, -1)) ge::FrameNode::ClampNode(n, false);
+		}
+
+	m_doc.SetSelection(imported);
+	SetModifiedFlag(TRUE);
+	CommitUndoPoint(L"붙여넣기");
+	LogAppEvent(_T("[클립보드] SVG 붙여넣기"));
+	UpdateShapePropertiesSelection(imported.front(), this);
+	UpdateAllViews(nullptr);
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+void CM2DrawDoc::OnEditCopy() { CopySelectionToClipboard(); }
+
+void CM2DrawDoc::OnEditCut()
+{
+	if (!CopySelectionToClipboard()) return;
+	PerformSmartDelete();
+	CommitUndoPoint(L"잘라내기");
+	UpdateAllViews(nullptr);
+}
+
+void CM2DrawDoc::OnEditPaste() { PasteFromClipboard(); }
+
+void CM2DrawDoc::OnUpdateEditCopy(CCmdUI* pCmdUI) { pCmdUI->Enable(HasSelectedObjects()); }
+
+void CM2DrawDoc::OnUpdateEditPaste(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(::IsClipboardFormatAvailable(SvgClipboardFormat()) || ::IsClipboardFormatAvailable(CF_UNICODETEXT));
+}
+
+// ============================================================================
+// PNG/JPG 내보내기 (Step 5.5)
+// ============================================================================
+namespace {
+class CExportImageDlg : public CDialog
+{
+public:
+	int   m_format = 0;          // 0 = PNG, 1 = JPG
+	int   m_scaleIdx = 1;        // 0:1x 1:2x 2:4x 3:8x
+	int   m_dpi = 96;
+	bool  m_transparent = true;
+	bool  m_selectionOnly = false;
+	bool  m_hasSelection = false;
+	CString m_sizeText;
+
+	INT_PTR Run(CWnd* parent)
+	{
+		std::vector<WORD> w;
+		auto add32 = [&](DWORD v) { w.push_back(LOWORD(v)); w.push_back(HIWORD(v)); };
+		auto addStr = [&](const wchar_t* s) { while (*s) w.push_back(*s++); w.push_back(0); };
+		auto align = [&]() { if (w.size() % 2) w.push_back(0); };
+		add32(DS_MODALFRAME | DS_SETFONT | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU);
+		add32(0);
+		w.push_back(11);   // 항목 수: 정적 4 + 콤보 2 + 편집 1 + 체크 2 + 크기 문구 1(위 합산 포함) + 버튼 2 = 11
+		w.push_back(0); w.push_back(0); w.push_back(250); w.push_back(152);
+		w.push_back(0); w.push_back(0);
+		addStr(L"이미지 내보내기 (PNG / JPG)");
+		w.push_back(9); addStr(L"Segoe UI");
+		auto item = [&](DWORD style, short x, short y, short cx, short cy, WORD id, WORD atom, const wchar_t* title) {
+			align();
+			add32(style | WS_CHILD | WS_VISIBLE);
+			add32(0);
+			w.push_back(x); w.push_back(y); w.push_back(cx); w.push_back(cy);
+			w.push_back(id);
+			w.push_back(0xFFFF); w.push_back(atom);
+			addStr(title);
+			w.push_back(0);
+		};
+		item(SS_LEFT, 8, 10, 40, 10, 0xFFFF, 0x0082, L"형식");
+		item(CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 52, 8, 100, 60, 1001, 0x0085, L"");
+		item(SS_LEFT, 8, 30, 40, 10, 0xFFFF, 0x0082, L"배율");
+		item(CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 52, 28, 100, 70, 1002, 0x0085, L"");
+		item(SS_LEFT, 8, 50, 40, 10, 0xFFFF, 0x0082, L"해상도(DPI)");
+		item(ES_NUMBER | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP, 52, 48, 50, 12, 1003, 0x0081, L"96");
+		item(BS_AUTOCHECKBOX | WS_TABSTOP, 8, 68, 234, 12, 1004, 0x0080, L"투명 배경 (PNG 만 해당, JPG 는 문서 배경색)");
+		item(BS_AUTOCHECKBOX | WS_TABSTOP, 8, 84, 234, 12, 1005, 0x0080, L"선택한 오브젝트 영역만 내보내기");
+		item(SS_LEFT, 8, 102, 234, 10, 1006, 0x0082, L"");
+		item(BS_DEFPUSHBUTTON | WS_TABSTOP, 136, 130, 50, 14, IDOK, 0x0080, L"내보내기");
+		item(BS_PUSHBUTTON | WS_TABSTOP, 192, 130, 50, 14, IDCANCEL, 0x0080, L"취소");
+		if (!InitModalIndirect(reinterpret_cast<LPCDLGTEMPLATE>(w.data()), parent)) return IDCANCEL;
+		return DoModal();
+	}
+	float Scale() const { static const float k[] = { 1.0f, 2.0f, 4.0f, 8.0f }; return k[(std::max)(0, (std::min)(3, m_scaleIdx))]; }
+
+protected:
+	BOOL OnInitDialog() override
+	{
+		CDialog::OnInitDialog();
+		CComboBox* f = static_cast<CComboBox*>(GetDlgItem(1001));
+		f->AddString(_T("PNG (무손실, 투명 배경 가능)"));
+		f->AddString(_T("JPG (불투명)"));
+		f->SetCurSel(m_format);
+		CComboBox* s = static_cast<CComboBox*>(GetDlgItem(1002));
+		s->AddString(_T("1x"));
+		s->AddString(_T("2x"));
+		s->AddString(_T("4x"));
+		s->AddString(_T("8x"));
+		s->SetCurSel(m_scaleIdx);
+		SetDlgItemInt(1003, m_dpi, FALSE);
+		CheckDlgButton(1004, m_transparent ? BST_CHECKED : BST_UNCHECKED);
+		CheckDlgButton(1005, (m_selectionOnly && m_hasSelection) ? BST_CHECKED : BST_UNCHECKED);
+		GetDlgItem(1005)->EnableWindow(m_hasSelection);
+		SetDlgItemText(1006, m_sizeText);
+		return TRUE;
+	}
+	void OnOK() override
+	{
+		m_format = static_cast<CComboBox*>(GetDlgItem(1001))->GetCurSel();
+		m_scaleIdx = static_cast<CComboBox*>(GetDlgItem(1002))->GetCurSel();
+		BOOL ok = FALSE;
+		const UINT d = GetDlgItemInt(1003, &ok, FALSE);
+		m_dpi = ok ? static_cast<int>((std::max)(1u, (std::min)(d, 2400u))) : 96;
+		m_transparent = IsDlgButtonChecked(1004) == BST_CHECKED;
+		m_selectionOnly = m_hasSelection && IsDlgButtonChecked(1005) == BST_CHECKED;
+		CDialog::OnOK();
+	}
+};
+} // namespace
+
+void CM2DrawDoc::OnFileExportImage()
+{
+	CExportImageDlg dlg;
+	dlg.m_format = AfxGetApp()->GetProfileInt(_T("ExportImage"), _T("Format"), 0);
+	dlg.m_scaleIdx = AfxGetApp()->GetProfileInt(_T("ExportImage"), _T("Scale"), 1);
+	dlg.m_dpi = AfxGetApp()->GetProfileInt(_T("ExportImage"), _T("Dpi"), 96);
+	dlg.m_transparent = AfxGetApp()->GetProfileInt(_T("ExportImage"), _T("Transparent"), 1) != 0;
+	dlg.m_hasSelection = HasSelectedObjects();
+	dlg.m_sizeText.Format(_T("문서 크기 %d x %d px  (출력 = 크기 x 배율)"), static_cast<int>(m_doc.width), static_cast<int>(m_doc.height));
+	if (dlg.Run(AfxGetMainWnd()) != IDOK) return;
+	AfxGetApp()->WriteProfileInt(_T("ExportImage"), _T("Format"), dlg.m_format);
+	AfxGetApp()->WriteProfileInt(_T("ExportImage"), _T("Scale"), dlg.m_scaleIdx);
+	AfxGetApp()->WriteProfileInt(_T("ExportImage"), _T("Dpi"), dlg.m_dpi);
+	AfxGetApp()->WriteProfileInt(_T("ExportImage"), _T("Transparent"), dlg.m_transparent ? 1 : 0);
+
+	ge::RasterExportOptions opt;
+	opt.jpeg = dlg.m_format == 1;
+	opt.scale = dlg.Scale();
+	opt.dpi = static_cast<float>(dlg.m_dpi);
+	opt.transparent = dlg.m_transparent;
+
+	ge::Rect2 region{};
+	const ge::Rect2* pRegion = nullptr;
+	if (dlg.m_selectionOnly && m_doc.GetSelectionBounds(region)) pRegion = &region;
+
+	unsigned pw = 0, ph = 0;
+	if (!ge::RasterExportPixelSize(m_doc, opt, pRegion, pw, ph))
+	{
+		AfxMessageBox(_T("출력 크기가 너무 큽니다 (한 변 최대 16384px). 배율을 낮춰 주세요."));
+		return;
+	}
+
+	CString suggested = GetTitle();
+	const int dot = suggested.ReverseFind(_T('.'));
+	if (dot > 0) suggested = suggested.Left(dot);
+	const BOOL jpeg = opt.jpeg;
+	CFileDialog fd(FALSE, jpeg ? _T("jpg") : _T("png"), suggested + (jpeg ? _T(".jpg") : _T(".png")), OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY,
+		jpeg ? _T("JPG 이미지 (*.jpg)|*.jpg||") : _T("PNG 이미지 (*.png)|*.png||"));
+	if (fd.DoModal() != IDOK) return;
+
+	CWaitCursor wait;
+	std::wstring err;
+	if (!ge::ExportRaster(m_doc, (LPCTSTR)fd.GetPathName(), opt, pRegion, &err))
+	{
+		CString msg;
+		msg.Format(_T("이미지를 저장하지 못했습니다.\n%s"), err.c_str());
+		AfxMessageBox(msg);
+		return;
+	}
+	CString log;
+	log.Format(_T("[내보내기] %s 저장: %s (%u x %u px, %.0fx, %d DPI)"), jpeg ? _T("JPG") : _T("PNG"), (LPCTSTR)fd.GetPathName(), pw, ph, static_cast<double>(opt.scale), dlg.m_dpi);
 	LogAppEvent(log);
 	SetAppStatusText(log);
 }

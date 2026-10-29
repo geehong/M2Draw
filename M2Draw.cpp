@@ -6,6 +6,7 @@
 #include "framework.h"
 #include "afxwinappex.h"
 #include "afxdialogex.h"
+#include "RasterExport.h"
 #include "M2Draw.h"
 #include "MainFrm.h"
 
@@ -98,6 +99,19 @@ BOOL CM2DrawApp::InitInstance()
 	}
 
 	AfxEnableControlContainer();
+
+#ifdef _DEBUG
+	// 런타임 자체 검증 (래스터 출력 / 클립보드 SVG / 페인트통 등 D2D/WIC 가 필요한 부분)
+	{
+		std::wstring failure;
+		if (!ge::RunRuntimeVerification(&failure))
+		{
+			CString msg;
+			msg.Format(_T("[런타임 자체 검증 실패]\n%s"), failure.c_str());
+			AfxMessageBox(msg, MB_ICONWARNING);
+		}
+	}
+#endif
 
 	EnableTaskbarInteraction();
 

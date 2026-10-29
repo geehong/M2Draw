@@ -62,6 +62,8 @@ private:
 	std::string RegisterCssRule(const std::string& desiredPrefix, const std::string& decls, const Node* pNode = nullptr);
 	std::string BuildCommonStyleDecls(const Node& node);
 	void AppendIndent();
+	// 자유 배치 프레임 안의 자식 위치/제약 CSS (position:absolute + left/right/top/bottom). 부모가 자유 배치가 아니면 빈 문자열
+	std::string PositionDecls(const Node& node, bool& omitW, bool& omitH);
 	void ExportTable(TableNode& table);   // <table>/<thead>/<tbody>/<tr>/<th>/<td> (또는 CSS Grid)
 	std::string StyleOrClassAttr(const std::string& prefix, const std::string& decls, const Node* node);
 

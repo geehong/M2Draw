@@ -71,6 +71,13 @@ bool Base64Decode(const std::string& in, std::vector<uint8_t>& out)
 }
 
 // "a,b,c" 형태의 실수 목록 (테이블 열 너비/행 높이 등)
+static FrameSizingMode ParseSizingMode(const std::wstring& v)
+{
+	if (v == L"hug") return FrameSizingMode::Hug;
+	if (v == L"fill") return FrameSizingMode::Fill;
+	return FrameSizingMode::Fixed;
+}
+
 std::vector<float> ParseFloatList(const std::wstring& text)
 {
 	std::vector<float> out;
@@ -489,6 +496,53 @@ void ApplyCommonState(Node& n, const AttrMap& attrs) {
 	if (const auto* a = get(L"m2:alt"))         n.SetAlt(WideToUtf8(*a));
 	if (const auto* l = get(L"m2:ariaLabel"))   n.SetAriaLabel(WideToUtf8(*l));
 	if (const auto* c = get(L"m2:customClass")) n.SetCustomClass(WideToUtf8(*c));
+	if (const auto* c = get(L"m2:cx")) { const long v = std::wcstol(c->c_str(), nullptr, 10); if (v >= 0 && v <= 3) n.SetConstraintH(static_cast<ConstraintH>(v)); }
+	if (const auto* c = get(L"m2:cy")) { const long v = std::wcstol(c->c_str(), nullptr, 10); if (v >= 0 && v <= 3) n.SetConstraintV(static_cast<ConstraintV>(v)); }
+
+	// 그림자: m2:shadow="x,y,blur,spread,#rrggbb,alpha" 우선, 없으면 표준 style="filter:drop-shadow(x y blur rgba(r,g,b,a))"
+	if (const auto* sh = get(L"m2:shadow")) {
+		std::vector<std::wstring> tok;
+		size_t p0 = 0;
+		while (p0 <= sh->size()) {
+			size_t e = sh->find(L',', p0);
+			if (e == std::wstring::npos) e = sh->size();
+			tok.push_back(sh->substr(p0, e - p0));
+			p0 = e + 1;
+		}
+		if (tok.size() >= 6) {
+			Shadow sd;
+			sd.enabled = true;
+			sd.x = std::wcstof(tok[0].c_str(), nullptr); sd.y = std::wcstof(tok[1].c_str(), nullptr);
+			sd.blur = std::wcstof(tok[2].c_str(), nullptr); sd.spread = std::wcstof(tok[3].c_str(), nullptr);
+			sd.color = ParseColorValue(tok[4]);
+			sd.color.a = std::wcstof(tok[5].c_str(), nullptr);
+			sd.inset = tok.size() >= 7 && tok[6] == L"1";
+			n.SetShadow(sd);
+		}
+	}
+	else if (const auto* s = get(L"style")) {
+		const size_t k = s->find(L"drop-shadow(");
+		if (k != std::wstring::npos) {
+			const wchar_t* q = s->c_str() + k + 12;
+			wchar_t* nx = nullptr;
+			Shadow sd;
+			sd.enabled = true;
+			sd.x = std::wcstof(q, &nx); q = nx;
+			while (*q == L'p' || *q == L'x' || *q == L' ') ++q;
+			sd.y = std::wcstof(q, &nx); q = nx;
+			while (*q == L'p' || *q == L'x' || *q == L' ') ++q;
+			sd.blur = std::wcstof(q, &nx); q = nx;
+			while (*q == L'p' || *q == L'x' || *q == L' ') ++q;
+			if (wcsncmp(q, L"rgba(", 5) == 0) {
+				q += 5;
+				float c[3] = { 0, 0, 0 };
+				for (int i = 0; i < 3; ++i) { c[i] = std::wcstof(q, &nx) / 255.0f; q = nx; while (*q == L',' || *q == L' ') ++q; }
+				const float a = std::wcstof(q, &nx);
+				sd.color = Color(c[0], c[1], c[2], a);
+			}
+			n.SetShadow(sd);
+		}
+	}
 
 	// 표준 CSS: style="mix-blend-mode:multiply" (외부 SVG / Clean 출력). m2:blend 가 없어도 복원됨
 	if (const auto* s = get(L"style")) {
@@ -774,8 +828,8 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 			}
 			const bool isShapeElem = (elemName == L"rect" || elemName == L"circle" || elemName == L"ellipse" ||
 				elemName == L"line" || elemName == L"polyline" || elemName == L"polygon" || elemName == L"path");
-			if (elemName == L"path" && attrs.count(L"m2:tableGrid")) continue;   // 테이블 격자선: 테이블 속성으로 다시 그려지므로 노드로 만들지 않음
-			if (elemName == L"rect" && attrs.count(L"m2:frameBg") && !groupStack.empty()) {
+			if (elemName == L"path" && (attrs.count(L"m2:tableGrid") || attrs.count(L"m2:frameBorder"))) continue;   // 테이블 격자선: 테이블 속성으로 다시 그려지므로 노드로 만들지 않음
+			if ((elemName == L"rect" || elemName == L"path") && attrs.count(L"m2:frameBg") && !groupStack.empty()) {
 				// 프레임의 배경/테두리 사각형: 프레임 스타일로 복원하고 별도 노드는 만들지 않음
 				if (auto* fr = dynamic_cast<FrameNode*>(groupStack.back())) {
 					Style st = fr->GetStyle();
@@ -786,6 +840,10 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 					const std::wstring strokeV = attrs.count(L"stroke") ? attrs[L"stroke"] : L"none";
 					if (strokeV == L"none") st.stroke.width = 0.0f;
 					else { st.stroke.color = ParseColorHex(strokeV); st.stroke.width = attrs.count(L"stroke-width") ? ParseLength(attrs[L"stroke-width"], 1.0f) : 1.0f; }
+if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in separate attrs
+	st.stroke.color = ParseColorHex(attrs[L"m2:bstroke"]);
+	st.stroke.width = attrs.count(L"m2:bwidth") ? ParseLength(attrs[L"m2:bwidth"], 1.0f) : 1.0f;
+}
 					fr->SetStyle(st);
 				}
 				continue;
@@ -992,6 +1050,7 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 						if (attrs.count(L"m2:border")) tn->SetBorderWidth(ParseLength(attrs[L"m2:border"], 1.0f));
 						if (attrs.count(L"m2:pad")) tn->SetCellPadding(ParseLength(attrs[L"m2:pad"], 6.0f));
 						if (attrs.count(L"m2:bcolor")) tn->SetBorderColor(ParseColorHex(attrs[L"m2:bcolor"]));
+							if (attrs.count(L"m2:bstyle")) tn->SetBorderStyle(static_cast<int>(ParseLength(attrs[L"m2:bstyle"], 0.0f)));
 							tn->SetHeaderRows(attrs.count(L"m2:header") ? static_cast<int>(ParseLength(attrs[L"m2:header"], 0.0f)) : 0);
 							if (attrs.count(L"m2:calign")) tn->SetCellAlign(static_cast<int>(ParseLength(attrs[L"m2:calign"], 0.0f)));
 							if (attrs.count(L"m2:merges")) {
@@ -1019,10 +1078,21 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 						fn->SetFrameSize(attrs.count(L"m2:w") ? ParseLength(attrs[L"m2:w"], 100.0f) : 100.0f, attrs.count(L"m2:h") ? ParseLength(attrs[L"m2:h"], 100.0f) : 100.0f);
 						fn->SetClip(!(attrs.count(L"m2:clip") && attrs[L"m2:clip"] == L"false"));
 						if (attrs.count(L"m2:radius")) fn->SetCornerRadius(ParseLength(attrs[L"m2:radius"], 0.0f));
+							if (attrs.count(L"m2:radius4")) {
+								const std::vector<float> v = ParseFloatList(attrs[L"m2:radius4"]);
+								if (v.size() == 4) fn->SetCornerRadii(CornerRadii{ v[0], v[1], v[2], v[3] });
+							}
+							if (attrs.count(L"m2:borderSides")) fn->SetBorderSides(static_cast<uint8_t>(ParseLength(attrs[L"m2:borderSides"], 15.0f)));
+							if (attrs.count(L"m2:sizingW")) fn->SetSizingW(ParseSizingMode(attrs[L"m2:sizingW"]));
+							if (attrs.count(L"m2:sizingH")) fn->SetSizingH(ParseSizingMode(attrs[L"m2:sizingH"]));
 						if (attrs.count(L"m2:layout")) {
 							fn->SetLayoutMode(attrs[L"m2:layout"] == L"row" ? FrameLayoutMode::Row : attrs[L"m2:layout"] == L"column" ? FrameLayoutMode::Column : FrameLayoutMode::None);
 							if (attrs.count(L"m2:gap")) fn->SetGap(ParseLength(attrs[L"m2:gap"], 10.0f));
 							if (attrs.count(L"m2:pad")) fn->SetPadding(ParseLength(attrs[L"m2:pad"], 10.0f));
+								if (attrs.count(L"m2:padding4")) {
+									const std::vector<float> v = ParseFloatList(attrs[L"m2:padding4"]);
+									if (v.size() == 4) fn->SetPaddingEdges(PaddingEdges{ v[0], v[1], v[2], v[3] });
+								}
 							if (attrs.count(L"m2:mainAlign")) {
 								const auto& a = attrs[L"m2:mainAlign"];
 								if (a == L"center") fn->SetMainAlign(LayoutMainAlign::Center);
@@ -1037,10 +1107,10 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 								else fn->SetCrossAlign(LayoutCrossAlign::Start);
 							}
 							if (attrs.count(L"m2:sizingW")) {
-								fn->SetSizingW(attrs[L"m2:sizingW"] == L"hug" ? FrameSizingMode::Hug : FrameSizingMode::Fixed);
+								fn->SetSizingW(ParseSizingMode(attrs[L"m2:sizingW"]));
 							}
 							if (attrs.count(L"m2:sizingH")) {
-								fn->SetSizingH(attrs[L"m2:sizingH"] == L"hug" ? FrameSizingMode::Hug : FrameSizingMode::Fixed);
+								fn->SetSizingH(ParseSizingMode(attrs[L"m2:sizingH"]));
 							}
 						}
 						group = std::move(fn);

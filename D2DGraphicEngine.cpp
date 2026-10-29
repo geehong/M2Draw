@@ -375,8 +375,8 @@ std::unique_ptr<Node> FrameNode::Clone() const
 {
 	auto copy = std::make_unique<FrameNode>();
 	copy->CopyNodePropsFrom(*this);
-	copy->m_w = m_w; copy->m_h = m_h; copy->m_clip = m_clip; copy->m_radius = m_radius;
-	copy->m_layoutMode = m_layoutMode; copy->m_gap = m_gap; copy->m_padding = m_padding;
+	copy->m_w = m_w; copy->m_h = m_h; copy->m_clip = m_clip; copy->m_radii = m_radii; copy->m_borderSides = m_borderSides;
+	copy->m_layoutMode = m_layoutMode; copy->m_gap = m_gap; copy->m_pad = m_pad;
 	copy->m_mainAlign = m_mainAlign; copy->m_crossAlign = m_crossAlign;
 	copy->m_sizingW = m_sizingW; copy->m_sizingH = m_sizingH;
 	for (const auto& c : m_children) copy->AddChild(c->Clone());
@@ -396,6 +396,7 @@ std::unique_ptr<Node> TableNode::Clone() const
 	copy->m_merges = m_merges;
 	copy->m_headerRows = m_headerRows;
 	copy->m_cellAlign = m_cellAlign;
+	copy->m_borderStyle = m_borderStyle;
 	for (const auto& c : m_children) copy->AddChild(c->Clone());
 	return copy;
 }
@@ -618,10 +619,29 @@ bool TableNode::RemoveColAt(int at)
 	return true;
 }
 
+CornerRadii FrameNode::ClampedRadii() const
+{
+	CornerRadii r = m_radii;
+	// 각 변에서 두 모서리 반경의 합이 변 길이를 넘으면 같은 비율로 줄임
+	float k = 1.0f;
+	auto fit = [&](float a, float b, float len) { const float s = a + b; if (s > len && s > 0.0f) k = (std::min)(k, len / s); };
+	fit(r.tl, r.tr, m_w); fit(r.bl, r.br, m_w);
+	fit(r.tl, r.bl, m_h); fit(r.tr, r.br, m_h);
+	r.tl *= k; r.tr *= k; r.br *= k; r.bl *= k;
+	return r;
+}
+
 bool FrameNode::ApplyLayout()
 {
 	if (m_layoutMode == FrameLayoutMode::None) return false;
 	bool changed = false;
+
+	const bool isRow = (m_layoutMode == FrameLayoutMode::Row);
+	// 주축/교차축 기준 안쪽 여백 (Row: 주축=가로, Column: 주축=세로)
+	const float mS = isRow ? m_pad.left : m_pad.top;
+	const float mE = isRow ? m_pad.right : m_pad.bottom;
+	const float cS = isRow ? m_pad.top : m_pad.left;
+	const float cE = isRow ? m_pad.bottom : m_pad.right;
 
 	// 1) 가시적 자식들의 바운딩 박스 수집
 	struct ChildLayoutInfo {
@@ -630,18 +650,13 @@ bool FrameNode::ApplyLayout()
 		float mainSize = 0.0f;
 		float crossSize = 0.0f;
 	};
-	std::vector<ChildLayoutInfo> visibleChildren;
-	float totalChildrenMain = 0.0f;
-	float maxCross = 0.0f;
-
-	const bool isRow = (m_layoutMode == FrameLayoutMode::Row);
 
 	// 0) Column 모드 등에서 TextNode 가 영역 텍스트인 경우, 프레임 가용 폭에 맞춰 자동 측정/줄바꿈 갱신
 	for (const auto& c : m_children) {
 		if (!c || !c->IsVisible()) continue;
 		if (auto* tn = dynamic_cast<TextNode*>(c.get())) {
 			if (!isRow && tn->IsAreaText()) {
-				const float availW = (std::max)(20.0f, m_w - 2.0f * m_padding);
+				const float availW = (std::max)(20.0f, m_w - m_pad.left - m_pad.right);
 				if (std::fabs(tn->GetBoxWidth() - availW) > 1.0f) {
 					tn->SetBoxWidth(availW);
 					changed = true;
@@ -650,6 +665,53 @@ bool FrameNode::ApplyLayout()
 			PathOp::MeasureText(*tn);
 		}
 	}
+
+	// 0.5) Fill 크기 규칙 (4.5.9): 자식 프레임이 부모의 가용 공간을 채움.
+	//      부모가 해당 축에서 Hug 이면 순환을 피하려고 자식의 현재 크기(Fixed 취급)를 유지한다.
+	{
+		const bool hugMain = isRow ? (m_sizingW == FrameSizingMode::Hug) : (m_sizingH == FrameSizingMode::Hug);
+		const bool hugCross = isRow ? (m_sizingH == FrameSizingMode::Hug) : (m_sizingW == FrameSizingMode::Hug);
+		std::vector<FrameNode*> fillMain;
+		float fixedMain = 0.0f;
+		int visCount = 0;
+		for (const auto& c : m_children) {
+			if (!c || !c->IsVisible()) continue;
+			Rect2 lb;
+			if (!c->GetLocalBounds(lb)) continue;
+			++visCount;
+			auto* fr = dynamic_cast<FrameNode*>(c.get());
+			const Rect2 b = c->GetTransform().TransformRect(lb);
+			const FrameSizingMode sMain = fr ? (isRow ? fr->GetSizingW() : fr->GetSizingH()) : FrameSizingMode::Fixed;
+			if (fr && sMain == FrameSizingMode::Fill && !hugMain) fillMain.push_back(fr);
+			else fixedMain += isRow ? b.Width() : b.Height();
+		}
+		const float availMain = (isRow ? m_w : m_h) - mS - mE;
+		const float availCross = (isRow ? m_h : m_w) - cS - cE;
+		const float share = fillMain.empty() ? 0.0f
+			: (std::max)(1.0f, (availMain - fixedMain - (visCount > 0 ? (visCount - 1) * m_gap : 0.0f)) / static_cast<float>(fillMain.size()));
+
+		for (const auto& c : m_children) {
+			auto* fr = dynamic_cast<FrameNode*>(c.get());
+			if (!fr || !fr->IsVisible()) continue;
+			const FrameSizingMode sMain = isRow ? fr->GetSizingW() : fr->GetSizingH();
+			const FrameSizingMode sCross = isRow ? fr->GetSizingH() : fr->GetSizingW();
+			float nw = fr->GetWidth(), nh = fr->GetHeight();
+			if (sMain == FrameSizingMode::Fill && !hugMain) (isRow ? nw : nh) = share;
+			if (sCross == FrameSizingMode::Fill && !hugCross) (isRow ? nh : nw) = (std::max)(1.0f, availCross);
+			const bool involved = (sMain == FrameSizingMode::Fill && !hugMain) || (sCross == FrameSizingMode::Fill && !hugCross);
+			if (!involved) continue;
+			if (std::fabs(nw - fr->GetWidth()) > 1e-3f || std::fabs(nh - fr->GetHeight()) > 1e-3f) {
+				fr->ResizeFrame(nw, nh);   // 자식의 자식도 다시 배치/보정
+				changed = true;
+			} else if (fr->ApplyLayout()) {
+				changed = true;
+			}
+		}
+	}
+
+	std::vector<ChildLayoutInfo> visibleChildren;
+	float totalChildrenMain = 0.0f;
+	float maxCross = 0.0f;
 
 	for (const auto& c : m_children) {
 		if (!c || !c->IsVisible()) continue;
@@ -669,8 +731,8 @@ bool FrameNode::ApplyLayout()
 	// 2) Hug 크기 모드 계산: 내용물에 맞춰 프레임 크기 자동 변경
 	const int count = static_cast<int>(visibleChildren.size());
 	const float contentMain = (count > 0) ? (totalChildrenMain + (count - 1) * m_gap) : 0.0f;
-	const float hugW = isRow ? (contentMain + 2.0f * m_padding) : (maxCross + 2.0f * m_padding);
-	const float hugH = isRow ? (maxCross + 2.0f * m_padding) : (contentMain + 2.0f * m_padding);
+	const float hugW = isRow ? (contentMain + mS + mE) : (maxCross + cS + cE);
+	const float hugH = isRow ? (maxCross + cS + cE) : (contentMain + mS + mE);
 
 	if (m_sizingW == FrameSizingMode::Hug) {
 		const float newW = (std::max)(1.0f, hugW);
@@ -691,33 +753,33 @@ bool FrameNode::ApplyLayout()
 
 	// 3) 주축(Main Axis) 가용 공간 및 간격 계산
 	const float frameMain = isRow ? m_w : m_h;
-	const float availableMain = frameMain - 2.0f * m_padding;
+	const float availableMain = frameMain - mS - mE;
 	const float remainingMain = availableMain - totalChildrenMain;
 
-	float startMain = m_padding;
+	float startMain = mS;
 	float actualGap = m_gap;
 
 	switch (m_mainAlign) {
 	case LayoutMainAlign::Start:
-		startMain = m_padding;
+		startMain = mS;
 		actualGap = m_gap;
 		break;
 	case LayoutMainAlign::Center:
 		if (count > 0) {
 			const float totalSpan = totalChildrenMain + (count - 1) * m_gap;
-			startMain = m_padding + (std::max)(0.0f, (availableMain - totalSpan) * 0.5f);
+			startMain = mS + (std::max)(0.0f, (availableMain - totalSpan) * 0.5f);
 		}
 		actualGap = m_gap;
 		break;
 	case LayoutMainAlign::End:
 		if (count > 0) {
 			const float totalSpan = totalChildrenMain + (count - 1) * m_gap;
-			startMain = m_padding + (std::max)(0.0f, availableMain - totalSpan);
+			startMain = mS + (std::max)(0.0f, availableMain - totalSpan);
 		}
 		actualGap = m_gap;
 		break;
 	case LayoutMainAlign::SpaceBetween:
-		startMain = m_padding;
+		startMain = mS;
 		if (count > 1) {
 			actualGap = (std::max)(0.0f, remainingMain / static_cast<float>(count - 1));
 		} else {
@@ -728,21 +790,21 @@ bool FrameNode::ApplyLayout()
 
 	// 4) 각 자식의 배치 위치 계산 및 변환 행렬 적용
 	const float frameCross = isRow ? m_h : m_w;
-	const float availableCross = frameCross - 2.0f * m_padding;
+	const float availableCross = frameCross - cS - cE;
 
 	float cursor = startMain;
 	for (const auto& item : visibleChildren) {
 		// 교차축(Cross Axis) 정렬 기준 위치
-		float crossPos = m_padding;
+		float crossPos = cS;
 		switch (m_crossAlign) {
 		case LayoutCrossAlign::Start:
-			crossPos = m_padding;
+			crossPos = cS;
 			break;
 		case LayoutCrossAlign::Center:
-			crossPos = m_padding + (std::max)(0.0f, (availableCross - item.crossSize) * 0.5f);
+			crossPos = cS + (std::max)(0.0f, (availableCross - item.crossSize) * 0.5f);
 			break;
 		case LayoutCrossAlign::End:
-			crossPos = m_padding + (std::max)(0.0f, availableCross - item.crossSize);
+			crossPos = cS + (std::max)(0.0f, availableCross - item.crossSize);
 			break;
 		}
 
@@ -766,6 +828,118 @@ bool FrameNode::ApplyLayout()
 	}
 
 	return changed;
+}
+
+void FrameNode::ResizeFrame(float w, float h)
+{
+	w = (std::max)(1.0f, w);
+	h = (std::max)(1.0f, h);
+	const float dw = w - m_w, dh = h - m_h;
+	const bool free = (m_layoutMode == FrameLayoutMode::None);
+	if (free && (std::fabs(dw) > 1e-4f || std::fabs(dh) > 1e-4f)) {
+		for (const auto& c : m_children) {
+			if (!c) continue;
+			Rect2 lb;
+			if (!c->GetLocalBounds(lb)) continue;
+			Rect2 b = c->GetTransform().TransformRect(lb);
+			Matrix2D xf = c->GetTransform();
+			float shiftX = 0.0f, shiftY = 0.0f;
+			float newCW = b.Width(), newCH = b.Height();
+			bool stretchW = false, stretchH = false;
+
+			switch (c->GetConstraintH()) {
+			case ConstraintH::Left: break;
+			case ConstraintH::Right: shiftX = dw; break;
+			case ConstraintH::Center: shiftX = dw * 0.5f; break;
+			case ConstraintH::LeftRight: stretchW = true; newCW = (std::max)(1.0f, b.Width() + dw); break;
+			}
+			switch (c->GetConstraintV()) {
+			case ConstraintV::Top: break;
+			case ConstraintV::Bottom: shiftY = dh; break;
+			case ConstraintV::Center: shiftY = dh * 0.5f; break;
+			case ConstraintV::TopBottom: stretchH = true; newCH = (std::max)(1.0f, b.Height() + dh); break;
+			}
+
+			// 글자/표는 늘리지 않고 위치만 보정 (왼쪽/위 기준)
+			if (c->Kind() == NodeKind::Text || dynamic_cast<TableNode*>(c.get())) { stretchW = stretchH = false; }
+
+			if (auto* child = dynamic_cast<FrameNode*>(c.get())) {
+				if (stretchW || stretchH) {
+					child->ResizeFrame(stretchW ? newCW : child->GetWidth(), stretchH ? newCH : child->GetHeight());
+				}
+			} else if ((stretchW && b.Width() > 1e-3f) || (stretchH && b.Height() > 1e-3f)) {
+				const float sx = (stretchW && b.Width() > 1e-3f) ? newCW / b.Width() : 1.0f;
+				const float sy = (stretchH && b.Height() > 1e-3f) ? newCH / b.Height() : 1.0f;
+				xf = xf * Matrix2D::Scale(sx, sy, Vec2{ b.left, b.top });
+			}
+			if (shiftX != 0.0f || shiftY != 0.0f) xf = xf * Matrix2D::Translation(shiftX, shiftY);
+			c->SetTransform(xf);
+			if (c->Kind() != NodeKind::Text) c->Invalidate();
+		}
+	}
+	m_w = w;
+	m_h = h;
+	if (free) ClampChildren();   // 부모가 줄어들면 자식도 범위 안으로
+	Invalidate();
+	ApplyLayout();
+}
+
+bool FrameNode::ClampChild(Node* c, bool shrink)
+{
+	if (!c || m_layoutMode != FrameLayoutMode::None) return false;
+	Rect2 lb;
+	if (!c->GetLocalBounds(lb)) return false;
+	Matrix2D xf = c->GetTransform();
+	const Rect2 b = xf.TransformRect(lb);
+	const float bw = b.Width(), bh = b.Height();
+	const float eps = 0.01f;
+	if (b.left >= -eps && b.top >= -eps && b.right <= m_w + eps && b.bottom <= m_h + eps) return false;
+
+	const bool isText = (c->Kind() == NodeKind::Text) || dynamic_cast<TableNode*>(c) != nullptr;
+	auto* fr = dynamic_cast<FrameNode*>(c);
+	const bool plainFrame = fr && std::fabs(xf.m11 - 1.0f) < 1e-4f && std::fabs(xf.m22 - 1.0f) < 1e-4f && std::fabs(xf.m12) < 1e-4f && std::fabs(xf.m21) < 1e-4f;
+
+	// 목표 상자: shrink 모드는 넘친 부분만 잘라냄, 그 외에는 부모보다 클 때만 부모 크기로 줄이고 위치를 안으로 옮김
+	float nl = b.left, nt = b.top, nw = bw, nh = bh;
+	if (!isText && shrink) {
+		nl = (std::max)(b.left, 0.0f); nt = (std::max)(b.top, 0.0f);
+		nw = (std::max)(1.0f, (std::min)(b.right, m_w) - nl);
+		nh = (std::max)(1.0f, (std::min)(b.bottom, m_h) - nt);
+	} else if (!isText) {
+		nw = (std::min)(bw, m_w); nh = (std::min)(bh, m_h);
+	}
+	// 위치를 부모 안으로
+	if (nw > m_w) nl = 0.0f; else nl = (std::max)(0.0f, (std::min)(nl, m_w - nw));
+	if (nh > m_h) nt = 0.0f; else nt = (std::max)(0.0f, (std::min)(nt, m_h - nh));
+
+	if (!isText && (std::fabs(nw - bw) > eps || std::fabs(nh - bh) > eps)) {
+		if (plainFrame) {
+			xf.dx += nl - b.left; xf.dy += nt - b.top;
+			c->SetTransform(xf);
+			fr->ResizeFrame(nw, nh);
+			return true;
+		}
+		const float sx = bw > 1e-3f ? nw / bw : 1.0f, sy = bh > 1e-3f ? nh / bh : 1.0f;
+		xf = xf * Matrix2D::Scale(sx, sy, Vec2{ b.left, b.top });
+	}
+	// 크기 조정 후의 위치 보정 (조정 후 좌상단은 b.left/b.top 그대로이므로 이동량 = 목표 - 현재)
+	xf = xf * Matrix2D::Translation(nl - b.left, nt - b.top);
+	c->SetTransform(xf);
+	if (c->Kind() != NodeKind::Text) c->Invalidate();
+	return true;
+}
+
+void FrameNode::ClampChildren()
+{
+	if (m_layoutMode != FrameLayoutMode::None) return;
+	for (const auto& c : m_children) ClampChild(c.get(), false);
+}
+
+bool FrameNode::ClampNode(Node* child, bool shrink)
+{
+	if (!child) return false;
+	auto* pf = dynamic_cast<FrameNode*>(child->GetParent());
+	return pf ? pf->ClampChild(child, shrink) : false;
 }
 
 bool GroupNode::GetLocalBounds(Rect2& out)
@@ -968,12 +1142,144 @@ std::vector<FrameNode*> Document::GetArtboards() const
 	return artboards;
 }
 
+bool Document::CanIsolate(const Node* n)
+{
+	if (!n || n->Kind() != NodeKind::Group) return false;
+	if (dynamic_cast<const FrameNode*>(n) || dynamic_cast<const TableNode*>(n)) return false;
+	return !static_cast<const GroupNode*>(n)->IsClippingMask();
+}
+
+GroupNode* Document::GetIsolationGroup()
+{
+	if (m_isolationId == 0) return nullptr;
+	Node* n = FindById(m_isolationId);
+	if (!n || !CanIsolate(n)) { m_isolationId = 0; return nullptr; }
+	return static_cast<GroupNode*>(n);
+}
+
+bool Document::EnterIsolation(GroupNode* g)
+{
+	if (!CanIsolate(g)) return false;
+	m_isolationId = g->GetId();
+	m_selection.clear();
+	return true;
+}
+
+void Document::ExitIsolation()
+{
+	GroupNode* g = GetIsolationGroup();
+	if (!g) return;
+	GroupNode* p = g->GetParent();
+	// 상위에 격리 가능한 그룹이 있으면 한 단계만 올라감
+	while (p && p->Kind() != NodeKind::Layer && !CanIsolate(p)) p = p->GetParent();
+	m_isolationId = (p && p->Kind() != NodeKind::Layer) ? p->GetId() : 0;
+	m_selection.clear();
+}
+
+std::vector<GroupNode*> Document::IsolationPath()
+{
+	std::vector<GroupNode*> path;
+	for (GroupNode* p = GetIsolationGroup(); p; p = p->GetParent()) path.push_back(p);
+	std::reverse(path.begin(), path.end());
+	return path;
+}
+
 Node* Document::AddShape(std::unique_ptr<Node> node)
 {
 	LayerNode* layer = GetActiveLayer();
 	if (!layer || !node) return nullptr;
 	AssignIds(*node);
 	return layer->AddChild(std::move(node));
+}
+
+static FrameNode* DeepestFrameAt(const GroupNode& g, Vec2 w, const Node* exclude)
+{
+	const auto& kids = g.GetChildren();
+	for (size_t i = kids.size(); i-- > 0;) {
+		Node* c = kids[i].get();
+		if (!c || c == exclude || !c->IsVisible() || c->IsLocked()) continue;
+		auto* gc = dynamic_cast<GroupNode*>(c);
+		if (!gc || dynamic_cast<TableNode*>(c) || gc->IsClippingMask()) continue;
+		if (auto* fr = dynamic_cast<FrameNode*>(gc)) {
+			Matrix2D inv = fr->GetWorldTransform();
+			if (!inv.Invert()) continue;
+			const Vec2 l = inv.TransformPoint(w);
+			if (l.x < 0.0f || l.y < 0.0f || l.x > fr->GetWidth() || l.y > fr->GetHeight()) continue;
+			if (FrameNode* deeper = DeepestFrameAt(*fr, w, exclude)) return deeper;
+			return fr;
+		}
+		if (FrameNode* d = DeepestFrameAt(*gc, w, exclude)) return d;   // 일반 그룹은 통과
+	}
+	return nullptr;
+}
+
+FrameNode* Document::FindFrameAt(Vec2 worldPt, const Node* exclude) const
+{
+	for (size_t i = m_layers.size(); i-- > 0;) {
+		const LayerNode* layer = m_layers[i].get();
+		if (!layer || !layer->IsVisible() || layer->IsLocked()) continue;
+		if (FrameNode* f = DeepestFrameAt(*layer, worldPt, exclude)) return f;
+	}
+	return nullptr;
+}
+
+void Document::RelayoutFrameChain(GroupNode* from)
+{
+	for (GroupNode* p = from; p; p = p->GetParent())
+		if (auto* f = dynamic_cast<FrameNode*>(p)) f->ApplyLayout();
+}
+
+Node* Document::AddShapeAt(std::unique_ptr<Node> node, Vec2 worldPt)
+{
+	if (!node) return nullptr;
+	FrameNode* parent = FindFrameAt(worldPt);
+	if (!parent) return AddShape(std::move(node));
+	AssignIds(*node);
+	const Matrix2D world = node->GetTransform();   // 아직 부모가 없으므로 월드 좌표 기준
+	Matrix2D inv = parent->GetWorldTransform();
+	if (inv.Invert()) node->SetTransform(world * inv);
+	Node* added = parent->AddChild(std::move(node));
+	parent->ClampChild(added, false);   // 부모 범위를 넘지 않게
+	RelayoutFrameChain(parent);
+	return added;
+}
+
+Node* Document::AddShapeAuto(std::unique_ptr<Node> node)
+{
+	if (!node) return nullptr;
+	Rect2 lb;
+	Vec2 c{ 0.0f, 0.0f };
+	if (node->GetLocalBounds(lb)) {
+		const Rect2 b = node->GetTransform().TransformRect(lb);
+		c = Vec2{ (b.left + b.right) * 0.5f, (b.top + b.bottom) * 0.5f };
+	} else {
+		c = Vec2{ node->GetTransform().dx, node->GetTransform().dy };
+	}
+	return AddShapeAt(std::move(node), c);
+}
+
+bool Document::ReparentAt(Node* node, Vec2 worldPt)
+{
+	if (!node || node->Kind() == NodeKind::Layer) return false;
+	GroupNode* oldParent = node->GetParent();
+	if (!oldParent) return false;
+	// 그룹/표/클리핑 그룹 안의 자식은 구조를 유지 (레이어 직속이거나 프레임 안의 노드만 대상)
+	if (oldParent->Kind() != NodeKind::Layer && !dynamic_cast<FrameNode*>(oldParent)) return false;
+
+	FrameNode* target = FindFrameAt(worldPt, node);
+	GroupNode* dest = target;
+	if (!dest) {
+		if (oldParent->Kind() == NodeKind::Layer) return false;   // 이미 레이어 직속
+		GroupNode* p = oldParent;
+		while (p && p->Kind() != NodeKind::Layer) p = p->GetParent();
+		dest = p;
+	}
+	if (!dest || dest == oldParent) return false;
+	if (!MoveNodeTo(node, dest, -1)) return false;
+	FrameNode::ClampNode(node, false);
+	RelayoutFrameChain(oldParent);
+	RelayoutFrameChain(dest);
+	return true;
 }
 
 std::wstring Document::GenerateNodeName(ShapeKind kind) const
@@ -2660,6 +2966,8 @@ void D2DRenderer::DrawNode(Node& node, const Matrix2D& parentXf, const Viewport&
 		m_rt->PushLayer(params, nullptr);
 	}
 
+	if (node.GetShadow().enabled && !node.GetShadow().inset) DrawNodeShadow(node, worldXf, view);   // 공통 그림자 (D2DShadowRender.cpp)
+
 	switch (node.Kind()) {
 	case NodeKind::Path:  DrawPath(static_cast<PathNode&>(node), worldXf, view); break;
 	case NodeKind::Text:  DrawTextNode(static_cast<TextNode&>(node), worldXf, view); break;
@@ -2667,6 +2975,11 @@ void D2DRenderer::DrawNode(Node& node, const Matrix2D& parentXf, const Viewport&
 	case NodeKind::Group:
 	case NodeKind::Layer: DrawGroup(static_cast<GroupNode&>(node), worldXf, view); break;
 	}
+
+	// 안쪽 그림자는 노드 위에 그린다. 프레임은 자식 아래/배경 위여야 해서 DrawGroup 안에서 처리
+	if (node.GetShadow().enabled && node.GetShadow().inset && node.Kind() != NodeKind::Text && node.Kind() != NodeKind::Layer &&
+		dynamic_cast<FrameNode*>(&node) == nullptr)
+		DrawNodeInsetShadow(node, worldXf, view);
 
 	if (needLayer) m_rt->PopLayer();
 }
@@ -2793,6 +3106,7 @@ void D2DRenderer::DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Vi
 
 	const Style& st = node.GetStyle();
 	const Color col = (st.fill.type == PaintType::None) ? Color(0, 0, 0, 0) : st.fill.color;
+	if (node.GetShadow().enabled) DrawTextShadow(layout, hit->second.x0, node.GetShadow(), worldXf, view);   // 글자 그림자는 글자 아래에
 	m_brush->SetColor(D2D1::ColorF(col.r, col.g, col.b, col.a));
 	m_rt->SetTransform((worldXf * view.ToMatrix()).ToD2D());
 	m_rt->DrawTextLayout(D2D1::Point2F(hit->second.x0, 0.0f), layout, m_brush.Get());
@@ -2813,27 +3127,72 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 	if (frame && m_rt && m_brush) {
 		const D2D1_MATRIX_3X2_F fm = (worldXf * view.ToMatrix()).ToD2D();
 		const Style& fst = frame->GetStyle();
-		const D2D1_RECT_F rc = D2D1::RectF(0.0f, 0.0f, frame->GetWidth(), frame->GetHeight());
-		const float rr = (std::min)(frame->GetCornerRadius(), (std::min)(frame->GetWidth(), frame->GetHeight()) * 0.5f);
+		const float fw = frame->GetWidth(), fh = frame->GetHeight();
+		const D2D1_RECT_F rc = D2D1::RectF(0.0f, 0.0f, fw, fh);
+		const CornerRadii cr = frame->ClampedRadii();
+		const uint8_t sides = frame->GetBorderSides();
+
+		// 모서리 반경이 4개 모두 같으면 사각형/둥근 사각형, 다르면 경로 지오메트리 (4.5.10)
+		ComPtr<ID2D1Geometry> frameGeo;
+		if (m_factory) {
+			if (cr.IsUniform()) {
+				if (cr.tl > 0.0f) {
+					ComPtr<ID2D1RoundedRectangleGeometry> rg;
+					if (SUCCEEDED(m_factory->CreateRoundedRectangleGeometry(D2D1::RoundedRect(rc, cr.tl, cr.tl), &rg))) frameGeo = rg;
+				} else {
+					ComPtr<ID2D1RectangleGeometry> rg;
+					if (SUCCEEDED(m_factory->CreateRectangleGeometry(rc, &rg))) frameGeo = rg;
+				}
+			} else {
+				ComPtr<ID2D1PathGeometry> pg;
+				ComPtr<ID2D1GeometrySink> sink;
+				if (SUCCEEDED(m_factory->CreatePathGeometry(&pg)) && SUCCEEDED(pg->Open(&sink))) {
+					auto arc = [&](float x, float y, float r) {
+						if (r > 0.0f) sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(x, y), D2D1::SizeF(r, r), 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+					};
+					sink->BeginFigure(D2D1::Point2F(cr.tl, 0.0f), D2D1_FIGURE_BEGIN_FILLED);
+					sink->AddLine(D2D1::Point2F(fw - cr.tr, 0.0f));
+					arc(fw, cr.tr, cr.tr);
+					sink->AddLine(D2D1::Point2F(fw, fh - cr.br));
+					arc(fw - cr.br, fh, cr.br);
+					sink->AddLine(D2D1::Point2F(cr.bl, fh));
+					arc(0.0f, fh - cr.bl, cr.bl);
+					sink->AddLine(D2D1::Point2F(0.0f, cr.tl));
+					arc(cr.tl, 0.0f, cr.tl);
+					sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+					if (SUCCEEDED(sink->Close())) frameGeo = pg;
+				}
+			}
+		}
+
 		m_rt->SetTransform(fm);
 		if (fst.fill.type == PaintType::Solid && fst.fill.color.a > 0.0f) {
 			m_brush->SetColor(D2D1::ColorF(fst.fill.color.r, fst.fill.color.g, fst.fill.color.b, fst.fill.color.a));
-			if (rr > 0.0f) m_rt->FillRoundedRectangle(D2D1::RoundedRect(rc, rr, rr), m_brush.Get());
+			if (frameGeo) m_rt->FillGeometry(frameGeo.Get(), m_brush.Get());
 			else m_rt->FillRectangle(rc, m_brush.Get());
 		}
-		if (fst.stroke.width > 0.0f && fst.stroke.color.a > 0.0f) {
+		if (fst.stroke.width > 0.0f && fst.stroke.color.a > 0.0f && sides != 0) {
 			m_brush->SetColor(D2D1::ColorF(fst.stroke.color.r, fst.stroke.color.g, fst.stroke.color.b, fst.stroke.color.a));
-			if (rr > 0.0f) m_rt->DrawRoundedRectangle(D2D1::RoundedRect(rc, rr, rr), m_brush.Get(), fst.stroke.width);
-			else m_rt->DrawRectangle(rc, m_brush.Get(), fst.stroke.width);
+			if (sides == BorderAll) {
+				if (frameGeo) m_rt->DrawGeometry(frameGeo.Get(), m_brush.Get(), fst.stroke.width);
+				else m_rt->DrawRectangle(rc, m_brush.Get(), fst.stroke.width);
+			} else {
+				// 일부 변만: 각 변을 직선으로 (둥근 모서리 호는 그리지 않음)
+				const float sw = fst.stroke.width;
+				if (sides & BorderTop)    m_rt->DrawLine(D2D1::Point2F(0.0f, 0.0f), D2D1::Point2F(fw, 0.0f), m_brush.Get(), sw);
+				if (sides & BorderRight)  m_rt->DrawLine(D2D1::Point2F(fw, 0.0f), D2D1::Point2F(fw, fh), m_brush.Get(), sw);
+				if (sides & BorderBottom) m_rt->DrawLine(D2D1::Point2F(0.0f, fh), D2D1::Point2F(fw, fh), m_brush.Get(), sw);
+				if (sides & BorderLeft)   m_rt->DrawLine(D2D1::Point2F(0.0f, 0.0f), D2D1::Point2F(0.0f, fh), m_brush.Get(), sw);
+			}
 		}
 		m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
 
-		if (frame->IsClip() && m_factory) {
-			ComPtr<ID2D1RoundedRectangleGeometry> rg;
-			if (SUCCEEDED(m_factory->CreateRoundedRectangleGeometry(D2D1::RoundedRect(rc, rr, rr), &rg))) {
-				ComPtr<ID2D1TransformedGeometry> xg;
-				if (SUCCEEDED(m_factory->CreateTransformedGeometry(rg.Get(), &fm, &xg))) maskGeo = xg;
-			}
+		// 프레임의 안쪽 그림자: 배경 위, 자식 아래 (4.5.18.1)
+		if (frame->GetShadow().enabled && frame->GetShadow().inset) DrawNodeInsetShadow(const_cast<GroupNode&>(node), worldXf, view);
+
+		if (frame->IsClip() && m_factory && frameGeo) {
+			ComPtr<ID2D1TransformedGeometry> xg;
+			if (SUCCEEDED(m_factory->CreateTransformedGeometry(frameGeo.Get(), &fm, &xg))) maskGeo = xg;
 		}
 	}
 
@@ -2875,8 +3234,69 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 		m_rt->PopLayer();
 	}
 
+	// 역할(시맨틱 태그) 표시용 이름: div/빈 값은 역할 없음 (4.5.8.3)
+	std::string roleTag;
+	if (frame) { roleTag = frame->GetHtmlTag(); if (roleTag == "div") roleTag.clear(); }
+	const bool isTopFrame = frame && (!node.GetParent() || node.GetParent()->Kind() == NodeKind::Layer);
+
+	// 내부 컨테이너 프레임: 역할이 지정된 경우 좌상단 안쪽에 작은 배지 [header] 이름 표시
+	if (frame && !isTopFrame && m_rt && m_brush) {   // 내부 프레임 윤곽선: 흰 배경 위에서도 범위가 보이는 편집용 표시 (저장/내보내기에는 들어가지 않음)
+		const D2D1_MATRIX_3X2_F fmo = (worldXf * view.ToMatrix()).ToD2D();
+		m_rt->SetTransform(fmo);
+		m_brush->SetColor(D2D1::ColorF(0.30f, 0.50f, 0.90f, 0.75f));
+		m_rt->DrawRectangle(D2D1::RectF(0.0f, 0.0f, frame->GetWidth(), frame->GetHeight()), m_brush.Get(), 1.0f / (std::max)(view.zoom, 0.01f));
+		m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
+	}
+	// 내부 프레임 배지: [역할] 이름  W × H. 배지가 프레임보다 길거나(너비/높이) 안에 자식이 있으면 안쪽이 아니라 프레임 위쪽에 표시 (4.5.8.3)
+	if (frame && !isTopFrame && m_rt && m_brush) {
+		static ComPtr<IDWriteFactory> s_dwBadge;
+		static ComPtr<IDWriteTextFormat> s_fmtBadge;
+		if (!s_dwBadge) {
+			DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(s_dwBadge.GetAddressOf()));
+			if (s_dwBadge) {
+				s_dwBadge->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+					DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 10.0f, L"ko-kr", &s_fmtBadge);
+				if (s_fmtBadge) {
+					s_fmtBadge->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+					s_fmtBadge->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+				}
+			}
+		}
+		if (s_fmtBadge) {
+			const D2D1_MATRIX_3X2_F fm = (worldXf * view.ToMatrix()).ToD2D();
+			std::wstring txt;
+			if (!roleTag.empty()) txt = L"[" + std::wstring(roleTag.begin(), roleTag.end()) + L"] ";
+			if (!frame->GetName().empty()) txt += frame->GetName() + L"  ";
+			wchar_t dimBuf2[48];
+			swprintf_s(dimBuf2, L"%d \u00D7 %d", static_cast<int>(std::round(frame->GetWidth())), static_cast<int>(std::round(frame->GetHeight())));
+			txt += dimBuf2;
+
+			// 실제 글자 폭 측정 (한글 이름도 정확히)
+			float textW = static_cast<float>(txt.length()) * 6.4f;
+			ComPtr<IDWriteTextLayout> lay;
+			if (SUCCEEDED(s_dwBadge->CreateTextLayout(txt.c_str(), static_cast<UINT32>(txt.length()), s_fmtBadge.Get(), 2000.0f, 20.0f, &lay)) && lay) {
+				DWRITE_TEXT_METRICS tm{};
+				if (SUCCEEDED(lay->GetMetrics(&tm))) textW = tm.widthIncludingTrailingWhitespace;
+			}
+			const float bh = 15.0f;
+			const float bw = textW + 12.0f;
+
+			const float sw = frame->GetWidth() * std::sqrt(fm._11 * fm._11 + fm._12 * fm._12);
+			const float sh = frame->GetHeight() * std::sqrt(fm._21 * fm._21 + fm._22 * fm._22);
+			const bool fitsInside = (bw + 6.0f <= sw) && (bh + 6.0f <= sh) && node.GetChildren().empty();
+			const D2D1_RECT_F bg = fitsInside
+				? D2D1::RectF(fm.dx + 2.0f, fm.dy + 2.0f, fm.dx + 2.0f + bw, fm.dy + 2.0f + bh)
+				: D2D1::RectF(fm.dx, fm.dy - bh - 3.0f, fm.dx + bw, fm.dy - 3.0f);   // 프레임 위쪽 바깥
+			m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
+			m_brush->SetColor(D2D1::ColorF(0.12f, 0.56f, 1.0f, 0.88f));
+			m_rt->FillRoundedRectangle(D2D1::RoundedRect(bg, 3.0f, 3.0f), m_brush.Get());
+			m_brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+			m_rt->DrawText(txt.c_str(), static_cast<UINT32>(txt.length()), s_fmtBadge.Get(), D2D1::RectF(bg.left + 6.0f, bg.top, bg.right - 2.0f, bg.bottom), m_brush.Get());
+		}
+	}
+
 	// 최상위 프레임(Artboard): 캔버스 위에 Figma 스타일로 상단 이름 라벨 표시 (예: "Frame 1  1920 × 1080")
-	if (frame && m_rt && m_brush && (!node.GetParent() || node.GetParent()->Kind() == NodeKind::Layer)) {
+	if (isTopFrame && m_rt && m_brush) {
 		static ComPtr<IDWriteFactory> s_dwLabel;
 		static ComPtr<IDWriteTextFormat> s_fmtLabel;
 		if (!s_dwLabel) {
@@ -2905,6 +3325,7 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 
 			std::wstring labelText = frame->GetName();
 			if (labelText.empty()) labelText = L"Artboard";
+			if (!roleTag.empty()) labelText = L"[" + std::wstring(roleTag.begin(), roleTag.end()) + L"] " + labelText;
 			wchar_t dimBuf[64];
 			swprintf_s(dimBuf, L"  %d × %d", static_cast<int>(std::round(effectiveW)), static_cast<int>(std::round(effectiveH)));
 			labelText += dimBuf;
