@@ -377,35 +377,394 @@ std::unique_ptr<Node> FrameNode::Clone() const
 	copy->CopyNodePropsFrom(*this);
 	copy->m_w = m_w; copy->m_h = m_h; copy->m_clip = m_clip; copy->m_radius = m_radius;
 	copy->m_layoutMode = m_layoutMode; copy->m_gap = m_gap; copy->m_padding = m_padding;
+	copy->m_mainAlign = m_mainAlign; copy->m_crossAlign = m_crossAlign;
+	copy->m_sizingW = m_sizingW; copy->m_sizingH = m_sizingH;
 	for (const auto& c : m_children) copy->AddChild(c->Clone());
 	return copy;
+}
+
+// ---------------- TableNode ----------------
+std::unique_ptr<Node> TableNode::Clone() const
+{
+	auto copy = std::make_unique<TableNode>();
+	copy->CopyNodePropsFrom(*this);
+	copy->m_colW = m_colW;
+	copy->m_rowH = m_rowH;
+	copy->m_border = m_border;
+	copy->m_pad = m_pad;
+	copy->m_borderColor = m_borderColor;
+	copy->m_merges = m_merges;
+	copy->m_headerRows = m_headerRows;
+	copy->m_cellAlign = m_cellAlign;
+	for (const auto& c : m_children) copy->AddChild(c->Clone());
+	return copy;
+}
+
+bool TableNode::GetLocalBounds(Rect2& out)
+{
+	float w = 0.0f, h = 0.0f;
+	for (float v : m_colW) w += v;
+	for (float v : m_rowH) h += v;
+	out = Rect2{ 0.0f, 0.0f, w, h };
+	return true;
+}
+
+void TableNode::SetGrid(int rows, int cols, float cellW, float cellH)
+{
+	rows = (std::max)(1, (std::min)(50, rows));
+	cols = (std::max)(1, (std::min)(50, cols));
+	m_rowH.assign(rows, (std::max)(1.0f, cellH));
+	m_colW.assign(cols, (std::max)(1.0f, cellW));
+	m_merges.clear();
+	m_headerRows = (std::min)(m_headerRows, rows);
+	Invalidate();
+}
+
+void TableNode::SetSizes(const std::vector<float>& colW, const std::vector<float>& rowH)
+{
+	if (colW.empty() || rowH.empty()) return;
+	m_colW = colW;
+	m_rowH = rowH;
+	for (auto& v : m_colW) v = (std::max)(1.0f, v);
+	for (auto& v : m_rowH) v = (std::max)(1.0f, v);
+	Invalidate();
+}
+
+void TableNode::SetColWidth(int c, float w)
+{
+	if (c < 0 || c >= Cols()) return;
+	m_colW[c] = (std::max)(1.0f, w);
+	Invalidate();
+}
+
+void TableNode::SetRowHeight(int r, float h)
+{
+	if (r < 0 || r >= Rows()) return;
+	m_rowH[r] = (std::max)(1.0f, h);
+	Invalidate();
+}
+
+Rect2 TableNode::CellRect(int r, int c) const
+{
+	if (r < 0 || r >= Rows() || c < 0 || c >= Cols()) return Rect2{};
+	float x = 0.0f, y = 0.0f;
+	for (int i = 0; i < c; ++i) x += m_colW[i];
+	for (int i = 0; i < r; ++i) y += m_rowH[i];
+	return Rect2{ x, y, x + m_colW[c], y + m_rowH[r] };
+}
+
+bool TableNode::CellAt(Vec2 p, int& r, int& c) const
+{
+	r = c = -1;
+	float acc = 0.0f;
+	int cc = -1, rr = -1;
+	for (int i = 0; i < Cols(); ++i) {
+		if (p.x >= acc && p.x < acc + m_colW[i]) { cc = i; break; }
+		acc += m_colW[i];
+	}
+	acc = 0.0f;
+	for (int i = 0; i < Rows(); ++i) {
+		if (p.y >= acc && p.y < acc + m_rowH[i]) { rr = i; break; }
+		acc += m_rowH[i];
+	}
+	if (cc < 0 || rr < 0) return false;
+	const Span sp = SpanOf(rr, cc);
+	r = sp.r;
+	c = sp.c;
+	return true;
+}
+
+// ---- 병합 / 격자선 / 행·열 편집 (4.5.7.2) ----
+void TableNode::SetMerges(const std::vector<Span>& v)
+{
+	m_merges.clear();
+	for (const Span& s : v) MergeRange(s.r, s.c, s.r + s.rs - 1, s.c + s.cs - 1);
+}
+
+TableNode::Span TableNode::SpanOf(int r, int c) const
+{
+	for (const Span& s : m_merges)
+		if (r >= s.r && r < s.r + s.rs && c >= s.c && c < s.c + s.cs) return s;
+	Span one; one.r = r; one.c = c;
+	return one;
+}
+
+bool TableNode::MergeRange(int r0, int c0, int r1, int c1)
+{
+	if (r0 > r1) std::swap(r0, r1);
+	if (c0 > c1) std::swap(c0, c1);
+	if (r0 < 0 || c0 < 0 || r1 >= Rows() || c1 >= Cols()) return false;
+	if (r0 == r1 && c0 == c1) return false;
+	for (const Span& s : m_merges)
+		if (!(r1 < s.r || r0 >= s.r + s.rs || c1 < s.c || c0 >= s.c + s.cs)) return false;   // 기존 병합과 겹침
+	Span n; n.r = r0; n.c = c0; n.rs = r1 - r0 + 1; n.cs = c1 - c0 + 1;
+	m_merges.push_back(n);
+	Invalidate();
+	return true;
+}
+
+bool TableNode::SplitAt(int r, int c)
+{
+	for (size_t i = 0; i < m_merges.size(); ++i) {
+		const Span& s = m_merges[i];
+		if (r >= s.r && r < s.r + s.rs && c >= s.c && c < s.c + s.cs) {
+			m_merges.erase(m_merges.begin() + i);
+			Invalidate();
+			return true;
+		}
+	}
+	return false;
+}
+
+Rect2 TableNode::SpanRect(int r, int c) const
+{
+	const Span s = SpanOf(r, c);
+	const Rect2 a = CellRect(s.r, s.c);
+	const Rect2 b = CellRect(s.r + s.rs - 1, s.c + s.cs - 1);
+	return Rect2{ a.left, a.top, b.right, b.bottom };
+}
+
+void TableNode::GridSegments(std::vector<Seg>& out) const
+{
+	out.clear();
+	const int R = Rows(), C = Cols();
+	float totalW = 0.0f, totalH = 0.0f;
+	for (float v : m_colW) totalW += v;
+	for (float v : m_rowH) totalH += v;
+
+	// 세로선: 열 i-1 / i 사이. 같은 병합 안에 있는 행 구간은 건너뜀
+	float x = 0.0f;
+	for (int i = 1; i < C; ++i) {
+		x += m_colW[i - 1];
+		float y = 0.0f, runStart = -1.0f;
+		for (int r = 0; r < R; ++r) {
+			const Span a = SpanOf(r, i - 1), b = SpanOf(r, i);
+			const bool inside = (a.r == b.r && a.c == b.c);
+			if (!inside && runStart < 0.0f) runStart = y;
+			if (inside && runStart >= 0.0f) { out.push_back(Seg{ x, runStart, x, y }); runStart = -1.0f; }
+			y += m_rowH[r];
+		}
+		if (runStart >= 0.0f) out.push_back(Seg{ x, runStart, x, totalH });
+	}
+	// 가로선: 행 i-1 / i 사이
+	float y = 0.0f;
+	for (int i = 1; i < R; ++i) {
+		y += m_rowH[i - 1];
+		float xx = 0.0f, runStart = -1.0f;
+		for (int c = 0; c < C; ++c) {
+			const Span a = SpanOf(i - 1, c), b = SpanOf(i, c);
+			const bool inside = (a.r == b.r && a.c == b.c);
+			if (!inside && runStart < 0.0f) runStart = xx;
+			if (inside && runStart >= 0.0f) { out.push_back(Seg{ runStart, y, xx, y }); runStart = -1.0f; }
+			xx += m_colW[c];
+		}
+		if (runStart >= 0.0f) out.push_back(Seg{ runStart, y, totalW, y });
+	}
+}
+
+bool TableNode::InsertRowAt(int at, float h)
+{
+	if (at < 0 || at > Rows() || Rows() >= 50) return false;
+	m_rowH.insert(m_rowH.begin() + at, (std::max)(1.0f, h));
+	for (Span& s : m_merges) {
+		if (s.r >= at) ++s.r;
+		else if (s.r + s.rs > at) ++s.rs;
+	}
+	if (at < m_headerRows) ++m_headerRows;
+	Invalidate();
+	return true;
+}
+
+bool TableNode::RemoveRowAt(int at)
+{
+	if (at < 0 || at >= Rows() || Rows() <= 1) return false;
+	m_rowH.erase(m_rowH.begin() + at);
+	for (size_t i = 0; i < m_merges.size();) {
+		Span& s = m_merges[i];
+		if (at < s.r) --s.r;
+		else if (at < s.r + s.rs) --s.rs;
+		if (s.rs <= 1 && s.cs <= 1) m_merges.erase(m_merges.begin() + i); else ++i;
+	}
+	if (at < m_headerRows) --m_headerRows;
+	if (m_actR >= Rows()) m_actR = Rows() - 1;
+	Invalidate();
+	return true;
+}
+
+bool TableNode::InsertColAt(int at, float w)
+{
+	if (at < 0 || at > Cols() || Cols() >= 50) return false;
+	m_colW.insert(m_colW.begin() + at, (std::max)(1.0f, w));
+	for (Span& s : m_merges) {
+		if (s.c >= at) ++s.c;
+		else if (s.c + s.cs > at) ++s.cs;
+	}
+	Invalidate();
+	return true;
+}
+
+bool TableNode::RemoveColAt(int at)
+{
+	if (at < 0 || at >= Cols() || Cols() <= 1) return false;
+	m_colW.erase(m_colW.begin() + at);
+	for (size_t i = 0; i < m_merges.size();) {
+		Span& s = m_merges[i];
+		if (at < s.c) --s.c;
+		else if (at < s.c + s.cs) --s.cs;
+		if (s.rs <= 1 && s.cs <= 1) m_merges.erase(m_merges.begin() + i); else ++i;
+	}
+	if (m_actC >= Cols()) m_actC = Cols() - 1;
+	Invalidate();
+	return true;
 }
 
 bool FrameNode::ApplyLayout()
 {
 	if (m_layoutMode == FrameLayoutMode::None) return false;
 	bool changed = false;
-	float cursor = m_padding;
+
+	// 1) 가시적 자식들의 바운딩 박스 수집
+	struct ChildLayoutInfo {
+		Node* node = nullptr;
+		Rect2 bounds{};
+		float mainSize = 0.0f;
+		float crossSize = 0.0f;
+	};
+	std::vector<ChildLayoutInfo> visibleChildren;
+	float totalChildrenMain = 0.0f;
+	float maxCross = 0.0f;
+
+	const bool isRow = (m_layoutMode == FrameLayoutMode::Row);
+
+	// 0) Column 모드 등에서 TextNode 가 영역 텍스트인 경우, 프레임 가용 폭에 맞춰 자동 측정/줄바꿈 갱신
+	for (const auto& c : m_children) {
+		if (!c || !c->IsVisible()) continue;
+		if (auto* tn = dynamic_cast<TextNode*>(c.get())) {
+			if (!isRow && tn->IsAreaText()) {
+				const float availW = (std::max)(20.0f, m_w - 2.0f * m_padding);
+				if (std::fabs(tn->GetBoxWidth() - availW) > 1.0f) {
+					tn->SetBoxWidth(availW);
+					changed = true;
+				}
+			}
+			PathOp::MeasureText(*tn);
+		}
+	}
+
 	for (const auto& c : m_children) {
 		if (!c || !c->IsVisible()) continue;
 		Rect2 lb;
 		if (!c->GetLocalBounds(lb)) continue;
-		const Rect2 b = c->GetTransform().TransformRect(lb);   // 프레임 좌표계에서의 자식 경계
-		float dx = 0.0f, dy = 0.0f;
-		if (m_layoutMode == FrameLayoutMode::Row) {
-			dx = cursor - b.left;
-			dy = m_padding - b.top;
-			cursor += b.Width() + m_gap;
-		} else {
-			dx = m_padding - b.left;
-			dy = cursor - b.top;
-			cursor += b.Height() + m_gap;
-		}
-		if (std::fabs(dx) > 1e-4f || std::fabs(dy) > 1e-4f) {
-			c->SetTransform(c->GetTransform() * Matrix2D::Translation(dx, dy));
+		const Rect2 b = c->GetTransform().TransformRect(lb);
+		ChildLayoutInfo info;
+		info.node = c.get();
+		info.bounds = b;
+		info.mainSize = isRow ? b.Width() : b.Height();
+		info.crossSize = isRow ? b.Height() : b.Width();
+		totalChildrenMain += info.mainSize;
+		if (info.crossSize > maxCross) maxCross = info.crossSize;
+		visibleChildren.push_back(info);
+	}
+
+	// 2) Hug 크기 모드 계산: 내용물에 맞춰 프레임 크기 자동 변경
+	const int count = static_cast<int>(visibleChildren.size());
+	const float contentMain = (count > 0) ? (totalChildrenMain + (count - 1) * m_gap) : 0.0f;
+	const float hugW = isRow ? (contentMain + 2.0f * m_padding) : (maxCross + 2.0f * m_padding);
+	const float hugH = isRow ? (maxCross + 2.0f * m_padding) : (contentMain + 2.0f * m_padding);
+
+	if (m_sizingW == FrameSizingMode::Hug) {
+		const float newW = (std::max)(1.0f, hugW);
+		if (std::fabs(m_w - newW) > 1e-3f) {
+			m_w = newW;
 			changed = true;
 		}
 	}
+	if (m_sizingH == FrameSizingMode::Hug) {
+		const float newH = (std::max)(1.0f, hugH);
+		if (std::fabs(m_h - newH) > 1e-3f) {
+			m_h = newH;
+			changed = true;
+		}
+	}
+
+	if (count == 0) return changed;
+
+	// 3) 주축(Main Axis) 가용 공간 및 간격 계산
+	const float frameMain = isRow ? m_w : m_h;
+	const float availableMain = frameMain - 2.0f * m_padding;
+	const float remainingMain = availableMain - totalChildrenMain;
+
+	float startMain = m_padding;
+	float actualGap = m_gap;
+
+	switch (m_mainAlign) {
+	case LayoutMainAlign::Start:
+		startMain = m_padding;
+		actualGap = m_gap;
+		break;
+	case LayoutMainAlign::Center:
+		if (count > 0) {
+			const float totalSpan = totalChildrenMain + (count - 1) * m_gap;
+			startMain = m_padding + (std::max)(0.0f, (availableMain - totalSpan) * 0.5f);
+		}
+		actualGap = m_gap;
+		break;
+	case LayoutMainAlign::End:
+		if (count > 0) {
+			const float totalSpan = totalChildrenMain + (count - 1) * m_gap;
+			startMain = m_padding + (std::max)(0.0f, availableMain - totalSpan);
+		}
+		actualGap = m_gap;
+		break;
+	case LayoutMainAlign::SpaceBetween:
+		startMain = m_padding;
+		if (count > 1) {
+			actualGap = (std::max)(0.0f, remainingMain / static_cast<float>(count - 1));
+		} else {
+			actualGap = m_gap;
+		}
+		break;
+	}
+
+	// 4) 각 자식의 배치 위치 계산 및 변환 행렬 적용
+	const float frameCross = isRow ? m_h : m_w;
+	const float availableCross = frameCross - 2.0f * m_padding;
+
+	float cursor = startMain;
+	for (const auto& item : visibleChildren) {
+		// 교차축(Cross Axis) 정렬 기준 위치
+		float crossPos = m_padding;
+		switch (m_crossAlign) {
+		case LayoutCrossAlign::Start:
+			crossPos = m_padding;
+			break;
+		case LayoutCrossAlign::Center:
+			crossPos = m_padding + (std::max)(0.0f, (availableCross - item.crossSize) * 0.5f);
+			break;
+		case LayoutCrossAlign::End:
+			crossPos = m_padding + (std::max)(0.0f, availableCross - item.crossSize);
+			break;
+		}
+
+		float targetX = 0.0f, targetY = 0.0f;
+		if (isRow) {
+			targetX = cursor;
+			targetY = crossPos;
+		} else {
+			targetX = crossPos;
+			targetY = cursor;
+		}
+
+		const float dx = targetX - item.bounds.left;
+		const float dy = targetY - item.bounds.top;
+		if (std::fabs(dx) > 1e-4f || std::fabs(dy) > 1e-4f) {
+			item.node->SetTransform(item.node->GetTransform() * Matrix2D::Translation(dx, dy));
+			changed = true;
+		}
+
+		cursor += item.mainSize + actualGap;
+	}
+
 	return changed;
 }
 
@@ -589,6 +948,26 @@ void Document::SetActiveLayer(int index)
 	if (index >= 0 && index < static_cast<int>(m_layers.size())) m_activeLayer = index;
 }
 
+std::vector<FrameNode*> Document::GetArtboards() const
+{
+	std::vector<FrameNode*> artboards;
+	for (const auto& layer : m_layers)
+	{
+		if (!layer) continue;
+		for (const auto& child : layer->GetChildren())
+		{
+			if (child && child->Kind() == NodeKind::Group)
+			{
+				if (auto* frame = dynamic_cast<FrameNode*>(child.get()))
+				{
+					artboards.push_back(frame);
+				}
+			}
+		}
+	}
+	return artboards;
+}
+
 Node* Document::AddShape(std::unique_ptr<Node> node)
 {
 	LayerNode* layer = GetActiveLayer();
@@ -662,6 +1041,11 @@ std::wstring Document::GenerateNameWithPrefix(const std::wstring& prefix) const
 std::wstring Document::GenerateGroupName() const
 {
 	return GenerateNameWithPrefix(L"group");
+}
+
+std::wstring Document::GenerateFrameName() const
+{
+	return GenerateNameWithPrefix(L"Frame ");
 }
 
 std::wstring Document::GenerateLayerName() const
@@ -848,6 +1232,22 @@ bool Document::CanGroupSelection() const
 	return count >= 2;
 }
 
+// 프레임으로 감쌀 수 있는 유효 대상(레이어/부모 없는 노드 제외)이 1개 이상인지
+bool Document::CanWrapInFrame() const
+{
+	std::vector<const Node*> sel;
+	for (const Node* n : m_selection)
+		if (n && n->GetParent() && n->Kind() != NodeKind::Layer) sel.push_back(n);
+	int count = 0;
+	for (const Node* n : sel) {
+		bool ancestorSelected = false;
+		for (const GroupNode* p = n->GetParent(); p && !ancestorSelected; p = p->GetParent())
+			if (std::find(sel.begin(), sel.end(), static_cast<const Node*>(p)) != sel.end()) ancestorSelected = true;
+		if (!ancestorSelected) ++count;
+	}
+	return count >= 1;
+}
+
 // 순서를 바꿀 수 있는 선택(레이어 제외, 부모가 있는 노드)이 하나라도 있는지
 bool Document::CanArrangeSelection() const
 {
@@ -1006,6 +1406,103 @@ GroupNode* Document::GroupSelection()
 	const bool invertible = parentInv.Invert();
 	for (Item& it : items) {
 		if (invertible) it.node->SetTransform(it.world * parentInv);   // local = world * inverse(부모 월드)
+		raw->AddChild(std::move(it.node));
+	}
+
+	m_selection = { raw };
+	return raw;
+}
+
+FrameNode* Document::WrapSelectionInFrame()
+{
+	if (!CanWrapInFrame()) return nullptr;
+
+	// 1) 대상 정리
+	std::vector<Node*> sel;
+	for (Node* n : m_selection)
+		if (n && n->GetParent() && n->Kind() != NodeKind::Layer) sel.push_back(n);
+	auto hasSelectedAncestor = [&](Node* n) {
+		for (GroupNode* p = n->GetParent(); p; p = p->GetParent())
+			if (std::find(sel.begin(), sel.end(), p) != sel.end()) return true;
+		return false;
+	};
+	sel.erase(std::remove_if(sel.begin(), sel.end(), hasSelectedAncestor), sel.end());
+	if (sel.empty()) return nullptr;
+
+	// 2) 선택 노드들의 전체 월드 바운딩 박스 계산
+	Rect2 unionBounds{};
+	bool hasBounds = false;
+	for (Node* n : sel) {
+		Rect2 b{};
+		if (GetWorldBounds(*n, b)) {
+			if (!hasBounds) { unionBounds = b; hasBounds = true; }
+			else {
+				unionBounds.left   = (std::min)(unionBounds.left, b.left);
+				unionBounds.top    = (std::min)(unionBounds.top, b.top);
+				unionBounds.right  = (std::max)(unionBounds.right, b.right);
+				unionBounds.bottom = (std::max)(unionBounds.bottom, b.bottom);
+			}
+		}
+	}
+	if (!hasBounds) return nullptr;
+
+	const float frameW = (std::max)(1.0f, unionBounds.right - unionBounds.left);
+	const float frameH = (std::max)(1.0f, unionBounds.bottom - unionBounds.top);
+
+	// 3) 문서 순서 정렬
+	auto orderKey = [&](Node* n) {
+		std::vector<int> key;
+		Node* c = n;
+		while (c->GetParent()) { key.push_back(c->GetParent()->IndexOf(c)); c = c->GetParent(); }
+		int layerIdx = 0;
+		for (size_t i = 0; i < m_layers.size(); ++i) if (m_layers[i].get() == c) layerIdx = static_cast<int>(i);
+		key.push_back(layerIdx);
+		std::reverse(key.begin(), key.end());
+		return key;
+	};
+	std::stable_sort(sel.begin(), sel.end(), [&](Node* a, Node* b) { return orderKey(a) < orderKey(b); });
+
+	// 4) 새 프레임 생성 위치 (최상단 노드가 있던 부모/인덱스)
+	Node* top = sel.back();
+	GroupNode* parent = top->GetParent();
+	int insertAt = parent->IndexOf(top);
+	for (Node* n : sel)
+		if (n != top && n->GetParent() == parent && parent->IndexOf(n) < parent->IndexOf(top)) --insertAt;
+
+	// 5) 자식 노드 분리
+	struct Item { std::unique_ptr<Node> node; Matrix2D world; };
+	std::vector<Item> items;
+	for (Node* n : sel) {
+		Matrix2D w = n->GetWorldTransform();
+		items.push_back({ n->GetParent()->RemoveChild(n), w });
+	}
+
+	// 6) FrameNode 생성 (바운딩 박스의 좌상단 위치로 변환, 크기 설정)
+	auto fn = std::make_unique<FrameNode>();
+	fn->m_id = IssueId();
+	fn->SetName(GenerateFrameName());
+	fn->SetFrameSize(frameW, frameH);
+
+	// 프레임의 월드 변환 = 평행 이동(unionBounds.left, unionBounds.top)
+	// parent 내부 로컬 좌표로 변환: frameLocal = frameWorld * inverse(parentWorld)
+	Matrix2D parentWorld = parent->GetWorldTransform();
+	Matrix2D parentInv = parentWorld;
+	Matrix2D frameWorld = Matrix2D::Translation(unionBounds.left, unionBounds.top);
+	if (parentInv.Invert()) {
+		fn->SetTransform(frameWorld * parentInv);
+	} else {
+		fn->SetTransform(frameWorld);
+	}
+
+	FrameNode* raw = fn.get();
+	parent->AddChild(std::move(fn), insertAt);
+
+	// 7) 자식들을 새 프레임 내부로 삽입 (프레임 원점 (unionBounds.left, unionBounds.top) 기준 로컬 좌표로 보정)
+	Matrix2D newFrameWorld = raw->GetWorldTransform();
+	Matrix2D newFrameInv = newFrameWorld;
+	const bool invertible = newFrameInv.Invert();
+	for (Item& it : items) {
+		if (invertible) it.node->SetTransform(it.world * newFrameInv);
 		raw->AddChild(std::move(it.node));
 	}
 
@@ -2304,6 +2801,8 @@ void D2DRenderer::DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Vi
 
 void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const Viewport& view)
 {
+	// 테이블이면 격자선을 먼저 그린다 (칸 내용은 아래 자식 루프에서 위에 그려짐)
+	if (auto* tb = dynamic_cast<TableNode*>(&node)) DrawTableGrid(*tb, worldXf, view);
 	const bool isClipMask = node.IsClippingMask();
 	Node* maskNode = isClipMask ? node.GetMaskNode() : nullptr;
 
@@ -2374,6 +2873,58 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 
 	if (pushMaskLayer) {
 		m_rt->PopLayer();
+	}
+
+	// 최상위 프레임(Artboard): 캔버스 위에 Figma 스타일로 상단 이름 라벨 표시 (예: "Frame 1  1920 × 1080")
+	if (frame && m_rt && m_brush && (!node.GetParent() || node.GetParent()->Kind() == NodeKind::Layer)) {
+		static ComPtr<IDWriteFactory> s_dwLabel;
+		static ComPtr<IDWriteTextFormat> s_fmtLabel;
+		if (!s_dwLabel) {
+			DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(s_dwLabel.GetAddressOf()));
+			if (s_dwLabel) {
+				s_dwLabel->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
+					DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 11.0f, L"ko-kr", &s_fmtLabel);
+				if (s_fmtLabel) {
+					s_fmtLabel->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+					s_fmtLabel->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+				}
+			}
+		}
+
+		if (s_fmtLabel) {
+			const D2D1_MATRIX_3X2_F fm = (worldXf * view.ToMatrix()).ToD2D();
+			// 화면상 프레임의 좌상단 위치 계산 (로컬 (0, 0) 변환)
+			const D2D1_POINT_2F screenTL = D2D1::Point2F(fm.dx, fm.dy);
+
+			// 변환 행렬(스케일)이 반영된 실제 월드 가로/세로 크기 계산
+			const Matrix2D& xf = frame->GetTransform();
+			const float scaleX = std::sqrt(xf.m11 * xf.m11 + xf.m12 * xf.m12);
+			const float scaleY = std::sqrt(xf.m21 * xf.m21 + xf.m22 * xf.m22);
+			const float effectiveW = frame->GetWidth() * (scaleX > 0.0001f ? scaleX : 1.0f);
+			const float effectiveH = frame->GetHeight() * (scaleY > 0.0001f ? scaleY : 1.0f);
+
+			std::wstring labelText = frame->GetName();
+			if (labelText.empty()) labelText = L"Artboard";
+			wchar_t dimBuf[64];
+			swprintf_s(dimBuf, L"  %d × %d", static_cast<int>(std::round(effectiveW)), static_cast<int>(std::round(effectiveH)));
+			labelText += dimBuf;
+
+			const float labelH = 18.0f;
+			const float labelW = static_cast<float>(labelText.length()) * 7.5f + 16.0f;
+			const D2D1_RECT_F labelBg = D2D1::RectF(screenTL.x, screenTL.y - labelH - 3.0f, screenTL.x + labelW, screenTL.y - 3.0f);
+
+			m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
+			// 반투명 다크 톤 라벨 배경
+			m_brush->SetColor(D2D1::ColorF(0.16f, 0.17f, 0.20f, 0.88f));
+			m_rt->FillRoundedRectangle(D2D1::RoundedRect(labelBg, 3.0f, 3.0f), m_brush.Get());
+			// 미세 테두리
+			m_brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.44f, 0.6f));
+			m_rt->DrawRoundedRectangle(D2D1::RoundedRect(labelBg, 3.0f, 3.0f), m_brush.Get(), 0.8f);
+			// 텍스트 라벨
+			m_brush->SetColor(D2D1::ColorF(0.88f, 0.90f, 0.94f, 1.0f));
+			const D2D1_RECT_F textRect = D2D1::RectF(labelBg.left + 8.0f, labelBg.top, labelBg.right - 4.0f, labelBg.bottom);
+			m_rt->DrawText(labelText.c_str(), static_cast<UINT32>(labelText.length()), s_fmtLabel.Get(), textRect, m_brush.Get());
+		}
 	}
 }
 

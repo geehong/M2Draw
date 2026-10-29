@@ -230,11 +230,15 @@
     <ClInclude Include="SvgReader.h" />
     <ClInclude Include="UndoManager.h" />
     <ClInclude Include="LayerWnd.h" />
+    <ClInclude Include="HtmlExporter.h" />
+    <ClInclude Include="HtmlComponents\TableComponent.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ChildFrm.cpp" />
     <ClCompile Include="D2DColorWheel.cpp" />
     <ClCompile Include="D2DGraphicEngine.cpp" />
+    <ClCompile Include="D2DTableRender.cpp" />
+    <ClCompile Include="HtmlComponents\TableComponent.cpp" />
     <ClCompile Include="D2DPropertyView.cpp" />
     <ClCompile Include="D2DLayer.cpp" />
     <ClCompile Include="LayerWnd.cpp" />
@@ -257,6 +261,7 @@
     <ClCompile Include="M2DrawControl.cpp" />
     <ClCompile Include="SvgWriter.cpp" />
     <ClCompile Include="SvgReader.cpp" />
+    <ClCompile Include="HtmlExporter.cpp" />
     <ClCompile Include="UndoManager.cpp" />
     <ClCompile Include="ToolManager.cpp" />
     <ClCompile Include="ToolBoxPane.cpp" />

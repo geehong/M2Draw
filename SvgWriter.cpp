@@ -174,6 +174,11 @@ std::string BuildCommonState(const Node& n, bool includeVisibleLocked, bool meta
 	if (n.GetBlendMode() != LayerBlendMode::Normal) {
 		s += " m2:blend=\"" + std::to_string(static_cast<int>(n.GetBlendMode())) + "\"";
 	}
+	if (!n.GetHtmlTag().empty())     s += " m2:htmlTag=\"" + EscapeXml(n.GetHtmlTag()) + "\"";
+	if (!n.GetHref().empty())        s += " m2:href=\"" + EscapeXml(n.GetHref()) + "\"";
+	if (!n.GetAlt().empty())         s += " m2:alt=\"" + EscapeXml(n.GetAlt()) + "\"";
+	if (!n.GetAriaLabel().empty())   s += " m2:ariaLabel=\"" + EscapeXml(n.GetAriaLabel()) + "\"";
+	if (!n.GetCustomClass().empty()) s += " m2:customClass=\"" + EscapeXml(n.GetCustomClass()) + "\"";
 	return s;
 }
 
@@ -448,6 +453,26 @@ void SvgWriter::Visit(GroupNode& node) {
 	m_output += BuildCommonState(node, true, Meta());
 	m_output += BuildCssStyle(node);
 
+	// 테이블(4.5.7.1): 칸 크기와 테두리 속성 저장 (복원용). 칸 내용은 자식 노드로 저장됨
+	if (const auto* table = dynamic_cast<const TableNode*>(&node)) {
+		if (Meta()) {
+			std::string cols, rows;
+			for (size_t i = 0; i < table->ColWidths().size(); ++i) cols += std::string(i ? "," : "") + FormatFloat(table->ColWidths()[i]);
+			for (size_t i = 0; i < table->RowHeights().size(); ++i) rows += std::string(i ? "," : "") + FormatFloat(table->RowHeights()[i]);
+			m_output += " m2:component=\"table\" m2:cols=\"" + cols + "\" m2:rows=\"" + rows + "\" m2:border=\"" + FormatFloat(table->GetBorderWidth()) +
+				"\" m2:pad=\"" + FormatFloat(table->GetCellPadding()) + "\" m2:bcolor=\"" + ColorToHex(table->GetBorderColor()) + "\"";
+				m_output += " m2:header=\"" + std::to_string(table->GetHeaderRows()) + "\" m2:calign=\"" + std::to_string(table->GetCellAlign()) + "\"";
+				if (!table->Merges().empty()) {
+					std::string mg;
+					for (size_t i = 0; i < table->Merges().size(); ++i) {
+						const auto& sp = table->Merges()[i];
+						mg += std::string(i ? ";" : "") + std::to_string(sp.r) + "," + std::to_string(sp.c) + "," + std::to_string(sp.rs) + "," + std::to_string(sp.cs);
+					}
+					m_output += " m2:merges=\"" + mg + "\"";
+				}
+		}
+	}
+
 	const FrameNode* frame = dynamic_cast<const FrameNode*>(&node);
 	if (frame) {
 		if (Meta()) {
@@ -456,6 +481,12 @@ void SvgWriter::Visit(GroupNode& node) {
 			if (frame->GetLayoutMode() != FrameLayoutMode::None) {
 				m_output += " m2:layout=\"" + std::string(frame->GetLayoutMode() == FrameLayoutMode::Row ? "row" : "column") + "\" m2:gap=\"" +
 					FormatFloat(frame->GetGap()) + "\" m2:pad=\"" + FormatFloat(frame->GetPadding()) + "\"";
+				static const char* kMainAlignStr[] = { "start", "center", "end", "space-between" };
+				static const char* kCrossAlignStr[] = { "start", "center", "end" };
+				m_output += " m2:mainAlign=\"" + std::string(kMainAlignStr[static_cast<int>(frame->GetMainAlign())]) + "\"";
+				m_output += " m2:crossAlign=\"" + std::string(kCrossAlignStr[static_cast<int>(frame->GetCrossAlign())]) + "\"";
+				if (frame->GetSizingW() == FrameSizingMode::Hug) m_output += " m2:sizingW=\"hug\"";
+				if (frame->GetSizingH() == FrameSizingMode::Hug) m_output += " m2:sizingH=\"hug\"";
 			}
 		}
 		if (frame->IsClip()) m_output += " clip-path=\"url(#frame_clip_" + std::to_string(node.GetId()) + ")\"";
@@ -480,6 +511,29 @@ void SvgWriter::Visit(GroupNode& node) {
 	m_output += ">\n";
 
 	++m_indent;
+	if (const auto* table = dynamic_cast<const TableNode*>(&node)) {
+		// 격자선은 표준 path 로 출력 (다른 뷰어에서도 보이게). M2 저장본은 m2:tableGrid 로 표시해 읽을 때 무시
+		Rect2 lb{ 0.0f, 0.0f, 0.0f, 0.0f };   // 표 크기 = 열 너비 합 x 행 높이 합 (const 에서 계산)
+		for (float v : table->ColWidths()) lb.right += v;
+		for (float v : table->RowHeights()) lb.bottom += v;
+		{
+			std::string d = "M " + FormatFloat(lb.left) + " " + FormatFloat(lb.top) + " H " + FormatFloat(lb.right) + " V " + FormatFloat(lb.bottom) +
+				" H " + FormatFloat(lb.left) + " Z";
+			std::vector<TableNode::Seg> segs;   // 병합 칸 안쪽 선은 제외된 안쪽 격자선
+			table->GridSegments(segs);
+			for (const auto& sg : segs)
+				d += " M " + FormatFloat(sg.x0) + " " + FormatFloat(sg.y0) + (sg.x0 == sg.x1 ? " V " + FormatFloat(sg.y1) : " H " + FormatFloat(sg.x1));
+			if (table->GetHeaderRows() > 0) {
+				const Rect2 hl = table->CellRect((std::min)(table->GetHeaderRows(), table->Rows()) - 1, 0);
+				AppendIndent();
+				m_output += std::string("<path") + (Meta() ? " m2:tableGrid=\"true\"" : "") + " d=\"M 0 0 H " + FormatFloat(lb.right) + " V " + FormatFloat(hl.bottom) +
+					" H 0 Z\" fill=\"#eef0f5\" stroke=\"none\" />\n";
+			}
+			AppendIndent();
+			m_output += std::string("<path") + (Meta() ? " m2:tableGrid=\"true\"" : "") + " d=\"" + d + "\" fill=\"none\" stroke=\"" +
+				ColorToHex(table->GetBorderColor()) + "\" stroke-width=\"" + FormatFloat(table->GetBorderWidth()) + "\" />\n";
+		}
+	}
 	if (frame) {
 		// 표준 뷰어에서도 보이도록: 클립 영역 + 배경 사각형을 그룹 안 첫 요소로 출력 (읽을 때 m2:frameBg 로 프레임 스타일 복원)
 		const std::string geom = " x=\"0\" y=\"0\" width=\"" + FormatFloat(frame->GetWidth()) + "\" height=\"" + FormatFloat(frame->GetHeight()) + "\"" +

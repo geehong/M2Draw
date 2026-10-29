@@ -7,7 +7,7 @@
 // 그룹/순서/불리언 등은 도구가 아니라 동작: 플라이아웃 그룹의 항목으로 ToolType::Action* 를 사용하고, 선택하면 명령을 실행한다
 static bool IsActionType(ToolType t)
 {
-	return t == ToolType::ActionGroup || t == ToolType::ActionUngroup || t == ToolType::ActionToFront ||
+	return t == ToolType::ActionGroup || t == ToolType::ActionUngroup || t == ToolType::ActionWrapFrame || t == ToolType::ActionToFront ||
 	       t == ToolType::ActionForward || t == ToolType::ActionBackward || t == ToolType::ActionToBack ||
 	       t == ToolType::ActionBooleanUnion || t == ToolType::ActionBooleanSubtract ||
 	       t == ToolType::ActionBooleanIntersect || t == ToolType::ActionBooleanExclude ||
@@ -20,6 +20,7 @@ static UINT CommandOfType(ToolType t)
 	{
 	case ToolType::ActionGroup:           return ID_OBJECT_GROUP;
 	case ToolType::ActionUngroup:         return ID_OBJECT_UNGROUP;
+	case ToolType::ActionWrapFrame:       return ID_OBJECT_WRAP_FRAME;
 	case ToolType::ActionToFront:         return ID_OBJECT_FRONT;
 	case ToolType::ActionForward:         return ID_OBJECT_FORWARD;
 	case ToolType::ActionBackward:        return ID_OBJECT_BACKWARD;
@@ -77,6 +78,7 @@ CToolBoxPane::CToolBoxPane() noexcept
 	m_buttons = {
 		{ ToolType::Select,      L"선택 (V)",        L'V', CRect() },
 		{ ToolType::Pan,         L"손도구 (H)",      L'H', CRect() },
+		{ ToolType::Frame,       L"프레임 (F)",      L'F', CRect() },
 		{ ToolType::Pen,         L"펜도구 (P)",      L'P', CRect() },
 		{ ToolType::Line,        L"직선 (L)",        L'L', CRect() },
 		{ ToolType::Rect,        L"사각형 (M)",      L'M', CRect() },
@@ -101,12 +103,10 @@ CToolBoxPane::CToolBoxPane() noexcept
 	{
 		if (btn.type == ToolType::Rect)
 		{
-			btn.subTools = { ToolType::Rect, ToolType::Triangle, ToolType::Frame };
+			btn.subTools = { ToolType::Rect, ToolType::Triangle };
 			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("RectGroupTool"), static_cast<int>(ToolType::Rect));
 			if (saved == static_cast<int>(ToolType::Triangle))
 				btn.type = ToolType::Triangle;
-			else if (saved == static_cast<int>(ToolType::Frame))
-				btn.type = ToolType::Frame;
 		}
 		else if (btn.type == ToolType::Polygon)
 		{
@@ -132,11 +132,13 @@ CToolBoxPane::CToolBoxPane() noexcept
 		}
 		else if (btn.type == ToolType::ActionGroup)
 		{
-			// 그룹 동작 그룹: 그룹화 / 그룹 해제 (마지막에 쓴 동작이 대표)
-			btn.subTools = { ToolType::ActionGroup, ToolType::ActionUngroup };
+			// 그룹 동작 그룹: 그룹화 / 그룹 해제 / 프레임으로 감싸기 (마지막에 쓴 동작이 대표)
+			btn.subTools = { ToolType::ActionGroup, ToolType::ActionUngroup, ToolType::ActionWrapFrame };
 			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("GroupActionTool"), static_cast<int>(ToolType::ActionGroup));
 			if (saved == static_cast<int>(ToolType::ActionUngroup))
 				btn.type = ToolType::ActionUngroup;
+			else if (saved == static_cast<int>(ToolType::ActionWrapFrame))
+				btn.type = ToolType::ActionWrapFrame;
 		}
 		else if (btn.type == ToolType::ActionToFront)
 		{
@@ -1125,6 +1127,7 @@ UINT CToolBoxPane::ComputeEnabledMask() const
 		if (pDoc->CanBoolean())        mask |= 8;
 		if (pDoc->CanMakeClipMask())    mask |= 16;
 		if (pDoc->CanReleaseClipMask()) mask |= 32;
+		if (pDoc->CanWrapInFrame())     mask |= 64;
 	}
 	return mask;
 }
@@ -1133,6 +1136,7 @@ bool CToolBoxPane::IsCommandEnabled(UINT commandId) const
 {
 	if (commandId == ID_OBJECT_GROUP)        return (m_enabledMask & 1) != 0;
 	if (commandId == ID_OBJECT_UNGROUP)      return (m_enabledMask & 2) != 0;
+	if (commandId == ID_OBJECT_WRAP_FRAME)    return (m_enabledMask & 64) != 0;
 	if (IsArrangeCommand(commandId))         return (m_enabledMask & 4) != 0;
 	if (IsBooleanCommand(commandId))         return (m_enabledMask & 8) != 0;
 	if (commandId == ID_OBJECT_CLIP_MASK)    return (m_enabledMask & 16) != 0;
@@ -1258,21 +1262,31 @@ void CToolBoxPane::DrawActionIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 		return;
 	}
 
-	if (!group && !m_pDashStyle && m_pD2DFactory)
+	const bool isWrap = (commandId == ID_OBJECT_WRAP_FRAME);
+	if (!group && !isWrap && !m_pDashStyle && m_pD2DFactory)
 	{
 		m_pD2DFactory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
 			D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_DASH, 0.0f), nullptr, 0, &m_pDashStyle);
 	}
 
 	brush->SetColor(col);
-	const D2D1_RECT_F outer = D2D1::RectF(cx - 11.0f, cy - 10.0f, cx + 11.0f, cy + 10.0f);
-	rt->DrawRoundedRectangle(D2D1::RoundedRect(outer, 2.0f, 2.0f), brush, 1.3f, group ? nullptr : m_pDashStyle);
+	const D2D1_RECT_F outer = D2D1::RectF(cx - 10.0f, cy - 9.0f, cx + 10.0f, cy + 9.0f);
+	rt->DrawRoundedRectangle(D2D1::RoundedRect(outer, 1.5f, 1.5f), brush, 1.3f, (group || isWrap) ? nullptr : m_pDashStyle);
+
+	if (isWrap)
+	{
+		// 프레임 상징 해시마크
+		rt->DrawLine(D2D1::Point2F(cx - 13.0f, cy - 5.0f), D2D1::Point2F(cx - 10.0f, cy - 5.0f), brush, 1.3f);
+		rt->DrawLine(D2D1::Point2F(cx - 13.0f, cy + 5.0f), D2D1::Point2F(cx - 10.0f, cy + 5.0f), brush, 1.3f);
+		rt->DrawLine(D2D1::Point2F(cx - 5.0f, cy - 12.0f), D2D1::Point2F(cx - 5.0f, cy - 9.0f), brush, 1.3f);
+		rt->DrawLine(D2D1::Point2F(cx + 5.0f, cy - 12.0f), D2D1::Point2F(cx + 5.0f, cy - 9.0f), brush, 1.3f);
+	}
 
 	D2D1_RECT_F a, b;
-	if (group)
+	if (group || isWrap)
 	{
-		a = D2D1::RectF(cx - 8.0f, cy - 6.0f, cx + 0.5f, cy + 2.0f);
-		b = D2D1::RectF(cx - 1.5f, cy - 1.5f, cx + 7.0f, cy + 6.5f);
+		a = D2D1::RectF(cx - 7.0f, cy - 5.0f, cx + 0.5f, cy + 2.0f);
+		b = D2D1::RectF(cx - 1.5f, cy - 1.5f, cx + 6.0f, cy + 5.5f);
 	}
 	else
 	{
@@ -1364,6 +1378,7 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	case ToolType::ZoomOut:  return L"돋보기 축소 (X)";
 	case ToolType::ActionGroup:   return L"그룹 (Ctrl+G)";
 	case ToolType::ActionUngroup: return L"그룹 해제 (Ctrl+Shift+G)";
+	case ToolType::ActionWrapFrame: return L"프레임으로 감싸기 (Wrap in Frame)";
 	case ToolType::ActionToFront:  return L"맨 앞으로 (Ctrl+Shift+])";
 	case ToolType::ActionForward:  return L"앞으로 (Ctrl+])";
 	case ToolType::ActionBackward: return L"뒤로 (Ctrl+[)";
@@ -1512,6 +1527,15 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color, bool
 		dc.Rectangle(c.x - 9, c.y - 8, c.x + 10, c.y + 9);
 		dc.Rectangle(c.x - 6, c.y - 5, c.x + 2, c.y + 3);
 		dc.Rectangle(c.x - 1, c.y - 1, c.x + 7, c.y + 7);
+		break;
+	case ToolType::ActionWrapFrame: // 프레임으로 감싸기: 바깥 프레임 격자 해시마크 + 안쪽 두 사각형
+		dc.Rectangle(c.x - 7, c.y - 7, c.x + 8, c.y + 8);
+		dc.MoveTo(c.x - 10, c.y - 4); dc.LineTo(c.x - 7, c.y - 4);
+		dc.MoveTo(c.x - 10, c.y + 4); dc.LineTo(c.x - 7, c.y + 4);
+		dc.MoveTo(c.x - 4, c.y - 10); dc.LineTo(c.x - 4, c.y - 7);
+		dc.MoveTo(c.x + 4, c.y - 10); dc.LineTo(c.x + 4, c.y - 7);
+		dc.Rectangle(c.x - 4, c.y - 4, c.x + 1, c.y + 1);
+		dc.Rectangle(c.x, c.y, c.x + 5, c.y + 5);
 		break;
 	case ToolType::ActionToFront:
 	case ToolType::ActionForward:

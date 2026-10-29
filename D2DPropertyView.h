@@ -56,6 +56,8 @@ protected:
 	ge::Node* GetSelectedShape() const;   // m_selectedNodeId 를 문서에서 조회 (없으면 nullptr)
 	bool IsGroupSelected() const;
 	bool IsFrameSelected() const;         // 선택된 노드가 프레임(FrameNode)인지 여부
+	bool IsButtonSelected() const;        // 선택된 노드가 버튼 컴포넌트인지 여부
+	ge::TextNode* GetButtonTextNode() const; // 버튼 컴포넌트의 자식 텍스트 노드
 	bool IsTextSelected() const;
 	bool IsImageSelected() const;         // 이미지가 선택되면 Transform 위에 원본 크기/맞춤/비율/교체 UI 표시
 
@@ -124,6 +126,7 @@ protected:
 	std::shared_ptr<M2DrawCheckBox>     m_chkAspectLink;       // 비율 고정 🔗
 	std::shared_ptr<M2DrawButton>       m_btnGroup;            // 선택 오브젝트 그룹화 (Ctrl+G)
 	std::shared_ptr<M2DrawButton>       m_btnUngroup;          // 그룹 해제 (Ctrl+Shift+G)
+	std::shared_ptr<M2DrawButton>       m_btnWrapFrame;        // 프레임으로 감싸기 (Wrap in Frame)
 	std::shared_ptr<M2DrawButton>       m_btnTabFill;
 	std::shared_ptr<M2DrawButton>       m_btnTabStroke;
 	std::vector<std::shared_ptr<M2DrawButton>> m_btnFillModes; // 5 modes
@@ -150,6 +153,8 @@ protected:
 
 	// 텍스트 전용 (Transform 바로 위): 변경 즉시 노드에 반영
 	std::shared_ptr<M2DrawLabel>        m_lblText;
+	std::shared_ptr<M2DrawLabel>        m_lblButtonLabel;  // 버튼 라벨 문구 라벨
+	std::shared_ptr<M2DrawTextInput>    m_txtButtonLabel;  // 버튼 라벨 텍스트 입력창
 	std::shared_ptr<M2DrawComboBox>     m_cboFont;
 	std::shared_ptr<M2DrawNumericInput> m_spinFontSize;
 	std::shared_ptr<M2DrawComboBox>     m_cboTextAlign;
@@ -178,7 +183,26 @@ protected:
 	std::shared_ptr<M2DrawNumericInput> m_spinFrameGap;
 	std::shared_ptr<M2DrawLabel>        m_lblFramePadding;     // 안쪽 여백(Padding)
 	std::shared_ptr<M2DrawNumericInput> m_spinFramePadding;
+	std::shared_ptr<M2DrawLabel>        m_lblFrameAlign;       // "Alignment (Main | Cross)"
+	std::shared_ptr<M2DrawComboBox>     m_cboFrameMainAlign;   // Start, Center, End, Space-Between
+	std::shared_ptr<M2DrawComboBox>     m_cboFrameCrossAlign;  // Start, Center, End
+	std::shared_ptr<M2DrawLabel>        m_lblFrameSizing;      // "Sizing (W | H)"
+	std::shared_ptr<M2DrawComboBox>     m_cboFrameSizingW;     // Fixed, Hug
+	std::shared_ptr<M2DrawComboBox>     m_cboFrameSizingH;     // Fixed, Hug
 	void ApplyFrameProps(const std::function<void(ge::FrameNode&)>& fn);
+
+	// 테이블 전용 (Step 4.5.7.7) — 값 변경은 TableComponent 함수를 거친다
+	std::shared_ptr<M2DrawLabel>        m_lblTable;
+	std::shared_ptr<M2DrawNumericInput> m_spinTblRows;
+	std::shared_ptr<M2DrawNumericInput> m_spinTblCols;
+	std::shared_ptr<M2DrawNumericInput> m_spinTblPad;
+	std::shared_ptr<M2DrawNumericInput> m_spinTblBorder;
+	std::shared_ptr<M2DrawCheckBox>     m_chkTblHeader;
+	std::shared_ptr<M2DrawComboBox>     m_cboTblAlign;
+	std::shared_ptr<M2DrawButton>       m_btnTblAddRow, m_btnTblDelRow, m_btnTblAddCol, m_btnTblDelCol;
+	std::shared_ptr<M2DrawButton>       m_btnTblMergeR, m_btnTblMergeD, m_btnTblSplit;
+	void ApplyTableProps(const std::function<void(ge::TableNode&)>& fn, const wchar_t* undoName);
+	void SyncTableControls();
 	std::shared_ptr<M2DrawLabel>        m_lblStrokeWidth;      // "Stroke Width"
 	std::shared_ptr<M2DrawSlider>       m_sliderStrokeWidth;   // Stroke width bar
 	std::shared_ptr<M2DrawNumericInput> m_spinStrokeWidth;     // Stroke width number input

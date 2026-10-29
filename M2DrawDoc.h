@@ -52,6 +52,7 @@ public:
 	// --- 그룹화 / 그룹 해제 (Ctrl+G / Ctrl+Shift+G, 오브젝트 메뉴, 속성창 버튼 공용) ---
 	bool CanGroup() const   { return m_doc.CanGroupSelection(); }
 	bool CanUngroup() const { return m_doc.CanUngroupSelection(); }
+	bool CanWrapInFrame() const { return m_doc.CanWrapInFrame(); }
 	bool GroupSelectedObjects();
 	bool UngroupSelectedObjects();
 
@@ -79,6 +80,7 @@ public:
 	bool ConvertTextToPath();
 	afx_msg void OnFilePlaceImage();
 	afx_msg void OnFileExportSvg();   // 순수 SVG 내보내기 (옵션: 텍스트 윤곽선 변환)
+	afx_msg void OnFileExportHtml();  // 시맨틱 HTML/CSS 내보내기 (Step 4.5)
 	bool PlaceImageFile(const CString& path);          // 이미지 파일을 문서 중앙에 배치 (메뉴/드래그 앤 드롭 공용)
 	bool ReplaceSelectedImage();                       // 선택된 이미지의 내용을 다른 파일로 교체 (크기/위치/맞춤 유지)
 	bool CanConvertTextToPath() const { return m_doc.CanConvertTextToPath(); }
@@ -97,10 +99,13 @@ public:
 	afx_msg void OnUpdateEditUndo(CCmdUI* pCmdUI);
 	afx_msg void OnEditRedo();
 	afx_msg void OnUpdateEditRedo(CCmdUI* pCmdUI);
+	bool WrapSelectedInFrame();
 	afx_msg void OnObjectGroup();
 	afx_msg void OnUpdateObjectGroup(CCmdUI* pCmdUI);
 	afx_msg void OnObjectUngroup();
 	afx_msg void OnUpdateObjectUngroup(CCmdUI* pCmdUI);
+	afx_msg void OnObjectWrapFrame();
+	afx_msg void OnUpdateObjectWrapFrame(CCmdUI* pCmdUI);
 	afx_msg void OnTextToPath();
 	afx_msg void OnUpdateTextToPath(CCmdUI* pCmdUI);
 	afx_msg void OnObjectArrange(UINT nID);

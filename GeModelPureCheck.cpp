@@ -11,6 +11,8 @@
 #include "GeNodeVisitor.h"
 #include "SvgWriter.h"
 #include "SvgReader.h"
+#include "HtmlExporter.h"
+#include "HtmlComponents/TableComponent.h"
 #include "UndoManager.h"
 #include "GeModelPureCheck.h"
 
@@ -1426,16 +1428,232 @@ bool RunPureModelVerification(std::wstring* failure)
 		b->SetVisible(true);
 		fr->ApplyLayout();
 
+		// 정렬 및 Hug 크기 모드 검증
+		fr->SetLayoutMode(FrameLayoutMode::Row);
+		fr->SetPadding(10.0f);
+		fr->SetGap(10.0f);
+		fr->SetCrossAlign(LayoutCrossAlign::Center); // 높이 200인 프레임 안에서 세로 가운데 정렬
+		fr->ApplyLayout();
+		world(a, ba);
+		// a는 로컬 높이 180. 가용 높이 200 - 20 = 180, padding 10 + (180 - 180)/2 = 10
+		GE_CHECK(std::abs(ba.top - 10.0f) < 1e-3f, L"Row CrossAlign Center 세로 가운데 정렬 오차");
+
+		// Hug 크기 모드 검증: 자식 총합에 맞춰 프레임 크기가 자동 계산되어야 함
+		fr->SetSizingW(FrameSizingMode::Hug);
+		fr->SetSizingH(FrameSizingMode::Hug);
+		fr->ApplyLayout();
+		// visible 자식 3개(각 폭 90, 총 270) + gap 2개(20) + padding 2개(20) = 310
+		GE_CHECK(std::abs(fr->GetWidth() - 310.0f) < 1e-3f, L"Hug 모드 프레임 폭 자동 계산 실패");
+
 		// 설정 왕복 (Undo 스냅샷이 SVG 라서 레이아웃 설정이 사라지면 안 됨)
 		SvgWriter lw;
 		const std::string svg = lw.WriteString(d, SvgWriteOptions(SvgWriteMode::Snapshot));
-		GE_CHECK(svg.find("m2:layout=\"column\"") != std::string::npos, L"레이아웃 설정이 출력되지 않음");
+		GE_CHECK(svg.find("m2:layout=\"row\"") != std::string::npos, L"레이아웃 설정이 출력되지 않음");
+		GE_CHECK(svg.find("m2:crossAlign=\"center\"") != std::string::npos, L"crossAlign 이 출력되지 않음");
+		GE_CHECK(svg.find("m2:sizingW=\"hug\"") != std::string::npos, L"sizingW 가 출력되지 않음");
 		Document back;
 		GE_CHECK(reader.ReadFromString(svg, back), L"레이아웃 프레임 SVG 읽기 실패");
 		auto* f2 = dynamic_cast<FrameNode*>(back.GetLayers()[0]->GetChildren()[0].get());
-		GE_CHECK(f2 && f2->GetLayoutMode() == FrameLayoutMode::Column && f2->GetGap() == 10.0f && f2->GetPadding() == 5.0f, L"레이아웃 모드/gap/padding 왕복이 틀림");
+		GE_CHECK(f2 && f2->GetLayoutMode() == FrameLayoutMode::Row && f2->GetCrossAlign() == LayoutCrossAlign::Center && f2->GetSizingW() == FrameSizingMode::Hug, L"레이아웃 모드/정렬/sizing 왕복이 틀림");
 		auto clone = fr->Clone();
-		GE_CHECK(static_cast<FrameNode*>(clone.get())->GetLayoutMode() == FrameLayoutMode::Column, L"프레임 복제가 레이아웃 설정을 보존하지 못함");
+		GE_CHECK(static_cast<FrameNode*>(clone.get())->GetCrossAlign() == LayoutCrossAlign::Center, L"프레임 복제가 레이아웃 정렬을 보존하지 못함");
+	}
+
+	// 28. Frame 안의 텍스트 동작 (Word Wrap 및 Hug 높이 연동) 검증 (Step 4.4)
+	{
+		Document d;
+		d.AddLayer(L"Layer 1");
+		auto* layer = d.GetLayers()[0].get();
+
+		auto frameHolder = std::make_unique<FrameNode>();
+		frameHolder->SetFrameSize(200.0f, 100.0f);
+		frameHolder->SetLayoutMode(FrameLayoutMode::Column);
+		frameHolder->SetPadding(10.0f);
+		frameHolder->SetGap(10.0f);
+		frameHolder->SetSizingW(FrameSizingMode::Fixed);
+		frameHolder->SetSizingH(FrameSizingMode::Hug); // 텍스트 높이에 맞춤
+
+		auto textHolder = std::make_unique<TextNode>();
+		textHolder->SetText(L"Frame 안에 들어있는 긴 문장입니다. 자동 줄바꿈이 연동되어야 합니다.");
+		textHolder->SetBoxWidth(180.0f); // Area Text (Word Wrap)
+		auto* textNode = static_cast<TextNode*>(frameHolder->AddChild(std::move(textHolder)));
+
+		auto* fr = static_cast<FrameNode*>(layer->AddChild(std::move(frameHolder)));
+		d.AssignIds(*fr);
+
+		// 레이아웃 계산: 가용 폭 200 - 20 = 180px 에 맞춰 자동 줄바꿈 및 Hug 높이 계산
+		GE_CHECK(fr->ApplyLayout(), L"Frame Layout ApplyLayout 실패");
+		GE_CHECK(textNode->GetBoxWidth() == 180.0f, L"TextNode 폭이 프레임 가용 폭과 일치하지 않음");
+		GE_CHECK(fr->GetHeight() > 20.0f, L"Hug 모드 프레임 높이가 자식 텍스트 높이를 반영하지 못함");
+	}
+
+	// 29. HtmlExporter (시맨틱 HTML/CSS 내보내기) 검증 (Step 4.5)
+	{
+		Document d;
+		d.AddLayer(L"WebPage");
+		auto* layer = d.GetLayers()[0].get();
+
+		auto frameHolder = std::make_unique<FrameNode>();
+		frameHolder->SetName(L"Navbar");
+		frameHolder->SetHtmlTag("nav");
+		frameHolder->SetFrameSize(800.0f, 60.0f);
+		frameHolder->SetLayoutMode(FrameLayoutMode::Row);
+		frameHolder->SetMainAlign(LayoutMainAlign::SpaceBetween);
+		frameHolder->SetCrossAlign(LayoutCrossAlign::Center);
+		frameHolder->SetPadding(15.0f);
+		frameHolder->SetGap(20.0f);
+		frameHolder->GetStyleRef().fill.type = PaintType::Solid;
+		frameHolder->GetStyleRef().fill.color = Color(0.1f, 0.2f, 0.3f, 1.0f);
+
+		auto textHolder = std::make_unique<TextNode>();
+		textHolder->SetName(L"Logo");
+		textHolder->SetHtmlTag("h1");
+		textHolder->SetText(L"My Brand");
+		textHolder->SetHref("https://example.com");
+		frameHolder->AddChild(std::move(textHolder));
+
+		auto* fr = static_cast<FrameNode*>(layer->AddChild(std::move(frameHolder)));
+		d.AssignIds(*fr);
+
+		HtmlExporter exporter;
+		HtmlExportOptions opt;
+		opt.singleFile = true;
+		opt.extractCssClasses = true;
+		HtmlExportResult res = exporter.Export(d, opt);
+
+		// 검증 항목:
+		// 1) HTML 문서 규격 선언
+		GE_CHECK(res.html.find("<!DOCTYPE html>") != std::string::npos, L"HTML5 DOCTYPE 선언 누락");
+		// 2) 시맨틱 태그 매핑: <nav> 및 <h1>
+		GE_CHECK(res.html.find("<nav") != std::string::npos, L"<nav> 시맨틱 태그 출력 누락");
+		GE_CHECK(res.html.find("<h1") != std::string::npos, L"<h1> 시맨틱 태그 출력 누락");
+		// 3) 링크 속성 매핑: href
+		GE_CHECK(res.html.find("href=\"https://example.com\"") != std::string::npos, L"href 링크 속성 출력 누락");
+		// 4) CSS Flexbox 및 스타일 추출 확인
+		GE_CHECK(res.html.find("display: flex;") != std::string::npos, L"CSS display: flex 선언 누락");
+		GE_CHECK(res.html.find("flex-direction: row;") != std::string::npos, L"CSS flex-direction: row 선언 누락");
+		GE_CHECK(res.html.find("justify-content: space-between;") != std::string::npos, L"CSS justify-content 선언 누락");
+		GE_CHECK(res.html.find("align-items: center;") != std::string::npos, L"CSS align-items 선언 누락");
+	}
+
+	// ---- 28. 테이블 모델 (4.5.7.1): 격자/칸 위치/칸 찾기/복제/SVG 왕복 ---------------------------------
+	{
+		Document d;
+		auto tu = std::make_unique<TableNode>();
+		tu->SetGrid(3, 4, 50.0f, 20.0f);
+		tu->SetTransform(Matrix2D::Translation(10.0f, 10.0f));
+		TableNode* t0 = static_cast<TableNode*>(d.AddShape(std::move(tu)));
+		GE_CHECK(t0->Rows() == 3 && t0->Cols() == 4, L"격자 행/열 수가 틀림");
+		Rect2 tbox;
+		GE_CHECK(t0->GetLocalBounds(tbox) && tbox.right == 200.0f && tbox.bottom == 60.0f, L"표 경계가 격자 합과 다름");
+		const Rect2 cell12 = t0->CellRect(1, 2);
+		GE_CHECK(cell12.left == 100.0f && cell12.top == 20.0f && cell12.right == 150.0f && cell12.bottom == 40.0f, L"칸 좌표가 틀림");
+		int cr = -1, cc = -1;
+		GE_CHECK(t0->CellAt(Vec2{ 120.0f, 25.0f }, cr, cc) && cr == 1 && cc == 2, L"점으로 칸 찾기가 틀림");
+		GE_CHECK(!t0->CellAt(Vec2{ -1.0f, 0.0f }, cr, cc), L"표 밖의 점이 칸으로 판정됨");
+		t0->AddChild(MakePath(L"cell", 105.0f, 25.0f));
+		d.AssignIds(*t0);
+
+		auto cl = t0->Clone();
+		auto* tc = dynamic_cast<TableNode*>(cl.get());
+		GE_CHECK(tc && tc->Rows() == 3 && tc->Cols() == 4 && tc->GetChildren().size() == 1, L"표 복제가 격자/칸 내용을 보존하지 못함");
+
+		SvgWriter tw;
+		const std::string svg = tw.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(svg.find("m2:component=\"table\"") != std::string::npos, L"표 속성이 저장되지 않음");
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"표 SVG 읽기 실패");
+		auto* t1 = dynamic_cast<TableNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+		GE_CHECK(t1 && t1->Cols() == 4 && t1->Rows() == 3 && t1->ColWidths()[2] == 50.0f && t1->RowHeights()[1] == 20.0f, L"표 격자 왕복이 틀림");
+		GE_CHECK(t1->GetChildren().size() == 1, L"표 격자선 path 가 노드로 읽히면 안 됨 (칸 내용 1개만 있어야 함)");
+
+		const std::string clean = tw.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("m2:") == std::string::npos && clean.find("stroke-width") != std::string::npos, L"Clean 표 출력이 틀림");
+	}
+
+	// ---- 30. 테이블 컴포넌트 (4.5.7.2~4.5.7.9): 병합/격자선/행·열 편집/리사이즈/저장 왕복/HTML 내보내기 ----
+	{
+		Document d;
+		TableNode* t = static_cast<TableNode*>(d.AddShape(TableComponent::Create(3, 4, 200.0f, 60.0f)));
+		GE_CHECK(t->Rows() == 3 && t->Cols() == 4 && t->GetHeaderRows() == 1, L"TableComponent::Create 결과가 틀림");
+		auto mkText = [](const wchar_t* s, float x, float y) {
+			auto tn = std::make_unique<TextNode>();
+			tn->SetText(s);
+			tn->SetTransform(Matrix2D::Translation(x, y));
+			return tn;
+		};
+		t->AddChild(mkText(L"A", 5.0f, 5.0f));     // 칸 (0,0)
+		t->AddChild(mkText(L"B", 55.0f, 5.0f));    // 칸 (0,1)
+		t->AddChild(mkText(L"C", 5.0f, 25.0f));    // 칸 (1,0)
+		d.AssignIds(*t);
+
+		// 병합
+		GE_CHECK(TableComponent::MergeCells(*t, 0, 0, 0, 1), L"칸 병합 실패");
+		GE_CHECK(!TableComponent::MergeCells(*t, 0, 1, 1, 1), L"겹치는 병합이 허용됨");
+		int mr = -1, mc = -1;
+		GE_CHECK(t->CellAt(Vec2{ 60.0f, 5.0f }, mr, mc) && mr == 0 && mc == 0, L"병합 칸 안의 점이 앵커로 판정되지 않음");
+		GE_CHECK(t->SpanRect(0, 1).right == 100.0f && t->SpanRect(0, 0).left == 0.0f, L"병합 영역 사각형이 틀림");
+		GE_CHECK(TableComponent::CellTexts(*t, 0, 0).size() == 2, L"병합 칸이 덮인 칸의 글자를 포함하지 않음");
+
+		// 격자선: x=50 세로선은 0행(병합 내부)을 건너뛰고 1~2행 구간(20~60) 하나만 남아야 함
+		std::vector<TableNode::Seg> segs;
+		t->GridSegments(segs);
+		int v50 = 0; bool v50ok = false;
+		for (const auto& sg : segs)
+			if (sg.x0 == 50.0f && sg.x1 == 50.0f) { ++v50; v50ok = (sg.y0 == 20.0f && sg.y1 == 60.0f); }
+		GE_CHECK(v50 == 1 && v50ok, L"병합 칸 내부 세로선이 제거되지 않음");
+
+		// 행 삽입/삭제: 아래 칸 내용이 함께 이동하고 병합 정보가 유지됨
+		GE_CHECK(TableComponent::InsertRow(*t, 1) && t->Rows() == 4, L"행 삽입 실패");
+		GE_CHECK(t->GetChildren()[2]->GetTransform().dy == 45.0f, L"행 삽입 시 아래 칸 내용이 밀리지 않음");
+		GE_CHECK(t->SpanOf(0, 0).cs == 2, L"행 삽입이 병합 정보를 깨뜨림");
+		GE_CHECK(TableComponent::DeleteRow(*t, 1) && t->Rows() == 3 && t->GetChildren()[2]->GetTransform().dy == 25.0f, L"행 삭제 후 내용 위치가 복원되지 않음");
+
+		// 열 너비 리사이즈: 오른쪽 칸 내용 이동
+		GE_CHECK(TableComponent::ResizeCol(*t, 0, 80.0f), L"열 너비 변경 실패");
+		GE_CHECK(t->GetChildren()[1]->GetTransform().dx == 85.0f, L"열 너비 변경 시 오른쪽 칸 내용이 이동하지 않음");
+		GE_CHECK(TableComponent::ResizeCol(*t, 0, 50.0f), L"열 너비 되돌리기 실패");
+
+		// 열 삭제 시 그 열 안의 내용은 함께 삭제, 마지막 열은 지울 수 없음
+		GE_CHECK(TableComponent::SetGridSize(*t, 3, 3) && t->Cols() == 3, L"열 수 줄이기 실패");
+		GE_CHECK(TableComponent::SetGridSize(*t, 3, 4) && t->Cols() == 4, L"열 수 늘리기 실패");
+		GE_CHECK(!TableComponent::SetGridSize(*t, 1, 1) || (t->Rows() == 1 && t->Cols() == 1), L"행/열 최소 1 개 유지");
+		GE_CHECK(!TableComponent::DeleteRow(*t, 0) && !TableComponent::DeleteCol(*t, 0), L"마지막 행/열이 삭제됨");
+
+		// 저장/복원 왕복 (병합/머리글/정렬)
+		Document d2;
+		TableNode* t2 = static_cast<TableNode*>(d2.AddShape(TableComponent::Create(3, 4, 200.0f, 60.0f)));
+		t2->SetCellAlign(1);
+		TableComponent::MergeCells(*t2, 1, 1, 2, 2);
+		t2->AddChild(mkText(L"X", 55.0f, 25.0f));
+		d2.AssignIds(*t2);
+		SvgWriter tw;
+		const std::string svg = tw.WriteString(d2, SvgWriteOptions(SvgWriteMode::File));
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"병합 표 SVG 읽기 실패");
+		auto* t3 = dynamic_cast<TableNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+		GE_CHECK(t3 && t3->Merges().size() == 1 && t3->Merges()[0].rs == 2 && t3->Merges()[0].cs == 2, L"병합 정보 왕복 실패");
+		GE_CHECK(t3->GetHeaderRows() == 1 && t3->GetCellAlign() == 1, L"머리글/정렬 왕복 실패");
+		GE_CHECK(t3->GetChildren().size() == 1, L"머리글 배경 path 가 노드로 읽힘");
+
+		// HtmlExporter: <table> 출력
+		HtmlExporter ex;
+		HtmlExportOptions opt;
+		opt.singleFile = true;
+		d.GetLayers()[0]->Accept(ex);   // 방문 가능 여부 확인 (결과 무시)
+		Document d4;
+		TableNode* t4 = static_cast<TableNode*>(d4.AddShape(TableComponent::Create(3, 4, 200.0f, 60.0f)));
+		t4->AddChild(mkText(L"A", 5.0f, 5.0f));
+		t4->AddChild(mkText(L"B", 55.0f, 5.0f));
+		TableComponent::MergeCells(*t4, 0, 0, 0, 1);
+		d4.AssignIds(*t4);
+		const std::string html = ex.Export(d4, opt).html;
+		GE_CHECK(html.find("<table") != std::string::npos && html.find("<thead>") != std::string::npos && html.find("<tbody>") != std::string::npos, L"<table>/<thead>/<tbody> 출력 누락");
+		GE_CHECK(html.find("<th") != std::string::npos && html.find("colspan=\"2\"") != std::string::npos, L"<th colspan> 출력 누락");
+		GE_CHECK(html.find(">A<br>B</th>") != std::string::npos, L"병합 칸 내용 출력이 틀림");
+		opt.tableAsGrid = true;
+		const std::string gridHtml = ex.Export(d4, opt).html;
+		GE_CHECK(gridHtml.find("display: grid") != std::string::npos && gridHtml.find("grid-column: 1 / span 2") != std::string::npos, L"CSS Grid 출력 누락");
 	}
 
 #undef GE_CHECK

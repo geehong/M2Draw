@@ -8,6 +8,7 @@
 #endif
 
 #include "M2DrawDoc.h"
+#include "HtmlComponents/TableComponent.h"
 #include "M2DrawView.h"
 #include "MainFrm.h"
 
@@ -403,6 +404,74 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 					BeginTextInlineEdit(tn);
 					return;
 				}
+			}
+		}
+	}
+
+	// 0-table. 선택 도구: 선택된 테이블의 칸을 더블클릭하면 그 칸의 내용(텍스트)을 입력/편집
+	if (activeType == ToolType::Select && pDoc && pDoc->GetDoc().GetSelection().size() == 1)
+	{
+		if (auto* tb = dynamic_cast<ge::TableNode*>(pDoc->GetPrimarySelection()))
+		{
+			ge::Matrix2D inv = tb->GetWorldTransform();
+			const D2D1_POINT_2F w = ScreenToWorld(point);
+			int r = -1, c = -1;
+			if (inv.Invert() && tb->CellAt(inv.TransformPoint(ge::Vec2{ w.x, w.y }), r, c))
+			{
+					const ge::Rect2 cell = tb->SpanRect(r, c);   // merged cell: whole span
+					tb->SetActiveCell(r, c);
+					ge::TextNode* content = nullptr;
+					{
+						const auto texts = ge::TableComponent::CellTexts(*tb, r, c);
+						if (!texts.empty()) content = texts.back();
+					}
+
+				TextEditProps props;
+				if (content)
+				{
+					props.text = content->GetText();
+					props.family = content->GetFontFamily();
+					props.size = content->GetFontSize();
+					props.bold = content->IsBold();
+					props.italic = content->IsItalic();
+					props.align = static_cast<int>(content->GetAlign());
+				}
+				else
+				{
+					props.family = L"Segoe UI";
+					props.size = 16.0f;
+				}
+
+				if (EditTextPropsDialog(this, props))
+				{
+					if (content)
+					{
+						content->SetText(props.text);
+						content->SetFontFamily(props.family);
+						content->SetFontSize(props.size);
+						content->SetBold(props.bold);
+						content->SetItalic(props.italic);
+						content->SetAlign(static_cast<ge::TextAlign>((std::max)(0, (std::min)(2, props.align))));
+					}
+					else if (!props.text.empty())
+					{
+						auto tn = std::make_unique<ge::TextNode>();
+						tn->SetText(props.text);
+						tn->SetFontFamily(props.family);
+						tn->SetFontSize(props.size);
+						tn->SetBold(props.bold);
+						tn->SetItalic(props.italic);
+						tn->SetAlign(ge::TextAlign::Left);
+						tn->SetName(L"텍스트");
+						tn->SetTransform(ge::Matrix2D::Translation(cell.left + tb->GetCellPadding(), cell.top + tb->GetCellPadding()));
+						pDoc->GetDoc().AssignIds(*tn);
+						tb->AddChild(std::move(tn));
+					}
+					pDoc->CommitUndoPoint(L"테이블 칸 편집");
+					LogAppEvent(_T("[테이블] 칸 내용 편집"));
+					pDoc->UpdateAllViews(nullptr);
+				}
+				return;
 			}
 		}
 	}
@@ -1098,6 +1167,10 @@ void CM2DrawView::CommitTextInlineEdit()
 	{
 		pNode->SetText(newText);
 		ge::PathOp::MeasureText(*pNode);
+		if (auto* fr = dynamic_cast<ge::FrameNode*>(pNode->GetParent()))
+		{
+			fr->ApplyLayout();
+		}
 		if (pDoc)
 		{
 			pDoc->SetModifiedFlag(TRUE);

@@ -538,6 +538,171 @@ void TextTool::OnUp(const ToolEvent& e)
 	}
 }
 
+// ---------------- HTML 기본 컴포넌트 도구 ----------------
+ToolType ComponentTool::GetType() const
+{
+	switch (m_kind) {
+	case ComponentKind::Heading: return ToolType::ComponentHeading;
+	case ComponentKind::Button:  return ToolType::ComponentButton;
+	case ComponentKind::Divider: return ToolType::ComponentDivider;
+	default:                     return ToolType::ComponentSpacer;
+	}
+}
+
+const wchar_t* ComponentTool::GetName() const
+{
+	switch (m_kind) {
+	case ComponentKind::Heading: return L"헤딩 도구 (Heading)";
+	case ComponentKind::Button:  return L"버튼 도구 (Button)";
+	case ComponentKind::Divider: return L"구분선 도구 (Divider)";
+	default:                     return L"간격 도구 (Spacer)";
+	}
+}
+
+void ComponentTool::OnDown(const ToolEvent& e)
+{
+	m_drag = true;
+	m_startW = m_curW = e.worldPt;
+	m_startS = m_curS = e.screenPt;
+}
+
+void ComponentTool::OnMove(const ToolEvent& e)
+{
+	if (!m_drag) return;
+	m_curW = e.worldPt;
+	m_curS = e.screenPt;
+}
+
+void ComponentTool::OnUp(const ToolEvent& e)
+{
+	if (!m_drag) return;
+	m_drag = false;
+	if (!e.pDoc) return;
+	m_curW = e.worldPt;
+	CM2DrawDoc* pDoc = e.pDoc;
+
+	float x0 = (std::min)(m_startW.x, m_curW.x), y0 = (std::min)(m_startW.y, m_curW.y);
+	float w = std::fabs(m_curW.x - m_startW.x), h = std::fabs(m_curW.y - m_startW.y);
+	const bool tiny = (w < 6.0f && h < 6.0f);
+	if (tiny) { x0 = m_startW.x; y0 = m_startW.y; }
+
+	ge::Node* added = nullptr;
+	const wchar_t* undo = L"";
+	switch (m_kind) {
+	case ComponentKind::Heading: {
+		TextEditProps props;
+		props.size = 32.0f;
+		props.bold = true;
+		if (!EditTextPropsDialog(AfxGetMainWnd(), props) || props.text.empty()) return;
+		auto tn = std::make_unique<ge::TextNode>();
+		tn->SetText(props.text);
+		tn->SetFontFamily(props.family);
+		tn->SetFontSize(props.size);
+		tn->SetBold(props.bold);
+		tn->SetItalic(props.italic);
+		tn->SetAlign(static_cast<ge::TextAlign>((std::max)(0, (std::min)(2, props.align))));
+		tn->SetName(L"헤딩");
+		tn->SetTransform(ge::Matrix2D::Translation(m_startW.x, m_startW.y));
+		ge::PathOp::MeasureText(*tn);
+		added = pDoc->GetDoc().AddShape(std::move(tn));
+		undo = L"헤딩 추가";
+		break;
+	}
+	case ComponentKind::Button: {
+		if (tiny || w < 6.0f || h < 6.0f) { w = 120.0f; h = 40.0f; }
+		std::wstring label = L"버튼";
+		if (!EditTextDialog(AfxGetMainWnd(), label) || label.empty()) return;
+
+		// 버튼 = 둥근 파란 프레임 + 가운데 흰 글자 (자식 텍스트)
+		auto fr = std::make_unique<ge::FrameNode>();
+		fr->SetFrameSize(w, h);
+		fr->SetCornerRadius(8.0f);
+		fr->SetHtmlTag("button");
+		ge::Style fs = fr->GetStyle();
+		fs.fill.type = ge::PaintType::Solid;
+		fs.fill.color = ge::Color(0.12f, 0.56f, 1.0f, 1.0f);
+		fs.stroke.width = 0.0f;
+		fr->SetStyle(fs);
+		fr->SetName(L"버튼");
+		fr->SetTransform(ge::Matrix2D::Translation(x0, y0));
+
+		auto tn = std::make_unique<ge::TextNode>();
+		tn->SetText(label);
+		tn->SetFontSize(16.0f);
+		tn->SetAlign(ge::TextAlign::Center);
+		ge::Style ts = tn->GetStyle();
+		ts.fill.type = ge::PaintType::Solid;
+		ts.fill.color = ge::Color(1.0f, 1.0f, 1.0f, 1.0f);
+		tn->SetStyle(ts);
+		ge::PathOp::MeasureText(*tn);
+		tn->SetTransform(ge::Matrix2D::Translation(w * 0.5f, (h - tn->MeasuredHeight()) * 0.5f));
+		tn->SetName(L"버튼 텍스트");
+		fr->AddChild(std::move(tn));
+
+		added = pDoc->GetDoc().AddShape(std::move(fr));
+		undo = L"버튼 추가";
+		break;
+	}
+	case ComponentKind::Divider: {
+		if (w < 6.0f) w = 200.0f;   // 가로 선: 드래그 폭 (클릭만 하면 200px)
+		ge::BezierNode a, b;
+		a.anchor = ge::Vec2{ 0.0f, 0.0f };
+		b.anchor = ge::Vec2{ w, 0.0f };
+		ge::SubPath sp;
+		sp.nodes = { a, b };
+		sp.closed = false;
+		auto pn = std::make_unique<ge::PathNode>();
+		pn->SetPaths(std::vector<ge::SubPath>{ sp });
+		ge::Style ps;
+		ps.fill.type = ge::PaintType::None;
+		ps.stroke.width = 2.0f;
+		ps.stroke.color = ge::Color(0.6f, 0.6f, 0.65f, 1.0f);
+		pn->SetStyle(ps);
+		pn->SetName(L"구분선");
+		pn->SetTransform(ge::Matrix2D::Translation(x0, y0));
+		added = pDoc->GetDoc().AddShape(std::move(pn));
+		undo = L"구분선 추가";
+		break;
+	}
+	default: {   // Spacer
+		if (tiny || w < 6.0f || h < 6.0f) { w = 200.0f; h = 40.0f; }
+		auto fr = std::make_unique<ge::FrameNode>();
+		fr->SetFrameSize(w, h);
+		ge::Style fs = fr->GetStyle();
+		fs.fill.type = ge::PaintType::None;
+		fs.stroke.width = 1.0f;
+		fs.stroke.color = ge::Color(0.7f, 0.7f, 0.75f, 1.0f);
+		fs.stroke.dashArray = { 4.0f, 4.0f };
+		fr->SetStyle(fs);
+		fr->SetName(L"간격");
+		fr->SetTransform(ge::Matrix2D::Translation(x0, y0));
+		added = pDoc->GetDoc().AddShape(std::move(fr));
+		undo = L"간격 추가";
+		break;
+	}
+	}
+	if (!added) return;
+
+	pDoc->GetDoc().SetSelection({ added });
+	pDoc->SetModifiedFlag(TRUE);
+	pDoc->CommitUndoPoint(undo);
+	LogAppEvent(_T("[HTML 컴포넌트] 요소 추가"));
+	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+	if (SelectTool* sel = GetApp()->GetToolManager().GetSelectTool()) sel->SelectNode(added, pDoc);
+	pDoc->UpdateAllViews(nullptr);
+}
+
+void ComponentTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float /*zoom*/, D2D1_POINT_2F /*pan*/, CM2DrawDoc* /*pDoc*/)
+{
+	if (!m_drag || !rt || !brush) return;
+	const D2D1_RECT_F rc = D2D1::RectF(static_cast<float>((std::min)(m_startS.x, m_curS.x)), static_cast<float>((std::min)(m_startS.y, m_curS.y)),
+		static_cast<float>((std::max)(m_startS.x, m_curS.x)), static_cast<float>((std::max)(m_startS.y, m_curS.y)));
+	brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.45f, 0.10f));
+	rt->FillRectangle(rc, brush);
+	brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.45f, 1.0f));
+	rt->DrawRectangle(rc, brush, 1.0f);
+}
+
 // ---------------- ToolManager ----------------
 ToolManager::ToolManager()
 	: m_activeType(ToolType::Select)
@@ -562,6 +727,11 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<TextTool>());
 	m_tools.push_back(std::make_unique<PaintBucketTool>());
 	m_tools.push_back(std::make_unique<FrameTool>());
+	m_tools.push_back(std::make_unique<TableTool>());
+	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Heading));
+	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Button));
+	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Divider));
+	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Spacer));
 	m_tools.push_back(std::make_unique<ZoomInTool>());
 	m_tools.push_back(std::make_unique<ZoomOutTool>());
 	m_tools.push_back(std::make_unique<GradientTool>());

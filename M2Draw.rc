@@ -183,6 +183,7 @@ BEGIN
         MENUITEM "열기(&O)...\tCtrl+O",            ID_FILE_OPEN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
         MENUITEM "SVG 내보내기(&E)...\tCtrl+Shift+E", ID_FILE_EXPORT_SVG
+        MENUITEM "HTML 내보내기(&H)...",             ID_FILE_EXPORT_HTML
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM SEPARATOR
         MENUITEM "인쇄 설정(&R)...",             ID_FILE_PRINT_SETUP
@@ -225,6 +226,7 @@ BEGIN
         MENUITEM "열기(&O)...\tCtrl+O",            ID_FILE_OPEN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
         MENUITEM "SVG 내보내기(&E)...\tCtrl+Shift+E", ID_FILE_EXPORT_SVG
+        MENUITEM "HTML 내보내기(&H)...",             ID_FILE_EXPORT_HTML
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM "저장(&S)\tCtrl+S",               ID_FILE_SAVE
         MENUITEM "다른 이름으로 저장(&A)...",                 ID_FILE_SAVE_AS
@@ -569,6 +571,7 @@ BEGIN
     ID_TEXT_TO_PATH          "선택한 텍스트를 편집 가능한 패스(윤곽선)로 변환합니다.\n윤곽선으로 변환"
     ID_FILE_PLACE_IMAGE      "이미지 파일을 캔버스에 가져옵니다.\n이미지 가져오기"
     ID_FILE_EXPORT_SVG       "순수 SVG(Illustrator/Inkscape/Figma/브라우저 호환)로 내보냅니다.\nSVG 내보내기"
+    ID_FILE_EXPORT_HTML      "시맨틱 HTML/CSS 반응형 웹 파일로 내보냅니다.\nHTML 내보내기"
     ID_SUB_SIMPLIFY          "정점을 줄여 패스를 단순화합니다. 허용 오차를 입력한 뒤 적용하세요.
 단순화"
     ID_SUB_APPLY             "입력한 값으로 적용합니다.
@@ -614,6 +617,12 @@ BEGIN
     ID_VIEW_GRID               "격자 표시"
     ID_VIEW_OUTPUTWND          "출력 창"
     ID_VIEW_TOOLBAR            "도구 모음"
+    ID_HTML_FRAME            "프레임 (F): 드래그로 프레임(아트보드)을 만듭니다.\n프레임"
+    ID_HTML_TABLE            "테이블: 드래그하여 3x3 표를 만듭니다. 칸을 더블클릭하면 내용을 입력합니다.\n테이블"
+    ID_HTML_HEADING          "헤딩(제목): 클릭한 곳에 굵은 제목 텍스트를 만듭니다.\n헤딩"
+    ID_HTML_BUTTON           "버튼: 드래그한 상자에 라벨이 있는 버튼을 만듭니다.\n버튼"
+    ID_HTML_DIVIDER          "구분선: 드래그한 길이의 가로 구분선을 만듭니다.\n구분선"
+    ID_HTML_SPACER           "간격 추가: 드래그한 상자 크기의 빈 간격(점선)을 만듭니다.\n간격 추가"
     ID_FILE_NEW             "새 문서를 만듭니다.\n새로 만들기"
     ID_FILE_OPEN            "기존 문서를 엽니다.\n열기"
     ID_FILE_CLOSE           "활성 문서를 닫습니다.\n닫기"

@@ -16,6 +16,7 @@
 #include "ITool.h"
 #include "SvgWriter.h"
 #include "SvgReader.h"
+#include "HtmlExporter.h"
 #include <algorithm>
 #include <vector>
 
@@ -38,6 +39,8 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_GROUP, &CM2DrawDoc::OnUpdateObjectGroup)
 	ON_COMMAND(ID_OBJECT_UNGROUP, &CM2DrawDoc::OnObjectUngroup)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_UNGROUP, &CM2DrawDoc::OnUpdateObjectUngroup)
+	ON_COMMAND(ID_OBJECT_WRAP_FRAME, &CM2DrawDoc::OnObjectWrapFrame)
+	ON_UPDATE_COMMAND_UI(ID_OBJECT_WRAP_FRAME, &CM2DrawDoc::OnUpdateObjectWrapFrame)
 	ON_COMMAND_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnObjectArrange)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnUpdateObjectArrange)
 	ON_COMMAND_RANGE(ID_BOOLEAN_UNION, ID_BOOLEAN_TRIM, &CM2DrawDoc::OnBooleanOperation)
@@ -50,6 +53,7 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnUpdateAlignCommand)
 	ON_COMMAND(ID_FILE_PLACE_IMAGE, &CM2DrawDoc::OnFilePlaceImage)
 	ON_COMMAND(ID_FILE_EXPORT_SVG, &CM2DrawDoc::OnFileExportSvg)
+	ON_COMMAND(ID_FILE_EXPORT_HTML, &CM2DrawDoc::OnFileExportHtml)
 	ON_COMMAND(ID_TEXT_TO_PATH, &CM2DrawDoc::OnTextToPath)
 	ON_UPDATE_COMMAND_UI(ID_TEXT_TO_PATH, &CM2DrawDoc::OnUpdateTextToPath)
 	ON_COMMAND(ID_PATH_OUTLINE, &CM2DrawDoc::OnPathOutline)
@@ -598,6 +602,31 @@ void CM2DrawDoc::OnUpdateObjectGroup(CCmdUI* pCmdUI)   { pCmdUI->Enable(CanGroup
 void CM2DrawDoc::OnObjectUngroup()             { UngroupSelectedObjects(); }
 void CM2DrawDoc::OnUpdateObjectUngroup(CCmdUI* pCmdUI) { pCmdUI->Enable(CanUngroup()); }
 
+bool CM2DrawDoc::WrapSelectedInFrame()
+{
+	ge::FrameNode* frame = m_doc.WrapSelectionInFrame();
+	if (!frame)
+		return false;
+
+	UpdateShapePropertiesSelection(frame, this);
+
+	CString strLog;
+	strLog.Format(_T("[프레임으로 감싸기] '%s' 생성 (자식 %d개)"), frame->GetName().c_str(), static_cast<int>(frame->GetChildren().size()));
+	LogAppEvent(strLog);
+	SetAppStatusText(strLog);
+
+	CommitUndoPoint(L"프레임으로 감싸기");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+void CM2DrawDoc::OnObjectWrapFrame()               { WrapSelectedInFrame(); }
+void CM2DrawDoc::OnUpdateObjectWrapFrame(CCmdUI* pCmdUI) { pCmdUI->Enable(m_doc.CanWrapInFrame()); }
+
 // ---------------------------------------------------------------------------
 // 순서(Z-order) 변경
 // ---------------------------------------------------------------------------
@@ -952,6 +981,47 @@ void CM2DrawDoc::OnFileExportSvg()
 	}
 	CString log;
 	log.Format(_T("[내보내기] 순수 SVG 저장: %s%s"), (LPCTSTR)dlg.GetPathName(), opt.m_outlineText ? _T(" (텍스트 윤곽선)") : _T(""));
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
+
+void CM2DrawDoc::OnFileExportHtml()
+{
+	CString suggested = GetTitle();
+	const int dot = suggested.ReverseFind(_T('.'));
+	if (dot > 0) suggested = suggested.Left(dot);
+
+	CFileDialog dlg(FALSE, _T("html"), suggested + _T(".html"), OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY, _T("HTML 파일 (*.html)|*.html||"));
+	if (dlg.DoModal() != IDOK) return;
+
+	ge::HtmlExportOptions opt;
+	opt.singleFile = true; // 단일 파일 기본 (인라인 CSS & 이미지)
+	opt.extractCssClasses = true;
+	opt.title = (const char*)CStringA(suggested);
+
+	// 선택된 최상위 아트보드가 있다면 그것만 내보내기, 없으면 문서 전체
+	auto* sel = GetPrimarySelection();
+	if (sel) {
+		for (ge::Node* p = sel; p; p = p->GetParent()) {
+			if (auto* fr = dynamic_cast<ge::FrameNode*>(p)) {
+				if (fr->GetParent() && fr->GetParent()->Kind() == ge::NodeKind::Layer) {
+					opt.targetArtboard = fr;
+					break;
+				}
+			}
+		}
+	}
+
+	ge::HtmlExporter exporter;
+	if (!exporter.ExportToFile(m_doc, (LPCTSTR)dlg.GetPathName(), opt))
+	{
+		AfxMessageBox(_T("HTML 파일을 저장하지 못했습니다."));
+		return;
+	}
+
+	CString log;
+	log.Format(_T("[내보내기] 시맨틱 HTML/CSS 저장: %s%s"), (LPCTSTR)dlg.GetPathName(),
+		opt.targetArtboard ? _T(" (선택된 아트보드)") : _T(" (전체)"));
 	LogAppEvent(log);
 	SetAppStatusText(log);
 }

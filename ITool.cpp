@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ITool.h"
+#include "HtmlComponents/TableComponent.h"
 #include "M2DrawDoc.h"
 #include "M2DrawView.h"
 #include "M2Draw.h"
@@ -41,34 +42,41 @@ static void ForEachSelectableTopDown(CM2DrawDoc* pDoc, Fn fn)
 	}
 }
 
-// 노드(또는 그룹이면 보이고 잠기지 않은 후손 중 하나)가 화면 좌표에서 히트되는지 재귀 검사 (위 -> 아래)
-static bool HitTestNodeRecursive(ge::Node* n, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
+// 개별 노드 자체(자식 제외)가 화면 좌표에 히트되는지 판정
+static bool HitTestSingleNode(ge::Node* n, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
 {
 	if (!n || !n->IsVisible() || n->IsLocked()) return false;
 
-	if (auto* group = dynamic_cast<ge::GroupNode*>(n))
+	if (auto* tb = dynamic_cast<ge::TableNode*>(n))
 	{
-		const auto& children = group->GetChildren();
-		for (int i = static_cast<int>(children.size()) - 1; i >= 0; --i)
+		ge::Matrix2D inv = tb->GetWorldTransform();
+		ge::Rect2 b;
+		if (inv.Invert() && tb->GetLocalBounds(b))
 		{
-			if (HitTestNodeRecursive(children[i].get(), screenPt, view, f)) return true;
+			const ge::Vec2 l = inv.TransformPoint(view.ScreenToWorld(ge::Vec2{ screenPt.x, screenPt.y }));
+			if (l.x >= b.left && l.x <= b.right && l.y >= b.top && l.y <= b.bottom) return true;
 		}
-		// 프레임은 자식이 없는 빈 곳(프레임 상자 안쪽)을 클릭해도 선택됨
-		if (auto* fr = dynamic_cast<ge::FrameNode*>(group))
+		return false;
+	}
+
+	if (auto* fr = dynamic_cast<ge::FrameNode*>(n))
+	{
+		ge::Matrix2D inv = fr->GetWorldTransform();
+		if (inv.Invert())
 		{
-			ge::Matrix2D inv = fr->GetWorldTransform();
-			if (inv.Invert())
-			{
-				const ge::Vec2 l = inv.TransformPoint(view.ScreenToWorld(ge::Vec2{ screenPt.x, screenPt.y }));
-				if (l.x >= 0.0f && l.x <= fr->GetWidth() && l.y >= 0.0f && l.y <= fr->GetHeight()) return true;
-			}
+			const ge::Vec2 l = inv.TransformPoint(view.ScreenToWorld(ge::Vec2{ screenPt.x, screenPt.y }));
+			if (l.x >= 0.0f && l.x <= fr->GetWidth() && l.y >= 0.0f && l.y <= fr->GetHeight()) return true;
 		}
+		return false;
+	}
+
+	if (n->Kind() == ge::NodeKind::Group)
+	{
 		return false;
 	}
 
 	if (n->Kind() == ge::NodeKind::Text || n->Kind() == ge::NodeKind::Image)
 	{
-		// 텍스트/이미지: 상자(로컬 경계) 안쪽 클릭이면 히트
 		ge::Rect2 b;
 		ge::Matrix2D inv = n->GetWorldTransform();
 		if (!n->GetLocalBounds(b) || !inv.Invert()) return false;
@@ -80,19 +88,74 @@ static bool HitTestNodeRecursive(ge::Node* n, D2D1_POINT_2F screenPt, const View
 	return ps && ps->HitTestScreenSpace(screenPt, 8.0f, view, f).part != HitResult::Part::None;
 }
 
-// 레이어 직속 자식 단위로 반환: 그룹 안쪽 도형을 클릭하면 그룹 전체가 선택 대상이 됨
+// 씬 그래프 깊은 탐색: 가장 안쪽의 히트된 말단 노드 반환 (위 -> 아래)
+static ge::Node* HitTestDeepNode(ge::Node* n, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
+{
+	if (!n || !n->IsVisible() || n->IsLocked()) return nullptr;
+
+	if (auto* group = dynamic_cast<ge::GroupNode*>(n))
+	{
+		const auto& children = group->GetChildren();
+		for (int i = static_cast<int>(children.size()) - 1; i >= 0; --i)
+		{
+			if (ge::Node* hit = HitTestDeepNode(children[i].get(), screenPt, view, f))
+				return hit;
+		}
+	}
+
+	if (HitTestSingleNode(n, screenPt, view, f))
+		return n;
+
+	return nullptr;
+}
+
+// 레이어/프레임 계층을 고려한 선택 대상 노드 반환:
+// - 컴포넌트(버튼 등)는 자식 텍스트와 프레임이 분리되지 않고 하나의 컴포넌트 오브젝트로 선택됨
+// - 일반 프레임(FrameNode) 안의 자식 객체(버튼, 테이블, 텍스트, 도형 등)는 개별 선택 가능함
+// - 일반 그룹(Ctrl+G)은 그룹 단위로 선택됨
 static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
 {
-	ge::Node* hit = nullptr;
-	ForEachSelectableTopDown(pDoc, [&](ge::Node* n) {
-		if (HitTestNodeRecursive(n, screenPt, view, f))
+	ge::Node* hitTarget = nullptr;
+	ForEachSelectableTopDown(pDoc, [&](ge::Node* topNode) {
+		ge::Node* deep = HitTestDeepNode(topNode, screenPt, view, f);
+		if (!deep) return false;
+
+		// 1) deep 노드가 "버튼" 컴포넌트의 자식 텍스트이거나 버튼 내부 요소인 경우, 버튼 컴포넌트 전체를 선택
+		ge::Node* checkBtn = deep;
+		while (checkBtn)
 		{
-			hit = n;
-			return true;
+			if (checkBtn->GetName() == L"버튼" || checkBtn->GetHtmlTag() == "button")
+			{
+				hitTarget = checkBtn;
+				return true;
+			}
+			checkBtn = checkBtn->GetParent();
 		}
-		return false;
+
+		// 2) deep 노드에서 부모 방향으로 올라가면서, FrameNode의 직속 자식이면 그 자식 단위로 선택
+		ge::Node* curr = deep;
+		while (curr && curr->GetParent())
+		{
+			ge::GroupNode* parent = curr->GetParent();
+			if (dynamic_cast<ge::FrameNode*>(parent) != nullptr)
+			{
+				// FrameNode의 직속 자식이면 이 curr 노드를 개별 선택 대상으로 확정!
+				hitTarget = curr;
+				return true;
+			}
+			if (parent->Kind() == ge::NodeKind::Layer)
+			{
+				hitTarget = curr;
+				return true;
+			}
+			curr = parent;
+		}
+
+		hitTarget = topNode;
+		return true;
 	});
-	return hit;
+
+	return hitTarget;
 }
 
 // ============================================================================
@@ -368,6 +431,11 @@ HCURSOR SelectTool::GetCursor() const
 		return ::LoadCursor(nullptr, IDC_CROSS);
 	}
 
+	if (m_mode == Mode::TableResize)
+		return ::LoadCursor(nullptr, m_tblCol ? IDC_SIZEWE : IDC_SIZENS);
+	if (m_mode == Mode::None && m_hoverTbl != 0)
+		return ::LoadCursor(nullptr, m_hoverTbl == 1 ? IDC_SIZEWE : IDC_SIZENS);
+
 	switch (m_hoverHandle)
 	{
 	case Handle::TL:
@@ -427,9 +495,72 @@ bool SelectTool::GetHandleScreenPositions(ge::Node* shape, const ViewportTransfo
 	return true;
 }
 
+bool SelectTool::HitTableLine(ge::TableNode* tb, D2D1_POINT_2F sp, const ViewportTransform& view, bool& isCol, int& idx)
+{
+	if (!tb) return false;
+	const ge::Matrix2D w = tb->GetWorldTransform();
+	ge::Rect2 b;
+	if (!tb->GetLocalBounds(b)) return false;
+	float best = 5.0f;
+	bool found = false;
+	auto distToSeg = [&](ge::Vec2 a, ge::Vec2 c) {
+		const ge::Vec2 A = view.WorldToScreen(w.TransformPoint(a)), C = view.WorldToScreen(w.TransformPoint(c));
+		const float vx = C.x - A.x, vy = C.y - A.y;
+		const float len2 = vx * vx + vy * vy;
+		float t = len2 > 0.0f ? ((sp.x - A.x) * vx + (sp.y - A.y) * vy) / len2 : 0.0f;
+		t = (std::max)(0.0f, (std::min)(1.0f, t));
+		const float dx = sp.x - (A.x + vx * t), dy = sp.y - (A.y + vy * t);
+		return std::sqrt(dx * dx + dy * dy);
+	};
+	float x = 0.0f;
+	for (int i = 0; i + 1 < tb->Cols(); ++i)
+	{
+		x += tb->ColWidths()[i];
+		const float d = distToSeg(ge::Vec2{ x, b.top }, ge::Vec2{ x, b.bottom });
+		if (d <= best) { best = d; isCol = true; idx = i; found = true; }
+	}
+	float y = 0.0f;
+	for (int i = 0; i + 1 < tb->Rows(); ++i)
+	{
+		y += tb->RowHeights()[i];
+		const float d = distToSeg(ge::Vec2{ b.left, y }, ge::Vec2{ b.right, y });
+		if (d <= best) { best = d; isCol = false; idx = i; found = true; }
+	}
+	return found;
+}
+
+float SelectTool::TableLocalAxis(ge::TableNode* tb, D2D1_POINT_2F worldPt, bool isCol)
+{
+	ge::Matrix2D inv = tb->GetWorldTransform();
+	if (!inv.Invert()) return 0.0f;
+	const ge::Vec2 l = inv.TransformPoint(ge::Vec2{ worldPt.x, worldPt.y });
+	return isCol ? l.x : l.y;
+}
+
 void SelectTool::OnDown(const ToolEvent& e)
 {
 	if (!e.pDoc) return;
+
+	// -1. 선택된 테이블의 안쪽 행/열 경계를 잡으면 크기 조절 (최우선)
+	if (e.pDoc->GetDoc().GetSelection().size() == 1)
+	{
+		if (auto* tb = dynamic_cast<ge::TableNode*>(e.pDoc->GetPrimarySelection()))
+		{
+			bool isCol = false; int idx = -1;
+			if (IsInteractive(tb) && HitTableLine(tb, D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y)), e.view, isCol, idx))
+			{
+				m_mode = Mode::TableResize;
+				m_handle = Handle::None;
+				m_tbl = tb;
+				m_tblCol = isCol;
+				m_tblIdx = idx;
+				m_tblStartSize = isCol ? tb->ColWidths()[idx] : tb->RowHeights()[idx];
+				m_tblStartLocal = TableLocalAxis(tb, e.worldPt, isCol);
+				LogAppEvent(isCol ? _T("[테이블] 열 경계 드래그 시작") : _T("[테이블] 행 경계 드래그 시작"));
+				return;
+			}
+		}
+	}
 
 	auto& doc = e.pDoc->GetDoc();
 	const std::vector<ge::Node*> sel = doc.GetSelection();
@@ -546,6 +677,13 @@ void SelectTool::OnDown(const ToolEvent& e)
 		doc.SetSelection(newSel);
 		ActivateLayerOf(e.pDoc, clicked);
 
+		if (auto* tb = dynamic_cast<ge::TableNode*>(clicked))
+		{
+			ge::Matrix2D inv = tb->GetWorldTransform();
+			int cr = -1, cc = -1;
+			if (inv.Invert() && tb->CellAt(inv.TransformPoint(ge::Vec2{ e.worldPt.x, e.worldPt.y }), cr, cc)) tb->SetActiveCell(cr, cc);
+		}
+
 		m_mode = Mode::Moving;
 		m_handle = Handle::None;
 		m_initialXf = clicked->GetTransform();
@@ -608,6 +746,17 @@ void SelectTool::OnMove(const ToolEvent& e)
 		m_hoverIsNode = false;
 		m_hoverHandle = Handle::None;
 		m_hoverOnShape = false;
+		m_hoverTbl = 0;
+		if (sel.size() == 1)
+		{
+			bool isCol = false; int idx = -1;
+			auto* tb = dynamic_cast<ge::TableNode*>(sel[0]);
+			if (tb && IsInteractive(tb) && HitTableLine(tb, screenPt, e.view, isCol, idx))
+			{
+				m_hoverTbl = isCol ? 1 : 2;
+				return;
+			}
+		}
 
 		// 0) 그라디언트 기즈모 핸들 호버 -> 십자 커서
 		if (sel.size() == 1 && IsInteractive(sel[0]))
@@ -659,6 +808,17 @@ void SelectTool::OnMove(const ToolEvent& e)
 	if (m_mode == Mode::Marquee)
 	{
 		// 마키(영역 선택) 드래그 중: 화면 갱신 유도
+		return;
+	}
+
+	if (m_mode == Mode::TableResize)
+	{
+		if (m_tbl)
+		{
+			const float delta = TableLocalAxis(m_tbl, e.worldPt, m_tblCol) - m_tblStartLocal;
+			if (m_tblCol) ge::TableComponent::ResizeCol(*m_tbl, m_tblIdx, m_tblStartSize + delta);
+			else ge::TableComponent::ResizeRow(*m_tbl, m_tblIdx, m_tblStartSize + delta);
+		}
 		return;
 	}
 
@@ -777,8 +937,29 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 	for (ge::Node* n : selection)
 	{
 		auto it = m_initialXfs.find(n);
-		D2D1::Matrix3x2F baseInitXf = (it != m_initialXfs.end()) ? it->second : static_cast<D2D1::Matrix3x2F>(n->GetTransform());
-		n->SetTransform(ge::Transformer::Translate(D2D1::Point2F(dx, dy), baseInitXf));
+		ge::Matrix2D baseInitXf = (it != m_initialXfs.end()) ? it->second : n->GetTransform();
+
+		// 부모가 있는 노드(예: FrameNode 안의 자식)인 경우 월드 이동량(dx, dy)을 부모 로컬 변위로 환산
+		ge::GroupNode* parent = n->GetParent();
+		if (parent && parent->Kind() != ge::NodeKind::Layer)
+		{
+			ge::Matrix2D pInv = parent->GetWorldTransform();
+			if (pInv.Invert())
+			{
+				ge::Vec2 d0 = pInv.TransformPoint(ge::Vec2{ 0.0f, 0.0f });
+				ge::Vec2 d1 = pInv.TransformPoint(ge::Vec2{ dx, dy });
+				ge::Vec2 localDelta = { d1.x - d0.x, d1.y - d0.y };
+				n->SetTransform(ge::Transformer::Translate(localDelta, baseInitXf));
+			}
+			else
+			{
+				n->SetTransform(ge::Transformer::Translate(ge::Vec2{ dx, dy }, baseInitXf));
+			}
+		}
+		else
+		{
+			n->SetTransform(ge::Transformer::Translate(ge::Vec2{ dx, dy }, baseInitXf));
+		}
 		if (n->Kind() != ge::NodeKind::Text) n->Invalidate();   // 텍스트 배치 캐시 보존
 	}
 }
@@ -787,7 +968,19 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 void SelectTool::ApplyScale(ge::Node* shape)
 {
 	if (!shape) return;
-	auto newXf = ge::Transformer::ScaleByHandle(static_cast<int>(m_handle), m_dragCurrentWorld, m_initialLocalBounds, m_initialXf);
+	// curWorld 를 부모 좌표계로 역변환하여 로컬/월드 일치 유지
+	D2D1_POINT_2F curWorld = D2D1::Point2F(m_dragCurrentWorld.x, m_dragCurrentWorld.y);
+	ge::GroupNode* parent = shape->GetParent();
+	if (parent && parent->Kind() != ge::NodeKind::Layer)
+	{
+		ge::Matrix2D pInv = parent->GetWorldTransform();
+		if (pInv.Invert())
+		{
+			ge::Vec2 cw = pInv.TransformPoint(ge::Vec2{ curWorld.x, curWorld.y });
+			curWorld = D2D1::Point2F(cw.x, cw.y);
+		}
+	}
+	auto newXf = ge::Transformer::ScaleByHandle(static_cast<int>(m_handle), curWorld, m_initialLocalBounds, m_initialXf);
 	if (newXf)
 	{
 		shape->SetTransform(*newXf);
@@ -800,7 +993,21 @@ void SelectTool::ApplyScale(ge::Node* shape)
 void SelectTool::ApplyRotate(ge::Node* shape)
 {
 	if (!shape) return;
-	auto newXf = ge::Transformer::RotateAboutCenter(m_dragStartWorld, m_dragCurrentWorld, m_initialLocalBounds, m_initialXf);
+	D2D1_POINT_2F startWorld = D2D1::Point2F(m_dragStartWorld.x, m_dragStartWorld.y);
+	D2D1_POINT_2F curWorld = D2D1::Point2F(m_dragCurrentWorld.x, m_dragCurrentWorld.y);
+	ge::GroupNode* parent = shape->GetParent();
+	if (parent && parent->Kind() != ge::NodeKind::Layer)
+	{
+		ge::Matrix2D pInv = parent->GetWorldTransform();
+		if (pInv.Invert())
+		{
+			ge::Vec2 sw = pInv.TransformPoint(ge::Vec2{ startWorld.x, startWorld.y });
+			ge::Vec2 cw = pInv.TransformPoint(ge::Vec2{ curWorld.x, curWorld.y });
+			startWorld = D2D1::Point2F(sw.x, sw.y);
+			curWorld = D2D1::Point2F(cw.x, cw.y);
+		}
+	}
+	auto newXf = ge::Transformer::RotateAboutCenter(startWorld, curWorld, m_initialLocalBounds, m_initialXf);
 	shape->SetTransform(newXf);
 	if (shape->Kind() != ge::NodeKind::Text) shape->Invalidate();   // 텍스트 배치 캐시 보존
 }
@@ -878,6 +1085,7 @@ void SelectTool::OnUp(const ToolEvent& e)
 	m_xfTarget = nullptr;
 	m_gradShape = nullptr;
 	m_gradHandle = GradHandle::None;
+	m_tbl = nullptr;
 	m_initialXfs.clear();
 }
 
@@ -2225,7 +2433,7 @@ void FrameTool::OnDown(const ToolEvent& e)
 			auto fn = std::make_unique<ge::FrameNode>();
 			fn->SetFrameSize(w, h);
 			fn->SetTransform(ge::Matrix2D::Translation(x, y));
-			fn->SetName(e.pDoc->GetDoc().GenerateGroupName());
+			fn->SetName(e.pDoc->GetDoc().GenerateFrameName());
 			ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(fn));
 			if (added)
 			{
@@ -2278,7 +2486,7 @@ void FrameTool::OnUp(const ToolEvent& e)
 		auto fn = std::make_unique<ge::FrameNode>();
 		fn->SetFrameSize(w, h);
 		fn->SetTransform(ge::Matrix2D::Translation(x, y));
-		fn->SetName(e.pDoc->GetDoc().GenerateGroupName());
+		fn->SetName(e.pDoc->GetDoc().GenerateFrameName());
 		ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(fn));
 		if (!added) return;
 		e.pDoc->GetDoc().SetSelection({ added });
@@ -2317,6 +2525,58 @@ void FrameTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, 
 	brush->SetColor(D2D1::ColorF(0.20f, 0.45f, 0.85f, 0.12f));
 	rt->FillRectangle(rc, brush);
 	brush->SetColor(D2D1::ColorF(0.20f, 0.45f, 0.85f, 1.0f));
+	rt->DrawRectangle(rc, brush, 1.0f);
+}
+
+// ---------------- 테이블 도구 ----------------
+void TableTool::OnDown(const ToolEvent& e)
+{
+	m_drag = true;
+	m_startW = m_curW = e.worldPt;
+	m_startS = m_curS = e.screenPt;
+}
+
+void TableTool::OnMove(const ToolEvent& e)
+{
+	if (!m_drag) return;
+	m_curW = e.worldPt;
+	m_curS = e.screenPt;
+}
+
+void TableTool::OnUp(const ToolEvent& e)
+{
+	if (!m_drag) return;
+	m_drag = false;
+	if (!e.pDoc) return;
+	m_curW = e.worldPt;
+
+	float x = (std::min)(m_startW.x, m_curW.x), y = (std::min)(m_startW.y, m_curW.y);
+	float w = std::fabs(m_curW.x - m_startW.x), h = std::fabs(m_curW.y - m_startW.y);
+	if (w < 6.0f || h < 6.0f) { x = m_startW.x; y = m_startW.y; w = 300.0f; h = 150.0f; }   // 클릭만 하면 기본 크기
+
+	auto tb = ge::TableComponent::Create(3, 3, w, h);
+	tb->SetTransform(ge::Matrix2D::Translation(x, y));
+	ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(tb));
+	if (!added) return;
+	e.pDoc->GetDoc().SetSelection({ added });
+	e.pDoc->SetModifiedFlag(TRUE);
+	e.pDoc->CommitUndoPoint(L"테이블 추가");
+	LogAppEvent(_T("[테이블 도구] 테이블 추가"));
+
+	CM2DrawDoc* pDoc = e.pDoc;
+	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+	if (SelectTool* sel = GetApp()->GetToolManager().GetSelectTool()) sel->SelectNode(added, pDoc);
+	pDoc->UpdateAllViews(nullptr);
+}
+
+void TableTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float /*zoom*/, D2D1_POINT_2F /*pan*/, CM2DrawDoc* /*pDoc*/)
+{
+	if (!m_drag || !rt || !brush) return;
+	const D2D1_RECT_F rc = D2D1::RectF(static_cast<float>((std::min)(m_startS.x, m_curS.x)), static_cast<float>((std::min)(m_startS.y, m_curS.y)),
+		static_cast<float>((std::max)(m_startS.x, m_curS.x)), static_cast<float>((std::max)(m_startS.y, m_curS.y)));
+	brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.45f, 0.10f));
+	rt->FillRectangle(rc, brush);
+	brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.45f, 1.0f));
 	rt->DrawRectangle(rc, brush, 1.0f);
 }
 

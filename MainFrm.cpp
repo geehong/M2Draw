@@ -42,6 +42,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_UPDATE_COMMAND_UI(ID_SUB_VALUE, &CMainFrame::OnUpdateSubValue)
 	ON_COMMAND(ID_SUB_CANCEL, &CMainFrame::OnSubCancel)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOL_RECT, ID_TOOL_ZOOMOUT, &CMainFrame::OnUpdateSubToolCommand)
+	ON_COMMAND_RANGE(ID_HTML_FRAME, ID_HTML_SPACER, &CMainFrame::OnSubToolCommand)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_HTML_FRAME, ID_HTML_SPACER, &CMainFrame::OnUpdateSubToolCommand)
 END_MESSAGE_MAP()
 
 static UINT indicators[] =
@@ -482,6 +484,33 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 	if (m_subInputMode != SubInputMode::None && !(bCanOutline || bCanSimplify))
 		m_subInputMode = SubInputMode::None;   // 대상 선택이 사라졌으면 입력 모드 해제
 
+	// 선택된 노드가 프레임, 테이블, 또는 HTML 컴포넌트인지 확인
+	bool bHtmlContextSelected = false;
+	if (pDoc && !pDoc->GetDoc().GetSelection().empty())
+	{
+		for (ge::Node* n : pDoc->GetDoc().GetSelection())
+		{
+			if (!n) continue;
+			if (dynamic_cast<ge::FrameNode*>(n) != nullptr || dynamic_cast<ge::TableNode*>(n) != nullptr)
+			{
+				bHtmlContextSelected = true;
+				break;
+			}
+			// FrameNode 안의 자식이거나 HTML 태그가 지정된 경우
+			if (!n->GetHtmlTag().empty() || (n->GetParent() && dynamic_cast<ge::FrameNode*>(n->GetParent()) != nullptr))
+			{
+				bHtmlContextSelected = true;
+				break;
+			}
+			const std::wstring& name = n->GetName();
+			if (name == L"버튼" || name == L"버튼 텍스트" || name == L"헤딩" || name == L"구분선" || name == L"간격" || name == L"테이블")
+			{
+				bHtmlContextSelected = true;
+				break;
+			}
+		}
+	}
+
 	// 도구별 서브도구 버튼 목록 구성 (필요한 메뉴만 동적으로)
 	std::vector<UINT> btnIds;
 	const bool boolTool = curTool == ToolType::ActionBooleanUnion || curTool == ToolType::ActionBooleanSubtract ||
@@ -489,6 +518,12 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 	if (bCanReleaseMask)
 	{
 		btnIds = { ID_OBJECT_RELEASE_MASK };   // 이미 마스크가 적용된 그룹이 선택된 경우 해제 버튼 노출
+	}
+	else if (curTool == ToolType::Frame || curTool == ToolType::Table || curTool == ToolType::ComponentHeading ||
+		curTool == ToolType::ComponentButton || curTool == ToolType::ComponentDivider || curTool == ToolType::ComponentSpacer ||
+		bHtmlContextSelected)
+	{
+		btnIds = { ID_HTML_FRAME, ID_HTML_TABLE, ID_HTML_HEADING, ID_HTML_BUTTON, ID_HTML_DIVIDER, ID_HTML_SPACER };   // 프레임/테이블 도구 및 HTML 요소 선택 시: HTML 요소 아이콘 모음
 	}
 	else if (m_subInputMode != SubInputMode::None)
 	{
@@ -502,6 +537,15 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 			btnIds.push_back(ID_TEXT_TO_PATH);
 		if (bCanMakeMask || curTool == ToolType::ActionClipMask)
 			btnIds.push_back(ID_OBJECT_CLIP_MASK);
+		if (pDoc && !pDoc->GetDoc().GetSelection().empty())
+		{
+			if (pDoc->CanGroup())
+				btnIds.push_back(ID_OBJECT_GROUP);
+			if (pDoc->CanUngroup())
+				btnIds.push_back(ID_OBJECT_UNGROUP);
+			if (pDoc->CanWrapInFrame())
+				btnIds.push_back(ID_OBJECT_WRAP_FRAME);
+		}
 		if (pDoc && pDoc->GetDoc().GetSelection().size() >= 2)
 			btnIds.insert(btnIds.end(), { ID_ALIGN_LEFT, ID_ALIGN_CENTERH, ID_ALIGN_RIGHT, ID_ALIGN_TOP, ID_ALIGN_CENTERV, ID_ALIGN_BOTTOM, ID_DISTRIBUTE_H, ID_DISTRIBUTE_V });
 		if (bIsPathSelected || curTool == ToolType::Pen)
@@ -530,7 +574,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 			break;
 		case ToolType::ActionGroup:
 		case ToolType::ActionUngroup:
-			btnIds = { ID_OBJECT_GROUP, ID_OBJECT_UNGROUP };
+			btnIds = { ID_OBJECT_GROUP, ID_OBJECT_UNGROUP, ID_OBJECT_WRAP_FRAME };
 			break;
 		case ToolType::ActionToFront:
 		case ToolType::ActionForward:
@@ -568,6 +612,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_TOOL_ZOOMOUT:       imgIdx = 8; break;
 		case ID_OBJECT_GROUP:       imgIdx = 9; break;
 		case ID_OBJECT_UNGROUP:     imgIdx = 10; break;
+		case ID_OBJECT_WRAP_FRAME:  imgIdx = 0; break;
 		case ID_BOOLEAN_UNION:      imgIdx = 11; break;
 		case ID_BOOLEAN_SUBTRACT:   imgIdx = 12; break;
 		case ID_BOOLEAN_INTERSECT:  imgIdx = 13; break;
@@ -584,6 +629,12 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_TOOL_POLYLINE:      imgIdx = 22; break;
 		case ID_SUB_SMOOTH:         imgIdx = 31; break;
 		case ID_TEXT_TO_PATH:       imgIdx = 32; break;
+		case ID_HTML_FRAME:         imgIdx = 33; break;
+		case ID_HTML_TABLE:         imgIdx = 34; break;
+		case ID_HTML_HEADING:       imgIdx = 35; break;
+		case ID_HTML_BUTTON:        imgIdx = 36; break;
+		case ID_HTML_DIVIDER:       imgIdx = 37; break;
+		case ID_HTML_SPACER:        imgIdx = 38; break;
 		case ID_ALIGN_LEFT:         imgIdx = 23; break;
 		case ID_ALIGN_CENTERH:      imgIdx = 24; break;
 		case ID_ALIGN_RIGHT:        imgIdx = 25; break;
@@ -627,6 +678,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_TOOL_ZOOMOUT: tip = L"축소"; break;
 		case ID_OBJECT_GROUP: tip = L"그룹 (Ctrl+G)"; break;
 		case ID_OBJECT_UNGROUP: tip = L"그룹 해제 (Ctrl+Shift+G)"; break;
+		case ID_OBJECT_WRAP_FRAME: tip = L"프레임으로 감싸기 (Wrap in Frame)"; break;
 		case ID_BOOLEAN_UNION: tip = L"합치기 (Union)"; break;
 		case ID_BOOLEAN_SUBTRACT: tip = L"빼기 (Subtract)"; break;
 		case ID_BOOLEAN_INTERSECT: tip = L"교차 (Intersect)"; break;
@@ -784,6 +836,12 @@ void CMainFrame::OnSubToolCommand(UINT nID)
 	case ID_TOOL_HEART:    targetTool = ToolType::Heart; break;
 	case ID_TOOL_ZOOMIN:   targetTool = ToolType::ZoomIn; break;
 	case ID_TOOL_ZOOMOUT:  targetTool = ToolType::ZoomOut; break;
+	case ID_HTML_FRAME:    targetTool = ToolType::Frame; break;
+	case ID_HTML_TABLE:    targetTool = ToolType::Table; break;
+	case ID_HTML_HEADING:  targetTool = ToolType::ComponentHeading; break;
+	case ID_HTML_BUTTON:   targetTool = ToolType::ComponentButton; break;
+	case ID_HTML_DIVIDER:  targetTool = ToolType::ComponentDivider; break;
+	case ID_HTML_SPACER:   targetTool = ToolType::ComponentSpacer; break;
 	default: return;
 	}
 
@@ -805,6 +863,12 @@ void CMainFrame::OnUpdateSubToolCommand(CCmdUI* pCmdUI)
 	case ID_TOOL_HEART:    isCur = (active == ToolType::Heart); break;
 	case ID_TOOL_ZOOMIN:   isCur = (active == ToolType::ZoomIn); break;
 	case ID_TOOL_ZOOMOUT:  isCur = (active == ToolType::ZoomOut); break;
+	case ID_HTML_FRAME:    isCur = (active == ToolType::Frame); break;
+	case ID_HTML_TABLE:    isCur = (active == ToolType::Table); break;
+	case ID_HTML_HEADING:  isCur = (active == ToolType::ComponentHeading); break;
+	case ID_HTML_BUTTON:   isCur = (active == ToolType::ComponentButton); break;
+	case ID_HTML_DIVIDER:  isCur = (active == ToolType::ComponentDivider); break;
+	case ID_HTML_SPACER:   isCur = (active == ToolType::ComponentSpacer); break;
 	default: break;
 	}
 	pCmdUI->Enable(TRUE);

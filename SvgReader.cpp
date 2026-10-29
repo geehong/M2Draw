@@ -30,6 +30,14 @@ void SkipSeparators(const wchar_t*& p, const wchar_t* end) {
 	}
 }
 
+static std::string WideToUtf8(const std::wstring& w) {
+	if (w.empty()) return "";
+	int size = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+	std::string s(size, 0);
+	WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), s.data(), size, nullptr, nullptr);
+	return s;
+}
+
 // 실수 1개 파싱
 bool ParseNextFloat(const wchar_t*& p, const wchar_t* end, float& val) {
 	SkipSeparators(p, end);
@@ -60,6 +68,17 @@ bool Base64Decode(const std::string& in, std::vector<uint8_t>& out)
 		if (bits >= 8) { bits -= 8; out.push_back(static_cast<uint8_t>((v >> bits) & 0xFF)); }
 	}
 	return !out.empty();
+}
+
+// "a,b,c" 형태의 실수 목록 (테이블 열 너비/행 높이 등)
+std::vector<float> ParseFloatList(const std::wstring& text)
+{
+	std::vector<float> out;
+	const wchar_t* p = text.c_str();
+	const wchar_t* e = p + text.size();
+	float v = 0.0f;
+	while (ParseNextFloat(p, e, v)) out.push_back(v);
+	return out;
 }
 
 // 색상 이름 (SVG/CSS 자주 쓰는 것)
@@ -465,6 +484,11 @@ void ApplyCommonState(Node& n, const AttrMap& attrs) {
 		if (m >= 0 && m <= static_cast<long>(LayerBlendMode::Luminosity))
 			n.SetBlendMode(static_cast<LayerBlendMode>(m));
 	}
+	if (const auto* t = get(L"m2:htmlTag"))     n.SetHtmlTag(WideToUtf8(*t));
+	if (const auto* h = get(L"m2:href"))        n.SetHref(WideToUtf8(*h));
+	if (const auto* a = get(L"m2:alt"))         n.SetAlt(WideToUtf8(*a));
+	if (const auto* l = get(L"m2:ariaLabel"))   n.SetAriaLabel(WideToUtf8(*l));
+	if (const auto* c = get(L"m2:customClass")) n.SetCustomClass(WideToUtf8(*c));
 
 	// 표준 CSS: style="mix-blend-mode:multiply" (외부 SVG / Clean 출력). m2:blend 가 없어도 복원됨
 	if (const auto* s = get(L"style")) {
@@ -750,6 +774,7 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 			}
 			const bool isShapeElem = (elemName == L"rect" || elemName == L"circle" || elemName == L"ellipse" ||
 				elemName == L"line" || elemName == L"polyline" || elemName == L"polygon" || elemName == L"path");
+			if (elemName == L"path" && attrs.count(L"m2:tableGrid")) continue;   // 테이블 격자선: 테이블 속성으로 다시 그려지므로 노드로 만들지 않음
 			if (elemName == L"rect" && attrs.count(L"m2:frameBg") && !groupStack.empty()) {
 				// 프레임의 배경/테두리 사각형: 프레임 스타일로 복원하고 별도 노드는 만들지 않음
 				if (auto* fr = dynamic_cast<FrameNode*>(groupStack.back())) {
@@ -959,7 +984,37 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 				} else {
 					std::unique_ptr<GroupNode> group;
 					const bool isFrame = attrs.count(L"m2:frame") && attrs[L"m2:frame"] == L"true";
-					if (isFrame) {
+					const bool isTable = attrs.count(L"m2:component") && attrs[L"m2:component"] == L"table";
+					if (isTable) {
+						auto tn = std::make_unique<TableNode>();
+						tn->SetSizes(ParseFloatList(attrs.count(L"m2:cols") ? attrs[L"m2:cols"] : std::wstring()),
+							ParseFloatList(attrs.count(L"m2:rows") ? attrs[L"m2:rows"] : std::wstring()));
+						if (attrs.count(L"m2:border")) tn->SetBorderWidth(ParseLength(attrs[L"m2:border"], 1.0f));
+						if (attrs.count(L"m2:pad")) tn->SetCellPadding(ParseLength(attrs[L"m2:pad"], 6.0f));
+						if (attrs.count(L"m2:bcolor")) tn->SetBorderColor(ParseColorHex(attrs[L"m2:bcolor"]));
+							tn->SetHeaderRows(attrs.count(L"m2:header") ? static_cast<int>(ParseLength(attrs[L"m2:header"], 0.0f)) : 0);
+							if (attrs.count(L"m2:calign")) tn->SetCellAlign(static_cast<int>(ParseLength(attrs[L"m2:calign"], 0.0f)));
+							if (attrs.count(L"m2:merges")) {
+								std::vector<TableNode::Span> spans;
+								const std::wstring all = attrs[L"m2:merges"];
+								size_t pos = 0;
+								while (pos < all.size()) {
+									size_t e = all.find(L';', pos);
+									if (e == std::wstring::npos) e = all.size();
+									const std::vector<float> v = ParseFloatList(all.substr(pos, e - pos));
+									if (v.size() == 4) {
+										TableNode::Span sp;
+										sp.r = static_cast<int>(v[0]); sp.c = static_cast<int>(v[1]);
+										sp.rs = static_cast<int>(v[2]); sp.cs = static_cast<int>(v[3]);
+										spans.push_back(sp);
+									}
+									pos = e + 1;
+								}
+								tn->SetMerges(spans);
+							}
+						group = std::move(tn);
+					}
+					else if (isFrame) {
 						auto fn = std::make_unique<FrameNode>();
 						fn->SetFrameSize(attrs.count(L"m2:w") ? ParseLength(attrs[L"m2:w"], 100.0f) : 100.0f, attrs.count(L"m2:h") ? ParseLength(attrs[L"m2:h"], 100.0f) : 100.0f);
 						fn->SetClip(!(attrs.count(L"m2:clip") && attrs[L"m2:clip"] == L"false"));
@@ -968,6 +1023,25 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 							fn->SetLayoutMode(attrs[L"m2:layout"] == L"row" ? FrameLayoutMode::Row : attrs[L"m2:layout"] == L"column" ? FrameLayoutMode::Column : FrameLayoutMode::None);
 							if (attrs.count(L"m2:gap")) fn->SetGap(ParseLength(attrs[L"m2:gap"], 10.0f));
 							if (attrs.count(L"m2:pad")) fn->SetPadding(ParseLength(attrs[L"m2:pad"], 10.0f));
+							if (attrs.count(L"m2:mainAlign")) {
+								const auto& a = attrs[L"m2:mainAlign"];
+								if (a == L"center") fn->SetMainAlign(LayoutMainAlign::Center);
+								else if (a == L"end") fn->SetMainAlign(LayoutMainAlign::End);
+								else if (a == L"space-between") fn->SetMainAlign(LayoutMainAlign::SpaceBetween);
+								else fn->SetMainAlign(LayoutMainAlign::Start);
+							}
+							if (attrs.count(L"m2:crossAlign")) {
+								const auto& a = attrs[L"m2:crossAlign"];
+								if (a == L"center") fn->SetCrossAlign(LayoutCrossAlign::Center);
+								else if (a == L"end") fn->SetCrossAlign(LayoutCrossAlign::End);
+								else fn->SetCrossAlign(LayoutCrossAlign::Start);
+							}
+							if (attrs.count(L"m2:sizingW")) {
+								fn->SetSizingW(attrs[L"m2:sizingW"] == L"hug" ? FrameSizingMode::Hug : FrameSizingMode::Fixed);
+							}
+							if (attrs.count(L"m2:sizingH")) {
+								fn->SetSizingH(attrs[L"m2:sizingH"] == L"hug" ? FrameSizingMode::Hug : FrameSizingMode::Fixed);
+							}
 						}
 						group = std::move(fn);
 					} else {

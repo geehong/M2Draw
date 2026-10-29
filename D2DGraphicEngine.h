@@ -615,6 +615,18 @@ public:
 	// 변경 횟수 (렌더러 지오메트리 캐시 무효화 판단용)
 	uint32_t GetVersion() const { return m_version; }
 
+	// 웹/HTML 시맨틱 속성 (Step 4.5)
+	const std::string& GetHtmlTag() const        { return m_htmlTag; }
+	void SetHtmlTag(const std::string& tag)      { m_htmlTag = tag; Invalidate(); }
+	const std::string& GetHref() const           { return m_href; }
+	void SetHref(const std::string& h)           { m_href = h; Invalidate(); }
+	const std::string& GetAlt() const            { return m_alt; }
+	void SetAlt(const std::string& a)            { m_alt = a; Invalidate(); }
+	const std::string& GetAriaLabel() const      { return m_ariaLabel; }
+	void SetAriaLabel(const std::string& l)      { m_ariaLabel = l; Invalidate(); }
+	const std::string& GetCustomClass() const    { return m_customClass; }
+	void SetCustomClass(const std::string& c)    { m_customClass = c; Invalidate(); }
+
 	virtual const wchar_t* GetShapeTypeName() const { return L"쉐이프"; }
 
 protected:
@@ -623,6 +635,8 @@ protected:
 		m_name = o.m_name; m_xf = o.m_xf; m_style = o.m_style;
 		m_visible = o.m_visible; m_locked = o.m_locked; m_opacity = o.m_opacity;
 		m_blendMode = o.m_blendMode;
+		m_htmlTag = o.m_htmlTag; m_href = o.m_href; m_alt = o.m_alt;
+		m_ariaLabel = o.m_ariaLabel; m_customClass = o.m_customClass;
 	}
 	void ResetIdentity() { m_id = 0; m_parent = nullptr; m_version = NextVersion(); m_dirty = true; }
 
@@ -642,6 +656,11 @@ protected:
 	bool         m_locked  = false;
 	float        m_opacity = 1.0f;
 	LayerBlendMode m_blendMode = LayerBlendMode::Normal;
+	std::string  m_htmlTag;                // e.g. "header", "nav", "section", "button", "h1", "p"
+	std::string  m_href;                   // 링크 주소
+	std::string  m_alt;                    // 대체 텍스트
+	std::string  m_ariaLabel;              // 접근성 라벨
+	std::string  m_customClass;            // 사용자 정의 CSS 클래스
 	bool         m_dirty   = true;
 };
 
@@ -843,6 +862,24 @@ enum class FrameLayoutMode : uint8_t {
 	Column = 2
 };
 
+enum class LayoutMainAlign : uint8_t {
+	Start = 0,
+	Center = 1,
+	End = 2,
+	SpaceBetween = 3
+};
+
+enum class LayoutCrossAlign : uint8_t {
+	Start = 0,
+	Center = 1,
+	End = 2
+};
+
+enum class FrameSizingMode : uint8_t {
+	Fixed = 0,
+	Hug = 1
+};
+
 class FrameNode : public GroupNode {
 public:
 	FrameNode() { m_style.fill.type = PaintType::Solid; m_style.fill.color = Color(1.0f, 1.0f, 1.0f, 1.0f); m_style.stroke.width = 0.0f; }
@@ -850,7 +887,10 @@ public:
 	std::unique_ptr<Node> Clone() const override;
 	bool GetLocalBounds(Rect2& out) override { out = Rect2{ 0.0f, 0.0f, m_w, m_h }; return true; }
 	using Node::GetLocalBounds;
-	const wchar_t* GetShapeTypeName() const override { return L"프레임"; }
+	const wchar_t* GetShapeTypeName() const override {
+		if (GetHtmlTag() == "button" || GetName() == L"버튼") return L"버튼";
+		return L"프레임";
+	}
 
 	float GetWidth() const  { return m_w; }
 	float GetHeight() const { return m_h; }
@@ -867,8 +907,17 @@ public:
 	float GetPadding() const { return m_padding; }
 	void SetPadding(float p) { m_padding = (std::max)(0.0f, p); Invalidate(); }
 
-	// 자동 레이아웃(Row/Column): 자식을 z-순서대로 안쪽 여백(padding) 안에서 gap 간격으로 나란히 배치.
-	// 교차축은 시작 쪽 정렬, 프레임 크기는 그대로 (Hug/Fill 은 후속). 모드가 None 이면 아무것도 하지 않음. 변경이 있었으면 true
+	LayoutMainAlign GetMainAlign() const { return m_mainAlign; }
+	void SetMainAlign(LayoutMainAlign a) { m_mainAlign = a; Invalidate(); }
+	LayoutCrossAlign GetCrossAlign() const { return m_crossAlign; }
+	void SetCrossAlign(LayoutCrossAlign a) { m_crossAlign = a; Invalidate(); }
+	FrameSizingMode GetSizingW() const { return m_sizingW; }
+	void SetSizingW(FrameSizingMode s) { m_sizingW = s; Invalidate(); }
+	FrameSizingMode GetSizingH() const { return m_sizingH; }
+	void SetSizingH(FrameSizingMode s) { m_sizingH = s; Invalidate(); }
+
+	// 자동 레이아웃(Row/Column): 자식을 z-순서대로 안쪽 여백(padding) 안에서 gap 간격과 정렬 규칙에 따라 배치.
+	// SizingMode 가 Hug 인 축은 자식 총합에 맞춰 프레임 크기를 자동 조정. 모드가 None 이면 아무것도 하지 않음. 변경이 있었으면 true
 	bool ApplyLayout();
 
 private:
@@ -878,6 +927,90 @@ private:
 	FrameLayoutMode m_layoutMode = FrameLayoutMode::None;
 	float m_gap = 10.0f;
 	float m_padding = 10.0f;
+	LayoutMainAlign m_mainAlign = LayoutMainAlign::Start;
+	LayoutCrossAlign m_crossAlign = LayoutCrossAlign::Start;
+	FrameSizingMode m_sizingW = FrameSizingMode::Fixed;
+	FrameSizingMode m_sizingH = FrameSizingMode::Fixed;
+};
+
+// ---- HTML 컴포넌트: 테이블 (Step 4.5.7.1) ----------------------------------------
+// GroupNode 상속 (FrameNode 가 아님: 프레임은 자동 배치 컨테이너라 표의 행/열 의미와 맞지 않음).
+// 자식 노드 = 칸 내용. 자식의 로컬 원점은 표 기준 좌표이며, 칸 안에 두면 그 칸의 내용이 된다.
+// 이 클래스는 격자 모델만 가진다. 그리기는 D2DTableRender.cpp, HTML 출력은 HtmlExporter 가 담당.
+// 칸 병합/헤더는 4.5.7.5에서 추가한다.
+class TableNode : public GroupNode {
+public:
+	TableNode() { m_style.fill.type = PaintType::None; m_style.stroke.width = 0.0f; }
+
+	std::unique_ptr<Node> Clone() const override;
+	bool GetLocalBounds(Rect2& out) override;
+	using Node::GetLocalBounds;
+	const wchar_t* GetShapeTypeName() const override { return L"테이블"; }
+
+	// 격자 전체를 같은 크기 칸으로 다시 만든다 (행/열은 1~50 으로 제한)
+	void SetGrid(int rows, int cols, float cellW, float cellH);
+	// 열 너비/행 높이 목록을 한 번에 설정 (저장 파일 복원용). 비어 있으면 무시
+	void SetSizes(const std::vector<float>& colW, const std::vector<float>& rowH);
+
+	int  Rows() const { return static_cast<int>(m_rowH.size()); }
+	int  Cols() const { return static_cast<int>(m_colW.size()); }
+	const std::vector<float>& ColWidths() const { return m_colW; }
+	const std::vector<float>& RowHeights() const { return m_rowH; }
+	void SetColWidth(int c, float w);
+	void SetRowHeight(int r, float h);
+
+	float GetBorderWidth() const { return m_border; }
+	void  SetBorderWidth(float v) { m_border = (std::max)(0.0f, v); Invalidate(); }
+	Color GetBorderColor() const { return m_borderColor; }
+	void  SetBorderColor(const Color& c) { m_borderColor = c; Invalidate(); }
+	float GetCellPadding() const { return m_pad; }
+	void  SetCellPadding(float v) { m_pad = (std::max)(0.0f, v); Invalidate(); }
+
+	// 칸의 로컬 사각형 (표 기준). 인덱스가 범위를 벗어나면 빈 사각형
+	Rect2 CellRect(int r, int c) const;
+	// 로컬 점이 속한 칸. 병합된 칸이면 병합 영역의 왼쪽 위 칸(앵커)을 돌려준다. 표 밖이면 false
+	bool  CellAt(Vec2 local, int& r, int& c) const;
+
+	// ---- 병합 / 머리글 / 정렬 (4.5.7.2) ----
+	struct Span { int r = 0, c = 0, rs = 1, cs = 1; };
+	const std::vector<Span>& Merges() const { return m_merges; }
+	void SetMerges(const std::vector<Span>& v);
+	// (r0,c0)~(r1,c1) 범위를 한 칸으로 병합. 범위 밖/1칸/기존 병합과 겹치면 false
+	bool MergeRange(int r0, int c0, int r1, int c1);
+	// (r,c) 를 포함하는 병합을 해제. 병합이 없으면 false
+	bool SplitAt(int r, int c);
+	// (r,c) 를 포함하는 병합 정보 (없으면 자기 자신 1x1)
+	Span SpanOf(int r, int c) const;
+	// 병합된 칸이 차지하는 전체 로컬 사각형 (앵커 기준)
+	Rect2 SpanRect(int r, int c) const;
+	// 안쪽 격자선 조각 (병합 칸 내부 선 제외). 바깥 테두리는 포함하지 않는다
+	struct Seg { float x0, y0, x1, y1; };
+	void GridSegments(std::vector<Seg>& out) const;
+
+	// 행/열 구조 편집 (병합 정보를 함께 갱신. 자식 노드 이동은 TableComponent 가 담당)
+	bool InsertRowAt(int at, float h);
+	bool RemoveRowAt(int at);
+	bool InsertColAt(int at, float w);
+	bool RemoveColAt(int at);
+
+	int   GetHeaderRows() const { return m_headerRows; }
+	void  SetHeaderRows(int n) { m_headerRows = (std::max)(0, (std::min)(n, Rows())); Invalidate(); }
+	int   GetCellAlign() const { return m_cellAlign; }          // 0=왼쪽 1=가운데 2=오른쪽 (내보내기 text-align)
+	void  SetCellAlign(int a) { m_cellAlign = (std::max)(0, (std::min)(2, a)); Invalidate(); }
+
+	// 편집 중인 칸 (저장하지 않는 임시 상태. -1 = 없음)
+	void  SetActiveCell(int r, int c) { m_actR = r; m_actC = c; }
+	bool  GetActiveCell(int& r, int& c) const { r = m_actR; c = m_actC; return m_actR >= 0 && m_actR < Rows() && m_actC >= 0 && m_actC < Cols(); }
+
+private:
+	std::vector<float> m_colW, m_rowH;
+	std::vector<Span>  m_merges;
+	int   m_headerRows = 0;
+	int   m_cellAlign = 0;
+	int   m_actR = -1, m_actC = -1;
+	float m_border = 1.0f;
+	float m_pad = 6.0f;
+	Color m_borderColor = Color(0.35f, 0.38f, 0.45f, 1.0f);
 };
 
 } // namespace ge
@@ -910,6 +1043,9 @@ public:
 	void       SetActiveLayer(int index);
 	int        GetActiveLayerIndex() const { return m_activeLayer; }
 
+	// Artboard: 레이어 직속 최상위 FrameNode 목록 조회
+	std::vector<FrameNode*> GetArtboards() const;
+
 	// 도형 추가 : 항상 활성 레이어의 최상단 (기존 push_back 대체 지점)
 	Node* AddShape(std::unique_ptr<Node> node);
 
@@ -918,10 +1054,12 @@ public:
 	void SetSelection(const std::vector<Node*>& nodes) { m_selection = nodes; }
 	void ClearSelection()                               { m_selection.clear(); }
 
-	// 그룹화
+	// 그룹화 & 프레임 감싸기
 	GroupNode* GroupSelection();
 	void       UngroupSelection();
+	FrameNode* WrapSelectionInFrame();        // 선택된 노드들을 감싸는 새 FrameNode 생성 (Figma: Frame Selection)
 	bool       CanGroupSelection() const;     // 그룹화 가능한 선택(2개 이상)인지
+	bool       CanWrapInFrame() const;        // 프레임으로 감쌀 수 있는 선택(1개 이상)인지
 	bool       CanUngroupSelection() const;   // 선택에 그룹이 있는지
 	bool       CanArrangeSelection() const;   // 순서(Z-order)를 바꿀 수 있는 선택(레이어 제외, 부모가 있는 노드)이 있는지
 	bool       CanBooleanOperation() const;   // 불리언 연산 가능한 선택 (2개 이상의 PathNode 또는 변환 가능한 도형)
@@ -969,6 +1107,7 @@ public:
 		std::wstring GenerateNodeName(ShapeKind kind) const;
 		std::wstring GenerateLayerName() const;
 		std::wstring GenerateGroupName() const;                              // group1, group2 ...
+		std::wstring GenerateFrameName() const;                              // Frame 1, Frame 2 ...
 		std::wstring GenerateNameWithPrefix(const std::wstring& prefix) const;
 
 		// 선택 항목 Z-Order 변경 (각자의 부모 안에서)
@@ -1182,6 +1321,8 @@ private:
 	void DrawGroup(GroupNode& node, const Matrix2D& worldXf, const Viewport& view);
 	void DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Viewport& view);
 	void DrawImageNode(ImageNode& node, const Matrix2D& worldXf, const Viewport& view);
+	// 테이블 격자선 (D2DTableRender.cpp). 칸 내용은 DrawGroup 이 자식으로 그린다
+	void DrawTableGrid(TableNode& node, const Matrix2D& worldXf, const Viewport& view);
 
 	// 디코딩한 비트맵 캐시 (렌더 타깃에 종속이라 Initialize/Shutdown 에서 비움). 키 데이터를 함께 잡아 주소 재사용을 막음
 	struct ImageCacheEntry { std::shared_ptr<const ImageData> keep; ComPtr<ID2D1Bitmap> bitmap; };

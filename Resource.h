@@ -117,6 +117,14 @@
 #define ID_TEXT_TO_PATH    32825
 #define ID_FILE_PLACE_IMAGE 32826
 #define ID_FILE_EXPORT_SVG  32827
+#define ID_HTML_FRAME      32830
+#define ID_HTML_TABLE      32831
+#define ID_HTML_HEADING    32832
+#define ID_HTML_BUTTON     32833
+#define ID_HTML_DIVIDER    32834
+#define ID_HTML_SPACER     32835
+#define ID_OBJECT_WRAP_FRAME 32828
+#define ID_FILE_EXPORT_HTML 32829
 
 // ?????? ?? ??u?? ????? ????????.
 //

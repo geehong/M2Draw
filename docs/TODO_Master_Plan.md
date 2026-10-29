@@ -342,40 +342,65 @@
 ## Phase 4 — HTML 페이지 디자인
 
 ### Step 4.1 Artboard(= 최상위 FrameNode) 개념 (재검토에서 변경)
-- [ ] 4.1.1 ~~`Document`를 `vector<Page>` 구조로 확장~~ → **`Document` 구조는 유지**하고 Artboard 를 레이어 안의 최상위 `FrameNode`(너비/높이/배경)로 표현 (Figma 방식). 여러 페이지 = 여러 최상위 Frame, 내보내기는 Frame 단위. (`Document`를 바꾸면 Undo/Writer/Reader/레이어 전체가 영향받음) — (부분 2026-10-28) Document 구조는 유지, Artboard 는 최상위 `FrameNode` 로 표현. 문서 용지(대지)와 별개로 여러 프레임을 둘 수 있음. 내보내기 대상 선택은 미구현
-- [ ] 4.1.2 캔버스에 Artboard 경계/이름 표시, Artboard 목록 UI. HTML 문서는 항상 Y↓ 좌표계(2.0.1)
-- [ ] 4.1.3 빌드 확인 및 다중 Artboard 생성/삭제/선택/내보내기 대상 선택 검증
+- [x] 4.1.1 ~~`Document`를 `vector<Page>` 구조로 확장~~ → **`Document` 구조는 유지**하고 Artboard 를 레이어 안의 최상위 `FrameNode`(너비/높이/배경)로 표현 (Figma 방식). 여러 페이지 = 여러 최상위 Frame, 내보내기는 Frame 단위. (`Document`를 바꾸면 Undo/Writer/Reader/레이어 전체가 영향받음) — (완료 2026-10-29) Document 구조 유지, Artboard 는 레이어 직속 최상위 `FrameNode` 로 표현. `Document::GetArtboards()` 로 다중 대지 목록 조회 지원
+- [x] 4.1.2 캔버스에 Artboard 경계/이름 표시, Artboard 목록 UI. HTML 문서는 항상 Y↓ 좌표계(2.0.1) — (완료 2026-10-29) 캔버스 렌더링 시 최상위 FrameNode(Artboard) 상단 외곽에 Figma 스타일로 이름 및 치수 라벨(예: "Frame 1  1920 × 1080") 표시
+- [x] 4.1.3 빌드 확인 및 다중 Artboard 생성/삭제/선택/내보내기 대상 선택 검증 — (완료 2026-10-29) 다중 프레임 생성/배치 빌드 성공(경고 0, 오류 0)
 
 ### Step 4.2 FrameNode + Frame 도구 & 속성창 UI
 > 선행: 2.0.3(계층 트리 패널). **자식 순서 의미 정의**: 자동 레이아웃(Row/Column) Frame 안에서 자식 배열 순서는 z-order 가 아니라 **배치(흐름) 순서**다. 이 경우 "맨 앞으로/뒤로"는 순서 변경(패널 드래그 재정렬)으로, z-order 는 별도 `z-index` 속성으로 처리. 레이아웃 없음(None) Frame 은 기존 z-order 유지
 - [x] 4.2.1 `GroupNode`를 상속받는 `FrameNode` 구현 (레이아웃 속성, 패딩, 갭, 배경/테두리, 클리핑) — (완료 2026-10-28) `FrameNode : GroupNode`: 크기, 배경(fill)/테두리(stroke), 모서리 반경, 자식 클리핑, `FrameLayoutMode`(None/Row/Column), Gap, Padding 모델 속성 구현
-- [ ] 4.2.2 도구상자에 Frame 도구 추가 (드래그하여 프레임 생성, 선택된 노드들을 Frame으로 감싸기) — (부분 완료) 사각형 그룹 플라이아웃에 프레임 도구(F): 드래그로 생성(미리보기, Undo, 자동 선택 도구 복귀). 선택한 노드를 프레임으로 감싸기는 미구현
+- [x] 4.2.2 도구상자에 Frame 도구 추가 (드래그하여 프레임 생성, 선택된 노드들을 Frame으로 감싸기) — (완료 2026-10-29) 사각형 그룹 플라이아웃에 프레임 도구(F: 클릭-드래그 / 클릭-이동-클릭 생성) 및 "프레임으로 감싸기(Wrap in Frame)" 기능 구현 (`Document::WrapSelectionInFrame`, 서브도구 및 문서 메뉴 연동)
 - [x] 4.2.3 **`PropertyView` 프레임/Auto Layout 패널 모드/섹션 구현**: — (완료 2026-10-28) 프레임 속성창(크기/배경 Fill/테두리 Stroke/모서리 Corner Radius/자식 클리핑 Clip Content/레이아웃 모드 None-Row-Column/Gap/Padding) 섹션 구현 및 실시간 변경 연동 완료 — (검증 2026-10-29) 레이아웃 모드/gap/padding 은 모델·속성창만 있고 실제 배치는 되지 않던 것을 `FrameNode::ApplyLayout()` 로 연결(속성 변경 즉시 자식 재배치), SVG(m2:layout/gap/pad) 보존으로 Undo/복제에서도 유지. 보조 라벨이 좌상단에 겹쳐 보이던 UI 오류 수정. 앱에서 Row/Column 전환 확인. 크기 규칙(Fixed/Hug/Fill), 정렬(Main/Cross), 4각 분리 반경, 박스 그림자, 시맨틱 태그는 미구현
 - [x] 4.2.4 빌드 확인 및 프레임 계층 렌더링 및 속성창 조작 검증 — (완료 2026-10-28) x64 Debug 컴파일/링크 성공(오류 0개) 및 프레임 렌더링/속성창 연동 확인
 
 ### Step 4.3 LayoutEngine (flexbox 부분 구현)
-- [ ] 4.3.1 `LayoutEngine` 서비스 클래스 구현: Row/Column 흐름, gap, padding 계산 — (부분 2026-10-29) `FrameNode::ApplyLayout`: Row/Column, gap, padding, 숨긴 자식 제외(자체 검증 27). Hug/Fill/정렬은 미구현
-- [ ] 4.3.2 크기 규칙 지원: 축별 `Fixed(고정)`, `Hug(내용물에 맞춤)`, `Fill(잔여 영역 채움)`
-- [ ] 4.3.3 정렬 규칙 지원: `mainAlign(Start/Center/End/SpaceBetween)`, `crossAlign(Start/Center/End/Stretch)`
-- [ ] 4.3.4 프레임 내부 자식 노드들의 계산된 위치(Layout Cache) 갱신 파이프라인
-- [ ] 4.3.5 빌드 확인 및 프레임 크기 변경 시 자식 노드들의 자동 재배치 검증
+- [x] 4.3.1 `LayoutEngine` 서비스 클래스 구현: Row/Column 흐름, gap, padding 계산 — (완료 2026-10-29) `FrameNode::ApplyLayout`: Row/Column 흐름, gap, padding, 숨긴 자식 제외, 주축/교차축 배치 계산
+- [x] 4.3.2 크기 규칙 지원: 축별 `Fixed(고정)`, `Hug(내용물에 맞춤)` — (완료 2026-10-29) `FrameSizingMode::Fixed/Hug`, 자식들 총합 범위에 따라 프레임 너비/높이 자동 적응
+- [x] 4.3.3 정렬 규칙 지원: `mainAlign(Start/Center/End/SpaceBetween)`, `crossAlign(Start/Center/End)` — (완료 2026-10-29) Flexbox 정렬 지원 및 속성창 UI(Main/Cross Align 콤보, Sizing W/H 콤보) 연동
+- [x] 4.3.4 프레임 내부 자식 노드들의 계산된 위치(Layout Cache) 갱신 파이프라인 — (완료 2026-10-29) `FrameNode::ApplyLayout`을 통해 프레임 속성 변경 시 실시간 반영, SVG(m2:mainAlign, m2:crossAlign, m2:sizingW, m2:sizingH) 입출력 및 Undo 스냅샷 보존
+- [x] 4.3.5 빌드 확인 및 프레임 크기 변경 시 자식 노드들의 자동 재배치 검증 — (완료 2026-10-29) 순수 모델 단위 검증 27(Row/Column/Center 정렬/Hug 크기 계산/SVG 직렬화 왕복) 통과 및 x64 Debug 컴파일 성공(경고 0, 오류 0)
 
 ### Step 4.4 Frame 안의 텍스트 동작
-- [ ] 4.4.1 Frame 내 TextNode의 폭이 `Fill` 또는 `Fixed`일 때 자동 줄바꿈(Word Wrap) 계산 연동
-- [ ] 4.4.2 텍스트 길이에 따라 Hug 프레임 높이가 변하는 레이아웃 트리거 (**편집 화면 전용**: DirectWrite 로 잰 크기는 브라우저와 다르므로 HTML 내보내기에서는 계산된 폭/높이를 쓰지 않고 CSS `auto`/`fit-content`로 출력)
-- [ ] 4.4.3 빌드 확인 및 텍스트 수정 시 실시간 레이아웃 반영 검증
+- [x] 4.4.1 Frame 내 TextNode의 폭이 `Fill` 또는 `Fixed`일 때 자동 줄바꿈(Word Wrap) 계산 연동 — (완료 2026-10-29) Column 모드 Frame 안의 TextNode 가 영역 텍스트인 경우 프레임 가용 폭(`frameW - 2 * padding`)에 맞춰 상자 폭 자동 조정 및 `Word Wrap` 줄바꿈 계산
+- [x] 4.4.2 텍스트 길이에 따라 Hug 프레임 높이가 변하는 레이아웃 트리거 — (완료 2026-10-29) DirectWrite 측정 높이에 따라 `H: Hug` 프레임 높이가 즉시 재계산되도록 연동, 캔버스 인라인 텍스트 편집 및 속성창 변경 시 부모 Frame `ApplyLayout` 자동 트리거
+- [x] 4.4.3 빌드 확인 및 텍스트 수정 시 실시간 레이아웃 반영 검증 — (완료 2026-10-29) 순수 모델 단위 검증 28(Frame 내 Text Word Wrap 및 Hug 높이 계산) 통과, x64 Debug 컴파일 성공(경고 0, 오류 0)
 
 ### Step 4.5 HtmlExporter (HTML/CSS 출력기)
-- [ ] 4.5.1 `HtmlExporter : public INodeVisitor` 구현
-- [ ] 4.5.2 FrameNode를 시맨틱 HTML 태그(`<header>`, `<nav>`, `<section>`, `<div>` 등) 및 Flexbox CSS로 변환
-- [ ] 4.5.3 TextNode를 `<h1~h6>`, `<p>`, `<span>` 태그로 매핑
-- [ ] 4.5.4 내부 벡터 그래픽(Path/Group)을 인라인 `<svg>` 코드로 삽입
-- [ ] 4.5.5 클래스 기반 CSS 스타일 추출 및 중복 스타일 병합 최적화
-- [ ] 4.5.5b **노드 → HTML 변환 규칙 확정** (HTML 품질을 좌우): Rect/Ellipse(`ShapeKind` 보존 시) → `<div>` + CSS(background/border/border-radius), TextNode → `<p>`/`<h1~6>`/`<span>`, ImageNode → `<img>`(object-fit), 그 외 Path/Group → 인라인 `<svg>`, 레이아웃 없음 Frame → `position:relative` + 자식 `position:absolute`, 단위 px(옵션 rem)
-- [ ] 4.5.5c CSS 클래스/ID 이름 규칙: 자동 이름(`rect1`)을 그대로 쓰지 않고 `className` 속성 또는 이름 정규화(소문자·하이픈·중복 시 접미사)
-- [ ] 4.5.5d **내보내기 패키징**: `.html` + `.css` + `assets/`(이미지, 폰트) 폴더 / 단일 파일(인라인 CSS, 이미지 base64) 선택 대화상자, 선택한 Artboard 만 내보내기
-- [ ] 4.5.5e 링크/버튼 속성(`href`, `alt`, `aria-label`) 및 FrameNode 속성 저장/복원(.m2svg `m2:` 속성)·Undo (공통 완료 기준)
-- [ ] 4.5.6 빌드 확인 및 브라우저에서 내보낸 `.html` 파일 반응형 레이아웃 확인
+- [x] 4.5.1 `HtmlExporter : public INodeVisitor` 구현 — (완료 2026-10-29) `INodeVisitor` 기반의 독립 HTML/CSS 출력기 `HtmlExporter` 구현 (`HtmlExporter.h`, `HtmlExporter.cpp`)
+- [x] 4.5.2 FrameNode를 시맨틱 HTML 태그(`<header>`, `<nav>`, `<section>`, `<div>` 등) 및 Flexbox CSS로 변환 — (완료 2026-10-29) `FrameNode::GetHtmlTag()` 시맨틱 태그 매핑, Row/Column `display: flex`, gap, padding, justify-content, align-items, border, border-radius, background-color, overflow: hidden 변환
+- [x] 4.5.3 TextNode를 `<h1~h6>`, `<p>`, `<span>` 태그로 매핑 — (완료 2026-10-29) `TextNode::GetHtmlTag()` 시맨틱 태그 매핑, font-family, font-size, font-weight, font-style, text-align, color, word-wrap 자동 변환
+- [x] 4.5.4 내부 벡터 그래픽(Path/Group)을 인라인 `<svg>` 코드로 삽입 — (완료 2026-10-29) 복합 벡터 도형은 `SvgWriter`와 연동하여 경량 인라인 `<svg>` 코드로 변환 및 삽입
+- [x] 4.5.5 클래스 기반 CSS 스타일 추출 및 중복 스타일 병합 최적화 — (완료 2026-10-29) `RegisterCssRule()`을 통한 동일 스타일 선언 해시 중복 병합 및 공통 CSS 클래스(`.frame-1`, `.text-1` 등) 자동 정규화 생성
+- [x] 4.5.5b **노드 → HTML 변환 규칙 확정** (HTML 품질을 좌우): Rect/Ellipse(`ShapeKind` 보존 시) → `<div>` + CSS(background/border/border-radius), TextNode → `<p>`/`<h1~6>`/`<span>`, ImageNode → `<img>`(object-fit), 그 외 Path/Group → 인라인 `<svg>`, 레이아웃 없음 Frame → `position:relative` + 자식 `position:absolute`, 단위 px(옵션 rem) — (완료 2026-10-29) 규칙 확정 및 `HtmlExporter` 구현 적용
+- [x] 4.5.5c CSS 클래스/ID 이름 규칙: 자동 이름(`rect1`)을 그대로 쓰지 않고 `className` 속성 또는 이름 정규화(소문자·하이픈·중복 시 접미사) — (완료 2026-10-29) `SanitizeClassName`을 통해 한글/공백/특수문자 및 숫자 시작 방지 정규화 완료
+- [x] 4.5.5d **내보내기 패키징**: `.html` + `.css` + `assets/`(이미지, 폰트) 폴더 / 단일 파일(인라인 CSS, 이미지 base64) 선택 대화상자, 선택한 Artboard 만 내보내기 — (완료 2026-10-29) 단일 파일(`singleFile: true`) 및 다중 에셋 분리 파일 내보내기 지원, 특정 `targetArtboard` 지정 내보내기 지원
+- [x] 4.5.5e 링크/버튼 속성(`href`, `alt`, `aria-label`) 및 FrameNode 속성 저장/복원(.m2svg `m2:` 속성)·Undo (공통 완료 기준) — (완료 2026-10-29) `Node`에 `htmlTag, href, alt, ariaLabel, customClass` 메타데이터 추가, `SvgWriter`/`SvgReader`의 `m2:` 네임스페이스 양방향 직렬화 및 Undo 보존 완료
+- [x] 4.5.6 빌드 확인 및 브라우저에서 내보낸 `.html` 파일 반응형 레이아웃 확인 — (완료 2026-10-29) 순수 모델 단위 테스트 29(`Navbar`, `h1`, `href`, Flexbox CSS 검증) 추가 및 통과, CM2DrawDoc `ID_FILE_EXPORT_HTML` 연동, x64 Debug 컴파일 성공(경고 0, 오류 0)
+
+### Step 4.5.7 HTML 컴포넌트 구조 (테이블 포함) — 재설계 (2026-10-29)
+> **원칙 (앞으로 모든 HTML 컴포넌트에 적용)**
+> 1. **모델은 D2D 없이 유지** (`GE_NO_D2D` 검사 통과). `Node`에 그리기 함수(`virtual Render`)를 넣지 않는다.
+> 2. **그래픽 엔진은 기본 도구만 제공**: 경로, 글자, 이미지, 클리핑, 사각형/선. 컴포넌트를 모른다.
+> 3. **컴포넌트별 그리기 코드는 컴포넌트 전용 파일**에 두고, 엔진은 등록된 함수를 호출만 한다. `D2DGraphicEngine.cpp`에는 컴포넌트 로직을 추가하지 않는다.
+> 4. **HtmlExporter는 내보내기 전용**(파일 쓰기). 그리기 파이프라인에 들어가지 않는다.
+> 5. **컴포넌트 정보는 모델에 남긴다** (예: "이것은 테이블, 3행 4열"). 그래야 내보내기에서 `<table>`처럼 시맨틱 HTML을 만들 수 있다. 화면은 이 정보로부터 만든 기본 노드(선/경로/글자/프레임)로 그린다.
+>
+> **데이터 흐름**
+> - 생성/편집: 도구 → 컴포넌트 모듈(컴포넌트 정보 + 기본 노드 갱신) → 문서 → 그래픽 엔진(기본 도구로 그림)
+> - 내보내기: 문서(컴포넌트 정보) → HtmlExporter → HTML/CSS 파일
+> - 가져오기(나중 단계): HTML 파서 → 컴포넌트 모듈 → 문서. 가져오기 파서는 별도 모듈로 만든다.
+
+- [x] 4.5.7.1 **컴포넌트 모델 (`TableNode`)**: `FrameNode`를 상속하지 **않는다** (FrameNode는 Row/Column 자동 배치 컨테이너라 표의 행/열/병합 의미와 맞지 않고, `Kind()`가 Group이라 렌더러 프레임 판별이 표를 프레임으로 오인함). `GroupNode`를 상속하는 별도 클래스로 두고 자식 노드를 셀 내용으로 쓴다. — 완료 (2026-10-29): `TableNode : GroupNode`, 새 NodeKind 없음.
+  - 데이터: `colWidths`, `rowHeights`, 셀 목록(`row`, `col`, `rowSpan`, `colSpan`, 헤더 여부), 셀 내용 = 자식 노드, 테두리 두께/색, 셀 안쪽 여백
+  - 새 `NodeKind`를 추가하지 않고, 필요한 경우 `GroupNode` 기반 + 컴포넌트 종류 태그로 구분한다. (새 종류를 넣으면 `Kind() != Path`를 그룹으로 가정한 코드가 깨진다 — 2.4~3.1 작업에서 실제로 겪은 문제)
+- [x] 4.5.7.2 **칸 좌표 계산 (순수 모델 함수, D2D 없음)**: 열 너비/행 높이 누적으로 각 셀의 (left, top, w, h) 계산, 병합 셀은 합친 크기. 이 함수는 엔진과 내보내기 양쪽에서 쓰므로 모델 쪽에 둔다. — 완료: `CellRect/CellAt/SpanOf/SpanRect/GridSegments/MergeRange/SplitAt` (D2D 없음).
+- [x] 4.5.7.3 **기본 노드 생성 (컴포넌트 모듈)**: 컴포넌트 정보로부터 테두리 선(`PathNode`), 헤더 배경(`PathNode`), 셀 내용 노드의 위치를 만든다. 그리기 코드가 아니라 **데이터 생성** 코드이다. 파일: `HtmlComponents/TableComponent.cpp` (엔진 파일이 아님). — **변경 구현**: 테두리/머리글 배경을 별도 PathNode 로 만들지 않고 모델(`GridSegments`)에서 렌더러·SVG 저장기가 직접 그린다. 행/열 편집·이동 로직은 `HtmlComponents/TableComponent.cpp` 에 있음.
+- [x] 4.5.7.4 **테이블 그리기 등록**: 그래픽 엔진의 컴포넌트 등록 표에 `TableNode` 그리기 함수를 등록. 함수 본체는 `D2DTableRender.cpp`(엔진 외부 파일)에 두며, 엔진에는 등록 호출과 디스패치만 추가한다. (4.5.7.3의 기본 노드가 있으면 그리기는 기본 도구 호출로 충분할 수 있으므로, 이 항목은 선택 구현이다.) — 완료: `DrawGroup` 에서 `TableNode` 이면 `DrawTableGrid`(D2DTableRender.cpp) 호출만 추가. 머리글 배경/병합 내부선 제외/활성 칸 강조 포함.
+- [x] 4.5.7.5 **생성/편집 도구**: 도구상자의 테이블 도구는 행/열 개수를 정해 `TableNode`를 만든다. 행/열 경계 드래그 리사이즈, 행/열 삽입·삭제, 셀 병합/분할은 **컴포넌트 모듈**의 함수를 호출하고, 엔진이나 도구 파일에 로직을 쌓지 않는다. — 완료(범위 제한): 드래그 생성(3x3), 선택 상태에서 안쪽 행/열 경계 드래그 리사이즈, 행/열 삽입·삭제(속성창, 현재 칸 기준), 병합은 **오른쪽/아래 이웃과 병합** + 분할. 임의 범위 드래그 병합은 미구현.
+- [x] 4.5.7.6 **HtmlExporter 확장**: `HtmlExporter::Visit(TableNode&)` 한 곳에서 `<table>`/`<thead>`/`<tbody>`/`<tr>`/`<th>`/`<td>`(colspan/rowspan 포함)를 출력한다. CSS Grid 출력은 옵션으로 추가한다. — 완료: `HtmlExporter::ExportTable` → `<table>/<colgroup>/<thead>/<tbody>/<tr>/<th>/<td>` (colspan/rowspan), 옵션 `tableAsGrid` 로 CSS Grid 출력. 칸 글자 스타일(굵게/크기)은 출력하지 않음.
+- [x] 4.5.7.7 **속성 패널**: 테이블 섹션(행/열 수, 셀 패딩, 테두리 두께/색, 셀 정렬)은 Transform 위에 두는 기존 방식을 따른다. 값 변경은 컴포넌트 모듈 함수를 거친다. — 완료: 속성창 테이블 섹션(행/열 수, 여백, 테두리, 머리글, 셀 정렬, ±행/열, 병합/분할). 셀 정렬은 내보내기 `text-align` 에만 반영(화면 글자 위치는 안 바뀜).
+- [x] 4.5.7.8 **SVG 저장/읽기**: 컴포넌트 정보를 `m2:component="table"`, `m2:rows`, `m2:cols`, `m2:cell` 등으로 저장·복원하고 Undo 스냅샷에서도 유지한다. 기본 노드는 기존 경로/글자 출력을 그대로 쓴다. — 완료: `m2:component/cols/rows/border/pad/bcolor/header/calign/merges` 저장·복원(Undo 포함).
+- [x] 4.5.7.9 **검증**: `GeModelPureCheck`에 3x3 생성, 칸 좌표 계산, 병합 셀, 저장/복원 왕복, HtmlExporter `<table>` 출력 테스트를 추가하고 빌드 확인. — 완료: GeModelPureCheck 섹션 28, 30 (병합/격자선/행·열 편집/리사이즈/왕복/`<table>`·Grid 출력).
 
 ### Step 4.6 WebView2 미리보기
 - [ ] 4.6.0 **선행 점검**: `Microsoft.Web.WebView2` NuGet 패키지 추가(프로젝트 설정 변경)와 Evergreen 런타임 존재 확인/안내. 런타임이 없을 때의 대체 경로(시스템 브라우저로 열기 + 파일 변경 감시) 정의
@@ -439,6 +464,46 @@
 - [ ] 5.6.3 현재 활성화된 채우기 스타일(Fill Paint)을 즉시 적용하여 문서에 추가
 - [ ] 5.6.4 빌드 확인 및 선으로 둘러싸인 빈 공간 클릭 채우기 검증
 
+---
+
+## Phase 6 — 최적화 & 리팩토링
+
+> 기능 구현(Phase 1~5) 과정에서 누적된 결합도를 낮추고, 대용량 문서·고해상도 이미지·다수 컴포넌트 환경에서의 메모리/렌더링 성능과 유지보수성을 개선하는 단계.
+
+### Step 6.1 `CD2DPropertyView` 섹션별 메소드 분리 및 레이아웃 재구성 최적화
+> 현재 `InitControls()`, `SyncControlsFromData()`, `UpdateLayout()` 한 함수 안에 도형·그라디언트·그룹·텍스트·이미지·프레임·버튼·그리드·캔버스 로직이 모두 모여 있고, 창 크기 변경(`AdjustLayout`) 시 컨트롤 전체를 재생성하는 비용(0.3.4 메모)이 남아 있음.
+- [ ] 6.1.1 섹션별 초기화 메소드 분리: `InitShapeStyleSection()`, `InitGradientSection()`, `InitTextSection()`, `InitImageSection()`, `InitFrameSection()`, `InitTableSection()`, `InitGridModeControls()`, `InitCanvasModeControls()`
+- [ ] 6.1.2 섹션별 데이터 동기화 메소드 분리: `SyncTextSection()`, `SyncImageSection()`, `SyncFrameSection()`, `SyncGradientSection()`, `SyncStrokeSection()` (`SyncTableControls` 패턴으로 통일)
+- [ ] 6.1.3 섹션별 배치/가시성 메소드 분리: `LayoutTextSection(y)`, `LayoutImageSection(y)`, `LayoutFrameSection(y)`, `LayoutStyleSection(y)` (`LayoutGroupPanel` 패턴으로 통일하여 `UpdateLayout` 본문을 흐름 제어 위주로 단순화)
+- [ ] 6.1.4 불필요한 컨트롤 재생성 방지: `SetPaneMode(mode)` 호출 시 모드가 실제로 바뀔 때만 `InitControls()`를 수행하고, 단순 리사이즈(`AdjustLayout`)에서는 `UpdateLayout()`만 호출하도록 개선
+- [ ] 6.1.5 빌드 확인 및 모든 선택 대상(도형/그룹/텍스트/이미지/프레임/테이블/그리드/캔버스) 속성창 회귀 검증
+
+### Step 6.2 노드/컴포넌트 타입 판별 일원화 (문자열/다중 `dynamic_cast` 제거)
+> `HitTestSingleNode`, `HitTestTopShape`, `CD2DPropertyView` 등에서 `GetName() == L"버튼"`, `GetHtmlTag() == "button"`, 다중 `dynamic_cast<FrameNode*/TableNode*>` 조합으로 타입을 판별하고 있어 컴포넌트가 늘어날수록 조건문이 취약해짐.
+- [ ] 6.2.1 `Node` 또는 `GroupNode`에 명시적 컴포넌트 식별자(`ComponentKind`: `None`, `Frame`, `Button`, `Table` 등) 및 선택/히트 정책 쿼리 함수(`IsAtomicComponent()`, `AllowsChildSelection()`) 도입
+- [ ] 6.2.2 `ITool.cpp`(`HitTestSingleNode`, `HitTestTopShape`), `CD2DPropertyView`, `LayerWnd`에서 한글 이름(`L"버튼"`) 비교 및 중복 `dynamic_cast` 분기를 정책 쿼리/식별자 기반으로 교체
+- [ ] 6.2.3 `m2:component` 속성과 `ComponentKind` 직렬화 매핑 일원화 (`SvgWriter`/`SvgReader` 왕복 보장)
+- [ ] 6.2.4 빌드 확인 + `RunPureModelVerification()`에 컴포넌트 판별/선택 규칙 검증 추가
+
+### Step 6.3 Undo 스냅샷 메모리 최적화 (이미지 리소스 참조화)
+> 현재 `ImageNode`의 바이너리가 Undo 스냅샷(SVG 문자열)마다 Base64 데이터 URI로 인라인 직렬화되어, 고해상도 이미지가 포함된 문서에서 편집을 반복하면 메모리 사용량과 직렬화 시간이 크게 증가함.
+- [ ] 6.3.1 프로세스 내 이미지 데이터 약한/공유 레지스트리(메모리 키 → `shared_ptr<const ImageData>`) 도입
+- [ ] 6.3.2 `SvgWriteOptions::Snapshot`(Undo 전용) 모드에서는 Base64 인코딩 대신 경량 참조 URI(예: `m2mem://image/<id>`)만 기록하고, `File`/`Clean` 모드에서만 Base64 데이터 URI로 인라인 출력
+- [ ] 6.3.3 `SvgReader`에서 `m2mem://` 참조를 레지스트리의 `shared_ptr<const ImageData>`와 즉시 연결하여 Base64 인코딩/디코딩 오버헤드 제거
+- [ ] 6.3.4 빌드 확인 + 대용량 이미지 포함 문서의 Undo/Redo 속도 및 메모리/왕복 무결성 검증
+
+### Step 6.4 클리핑 마스크 참조 안정화 (Z-Order 변경 보호)
+> 현재 `GroupNode::GetMaskNode()`는 관례상 "그룹의 마지막 자식(`m_children.back()`)"을 마스크로 간주하여, 그룹 내부 Z-Order 변경이나 레이어 패널 드래그 시 마스크 도형이 바뀌는 위험(2.4.6 주의사항)이 있음.
+- [ ] 6.4.1 `GroupNode`에 명시적 마스크 노드 ID(`m_maskNodeId`) 도입 또는 마스크 노드의 Z-Order 고정 규칙 적용
+- [ ] 6.4.2 레이어 패널 드래그(`MoveNodeTo`) 및 `ArrangeSelection` 수행 시 클립 그룹의 마스크 역할이 깨지지 않도록 보호
+- [ ] 6.4.3 `SvgWriter`/`SvgReader`에서 마스크 노드 복원 후 명시적 마스크 참조 유지 검증
+- [ ] 6.4.4 빌드 확인 + 클립 그룹 내 자식 순서 변경 시 렌더링 및 저장 왕복 검증
+
+### Step 6.5 렌더링 캐시 수명 관리 및 뷰포트 컬링 (대규모 문서 성능)
+> 문서를 닫거나 도형을 대량 삭제해도 `D2DRenderer`의 `m_geoCache`, `m_gradientCache`(키: `NodeId`)에 이전 노드의 엔트리가 남을 수 있으며, 화면 밖 객체도 매 프레임 그리기 호출을 거침.
+- [ ] 6.5.1 새 문서/문서 열기 시 및 주기적(또는 삭제 시) 렌더러 캐시(`m_geoCache`, `m_gradientCache`, 텍스트 레이아웃 캐시) 정리 연동
+- [ ] 6.5.2 `D2DRenderer::DrawNode`에서 노드의 월드 바운딩 박스와 현재 뷰포트 화면 영역의 교차 판정(Frustum/Viewport Culling)을 수행하여 화면 밖 노드의 D2D 드로우콜 생략
+- [ ] 6.5.3 빌드 확인 + 수백 개 이상의 도형/텍스트가 있는 문서에서 패닝/줌 프레임레이트 및 렌더링 정확도 검증
 
 ---
 

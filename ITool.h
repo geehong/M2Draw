@@ -80,6 +80,7 @@ enum class ToolType
 	// 아래 둘은 도구가 아니라 도구상자의 "동작" 항목(그룹/그룹 해제)을 플라이아웃 그룹에 담기 위한 표시용 값. 활성 도구가 되지 않음
 	ActionGroup,
 	ActionUngroup,
+	ActionWrapFrame, // 프레임으로 감싸기
 	ActionToFront,   // 순서: 맨 앞으로
 	ActionForward,   // 앞으로
 	ActionBackward,  // 뒤로
@@ -92,7 +93,12 @@ enum class ToolType
 	ActionClipMask,         // 클리핑 마스크 만들기
 	ActionReleaseMask,      // 클리핑 마스크 해제
 	Polyline,               // 열린 다각형(폴리라인) 도구: 클릭으로 꺾은선, 더블클릭/우클릭/Enter 로 완성
-	Frame                   // 프레임(아트보드) 도구 (F): 드래그로 프레임 생성
+	Frame,                  // 프레임(아트보드) 도구 (F): 드래그로 프레임 생성
+	Table,                  // 테이블 도구: 드래그로 3x3 표(HTML 컴포넌트) 생성
+	ComponentHeading,       // 헤딩(제목) 도구: 클릭 위치에 굵은 제목 텍스트
+	ComponentButton,        // 버튼 도구: 드래그 상자 + 가운데 라벨
+	ComponentDivider,       // 구분선 도구: 가로 선
+	ComponentSpacer        // 간격 도구: 빈 간격 상자(점선)
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)
@@ -161,7 +167,7 @@ public:
 	ToolType GetType() const override { return ToolType::Select; }
 	const wchar_t* GetName() const override { return L"선택 도구 (Select)"; }
 	wchar_t GetShortcut() const override { return L'V'; }
-	enum class Mode { None, Moving, Scaling, Rotating, EditNode, Marquee, GradientHandle };
+	enum class Mode { None, Moving, Scaling, Rotating, EditNode, Marquee, GradientHandle, TableResize };
 	enum class Handle { None, TL, T, TR, R, BR, B, BL, L, Rotate };
 
 	HCURSOR GetCursor() const override;
@@ -177,7 +183,7 @@ public:
 	// 문서 선택만 해제 (패널 갱신은 호출 측 책임)
 	void ClearSelection(CM2DrawDoc* pDoc);
 	// 진행 중인 드래그/편집 상태 폐기 (문서가 교체되어 노드 포인터가 무효가 된 경우)
-	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; m_gradShape = nullptr; m_gradHandle = GradHandle::None; }
+	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; m_gradShape = nullptr; m_gradHandle = GradHandle::None; m_tbl = nullptr; m_hoverTbl = 0; }
 
 	Handle GetActiveHandle() const { return m_handle; }
 	void SetActiveHandle(Handle h) { m_handle = h; }
@@ -206,6 +212,16 @@ private:
 	ge::PathNode*     m_gradShape = nullptr;
 	ge::Rect2         m_gradBounds{};                      // 드래그 시작 시점의 지오메트리 경계 (드래그 중 변하지 않음)
 	void ApplyGradientDrag(const ToolEvent& e);
+
+	// 테이블 행/열 경계 드래그 리사이즈 (4.5.7.5) — 실제 크기 변경은 TableComponent::ResizeRow/ResizeCol
+	ge::TableNode* m_tbl = nullptr;
+	bool           m_tblCol = false;
+	int            m_tblIdx = -1;
+	float          m_tblStartSize = 0.0f;
+	float          m_tblStartLocal = 0.0f;
+	int            m_hoverTbl = 0;   // 0=없음 1=열 경계 2=행 경계
+	static bool HitTableLine(ge::TableNode* tb, D2D1_POINT_2F screenPt, const ViewportTransform& view, bool& isCol, int& idx);
+	static float TableLocalAxis(ge::TableNode* tb, D2D1_POINT_2F worldPt, bool isCol);
 
 	static bool IsOpenPath(ge::Node* shape);
 	void ApplyNodeEdit(ge::PathNode* shape, const ToolEvent& e);
@@ -490,6 +506,55 @@ public:
 private:
 	bool          m_drag = false;
 	bool          m_waitingSecondClick = false; // 클릭-이동-클릭 모드 플래그
+	D2D1_POINT_2F m_startW{}, m_curW{};
+	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
+};
+
+// HTML 기본 컴포넌트 도구 종류
+enum class ComponentKind : uint8_t { Heading, Button, Divider, Spacer };
+
+// HTML 기본 컴포넌트 도구 (헤딩/버튼/구분선/간격). 기존 노드(텍스트/프레임/경로)로 구성하고 선택 도구로 돌아감
+class ComponentTool : public ITool
+{
+public:
+	explicit ComponentTool(ComponentKind k) : m_kind(k) {}
+	ToolType GetType() const override;
+	const wchar_t* GetName() const override;
+	wchar_t GetShortcut() const override { return 0; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	bool HasActiveShape() const override { return m_drag; }
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+private:
+	ComponentKind m_kind;
+	bool          m_drag = false;
+	D2D1_POINT_2F m_startW{}, m_curW{};
+	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
+};
+
+// 테이블 도구: 드래그한 크기의 3x3 표를 만들고 선택 도구로 돌아감 (클릭만 하면 300x150 기본 크기)
+class TableTool : public ITool
+{
+public:
+	ToolType GetType() const override { return ToolType::Table; }
+	const wchar_t* GetName() const override { return L"테이블 도구 (Table)"; }
+	wchar_t GetShortcut() const override { return 0; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	bool HasActiveShape() const override { return m_drag; }
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+private:
+	bool          m_drag = false;
 	D2D1_POINT_2F m_startW{}, m_curW{};
 	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
 };
