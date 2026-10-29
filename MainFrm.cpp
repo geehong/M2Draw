@@ -441,11 +441,9 @@ void CMainFrame::OnClose()
 
 void CMainFrame::OnDestroy()
 {
+	// 창이 파괴되는 중이므로 속성창을 비우지 않는다: 속성 그리드(RemoveAll)가 이미 파괴된 툴팁에 DelTool 을 호출해 assert 가 난다
 	m_bClosing = true;
 	GetApp()->GetToolManager().RemoveListener(this);
-	m_wndProperties.SetSelectedShape(nullptr, nullptr);
-	m_wndGridProp.SetSelectedShape(nullptr, nullptr);
-	m_wndCanvasProp.SetSelectedShape(nullptr, nullptr);
 	CMDIFrameWndEx::OnDestroy();
 }
 
