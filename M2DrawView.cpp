@@ -42,6 +42,8 @@ BEGIN_MESSAGE_MAP(CM2DrawView, CView)
 	ON_COMMAND(ID_EDIT_CLEAR, &CM2DrawView::OnEditClear)
 	ON_UPDATE_COMMAND_UI(ID_EDIT_CLEAR, &CM2DrawView::OnUpdateEditClear)
 	ON_COMMAND(0x9999, &CM2DrawView::CenterOrigin)
+	ON_EN_KILLFOCUS(1099, &CM2DrawView::OnTextEditKillFocus)
+	ON_EN_CHANGE(1099, &CM2DrawView::OnTextEditChange)
 END_MESSAGE_MAP()
 
 // CM2DrawView 생성/소멸
@@ -203,6 +205,7 @@ void CM2DrawView::OnSize(UINT nType, int cx, int cy)
 	{
 		CenterOrigin();
 	}
+	if (IsTextInlineEditing()) UpdateTextEditCtrlLayout();
 }
 
 BOOL CM2DrawView::OnEraseBkgnd(CDC* /*pDC*/)
@@ -232,6 +235,7 @@ void CM2DrawView::ZoomAtPoint(CPoint clientPt, float factor)
 			m_fZoom * 100.0f, m_fZoom, clientPt.x, clientPt.y, m_ptPan.x, m_ptPan.y);
 		LogAppEvent(strLog);
 
+		if (IsTextInlineEditing()) UpdateTextEditCtrlLayout();
 		Invalidate(FALSE);
 	}
 }
@@ -273,6 +277,7 @@ void CM2DrawView::ZoomAtRect(CRect marqueeClientRc)
 		m_fZoom * 100.0f, m_fZoom, m_ptPan.x, m_ptPan.y);
 	LogAppEvent(strLog);
 
+	if (IsTextInlineEditing()) UpdateTextEditCtrlLayout();
 	Invalidate(FALSE);
 }
 
@@ -293,6 +298,11 @@ BOOL CM2DrawView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 
 void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 {
+	if (IsTextInlineEditing())
+	{
+		CommitTextInlineEdit();
+	}
+
 	CM2DrawDoc* pDoc = GetDocument();
 	bool isBottomLeft = (pDoc && pDoc->GetDoc().originMode == ge::CanvasOriginMode::BottomLeft);
 	D2D1_POINT_2F rawWorld = ScreenToWorld(point);
@@ -375,7 +385,7 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 	CM2DrawDoc* pDoc = GetDocument();
 	ToolType activeType = GetApp()->GetToolManager().GetActiveType();
 
-	// 0-a. 선택 도구: 선택된 텍스트를 더블클릭하면 내용 편집
+	// 0-a. 선택 도구: 선택된 텍스트를 더블클릭하면 캔버스 위에서 직접 인라인 편집
 	if (activeType == ToolType::Select && pDoc && pDoc->GetDoc().GetSelection().size() == 1)
 	{
 		ge::Node* sel = pDoc->GetPrimarySelection();
@@ -390,26 +400,7 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 				if (l.x >= b.left && l.x <= b.right && l.y >= b.top && l.y <= b.bottom)
 				{
 					auto* tn = static_cast<ge::TextNode*>(sel);
-					TextEditProps props;
-					props.text = tn->GetText();
-					props.family = tn->GetFontFamily();
-					props.size = tn->GetFontSize();
-					props.bold = tn->IsBold();
-					props.italic = tn->IsItalic();
-					props.align = static_cast<int>(tn->GetAlign());
-					if (EditTextPropsDialog(this, props) && !props.text.empty())
-					{
-						tn->SetText(props.text);
-						tn->SetFontFamily(props.family);
-						tn->SetFontSize(props.size);
-						tn->SetBold(props.bold);
-						tn->SetItalic(props.italic);
-						tn->SetAlign(static_cast<ge::TextAlign>((std::max)(0, (std::min)(2, props.align))));
-						LogAppEvent(_T("[선택 도구] 텍스트 편집"));
-						pDoc->CommitUndoPoint(L"텍스트 편집");
-						UpdateShapePropertiesSelection(tn, pDoc);
-						pDoc->UpdateAllViews(nullptr);
-					}
+					BeginTextInlineEdit(tn);
 					return;
 				}
 			}
@@ -586,6 +577,29 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 
 BOOL CM2DrawView::PreTranslateMessage(MSG* pMsg)
 {
+	// 인라인 텍스트 편집 중 키보드 메시지 처리: Enter = 확정(Shift+Enter는 줄바꿈), Esc = 취소
+	if (IsTextInlineEditing() && m_wndTextInlineEdit.GetSafeHwnd() && pMsg->hwnd == m_wndTextInlineEdit.GetSafeHwnd())
+	{
+		if (pMsg->message == WM_KEYDOWN)
+		{
+			if (pMsg->wParam == VK_RETURN)
+			{
+				const bool shiftDown = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+				if (!shiftDown)
+				{
+					CommitTextInlineEdit();
+					return TRUE;
+				}
+			}
+			else if (pMsg->wParam == VK_ESCAPE)
+			{
+				CancelTextInlineEdit();
+				return TRUE;
+			}
+		}
+		return CView::PreTranslateMessage(pMsg);
+	}
+
 	if (pMsg->message == WM_KEYDOWN && (pMsg->wParam == VK_DELETE || pMsg->wParam == VK_BACK))
 	{
 		CM2DrawDoc* pDoc = GetDocument();
@@ -980,3 +994,170 @@ CM2DrawDoc* CM2DrawView::GetDocument() const
 	return (CM2DrawDoc*)m_pDocument;
 }
 #endif //_DEBUG
+
+// ----------------------------------------------------------------------------
+// 캔버스 위 텍스트 직접 인라인 편집 (Step 3.2.2 ~ 3.2.4)
+// ----------------------------------------------------------------------------
+bool CM2DrawView::BeginTextInlineEdit(ge::TextNode* pNode)
+{
+	if (!pNode || !GetSafeHwnd()) return false;
+
+	if (m_pEditingTextNode && m_pEditingTextNode != pNode)
+	{
+		CommitTextInlineEdit();
+	}
+
+	m_pEditingTextNode = pNode;
+	m_textBeforeInlineEdit = pNode->GetText();
+
+	// EDIT 컨트롤이 없으면 동적 생성
+	if (!m_wndTextInlineEdit.GetSafeHwnd())
+	{
+		const DWORD dwStyle = WS_CHILD | WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN;
+		if (!m_wndTextInlineEdit.Create(dwStyle, CRect(0, 0, 10, 10), this, 1099))
+		{
+			m_pEditingTextNode = nullptr;
+			return false;
+		}
+	}
+
+	// 텍스트 노드의 글꼴 및 크기 반영
+	if (m_textEditFont.GetSafeHandle())
+	{
+		m_textEditFont.DeleteObject();
+	}
+	int screenPtSize = static_cast<int>(std::round(pNode->GetFontSize() * m_fZoom));
+	if (screenPtSize < 9) screenPtSize = 9;
+
+	LOGFONT lf{};
+	lf.lfHeight = -screenPtSize;
+	lf.lfWeight = pNode->IsBold() ? FW_BOLD : FW_NORMAL;
+	lf.lfItalic = pNode->IsItalic() ? TRUE : FALSE;
+	lf.lfCharSet = DEFAULT_CHARSET;
+	_tcsncpy_s(lf.lfFaceName, LF_FACESIZE, pNode->GetFontFamily().c_str(), _TRUNCATE);
+	m_textEditFont.CreateFontIndirect(&lf);
+	m_wndTextInlineEdit.SetFont(&m_textEditFont);
+
+	CString s(pNode->GetText().c_str());
+	s.Replace(_T("\n"), _T("\r\n"));
+	m_wndTextInlineEdit.SetWindowText(s);
+
+	UpdateTextEditCtrlLayout();
+
+	m_wndTextInlineEdit.ShowWindow(SW_SHOW);
+	m_wndTextInlineEdit.SetFocus();
+	// 전체 선택
+	m_wndTextInlineEdit.SetSel(0, -1);
+
+	Invalidate(FALSE);
+	return true;
+}
+
+void CM2DrawView::UpdateTextEditCtrlLayout()
+{
+	if (!m_pEditingTextNode || !m_wndTextInlineEdit.GetSafeHwnd()) return;
+
+	ge::Rect2 b{};
+	m_pEditingTextNode->GetLocalBounds(b);
+	const ge::Matrix2D worldXf = m_pEditingTextNode->GetWorldTransform();
+
+	const ge::Viewport view{ m_fZoom, { m_ptPan.x, m_ptPan.y } };
+	const D2D1_POINT_2F p0 = view.WorldToScreen(worldXf.TransformPoint(ge::Vec2{ b.left, b.top }));
+	const D2D1_POINT_2F p1 = view.WorldToScreen(worldXf.TransformPoint(ge::Vec2{ b.right, b.bottom }));
+
+	int left = static_cast<int>(std::floor((std::min)(p0.x, p1.x)));
+	int top = static_cast<int>(std::floor((std::min)(p0.y, p1.y)));
+	int width = static_cast<int>(std::ceil(std::fabs(p1.x - p0.x)));
+	int height = static_cast<int>(std::ceil(std::fabs(p1.y - p0.y)));
+
+	// 마진 및 최소 크기 확보
+	const int kPadding = 4;
+	if (width < 60) width = 60;
+	if (height < 24) height = 24;
+
+	CRect rcEdit(left - kPadding, top - kPadding, left + width + kPadding * 2, top + height + kPadding * 2);
+	m_wndTextInlineEdit.MoveWindow(&rcEdit);
+}
+
+void CM2DrawView::CommitTextInlineEdit()
+{
+	if (!m_pEditingTextNode || !m_wndTextInlineEdit.GetSafeHwnd()) return;
+
+	ge::TextNode* pNode = m_pEditingTextNode;
+	m_pEditingTextNode = nullptr; // 재진입 방지
+
+	CString s;
+	m_wndTextInlineEdit.GetWindowText(s);
+	s.Replace(_T("\r\n"), _T("\n"));
+	const std::wstring newText = (LPCTSTR)s;
+
+	m_wndTextInlineEdit.ShowWindow(SW_HIDE);
+
+	CM2DrawDoc* pDoc = GetDocument();
+	if (newText != m_textBeforeInlineEdit)
+	{
+		pNode->SetText(newText);
+		ge::PathOp::MeasureText(*pNode);
+		if (pDoc)
+		{
+			pDoc->SetModifiedFlag(TRUE);
+			pDoc->CommitUndoPoint(L"텍스트 편집");
+			UpdateShapePropertiesSelection(pNode, pDoc);
+			pDoc->UpdateAllViews(nullptr);
+		}
+		LogAppEvent(_T("[인라인 편집] 텍스트 변경 확정"));
+	}
+	else
+	{
+		if (pDoc) pDoc->UpdateAllViews(nullptr);
+	}
+
+	SetFocus();
+	Invalidate(FALSE);
+}
+
+void CM2DrawView::CancelTextInlineEdit()
+{
+	if (!m_pEditingTextNode || !m_wndTextInlineEdit.GetSafeHwnd()) return;
+
+	ge::TextNode* pNode = m_pEditingTextNode;
+	m_pEditingTextNode = nullptr; // 재진입 방지
+
+	m_wndTextInlineEdit.ShowWindow(SW_HIDE);
+
+	if (pNode->GetText() != m_textBeforeInlineEdit)
+	{
+		pNode->SetText(m_textBeforeInlineEdit);
+		ge::PathOp::MeasureText(*pNode);
+		CM2DrawDoc* pDoc = GetDocument();
+		if (pDoc)
+		{
+			UpdateShapePropertiesSelection(pNode, pDoc);
+			pDoc->UpdateAllViews(nullptr);
+		}
+	}
+
+	LogAppEvent(_T("[인라인 편집] 텍스트 편집 취소"));
+	SetFocus();
+	Invalidate(FALSE);
+}
+
+void CM2DrawView::OnTextEditKillFocus()
+{
+	if (m_pEditingTextNode)
+	{
+		CommitTextInlineEdit();
+	}
+}
+
+void CM2DrawView::OnTextEditChange()
+{
+	if (!m_pEditingTextNode || !m_wndTextInlineEdit.GetSafeHwnd()) return;
+
+	CString s;
+	m_wndTextInlineEdit.GetWindowText(s);
+	s.Replace(_T("\r\n"), _T("\n"));
+	m_pEditingTextNode->SetText((LPCTSTR)s);
+	ge::PathOp::MeasureText(*m_pEditingTextNode);
+	UpdateTextEditCtrlLayout();
+}

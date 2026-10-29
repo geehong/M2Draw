@@ -116,6 +116,7 @@ BEGIN_MESSAGE_MAP(CD2DPropertyView, CWnd)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONUP()
+	ON_WM_MOUSEWHEEL()
 	ON_WM_KEYDOWN()
 	ON_WM_CHAR()
 	ON_WM_SETFOCUS()
@@ -2782,6 +2783,23 @@ void CD2DPropertyView::OnLButtonUp(UINT /*nFlags*/, CPoint point)
 		ReleaseCapture();
 	}
 	SafeInvalidate(FALSE);
+}
+
+BOOL CD2DPropertyView::OnMouseWheel(UINT nFlags, short zDelta, CPoint point)
+{
+	CPoint clientPt = point;
+	ScreenToClient(&clientPt);
+	D2D1_POINT_2F ptD2D = D2D1::Point2F(static_cast<float>(clientPt.x), static_cast<float>(clientPt.y));
+
+	if (std::shared_ptr<M2DrawPanel> panel = m_pCurrentPanel)
+	{
+		if (panel->OnMouseWheel(ptD2D, zDelta))
+		{
+			SafeInvalidate(FALSE);
+			return TRUE;
+		}
+	}
+	return CWnd::OnMouseWheel(nFlags, zDelta, point);
 }
 
 void CD2DPropertyView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)

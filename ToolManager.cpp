@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "ToolManager.h"
 #include "M2DrawDoc.h"
+#include "M2DrawView.h"
 #include "M2Draw.h"
 
 // PanTool, ZoomInTool, ZoomOutTool은 ITool.cpp에 구현되어 있습니다.
@@ -506,27 +507,21 @@ void TextTool::OnUp(const ToolEvent& e)
 	const float ax = (std::min)(m_startW.x, m_curW.x), ay = (std::min)(m_startW.y, m_curW.y);
 	const float aw = std::fabs(m_curW.x - m_startW.x);
 
-	TextEditProps props;
-	// 마지막으로 쓴 글꼴/크기를 기억해 연속 입력이 편하게 (앱 설정)
-	props.family = (LPCTSTR)AfxGetApp()->GetProfileString(_T("Text"), _T("Family"), _T("Segoe UI"));
-	props.size = static_cast<float>(AfxGetApp()->GetProfileInt(_T("Text"), _T("Size"), 24));
-	if (!EditTextPropsDialog(AfxGetMainWnd(), props) || props.text.empty()) return;
-	AfxGetApp()->WriteProfileString(_T("Text"), _T("Family"), props.family.c_str());
-	AfxGetApp()->WriteProfileInt(_T("Text"), _T("Size"), static_cast<int>(props.size));
+	std::wstring family = (LPCTSTR)AfxGetApp()->GetProfileString(_T("Text"), _T("Family"), _T("Segoe UI"));
+	float size = static_cast<float>(AfxGetApp()->GetProfileInt(_T("Text"), _T("Size"), 24));
 
 	auto tn = std::make_unique<ge::TextNode>();
 	tn->SetTransform(ge::Matrix2D::Translation(area ? ax : m_startW.x, area ? ay : m_startW.y));
-	tn->SetText(props.text);
-	tn->SetFontFamily(props.family);
-	tn->SetFontSize(props.size);
-	tn->SetBold(props.bold);
-	tn->SetItalic(props.italic);
-	tn->SetAlign(static_cast<ge::TextAlign>((std::max)(0, (std::min)(2, props.align))));
+	tn->SetText(L"텍스트");
+	tn->SetFontFamily(family);
+	tn->SetFontSize(size);
 	if (area) tn->SetBoxWidth(aw);
-	ge::PathOp::MeasureText(*tn);   // 속성창 W/H 가 만들자마자 정확하도록 바로 측정
+	ge::PathOp::MeasureText(*tn);
 	tn->SetName(L"텍스트");
+
 	ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(tn));
 	if (!added) return;
+
 	e.pDoc->GetDoc().SetSelection({ added });
 	e.pDoc->SetModifiedFlag(TRUE);
 	e.pDoc->CommitUndoPoint(area ? L"영역 텍스트 추가" : L"텍스트 추가");
@@ -536,6 +531,11 @@ void TextTool::OnUp(const ToolEvent& e)
 	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
 	if (SelectTool* sel = GetApp()->GetToolManager().GetSelectTool()) sel->SelectNode(added, pDoc);
 	pDoc->UpdateAllViews(nullptr);
+
+	if (e.pView && e.pView->IsKindOf(RUNTIME_CLASS(CM2DrawView)))
+	{
+		static_cast<CM2DrawView*>(e.pView)->BeginTextInlineEdit(static_cast<ge::TextNode*>(added));
+	}
 }
 
 // ---------------- ToolManager ----------------

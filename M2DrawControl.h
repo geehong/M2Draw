@@ -61,6 +61,7 @@ public:
 	virtual bool OnLButtonDown(D2D1_POINT_2F pt);
 	virtual bool OnMouseMove(D2D1_POINT_2F pt);
 	virtual bool OnLButtonUp(D2D1_POINT_2F pt);
+	virtual bool OnMouseWheel(D2D1_POINT_2F pt, short zDelta);
 	virtual bool OnKeyDown(UINT nChar);
 	virtual bool OnChar(UINT nChar);
 
@@ -382,6 +383,7 @@ public:
 	bool OnLButtonDown(D2D1_POINT_2F pt) override;
 	bool OnMouseMove(D2D1_POINT_2F pt) override;
 	bool OnLButtonUp(D2D1_POINT_2F pt) override;
+	bool OnMouseWheel(D2D1_POINT_2F pt, short zDelta) override;
 	bool OnKeyDown(UINT nChar) override;
 	bool OnChar(UINT nChar) override;
 	void ResetState() override;
@@ -422,6 +424,7 @@ public:
 	bool OnLButtonDown(D2D1_POINT_2F pt) override;
 	bool OnMouseMove(D2D1_POINT_2F pt) override;
 	bool OnLButtonUp(D2D1_POINT_2F pt) override;
+	bool OnMouseWheel(D2D1_POINT_2F pt, short zDelta) override;
 	bool OnKeyDown(UINT nChar) override;
 	bool OnChar(UINT nChar) override;
 	void ResetState() override;
@@ -528,6 +531,9 @@ public:
 	void SetItemHeight(float h) { m_itemHeight = h; }
 	float GetItemHeight() const { return m_itemHeight; }
 
+	void SetMaxVisibleItems(int count) { m_maxVisibleItems = (count > 0 ? count : 1); }
+	int GetMaxVisibleItems() const { return m_maxVisibleItems; }
+
 	void SetOnSelectionChanged(SelectCallback cb) { m_onSelectionChanged = cb; }
 
 	bool HitTest(D2D1_POINT_2F pt) const override;
@@ -537,6 +543,9 @@ public:
 
 	bool OnLButtonDown(D2D1_POINT_2F pt) override;
 	bool OnMouseMove(D2D1_POINT_2F pt) override;
+	bool OnLButtonUp(D2D1_POINT_2F pt) override;
+	bool OnMouseWheel(D2D1_POINT_2F pt, short zDelta) override;
+	void ResetState() override;
 
 private:
 	std::vector<std::wstring> m_items;
@@ -544,11 +553,20 @@ private:
 	int                       m_hoverIndex = -1;
 	bool                      m_bDropped = false;
 	float                     m_itemHeight = 22.0f;
+	int                       m_maxVisibleItems = 7;
+	int                       m_scrollOffset = 0;
+	bool                      m_bDraggingScrollbar = false;
+	float                     m_dragStartThumbY = 0.0f;
+	float                     m_dragStartMouseY = 0.0f;
 	SelectCallback            m_onSelectionChanged;
 
 	D2D1_RECT_F GetHeaderRect() const { return m_bounds; }
 	D2D1_RECT_F GetDropDownRect() const;
 	D2D1_RECT_F GetItemRect(int index) const;
+	D2D1_RECT_F GetScrollbarTrackRect() const;
+	D2D1_RECT_F GetScrollbarThumbRect() const;
+	int GetMaxScrollOffset() const;
+	void ClampScrollOffset();
 };
 
 

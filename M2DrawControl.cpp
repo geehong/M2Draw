@@ -60,6 +60,11 @@ bool M2DrawControl::OnLButtonUp(D2D1_POINT_2F /*pt*/)
 	return false;
 }
 
+bool M2DrawControl::OnMouseWheel(D2D1_POINT_2F /*pt*/, short /*zDelta*/)
+{
+	return false;
+}
+
 bool M2DrawControl::OnKeyDown(UINT /*nChar*/)
 {
 	return false;
@@ -1355,6 +1360,39 @@ bool M2DrawPanel::OnLButtonUp(D2D1_POINT_2F pt)
 	return false;
 }
 
+bool M2DrawPanel::OnMouseWheel(D2D1_POINT_2F pt, short zDelta)
+{
+	if (!m_bVisible || !m_bEnabled) return false;
+
+	// 1. 드롭다운이 열려 있는 콤보박스가 있다면 팝업 영역에서 휠 이벤트를 최우선 처리
+	for (auto& child : m_children)
+	{
+		if (child && child->IsVisible())
+		{
+			auto combo = std::dynamic_pointer_cast<M2DrawComboBox>(child);
+			if (combo && combo->IsDropped() && combo->HitTest(pt))
+			{
+				return combo->OnMouseWheel(pt, zDelta);
+			}
+		}
+	}
+
+	// 2. 다른 자식 컨트롤에게 휠 전달 (역순)
+	for (int i = static_cast<int>(m_children.size()) - 1; i >= 0; --i)
+	{
+		if (i >= static_cast<int>(m_children.size())) continue;
+		auto child = m_children[i];
+		if (child && child->IsVisible() && child->HitTest(pt))
+		{
+			if (child->OnMouseWheel(pt, zDelta))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 bool M2DrawPanel::OnKeyDown(UINT nChar)
 {
 	if (m_capturedChild)
@@ -1550,6 +1588,25 @@ bool M2DrawExpander::OnLButtonUp(D2D1_POINT_2F pt)
 			if (child && child->IsVisible())
 			{
 				child->OnLButtonUp(pt);
+			}
+		}
+	}
+	return false;
+}
+
+bool M2DrawExpander::OnMouseWheel(D2D1_POINT_2F pt, short zDelta)
+{
+	if (!m_bVisible || !m_bEnabled || !m_bExpanded) return false;
+
+	for (int i = static_cast<int>(m_children.size()) - 1; i >= 0; --i)
+	{
+		if (i >= static_cast<int>(m_children.size())) continue;
+		auto child = m_children[i];
+		if (child && child->IsVisible() && child->HitTest(pt))
+		{
+			if (child->OnMouseWheel(pt, zDelta))
+			{
+				return true;
 			}
 		}
 	}
@@ -1881,6 +1938,8 @@ void M2DrawComboBox::ClearItems()
 	m_curSel = 0;
 	m_hoverIndex = -1;
 	m_bDropped = false;
+	m_scrollOffset = 0;
+	m_bDraggingScrollbar = false;
 }
 
 const std::wstring& M2DrawComboBox::GetItemText(int index) const
@@ -1904,17 +1963,58 @@ void M2DrawComboBox::SetCurSel(int index, bool bTriggerCallback)
 	}
 }
 
+int M2DrawComboBox::GetMaxScrollOffset() const
+{
+	int count = static_cast<int>(m_items.size());
+	if (count <= m_maxVisibleItems) return 0;
+	return count - m_maxVisibleItems;
+}
+
+void M2DrawComboBox::ClampScrollOffset()
+{
+	int maxScroll = GetMaxScrollOffset();
+	if (m_scrollOffset < 0) m_scrollOffset = 0;
+	if (m_scrollOffset > maxScroll) m_scrollOffset = maxScroll;
+}
+
 D2D1_RECT_F M2DrawComboBox::GetDropDownRect() const
 {
 	float top = m_bounds.bottom + 2.0f;
-	float totalH = static_cast<float>(m_items.size()) * m_itemHeight + 4.0f;
+	int visibleCount = (std::min)(static_cast<int>(m_items.size()), m_maxVisibleItems);
+	if (visibleCount <= 0) visibleCount = 1;
+	float totalH = static_cast<float>(visibleCount) * m_itemHeight + 4.0f;
 	return D2D1::RectF(m_bounds.left, top, m_bounds.right, top + totalH);
 }
 
 D2D1_RECT_F M2DrawComboBox::GetItemRect(int index) const
 {
-	float top = m_bounds.bottom + 4.0f + index * m_itemHeight;
-	return D2D1::RectF(m_bounds.left + 2.0f, top, m_bounds.right - 2.0f, top + m_itemHeight);
+	int visualIdx = index - m_scrollOffset;
+	float top = m_bounds.bottom + 4.0f + visualIdx * m_itemHeight;
+	float rightMargin = (static_cast<int>(m_items.size()) > m_maxVisibleItems) ? 14.0f : 2.0f;
+	return D2D1::RectF(m_bounds.left + 2.0f, top, m_bounds.right - rightMargin, top + m_itemHeight);
+}
+
+D2D1_RECT_F M2DrawComboBox::GetScrollbarTrackRect() const
+{
+	D2D1_RECT_F dropRect = GetDropDownRect();
+	return D2D1::RectF(dropRect.right - 10.0f, dropRect.top + 3.0f, dropRect.right - 3.0f, dropRect.bottom - 3.0f);
+}
+
+D2D1_RECT_F M2DrawComboBox::GetScrollbarThumbRect() const
+{
+	D2D1_RECT_F track = GetScrollbarTrackRect();
+	float trackH = track.bottom - track.top;
+	int total = static_cast<int>(m_items.size());
+	if (total <= m_maxVisibleItems || trackH <= 10.0f)
+	{
+		return track;
+	}
+
+	float thumbH = (std::max)(16.0f, trackH * static_cast<float>(m_maxVisibleItems) / static_cast<float>(total));
+	int maxScroll = GetMaxScrollOffset();
+	float ratio = (maxScroll > 0) ? (static_cast<float>(m_scrollOffset) / static_cast<float>(maxScroll)) : 0.0f;
+	float thumbY = track.top + ratio * (trackH - thumbH);
+	return D2D1::RectF(track.left, thumbY, track.right, thumbY + thumbH);
 }
 
 bool M2DrawComboBox::HitTest(D2D1_POINT_2F pt) const
@@ -1967,7 +2067,15 @@ void M2DrawComboBox::Draw(
 		// 드롭다운 배경 (살짝 더 어두운 섀도우 다크 톤)
 		DrawControlFrame(pRT, pBrush, dropRect, 4.0f, D2D1::ColorF(0.14f, 0.14f, 0.17f, 0.98f));
 
-		for (int i = 0; i < static_cast<int>(m_items.size()); ++i)
+		ClampScrollOffset();
+
+		// 리스트 내용 영역 클리핑 (모서리/스크롤 넘침 방지)
+		pRT->PushAxisAlignedClip(D2D1::RectF(dropRect.left + 2.0f, dropRect.top + 2.0f, dropRect.right - 2.0f, dropRect.bottom - 2.0f), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+
+		int startIdx = m_scrollOffset;
+		int endIdx = (std::min)(static_cast<int>(m_items.size()), startIdx + m_maxVisibleItems + 1);
+
+		for (int i = startIdx; i < endIdx; ++i)
 		{
 			D2D1_RECT_F rItem = GetItemRect(i);
 			bool isSelected = (i == m_curSel);
@@ -1992,6 +2100,23 @@ void M2DrawComboBox::Draw(
 			DrawTextLabel(pRT, pBrush, pTextFormat, m_items[i].c_str(), itemTextRect,
 				DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, textColor);
 		}
+
+		pRT->PopAxisAlignedClip();
+
+		// 3. 스크롤바 (아이템 수가 최대 표시 개수보다 많을 때)
+		if (static_cast<int>(m_items.size()) > m_maxVisibleItems)
+		{
+			D2D1_RECT_F track = GetScrollbarTrackRect();
+			pBrush->SetColor(D2D1::ColorF(0.18f, 0.18f, 0.22f, 0.6f));
+			pRT->FillRoundedRectangle(D2D1::RoundedRect(track, 3.0f, 3.0f), pBrush);
+
+			D2D1_RECT_F thumb = GetScrollbarThumbRect();
+			D2D1_COLOR_F thumbClr = m_bDraggingScrollbar
+				? D2D1::ColorF(0.55f, 0.55f, 0.65f, 0.95f)
+				: D2D1::ColorF(0.38f, 0.38f, 0.46f, 0.85f);
+			pBrush->SetColor(thumbClr);
+			pRT->FillRoundedRectangle(D2D1::RoundedRect(thumb, 3.0f, 3.0f), pBrush);
+		}
 	}
 }
 
@@ -2004,13 +2129,66 @@ bool M2DrawComboBox::OnLButtonDown(D2D1_POINT_2F pt)
 	{
 		m_bDropped = !m_bDropped;
 		m_hoverIndex = -1;
+		m_bDraggingScrollbar = false;
+		if (m_bDropped)
+		{
+			// 현재 선택된 아이템이 가시 영역에 들어오도록 초기 스크롤 위치 조정
+			if (m_curSel >= 0)
+			{
+				if (m_curSel < m_scrollOffset)
+					m_scrollOffset = m_curSel;
+				else if (m_curSel >= m_scrollOffset + m_maxVisibleItems)
+					m_scrollOffset = m_curSel - m_maxVisibleItems + 1;
+			}
+			ClampScrollOffset();
+		}
 		return true;
 	}
 
-	// 2. 드롭다운 목록 클릭 시 항목 선택 및 닫기
+	// 2. 드롭다운 목록 클릭 시
 	if (m_bDropped)
 	{
-		for (int i = 0; i < static_cast<int>(m_items.size()); ++i)
+		D2D1_RECT_F dropRect = GetDropDownRect();
+		if (pt.x < dropRect.left || pt.x > dropRect.right || pt.y < dropRect.top || pt.y > dropRect.bottom)
+		{
+			// 목록 밖을 클릭하면 닫기
+			m_bDropped = false;
+			m_hoverIndex = -1;
+			m_bDraggingScrollbar = false;
+			return true;
+		}
+
+		// 스크롤바 클릭 검사
+		if (static_cast<int>(m_items.size()) > m_maxVisibleItems)
+		{
+			D2D1_RECT_F track = GetScrollbarTrackRect();
+			if (pt.x >= track.left - 2.0f && pt.x <= track.right + 2.0f && pt.y >= track.top && pt.y <= track.bottom)
+			{
+				D2D1_RECT_F thumb = GetScrollbarThumbRect();
+				if (pt.y >= thumb.top && pt.y <= thumb.bottom)
+				{
+					m_bDraggingScrollbar = true;
+					m_dragStartMouseY = pt.y;
+					m_dragStartThumbY = thumb.top;
+					return true;
+				}
+				else
+				{
+					// 트랙 빈 곳 클릭 시 페이지 단위 / 방향 스크롤
+					if (pt.y < thumb.top)
+						m_scrollOffset -= (m_maxVisibleItems - 1);
+					else
+						m_scrollOffset += (m_maxVisibleItems - 1);
+					ClampScrollOffset();
+					return true;
+				}
+			}
+		}
+
+		// 아이템 클릭 검사 (현재 가시 아이템만)
+		int startIdx = m_scrollOffset;
+		int endIdx = (std::min)(static_cast<int>(m_items.size()), startIdx + m_maxVisibleItems);
+		for (int i = startIdx; i < endIdx; ++i)
 		{
 			D2D1_RECT_F rItem = GetItemRect(i);
 			if (pt.x >= rItem.left && pt.x <= rItem.right && pt.y >= rItem.top && pt.y <= rItem.bottom)
@@ -2018,11 +2196,11 @@ bool M2DrawComboBox::OnLButtonDown(D2D1_POINT_2F pt)
 				SetCurSel(i);
 				m_bDropped = false;
 				m_hoverIndex = -1;
+				m_bDraggingScrollbar = false;
 				return true;
 			}
 		}
-		// 목록 밖을 클릭하면 닫기
-		m_bDropped = false;
+
 		return true;
 	}
 
@@ -2037,17 +2215,85 @@ bool M2DrawComboBox::OnMouseMove(D2D1_POINT_2F pt)
 
 	if (m_bDropped)
 	{
-		for (int i = 0; i < static_cast<int>(m_items.size()); ++i)
+		// 스크롤바 드래그 처리
+		if (m_bDraggingScrollbar && static_cast<int>(m_items.size()) > m_maxVisibleItems)
 		{
-			D2D1_RECT_F rItem = GetItemRect(i);
-			if (pt.x >= rItem.left && pt.x <= rItem.right && pt.y >= rItem.top && pt.y <= rItem.bottom)
+			D2D1_RECT_F track = GetScrollbarTrackRect();
+			float trackH = track.bottom - track.top;
+			float thumbH = (std::max)(16.0f, trackH * static_cast<float>(m_maxVisibleItems) / static_cast<float>(m_items.size()));
+			float available = trackH - thumbH;
+			if (available > 0.0f)
 			{
-				m_hoverIndex = i;
-				break;
+				float deltaY = pt.y - m_dragStartMouseY;
+				float newThumbY = m_dragStartThumbY + deltaY;
+				float ratio = (newThumbY - track.top) / available;
+				ratio = (std::max)(0.0f, (std::min)(1.0f, ratio));
+				int maxScroll = GetMaxScrollOffset();
+				m_scrollOffset = static_cast<int>(std::round(ratio * maxScroll));
+				ClampScrollOffset();
+			}
+			return true;
+		}
+
+		// 아이템 호버 검사
+		D2D1_RECT_F dropRect = GetDropDownRect();
+		if (pt.x >= dropRect.left && pt.x <= dropRect.right && pt.y >= dropRect.top && pt.y <= dropRect.bottom)
+		{
+			int startIdx = m_scrollOffset;
+			int endIdx = (std::min)(static_cast<int>(m_items.size()), startIdx + m_maxVisibleItems);
+			for (int i = startIdx; i < endIdx; ++i)
+			{
+				D2D1_RECT_F rItem = GetItemRect(i);
+				if (pt.x >= rItem.left && pt.x <= rItem.right && pt.y >= rItem.top && pt.y <= rItem.bottom)
+				{
+					m_hoverIndex = i;
+					break;
+				}
 			}
 		}
 	}
 	return (oldHover != m_hoverIndex);
+}
+
+bool M2DrawComboBox::OnLButtonUp(D2D1_POINT_2F pt)
+{
+	if (m_bDraggingScrollbar)
+	{
+		m_bDraggingScrollbar = false;
+		return true;
+	}
+	return M2DrawControl::OnLButtonUp(pt);
+}
+
+bool M2DrawComboBox::OnMouseWheel(D2D1_POINT_2F pt, short zDelta)
+{
+	if (!m_bVisible || !m_bEnabled || !m_bDropped) return false;
+
+	D2D1_RECT_F dropRect = GetDropDownRect();
+	// 헤더 또는 드롭다운 영역 위에서 휠 스크롤 허용
+	bool inCombo = (pt.x >= m_bounds.left && pt.x <= m_bounds.right && pt.y >= m_bounds.top && pt.y <= m_bounds.bottom);
+	bool inDrop = (pt.x >= dropRect.left && pt.x <= dropRect.right && pt.y >= dropRect.top && pt.y <= dropRect.bottom);
+
+	if (inCombo || inDrop)
+	{
+		int oldOffset = m_scrollOffset;
+		int step = (zDelta > 0) ? -2 : 2; // 위로 휠 = 이전 항목, 아래로 휠 = 다음 항목
+		m_scrollOffset += step;
+		ClampScrollOffset();
+
+		// 스크롤 변경 후 호버 갱신
+		OnMouseMove(pt);
+		return (oldOffset != m_scrollOffset);
+	}
+	return false;
+}
+
+void M2DrawComboBox::ResetState()
+{
+	M2DrawControl::ResetState();
+	m_bDropped = false;
+	m_hoverIndex = -1;
+	m_bDraggingScrollbar = false;
 }
 
 

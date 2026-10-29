@@ -58,6 +58,19 @@ public:
 	D2D1_POINT_2F ScreenToWorld(CPoint screenPt) const;
 	D2D1_POINT_2F WorldToScreen(D2D1_POINT_2F worldPt) const;
 
+	// 캔버스 위 텍스트 직접 인라인 편집 (Step 3.2.2 ~ 3.2.4)
+	bool IsTextInlineEditing() const { return m_pEditingTextNode != nullptr; }
+	bool BeginTextInlineEdit(ge::TextNode* pNode);
+	void CommitTextInlineEdit();
+	void CancelTextInlineEdit();
+	void UpdateTextEditCtrlLayout();
+
+protected:
+	CEdit         m_wndTextInlineEdit;
+	CFont         m_textEditFont;
+	ge::TextNode* m_pEditingTextNode = nullptr;
+	std::wstring  m_textBeforeInlineEdit;
+
 // Direct2D 리소스
 protected:
 	ID2D1Factory*          m_pD2DFactory;
@@ -93,6 +106,8 @@ protected:
 	afx_msg BOOL OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message);
 	afx_msg void OnEditClear();
 	afx_msg void OnUpdateEditClear(CCmdUI* pCmdUI);
+	afx_msg void OnTextEditKillFocus();
+	afx_msg void OnTextEditChange();
 
 public:
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
