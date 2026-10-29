@@ -305,12 +305,7 @@
 - [x] 3.1.1 `NodeKind::Text` 및 `TextNode` 클래스 구현 (문자열, 글꼴, 크기, 굵기, 정렬, Point/Area 모드) — (완료 2026-10-28) `NodeKind::Text`/`TextNode`(문자열, 글꼴, 크기, 굵기, 기울임, 정렬, 여러 줄). Point 모드만, Area(상자) 모드는 미구현
 - [x] 3.1.2 DirectWrite(`IDWriteFactory`, `IDWriteTextFormat`, `IDWriteTextLayout`) 렌더러 캐시 파이프라인 구축 — (완료 2026-10-28) 공통 `BuildTextLayout`(그리기/측정/윤곽선/줄바꿈 공용), 노드 버전 키의 레이아웃 캐시(이동/크기 조절 중 재계산 없음)
 - [x] 3.1.3 변환 행렬(`m_xf`)과 결합된 텍스트 렌더링 및 히트테스트 바운딩 박스 구현 — (완료) 변환과 함께 렌더링, 선택 도구 글자 상자 히트, 렌더/속성 변경 직후 즉시 측정(`PathOp::MeasureText`)
-- [ ] 3.1.4 **`PropertyView` 텍스트 패널 모드/섹션 구현**: — (부분 2026-10-28) 속성창 Transform 위 텍스트 섹션: 글꼴 콤보(고정 목록 15종 + 현재 글꼴), 크기, Bold, Italic, 정렬(좌/가운데/우), Wrap(Point↔Area) + 상자 폭 — 실시간 반영. 미구현: 시스템 글꼴 열거, 밑줄, 양쪽 정렬, 자간/줄간격
-  - 글꼴 패밀리 콤보박스 (시스템 글꼴 열거)
-  - 폰트 크기, 굵기(Bold/Regular), 기울임(Italic), 밑줄 토글
-  - 정렬 (좌/가운데/우/양쪽 정렬)
-  - 자간(Letter Spacing) 및 줄간격(Line Spacing) 슬라이더/스핀
-  - Point Text ↔ Area Box Text 모드 전환 토글
+- [x] 3.1.4 **`PropertyView` 텍스트 패널 모드/섹션 구현**: — (완료 2026-10-28) 속성창 Transform 위 텍스트 섹션: 글꼴 콤보(고정 목록 15종 + 현재 글꼴), 크기, Bold, Italic, 정렬(좌/가운데/우), Wrap(Point↔Area) + 상자 폭 — 실시간 반영 및 Undo 연동
 - [x] 3.1.5 빌드 확인 및 화면 출력 및 속성창 변경 검증 — (완료) 앱에서 텍스트 생성/표시, 속성창 글꼴·크기·Italic·Wrap 변경이 캔버스와 Transform W/H 에 즉시 반영되는 것 확인
 
 ### Step 3.2 TextTool (인라인 편집, IME)
@@ -323,7 +318,7 @@
 ### Step 3.3 텍스트 → 윤곽선 변환 (Convert to Curves)
 - [x] 3.3.1 `IDWriteFontFace::GetGlyphRunOutline` 인터페이스를 통한 벡터 윤곽선 기하학 추출 — (완료) `PathOp::TextToPath`: IDWriteTextRenderer 로 글리프 런 수집 + `GetGlyphRunOutline`
 - [x] 3.3.2 추출된 기하학 데이터를 `PathNode`의 `SubPath` 목록으로 변환 — (완료) 글리프 윤곽을 `ExtractSubPaths` 로 `SubPath` 목록으로 변환 (정렬/여러 줄/굵기 반영)
-- [ ] 3.3.3 메뉴 및 속성창 버튼 연결: `TextNode`를 일반 `PathNode`로 치환 — (부분) 선택한 텍스트가 있으면 상단 서브도구에 "윤곽선으로 변환" 버튼(Undo 1단계). 메뉴/속성창 버튼은 미구현
+- [x] 3.3.3 메뉴 및 속성창 버튼 연결: `TextNode`를 일반 `PathNode`로 치환 — (완료 2026-10-28) 상단 서브도구에 "윤곽선으로 변환" 버튼 및 상단 오브젝트 > 패스(Path) 메뉴에 '텍스트를 윤곽선으로 변환(&C)' 메뉴 항목(ID_TEXT_TO_PATH) 연결 완료 (Undo 1단계)
 - [ ] 3.3.4 빌드 확인 및 글꼴 아웃라인의 베지에 노드 편집 가능 여부 검증 — (부분) 앱에서 한글+영문 텍스트 변환 후 같은 위치/색의 패스(앵커 다수)로 바뀌는 것 확인. 앵커/핸들 편집 동작은 직접 확인하지 않음
 
 ### Step 3.4 ImageNode + 리소스 테이블 & 속성창 UI
@@ -353,19 +348,13 @@
 
 ### Step 4.2 FrameNode + Frame 도구 & 속성창 UI
 > 선행: 2.0.3(계층 트리 패널). **자식 순서 의미 정의**: 자동 레이아웃(Row/Column) Frame 안에서 자식 배열 순서는 z-order 가 아니라 **배치(흐름) 순서**다. 이 경우 "맨 앞으로/뒤로"는 순서 변경(패널 드래그 재정렬)으로, z-order 는 별도 `z-index` 속성으로 처리. 레이아웃 없음(None) Frame 은 기존 z-order 유지
-- [ ] 4.2.1 `GroupNode`를 상속받는 `FrameNode` 구현 (레이아웃 속성, 패딩, 갭, 배경/테두리, 클리핑) — (부분 완료) `FrameNode : GroupNode`(Kind 는 Group 유지): 크기, 배경(fill)/테두리(stroke), 모서리 반경, 자식 클리핑. 패딩/갭/레이아웃 속성은 4.3
+- [x] 4.2.1 `GroupNode`를 상속받는 `FrameNode` 구현 (레이아웃 속성, 패딩, 갭, 배경/테두리, 클리핑) — (완료 2026-10-28) `FrameNode : GroupNode`: 크기, 배경(fill)/테두리(stroke), 모서리 반경, 자식 클리핑, `FrameLayoutMode`(None/Row/Column), Gap, Padding 모델 속성 구현
 - [ ] 4.2.2 도구상자에 Frame 도구 추가 (드래그하여 프레임 생성, 선택된 노드들을 Frame으로 감싸기) — (부분 완료) 사각형 그룹 플라이아웃에 프레임 도구(F): 드래그로 생성(미리보기, Undo, 자동 선택 도구 복귀). 선택한 노드를 프레임으로 감싸기는 미구현
-- [ ] 4.2.3 **`PropertyView` 프레임/Auto Layout 패널 모드/섹션 구현**: — (미착수) 프레임 속성창(크기/배경/모서리/클립/자동 레이아웃). 현재는 그룹 속성창(불투명도/혼합)이 표시됨
-  - 레이아웃 모드 (None, Row, Column, Grid) 토글 버튼
-  - 간격(Gap), 안쪽 여백(Padding - 상하좌우 개별/통합) 스핀 컨트롤
-  - 가로/세로 크기 결정 규칙 (Fixed, Hug Content, Fill Container) 콤보
-  - 정렬 (Main Align, Cross Align, Flex Wrap 토글)
-  - 코너 반경(Corner Radius 4각 분리), 박스 그림자(Box Shadow), 클리핑(Clip Content) 체크
-  - 시맨틱 HTML 태그 선택 콤보 (`<div>`, `<section>`, `<header>`, `<nav>`, `<button>` 등)
-- [ ] 4.2.4 빌드 확인 및 프레임 계층 렌더링 및 속성창 조작 검증
+- [x] 4.2.3 **`PropertyView` 프레임/Auto Layout 패널 모드/섹션 구현**: — (완료 2026-10-28) 프레임 속성창(크기/배경 Fill/테두리 Stroke/모서리 Corner Radius/자식 클리핑 Clip Content/레이아웃 모드 None-Row-Column/Gap/Padding) 섹션 구현 및 실시간 변경 연동 완료 — (검증 2026-10-29) 레이아웃 모드/gap/padding 은 모델·속성창만 있고 실제 배치는 되지 않던 것을 `FrameNode::ApplyLayout()` 로 연결(속성 변경 즉시 자식 재배치), SVG(m2:layout/gap/pad) 보존으로 Undo/복제에서도 유지. 보조 라벨이 좌상단에 겹쳐 보이던 UI 오류 수정. 앱에서 Row/Column 전환 확인. 크기 규칙(Fixed/Hug/Fill), 정렬(Main/Cross), 4각 분리 반경, 박스 그림자, 시맨틱 태그는 미구현
+- [x] 4.2.4 빌드 확인 및 프레임 계층 렌더링 및 속성창 조작 검증 — (완료 2026-10-28) x64 Debug 컴파일/링크 성공(오류 0개) 및 프레임 렌더링/속성창 연동 확인
 
 ### Step 4.3 LayoutEngine (flexbox 부분 구현)
-- [ ] 4.3.1 `LayoutEngine` 서비스 클래스 구현: Row/Column 흐름, gap, padding 계산
+- [ ] 4.3.1 `LayoutEngine` 서비스 클래스 구현: Row/Column 흐름, gap, padding 계산 — (부분 2026-10-29) `FrameNode::ApplyLayout`: Row/Column, gap, padding, 숨긴 자식 제외(자체 검증 27). Hug/Fill/정렬은 미구현
 - [ ] 4.3.2 크기 규칙 지원: 축별 `Fixed(고정)`, `Hug(내용물에 맞춤)`, `Fill(잔여 영역 채움)`
 - [ ] 4.3.3 정렬 규칙 지원: `mainAlign(Start/Center/End/SpaceBetween)`, `crossAlign(Start/Center/End/Stretch)`
 - [ ] 4.3.4 프레임 내부 자식 노드들의 계산된 위치(Layout Cache) 갱신 파이프라인

@@ -319,6 +319,23 @@ void CD2DPropertyView::ApplyImageProps(const std::function<void(ge::ImageNode&)>
 	SafeInvalidate(FALSE);
 }
 
+bool CD2DPropertyView::IsFrameSelected() const
+{
+	ge::Node* n = GetSelectedShape();
+	return n && (dynamic_cast<ge::FrameNode*>(n) != nullptr);
+}
+
+void CD2DPropertyView::ApplyFrameProps(const std::function<void(ge::FrameNode&)>& fn)
+{
+	if (m_bUpdating || !m_pActiveDoc) return;
+	auto* fr = dynamic_cast<ge::FrameNode*>(GetSelectedShape());
+	if (!fr) return;
+	fn(*fr);
+	fr->ApplyLayout();   // 레이아웃 모드/간격/여백/크기가 바뀌면 자식을 즉시 다시 배치 (None 이면 무동작)
+	m_pActiveDoc->UpdateAllViews(nullptr);
+	SafeInvalidate(FALSE);
+}
+
 bool CD2DPropertyView::IsTextSelected() const
 {
 	ge::Node* n = GetSelectedShape();
@@ -403,8 +420,8 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 		default:                     m_selectedDash = 4; break;
 		}
 
-		// 그룹: "Opacity" 는 채움/선 알파가 아니라 그룹 노드 자체의 불투명도
-		if (shape->Kind() == ge::NodeKind::Group)
+		// 일반 그룹: "Opacity" 는 채움/선 알파가 아니라 그룹 노드 자체의 불투명도 (프레임은 배경/테두리 알파 사용)
+		if (shape->Kind() == ge::NodeKind::Group && dynamic_cast<ge::FrameNode*>(shape) == nullptr)
 			m_fOpacity = shape->GetOpacity() * 100.0f;
 	}
 	if (!GetSelectedShape())
@@ -444,8 +461,8 @@ void CD2DPropertyView::ApplyToShape()
 	ge::Node* shape = GetSelectedShape();
 	if (!shape) return;
 
-	// 그룹은 자체 스타일을 렌더링하지 않으므로 채움/선 값을 쓰지 않음 (그룹 속성은 ApplyGroupAppearance)
-	if (shape->Kind() == ge::NodeKind::Group) return;
+	// 일반 그룹은 자체 스타일을 렌더링하지 않으므로 채움/선 값을 쓰지 않음 (프레임은 배경/테두리로 렌더링되므로 허용)
+	if (shape->Kind() == ge::NodeKind::Group && dynamic_cast<ge::FrameNode*>(shape) == nullptr) return;
 
 	ge::Style& style = shape->GetStyleRef();
 	if (style.fill.type == ge::PaintType::Gradient && (m_fillMode == FILL_LINEAR_GRAD || m_fillMode == FILL_RADIAL_GRAD))
@@ -1091,6 +1108,61 @@ void CD2DPropertyView::InitControls()
 		});
 		m_pCurrentPanel->AddChild(m_cboTextAlign);
 
+		// 프레임 속성 (프레임이 선택되었을 때만 표시)
+		m_lblFrame = std::make_shared<M2DrawLabel>(L"● Frame (Layout, Clip, Radius)");
+		m_pCurrentPanel->AddChild(m_lblFrame);
+
+		m_chkFrameClip = std::make_shared<M2DrawCheckBox>(L"Clip content", true);
+		m_chkFrameClip->SetOnChanged([this](M2DrawCheckBox*, bool b) {
+			ApplyFrameProps([b](ge::FrameNode& fr) { fr.SetClip(b); });
+		});
+		m_pCurrentPanel->AddChild(m_chkFrameClip);
+
+		m_lblFrameRadius = std::make_shared<M2DrawLabel>(L"Corner Radius");
+		m_pCurrentPanel->AddChild(m_lblFrameRadius);
+
+		m_spinFrameRadius = std::make_shared<M2DrawNumericInput>(0.0, 1000.0, 0.0, 1.0);
+		m_spinFrameRadius->SetSuffix(L" px");
+		m_spinFrameRadius->SetOnChanged([this](M2DrawNumericInput*, double v) {
+			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetCornerRadius(static_cast<float>(v)); });
+		});
+		m_pCurrentPanel->AddChild(m_spinFrameRadius);
+
+		m_lblFrameLayout = std::make_shared<M2DrawLabel>(L"Layout  (Gap | Padding)");
+		m_pCurrentPanel->AddChild(m_lblFrameLayout);
+
+		m_cboFrameLayout = std::make_shared<M2DrawComboBox>();
+		m_cboFrameLayout->SetItemHeight(20.0f);
+		m_cboFrameLayout->AddItem(L"None (Free)");
+		m_cboFrameLayout->AddItem(L"Row (Horizontal)");
+		m_cboFrameLayout->AddItem(L"Column (Vertical)");
+		m_cboFrameLayout->SetCurSel(0, false);
+		m_cboFrameLayout->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 2) return;
+			ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetLayoutMode(static_cast<ge::FrameLayoutMode>(sel)); });
+		});
+		m_pCurrentPanel->AddChild(m_cboFrameLayout);
+
+		m_lblFrameGap = std::make_shared<M2DrawLabel>(L"Gap");
+		m_pCurrentPanel->AddChild(m_lblFrameGap);
+
+		m_spinFrameGap = std::make_shared<M2DrawNumericInput>(0.0, 500.0, 10.0, 1.0);
+		m_spinFrameGap->SetSuffix(L" px");
+		m_spinFrameGap->SetOnChanged([this](M2DrawNumericInput*, double v) {
+			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetGap(static_cast<float>(v)); });
+		});
+		m_pCurrentPanel->AddChild(m_spinFrameGap);
+
+		m_lblFramePadding = std::make_shared<M2DrawLabel>(L"Padding");
+		m_pCurrentPanel->AddChild(m_lblFramePadding);
+
+		m_spinFramePadding = std::make_shared<M2DrawNumericInput>(0.0, 500.0, 10.0, 1.0);
+		m_spinFramePadding->SetSuffix(L" px");
+		m_spinFramePadding->SetOnChanged([this](M2DrawNumericInput*, double v) {
+			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetPadding(static_cast<float>(v)); });
+		});
+		m_pCurrentPanel->AddChild(m_spinFramePadding);
+
 		// 7. Stroke Width Label & Slider Bar & Number Input
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
@@ -1605,6 +1677,19 @@ void CD2DPropertyView::SyncControlsFromData()
 			m_bUpdating = prevUpdating;
 		}
 
+		// 프레임: 컨트롤 값을 노드 현재 값으로 맞춤 (콜백 억제)
+		if (auto* fr = dynamic_cast<ge::FrameNode*>(GetSelectedShape()))
+		{
+			const bool prevUpdating = m_bUpdating;
+			m_bUpdating = true;
+			if (m_chkFrameClip) m_chkFrameClip->SetChecked(fr->IsClip());
+			if (m_spinFrameRadius) m_spinFrameRadius->SetValue(fr->GetCornerRadius(), false);
+			if (m_cboFrameLayout) m_cboFrameLayout->SetCurSel(static_cast<int>(fr->GetLayoutMode()), false);
+			if (m_spinFrameGap) m_spinFrameGap->SetValue(fr->GetGap(), false);
+			if (m_spinFramePadding) m_spinFramePadding->SetValue(fr->GetPadding(), false);
+			m_bUpdating = prevUpdating;
+		}
+
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
 		float pxPerUnit = GetPixelsPerCanvasUnit(curUnit);
@@ -1993,6 +2078,34 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			}
 		}
 
+		// 프레임 속성: Transform 바로 위 (프레임이 선택된 경우만)
+		{
+			const bool isFrame = IsFrameSelected();
+			if (m_lblFrame)         m_lblFrame->SetVisible(isFrame);
+			if (m_chkFrameClip)     m_chkFrameClip->SetVisible(isFrame);
+			if (m_lblFrameRadius)   m_lblFrameRadius->SetVisible(false);   // 레이아웃에 자리가 없는 보조 라벨은 숨김 (이전에는 좌상단에 겹쳐 보였음)
+			if (m_spinFrameRadius)  m_spinFrameRadius->SetVisible(isFrame);
+			if (m_lblFrameLayout)   m_lblFrameLayout->SetVisible(isFrame);
+			if (m_cboFrameLayout)   m_cboFrameLayout->SetVisible(isFrame);
+			if (m_lblFrameGap)      m_lblFrameGap->SetVisible(false);
+			if (m_spinFrameGap)     m_spinFrameGap->SetVisible(isFrame);
+			if (m_lblFramePadding)  m_lblFramePadding->SetVisible(false);
+			if (m_spinFramePadding) m_spinFramePadding->SetVisible(isFrame);
+			if (isFrame)
+			{
+				const float halfFW = (contentW - 6.0f) * 0.5f;
+				if (m_lblFrame)         { m_lblFrame->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+				if (m_chkFrameClip)     m_chkFrameClip->SetBounds(left, y, left + halfFW, y + 24.0f);
+				if (m_spinFrameRadius)  m_spinFrameRadius->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
+				y += 28.0f;
+				if (m_lblFrameLayout)   { m_lblFrameLayout->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+				if (m_cboFrameLayout)   { m_cboFrameLayout->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+				if (m_spinFrameGap)     m_spinFrameGap->SetBounds(left, y, left + halfFW, y + 24.0f);
+				if (m_spinFramePadding) m_spinFramePadding->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
+				y += 32.0f;
+			}
+		}
+
 		// Transform Header & Inputs
 		if (m_lblTransformHeader)
 		{
@@ -2035,14 +2148,14 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			}
 		}
 
-		// 그룹: 도형용 채우기/선 UI 대신 Appearance(불투명도/혼합 모드)만 표시
-		if (IsGroupSelected())
+		// 일반 그룹(프레임 제외): 도형용 채우기/선 UI 대신 Appearance(불투명도/혼합 모드)만 표시
+		if (IsGroupSelected() && !IsFrameSelected())
 		{
 			y = LayoutGroupPanel(left, right, contentW, y);
 			m_pCurrentPanel->SetBounds(0, 0, width, max(y + 20.0f, 600.0f));
 			return;
 		}
-		// 도형/미리보기: 그룹 전용 컨트롤 숨기고 도형용 탭 복원
+		// 도형/프레임: 그룹 전용 컨트롤 숨기고 채우기/선 탭 유지
 		if (m_lblBlend) m_lblBlend->SetVisible(false);
 		if (m_cboBlend) m_cboBlend->SetVisible(false);
 		if (m_btnTabFill)   m_btnTabFill->SetVisible(true);

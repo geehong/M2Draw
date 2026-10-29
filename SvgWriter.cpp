@@ -453,6 +453,10 @@ void SvgWriter::Visit(GroupNode& node) {
 		if (Meta()) {
 			m_output += " m2:frame=\"true\" m2:w=\"" + FormatFloat(frame->GetWidth()) + "\" m2:h=\"" + FormatFloat(frame->GetHeight()) +
 				"\" m2:clip=\"" + std::string(frame->IsClip() ? "true" : "false") + "\" m2:radius=\"" + FormatFloat(frame->GetCornerRadius()) + "\"";
+			if (frame->GetLayoutMode() != FrameLayoutMode::None) {
+				m_output += " m2:layout=\"" + std::string(frame->GetLayoutMode() == FrameLayoutMode::Row ? "row" : "column") + "\" m2:gap=\"" +
+					FormatFloat(frame->GetGap()) + "\" m2:pad=\"" + FormatFloat(frame->GetPadding()) + "\"";
+			}
 		}
 		if (frame->IsClip()) m_output += " clip-path=\"url(#frame_clip_" + std::to_string(node.GetId()) + ")\"";
 	}

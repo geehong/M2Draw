@@ -55,8 +55,9 @@ protected:
 
 	ge::Node* GetSelectedShape() const;   // m_selectedNodeId 를 문서에서 조회 (없으면 nullptr)
 	bool IsGroupSelected() const;
+	bool IsFrameSelected() const;         // 선택된 노드가 프레임(FrameNode)인지 여부
 	bool IsTextSelected() const;
-	bool IsImageSelected() const;         // 이미지가 선택되면 Transform 위에 원본 크기/맞춤/비율/교체 UI 표시          // 선택된 노드가 텍스트면 Transform 위에 글꼴/크기/굵기/정렬 UI 표시         // 선택된 노드가 그룹이면 도형용 스타일 UI 대신 그룹 전용 UI 표시
+	bool IsImageSelected() const;         // 이미지가 선택되면 Transform 위에 원본 크기/맞춤/비율/교체 UI 표시
 
 	// --- 그라디언트 편집 (채우기 탭 + Linear/Radial 모드 + 그라디언트 채움 도형일 때만 표시) ---
 	bool IsGradientMode() const;          // 그라디언트 편집 UI 를 보여야 하는지
@@ -165,6 +166,19 @@ protected:
 	std::shared_ptr<M2DrawButton>       m_btnImageRatio;
 	std::shared_ptr<M2DrawButton>       m_btnImageReplace;
 	void ApplyImageProps(const std::function<void(ge::ImageNode&)>& fn);
+
+	// 프레임 전용 (Frame / Auto Layout)
+	std::shared_ptr<M2DrawLabel>        m_lblFrame;            // "● Frame (Layout, Clip, Radius)"
+	std::shared_ptr<M2DrawCheckBox>     m_chkFrameClip;        // 자식 클리핑(Clip content)
+	std::shared_ptr<M2DrawLabel>        m_lblFrameRadius;      // 코너 반경
+	std::shared_ptr<M2DrawNumericInput> m_spinFrameRadius;
+	std::shared_ptr<M2DrawLabel>        m_lblFrameLayout;      // 레이아웃 모드
+	std::shared_ptr<M2DrawComboBox>     m_cboFrameLayout;      // None, Row, Column
+	std::shared_ptr<M2DrawLabel>        m_lblFrameGap;         // 간격(Gap)
+	std::shared_ptr<M2DrawNumericInput> m_spinFrameGap;
+	std::shared_ptr<M2DrawLabel>        m_lblFramePadding;     // 안쪽 여백(Padding)
+	std::shared_ptr<M2DrawNumericInput> m_spinFramePadding;
+	void ApplyFrameProps(const std::function<void(ge::FrameNode&)>& fn);
 	std::shared_ptr<M2DrawLabel>        m_lblStrokeWidth;      // "Stroke Width"
 	std::shared_ptr<M2DrawSlider>       m_sliderStrokeWidth;   // Stroke width bar
 	std::shared_ptr<M2DrawNumericInput> m_spinStrokeWidth;     // Stroke width number input

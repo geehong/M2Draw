@@ -482,12 +482,14 @@ public:
 	void OnDown(const ToolEvent& e) override;
 	void OnMove(const ToolEvent& e) override;
 	void OnUp(const ToolEvent& e) override;
-	bool HasActiveShape() const override { return m_drag; }
+	void OnKeyDown(UINT nChar, CM2DrawDoc* pDoc) override;
+	bool HasActiveShape() const override { return m_drag || m_waitingSecondClick; }
 	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
 
 private:
 	bool          m_drag = false;
+	bool          m_waitingSecondClick = false; // 클릭-이동-클릭 모드 플래그
 	D2D1_POINT_2F m_startW{}, m_curW{};
 	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
 };

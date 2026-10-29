@@ -73,6 +73,14 @@ CM2DrawDoc::CM2DrawDoc() noexcept
 
 CM2DrawDoc::~CM2DrawDoc()
 {
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+	{
+		CMainFrame* pFrame = static_cast<CMainFrame*>(pMainWnd);
+		pFrame->GetPropertiesWnd().SetSelectedShape(nullptr, nullptr);
+		pFrame->GetGridPropertiesWnd().SetSelectedShape(nullptr, nullptr);
+		pFrame->GetCanvasPropertiesWnd().SetSelectedShape(nullptr, nullptr);
+	}
 }
 
 BOOL CM2DrawDoc::OnNewDocument()

@@ -964,6 +964,11 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 						fn->SetFrameSize(attrs.count(L"m2:w") ? ParseLength(attrs[L"m2:w"], 100.0f) : 100.0f, attrs.count(L"m2:h") ? ParseLength(attrs[L"m2:h"], 100.0f) : 100.0f);
 						fn->SetClip(!(attrs.count(L"m2:clip") && attrs[L"m2:clip"] == L"false"));
 						if (attrs.count(L"m2:radius")) fn->SetCornerRadius(ParseLength(attrs[L"m2:radius"], 0.0f));
+						if (attrs.count(L"m2:layout")) {
+							fn->SetLayoutMode(attrs[L"m2:layout"] == L"row" ? FrameLayoutMode::Row : attrs[L"m2:layout"] == L"column" ? FrameLayoutMode::Column : FrameLayoutMode::None);
+							if (attrs.count(L"m2:gap")) fn->SetGap(ParseLength(attrs[L"m2:gap"], 10.0f));
+							if (attrs.count(L"m2:pad")) fn->SetPadding(ParseLength(attrs[L"m2:pad"], 10.0f));
+						}
 						group = std::move(fn);
 					} else {
 						group = std::make_unique<GroupNode>();

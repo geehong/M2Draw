@@ -1386,6 +1386,58 @@ bool RunPureModelVerification(std::wstring* failure)
 		free(dir);
 	}
 
+	// ---- 27. 프레임 자동 레이아웃 (4.3.1/4.3.4 일부): Row/Column 배치, gap/padding, 설정 왕복 -------------
+	{
+		Document d;
+		auto fn = std::make_unique<FrameNode>();
+		fn->SetFrameSize(300.0f, 200.0f);
+		FrameNode* fr = static_cast<FrameNode*>(d.AddShape(std::move(fn)));
+		// MakePath: 크기가 서로 다른 자식 (x 오프셋만 다름)을 흩어 놓음
+		Node* a = fr->AddChild(MakePath(L"a", 100.0f, 50.0f));
+		Node* b = fr->AddChild(MakePath(L"b", 7.0f, 90.0f));
+		Node* c = fr->AddChild(MakePath(L"c", 250.0f, 10.0f));
+		d.AssignIds(*fr);
+		Rect2 ba, bb, bc;
+		GE_CHECK(!fr->ApplyLayout(), L"레이아웃 모드가 None 이면 자식을 건드리면 안 됨");
+
+		fr->SetLayoutMode(FrameLayoutMode::Row);
+		fr->SetGap(10.0f);
+		fr->SetPadding(5.0f);
+		GE_CHECK(fr->ApplyLayout(), L"Row 레이아웃이 변경을 보고하지 않음");
+		auto world = [&](Node* n, Rect2& out) { Rect2 lb; n->GetLocalBounds(lb); out = n->GetTransform().TransformRect(lb); };
+		world(a, ba); world(b, bb); world(c, bc);
+		GE_CHECK(std::abs(ba.left - 5.0f) < 1e-3f && std::abs(ba.top - 5.0f) < 1e-3f, L"Row: 첫 자식이 padding 위치가 아님");
+		GE_CHECK(std::abs(bb.left - (ba.right + 10.0f)) < 1e-3f && std::abs(bb.top - 5.0f) < 1e-3f, L"Row: 두 번째 자식이 gap 만큼 떨어져 있지 않음");
+		GE_CHECK(std::abs(bc.left - (bb.right + 10.0f)) < 1e-3f && std::abs(bc.top - 5.0f) < 1e-3f, L"Row: 세 번째 자식 위치가 틀림");
+		GE_CHECK(!fr->ApplyLayout(), L"이미 배치된 상태에서 다시 적용해도 변경이 없어야 함");
+
+		fr->SetLayoutMode(FrameLayoutMode::Column);
+		GE_CHECK(fr->ApplyLayout(), L"Column 레이아웃이 변경을 보고하지 않음");
+		world(a, ba); world(b, bb); world(c, bc);
+		GE_CHECK(std::abs(ba.left - 5.0f) < 1e-3f && std::abs(ba.top - 5.0f) < 1e-3f, L"Column: 첫 자식이 padding 위치가 아님");
+		GE_CHECK(std::abs(bb.top - (ba.bottom + 10.0f)) < 1e-3f && std::abs(bb.left - 5.0f) < 1e-3f, L"Column: 두 번째 자식이 gap 만큼 아래가 아님");
+		GE_CHECK(std::abs(bc.top - (bb.bottom + 10.0f)) < 1e-3f, L"Column: 세 번째 자식 위치가 틀림");
+
+		// 숨긴 자식은 배치에서 제외
+		b->SetVisible(false);
+		fr->ApplyLayout();
+		world(c, bc); world(a, ba);
+		GE_CHECK(std::abs(bc.top - (ba.bottom + 10.0f)) < 1e-3f, L"숨긴 자식은 레이아웃에서 빠져야 함");
+		b->SetVisible(true);
+		fr->ApplyLayout();
+
+		// 설정 왕복 (Undo 스냅샷이 SVG 라서 레이아웃 설정이 사라지면 안 됨)
+		SvgWriter lw;
+		const std::string svg = lw.WriteString(d, SvgWriteOptions(SvgWriteMode::Snapshot));
+		GE_CHECK(svg.find("m2:layout=\"column\"") != std::string::npos, L"레이아웃 설정이 출력되지 않음");
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"레이아웃 프레임 SVG 읽기 실패");
+		auto* f2 = dynamic_cast<FrameNode*>(back.GetLayers()[0]->GetChildren()[0].get());
+		GE_CHECK(f2 && f2->GetLayoutMode() == FrameLayoutMode::Column && f2->GetGap() == 10.0f && f2->GetPadding() == 5.0f, L"레이아웃 모드/gap/padding 왕복이 틀림");
+		auto clone = fr->Clone();
+		GE_CHECK(static_cast<FrameNode*>(clone.get())->GetLayoutMode() == FrameLayoutMode::Column, L"프레임 복제가 레이아웃 설정을 보존하지 못함");
+	}
+
 #undef GE_CHECK
 
 	return true;

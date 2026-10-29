@@ -376,8 +376,37 @@ std::unique_ptr<Node> FrameNode::Clone() const
 	auto copy = std::make_unique<FrameNode>();
 	copy->CopyNodePropsFrom(*this);
 	copy->m_w = m_w; copy->m_h = m_h; copy->m_clip = m_clip; copy->m_radius = m_radius;
+	copy->m_layoutMode = m_layoutMode; copy->m_gap = m_gap; copy->m_padding = m_padding;
 	for (const auto& c : m_children) copy->AddChild(c->Clone());
 	return copy;
+}
+
+bool FrameNode::ApplyLayout()
+{
+	if (m_layoutMode == FrameLayoutMode::None) return false;
+	bool changed = false;
+	float cursor = m_padding;
+	for (const auto& c : m_children) {
+		if (!c || !c->IsVisible()) continue;
+		Rect2 lb;
+		if (!c->GetLocalBounds(lb)) continue;
+		const Rect2 b = c->GetTransform().TransformRect(lb);   // 프레임 좌표계에서의 자식 경계
+		float dx = 0.0f, dy = 0.0f;
+		if (m_layoutMode == FrameLayoutMode::Row) {
+			dx = cursor - b.left;
+			dy = m_padding - b.top;
+			cursor += b.Width() + m_gap;
+		} else {
+			dx = m_padding - b.left;
+			dy = cursor - b.top;
+			cursor += b.Height() + m_gap;
+		}
+		if (std::fabs(dx) > 1e-4f || std::fabs(dy) > 1e-4f) {
+			c->SetTransform(c->GetTransform() * Matrix2D::Translation(dx, dy));
+			changed = true;
+		}
+	}
+	return changed;
 }
 
 bool GroupNode::GetLocalBounds(Rect2& out)

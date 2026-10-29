@@ -837,6 +837,12 @@ protected:
 // 그룹의 한 종류: 로컬 (0,0)~(W,H) 상자에 배경(Style.fill)/테두리(Style.stroke)/모서리 반경을 가지고 자식을 그 상자로 클리핑한다.
 // Kind() 는 Group 이라서 기존의 그룹 처리(선택, 순서, 패널, Undo)가 그대로 동작한다. 프레임 여부는 dynamic_cast<FrameNode*> 로 구분.
 // (자동 레이아웃(Row/Column)은 4.3)
+enum class FrameLayoutMode : uint8_t {
+	None = 0,
+	Row = 1,
+	Column = 2
+};
+
 class FrameNode : public GroupNode {
 public:
 	FrameNode() { m_style.fill.type = PaintType::Solid; m_style.fill.color = Color(1.0f, 1.0f, 1.0f, 1.0f); m_style.stroke.width = 0.0f; }
@@ -854,10 +860,24 @@ public:
 	float GetCornerRadius() const { return m_radius; }
 	void  SetCornerRadius(float v) { m_radius = (std::max)(0.0f, v); Invalidate(); }
 
+	FrameLayoutMode GetLayoutMode() const { return m_layoutMode; }
+	void SetLayoutMode(FrameLayoutMode m) { m_layoutMode = m; Invalidate(); }
+	float GetGap() const { return m_gap; }
+	void SetGap(float g) { m_gap = (std::max)(0.0f, g); Invalidate(); }
+	float GetPadding() const { return m_padding; }
+	void SetPadding(float p) { m_padding = (std::max)(0.0f, p); Invalidate(); }
+
+	// 자동 레이아웃(Row/Column): 자식을 z-순서대로 안쪽 여백(padding) 안에서 gap 간격으로 나란히 배치.
+	// 교차축은 시작 쪽 정렬, 프레임 크기는 그대로 (Hug/Fill 은 후속). 모드가 None 이면 아무것도 하지 않음. 변경이 있었으면 true
+	bool ApplyLayout();
+
 private:
 	float m_w = 100.0f, m_h = 100.0f;
 	bool  m_clip = true;
 	float m_radius = 0.0f;
+	FrameLayoutMode m_layoutMode = FrameLayoutMode::None;
+	float m_gap = 10.0f;
+	float m_padding = 10.0f;
 };
 
 } // namespace ge

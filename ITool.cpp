@@ -2209,14 +2209,51 @@ void PanTool::OnUp(const ToolEvent& e)
 // ---------------- 프레임 도구 ----------------
 void FrameTool::OnDown(const ToolEvent& e)
 {
+	if (!e.pDoc) return;
+
+	// 2. 이미 1번째 클릭을 마친 상태(클릭-이동-클릭 모드)인 경우:
+	// 이번 2번째 클릭으로 프레임 생성 완료!
+	if (m_waitingSecondClick)
+	{
+		m_curW = e.worldPt;
+		m_curS = e.screenPt;
+		const float x = (std::min)(m_startW.x, m_curW.x), y = (std::min)(m_startW.y, m_curW.y);
+		const float w = std::fabs(m_curW.x - m_startW.x), h = std::fabs(m_curW.y - m_startW.y);
+
+		if (w >= 4.0f && h >= 4.0f)
+		{
+			auto fn = std::make_unique<ge::FrameNode>();
+			fn->SetFrameSize(w, h);
+			fn->SetTransform(ge::Matrix2D::Translation(x, y));
+			fn->SetName(e.pDoc->GetDoc().GenerateGroupName());
+			ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(fn));
+			if (added)
+			{
+				e.pDoc->GetDoc().SetSelection({ added });
+				e.pDoc->SetModifiedFlag(TRUE);
+				e.pDoc->CommitUndoPoint(L"프레임 추가");
+				LogAppEvent(_T("[프레임 도구] 프레임 추가"));
+
+				GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+				if (SelectTool* sel = GetApp()->GetToolManager().GetSelectTool()) sel->SelectNode(added, e.pDoc);
+			}
+		}
+		m_waitingSecondClick = false;
+		m_drag = false;
+		e.pDoc->UpdateAllViews(nullptr);
+		return;
+	}
+
+	// 1. 첫 번째 클릭(다운): 시작점 기록 및 드래그 시작
 	m_drag = true;
+	m_waitingSecondClick = false;
 	m_startW = m_curW = e.worldPt;
 	m_startS = m_curS = e.screenPt;
 }
 
 void FrameTool::OnMove(const ToolEvent& e)
 {
-	if (!m_drag) return;
+	if (!m_drag && !m_waitingSecondClick) return;
 	m_curW = e.worldPt;
 	m_curS = e.screenPt;
 }
@@ -2226,30 +2263,55 @@ void FrameTool::OnUp(const ToolEvent& e)
 	if (!m_drag) return;
 	m_drag = false;
 	m_curW = e.worldPt;
-	const float x = (std::min)(m_startW.x, m_curW.x), y = (std::min)(m_startW.y, m_curW.y);
-	const float w = std::fabs(m_curW.x - m_startW.x), h = std::fabs(m_curW.y - m_startW.y);
-	if (!e.pDoc || w < 4.0f || h < 4.0f) return;
+	m_curS = e.screenPt;
 
-	auto fn = std::make_unique<ge::FrameNode>();
-	fn->SetFrameSize(w, h);
-	fn->SetTransform(ge::Matrix2D::Translation(x, y));
-	fn->SetName(e.pDoc->GetDoc().GenerateGroupName());
-	ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(fn));
-	if (!added) return;
-	e.pDoc->GetDoc().SetSelection({ added });
-	e.pDoc->SetModifiedFlag(TRUE);
-	e.pDoc->CommitUndoPoint(L"프레임 추가");
-	LogAppEvent(_T("[프레임 도구] 프레임 추가"));
+	const float dx = e.worldPt.x - m_startW.x;
+	const float dy = e.worldPt.y - m_startW.y;
 
-	CM2DrawDoc* pDoc = e.pDoc;
-	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
-	if (SelectTool* sel = GetApp()->GetToolManager().GetSelectTool()) sel->SelectNode(added, pDoc);
-	pDoc->UpdateAllViews(nullptr);
+	// 1. 드래그 방식: 마우스를 누른 채 충분히 이동(4px 초과)하여 뗐다면 즉시 완성!
+	if ((dx * dx + dy * dy) > 16.0f)
+	{
+		const float x = (std::min)(m_startW.x, m_curW.x), y = (std::min)(m_startW.y, m_curW.y);
+		const float w = std::fabs(m_curW.x - m_startW.x), h = std::fabs(m_curW.y - m_startW.y);
+		if (!e.pDoc || w < 4.0f || h < 4.0f) return;
+
+		auto fn = std::make_unique<ge::FrameNode>();
+		fn->SetFrameSize(w, h);
+		fn->SetTransform(ge::Matrix2D::Translation(x, y));
+		fn->SetName(e.pDoc->GetDoc().GenerateGroupName());
+		ge::Node* added = e.pDoc->GetDoc().AddShape(std::move(fn));
+		if (!added) return;
+		e.pDoc->GetDoc().SetSelection({ added });
+		e.pDoc->SetModifiedFlag(TRUE);
+		e.pDoc->CommitUndoPoint(L"프레임 추가");
+		LogAppEvent(_T("[프레임 도구] 프레임 추가"));
+
+		CM2DrawDoc* pDoc = e.pDoc;
+		GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+		if (SelectTool* sel = GetApp()->GetToolManager().GetSelectTool()) sel->SelectNode(added, pDoc);
+		pDoc->UpdateAllViews(nullptr);
+		m_waitingSecondClick = false;
+	}
+	// 2. 클릭-이동-클릭 방식: 단순 클릭(다운-업)한 경우 2번째 클릭 대기
+	else
+	{
+		m_waitingSecondClick = true;
+	}
+}
+
+void FrameTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
+{
+	if (nChar == VK_ESCAPE)
+	{
+		m_drag = false;
+		m_waitingSecondClick = false;
+		if (pDoc) pDoc->UpdateAllViews(nullptr);
+	}
 }
 
 void FrameTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float /*zoom*/, D2D1_POINT_2F /*pan*/, CM2DrawDoc* /*pDoc*/)
 {
-	if (!m_drag || !rt || !brush) return;
+	if ((!m_drag && !m_waitingSecondClick) || !rt || !brush) return;
 	const D2D1_RECT_F rc = D2D1::RectF(static_cast<float>((std::min)(m_startS.x, m_curS.x)), static_cast<float>((std::min)(m_startS.y, m_curS.y)),
 		static_cast<float>((std::max)(m_startS.x, m_curS.x)), static_cast<float>((std::max)(m_startS.y, m_curS.y)));
 	brush->SetColor(D2D1::ColorF(0.20f, 0.45f, 0.85f, 0.12f));

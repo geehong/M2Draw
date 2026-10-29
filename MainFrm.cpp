@@ -434,6 +434,9 @@ CM2DrawDoc* CMainFrame::GetActiveM2DrawDoc()
 void CMainFrame::OnDestroy()
 {
 	GetApp()->GetToolManager().RemoveListener(this);
+	m_wndProperties.SetSelectedShape(nullptr, nullptr);
+	m_wndGridProp.SetSelectedShape(nullptr, nullptr);
+	m_wndCanvasProp.SetSelectedShape(nullptr, nullptr);
 	CMDIFrameWndEx::OnDestroy();
 }
 
