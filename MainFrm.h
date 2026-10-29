@@ -71,6 +71,8 @@ public:
 protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
 	afx_msg void OnDestroy();
+	afx_msg void OnClose();
+	bool m_bClosing = false;   // 종료 중: 서브도구 바를 다시 만들면 파괴된 툴팁(DelTool assert)을 건드리므로 막음
 	afx_msg void OnWindowManager();
 	afx_msg void OnViewCustomize();
 	afx_msg LRESULT OnToolbarCreateNew(WPARAM wp, LPARAM lp);

@@ -23,6 +23,7 @@ const UINT uiLastUserToolBarId = uiFirstUserToolBarId + iMaxUserToolbars - 1;
 
 BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_WM_CREATE()
+	ON_WM_CLOSE()
 	ON_WM_DESTROY()
 	ON_COMMAND(ID_WINDOW_MANAGER, &CMainFrame::OnWindowManager)
 	ON_COMMAND(ID_VIEW_CUSTOMIZE, &CMainFrame::OnViewCustomize)
@@ -431,8 +432,16 @@ CM2DrawDoc* CMainFrame::GetActiveM2DrawDoc()
 	return nullptr;
 }
 
+void CMainFrame::OnClose()
+{
+	// 문서 닫기 중에도 선택/도구 변경으로 서브도구 바가 갱신되므로 종료 시작 시점에 표시
+	m_bClosing = true;
+	CMDIFrameWndEx::OnClose();
+}
+
 void CMainFrame::OnDestroy()
 {
+	m_bClosing = true;
 	GetApp()->GetToolManager().RemoveListener(this);
 	m_wndProperties.SetSelectedShape(nullptr, nullptr);
 	m_wndGridProp.SetSelectedShape(nullptr, nullptr);
@@ -447,7 +456,8 @@ void CMainFrame::OnToolChanged(ToolType newTool)
 
 void CMainFrame::UpdateSubToolBar(ToolType curTool)
 {
-	if (!m_wndSubToolBar.GetSafeHwnd())
+	// 종료 중이면 툴바를 건드리지 않음: 툴바의 툴팁은 OnDestroy 에서 이미 파괴되어 버튼 교체 시 DelTool 디버그 assert 발생
+	if (m_bClosing || !m_wndSubToolBar.GetSafeHwnd())
 		return;
 
 	// (버튼 구성이 이전과 같으면 아래에서 바로 반환: 드래그 중 반복 호출되어도 툴바를 다시 만들지 않음)
