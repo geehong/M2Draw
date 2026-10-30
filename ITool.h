@@ -100,7 +100,8 @@ enum class ToolType
 	ComponentHeading,       // 헤딩(제목) 도구: 클릭 위치에 굵은 제목 텍스트
 	ComponentButton,        // 버튼 도구: 드래그 상자 + 가운데 라벨
 	ComponentDivider,       // 구분선 도구: 가로 선
-	ComponentSpacer        // 간격 도구: 빈 간격 상자(점선)
+	ComponentSpacer,       // 간격 도구: 빈 간격 상자(점선)
+	UiComponent            // 표준 HTML UI 컴포넌트 도구 (4.5.17): 어떤 종류인지는 UiComponentTool::SetPending 으로 지정
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)
@@ -565,6 +566,31 @@ private:
 	bool          m_drag = false;
 	D2D1_POINT_2F m_startW{}, m_curW{};
 	CPoint        m_startS{ 0, 0 }, m_curS{ 0, 0 };
+	std::vector<ge::GuideLine> m_guides;
+};
+
+// 표준 HTML UI 컴포넌트 도구 (텍스트 박스/입력/체크/콤보/목록/막대/탭/배지/카드/페이지). 종류(ge::UiComp::Kind)는 SetPending 으로 정함
+class UiComponentTool : public ITool
+{
+public:
+	static void SetPending(int kind) { s_pending = kind; }
+	static int  Pending() { return s_pending; }
+	ToolType GetType() const override { return ToolType::UiComponent; }
+	const wchar_t* GetName() const override { return L"UI 컴포넌트 도구"; }
+	wchar_t GetShortcut() const override { return 0; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	bool HasActiveShape() const override { return m_drag; }
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+private:
+	static int    s_pending;
+	bool          m_drag = false;
+	D2D1_POINT_2F m_startW{}, m_curW{};
 	std::vector<ge::GuideLine> m_guides;
 };
 

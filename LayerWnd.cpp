@@ -706,7 +706,9 @@ void CLayerView::AppendNodeRows(ge::Node* node, int depth)
 	row.pNode = node;
 	row.isLayer = isLayer;
 	row.depth = depth;
-	row.hasChildren = group && !group->GetChildren().empty();
+	const auto* uiFrame = dynamic_cast<const ge::FrameNode*>(node);
+	const bool atomicUi = uiFrame && uiFrame->IsUiComponent();   // UI 컴포넌트 내부 도형은 따로 나열/선택하지 않음
+	row.hasChildren = group && !atomicUi && !group->GetChildren().empty();
 	row.isExpanded = (m_collapsedIds.find(node->GetId()) == m_collapsedIds.end());
 
 	if (isLayer)
@@ -794,7 +796,7 @@ void CLayerView::AppendNodeRows(ge::Node* node, int depth)
 	m_rowItems.push_back(std::move(row));
 
 	// 자식은 위(z-order 최상단) -> 아래 순서로, 펼쳐진 경우에만
-	if (group && expanded)
+	if (group && expanded && !atomicUi)
 	{
 		const auto& children = group->GetChildren();
 		for (int ci = static_cast<int>(children.size()) - 1; ci >= 0; --ci)

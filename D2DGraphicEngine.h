@@ -991,6 +991,26 @@ public:
 	// 자동 배치(Row/Column)면 다시 배치한다 (4.5.11)
 	void ResizeFrame(float w, float h);
 
+	// ---- 표준 HTML UI 컴포넌트 (4.5.17) ----
+	// 컴포넌트 프레임 = 종류(uiKind) + 속성(uiProps) + 속성으로 만든 자식 도형들. 자식은 Rebuild 가 속성에서 다시 만든다.
+	// 속성은 SVG(m2:ui / m2:uiProps)로 저장되고, HTML 내보내기는 이 속성으로 의미 있는 태그를 만든다.
+	using UiProps = std::vector<std::pair<std::string, std::string>>;
+	bool IsUiComponent() const { return !m_uiKind.empty(); }
+	const std::string& GetUiKind() const { return m_uiKind; }
+	void SetUiKind(const std::string& k) { m_uiKind = k; }
+	const UiProps& GetUiProps() const { return m_uiProps; }
+	void SetUiProps(const UiProps& p) { m_uiProps = p; }
+	std::string GetUiProp(const std::string& key, const std::string& def = std::string()) const {
+		for (const auto& kv : m_uiProps) if (kv.first == key) return kv.second;
+		return def;
+	}
+	void SetUiPropRaw(const std::string& key, const std::string& value) {
+		for (auto& kv : m_uiProps) if (kv.first == key) { kv.second = value; return; }
+		m_uiProps.emplace_back(key, value);
+	}
+	// 크기가 바뀐 컴포넌트 프레임의 자식을 다시 만드는 함수 (UiComponents.cpp 가 등록)
+	static void (*s_uiRebuildHook)(FrameNode&);
+
 	// 자식이 부모 프레임 범위(0,0,w,h)를 벗어나지 못하게 한다 (자유 배치 프레임만; 자동 배치는 레이아웃이 결정).
 	// shrink=false: 위치를 안으로 옮기고 부모보다 큰 자식은 부모 크기로 줄임 (이동/생성/부모 축소)
 	// shrink=true : 위치는 두고 넘친 쪽만 잘라 크기를 줄임 (크기 조절 드래그: 반대쪽 모서리 고정)
@@ -1012,7 +1032,17 @@ private:
 	LayoutCrossAlign m_crossAlign = LayoutCrossAlign::Start;
 	FrameSizingMode m_sizingW = FrameSizingMode::Fixed;
 	FrameSizingMode m_sizingH = FrameSizingMode::Fixed;
+	std::string m_uiKind;
+	UiProps m_uiProps;
 };
+
+// 하나의 오브젝트로 선택/이동/크기 조절되는 컴포넌트인가 (버튼, 표준 UI 컴포넌트). 자식은 따로 선택되지 않는다.
+inline bool IsAtomicComponent(const Node* n) {
+	if (!n) return false;
+	if (n->GetName() == L"버튼" || n->GetHtmlTag() == "button") return true;
+	const auto* f = dynamic_cast<const FrameNode*>(n);
+	return f && f->IsUiComponent();
+}
 
 // ---- HTML 컴포넌트: 테이블 (Step 4.5.7.1) ----------------------------------------
 // GroupNode 상속 (FrameNode 가 아님: 프레임은 자동 배치 컨테이너라 표의 행/열 의미와 맞지 않음).

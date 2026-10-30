@@ -277,6 +277,7 @@ void CM2DrawDoc::SetModifiedFlag(BOOL bModified)
 
 bool CM2DrawDoc::CommitUndoPoint(const std::wstring& actionName)
 {
+	m_doc.EnsureUniqueIds();   // 컴포넌트 Rebuild 등으로 새로 생긴 노드에 ID 발급 (스냅샷/선택 복원이 ID 기준)
 	if (!m_undoMgr.CommitChange(actionName, m_doc))
 		return false;
 	SetModifiedFlag(TRUE);
@@ -1258,6 +1259,29 @@ void CM2DrawDoc::OnFileExportImage()
 	log.Format(_T("[내보내기] %s 저장: %s (%u x %u px, %.0fx, %d DPI)"), jpeg ? _T("JPG") : _T("PNG"), (LPCTSTR)fd.GetPathName(), pw, ph, static_cast<double>(opt.scale), dlg.m_dpi);
 	LogAppEvent(log);
 	SetAppStatusText(log);
+}
+
+ge::FrameNode* CM2DrawDoc::GetSelectedTopArtboard()
+{
+	auto* sel = GetPrimarySelection();
+	for (ge::Node* p = sel; p; p = p->GetParent()) {
+		if (auto* fr = dynamic_cast<ge::FrameNode*>(p)) {
+			if (fr->GetParent() && fr->GetParent()->Kind() == ge::NodeKind::Layer && !fr->IsUiComponent()) return fr;
+		}
+	}
+	return nullptr;
+}
+
+std::string CM2DrawDoc::BuildPreviewHtml()
+{
+	ge::HtmlExportOptions opt;
+	opt.singleFile = true;
+	opt.extractCssClasses = true;
+	CString t = GetTitle();
+	opt.title = (const char*)CStringA(t);
+	opt.targetArtboard = GetSelectedTopArtboard();
+	ge::HtmlExporter exporter;
+	return exporter.Export(m_doc, opt).html;
 }
 
 void CM2DrawDoc::OnFileExportHtml()

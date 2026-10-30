@@ -8,6 +8,7 @@
 
 #include "MainFrm.h"
 #include "M2DrawDoc.h"
+#include "HtmlPreview.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -27,6 +28,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_WM_DESTROY()
 	ON_COMMAND(ID_WINDOW_MANAGER, &CMainFrame::OnWindowManager)
 	ON_COMMAND(ID_VIEW_CUSTOMIZE, &CMainFrame::OnViewCustomize)
+	ON_COMMAND(ID_FILE_PREVIEW_HTML, &CMainFrame::OnFilePreviewHtml)
 	ON_REGISTERED_MESSAGE(AFX_WM_CREATETOOLBAR, &CMainFrame::OnToolbarCreateNew)
 	ON_WM_SETTINGCHANGE()
 	ON_COMMAND_RANGE(ID_OPT_FIRST, ID_OPT_LAST, &CMainFrame::OnOptionBarCommit)
@@ -44,6 +46,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOL_RECT, ID_TOOL_ZOOMOUT, &CMainFrame::OnUpdateSubToolCommand)
 	ON_COMMAND_RANGE(ID_HTML_FRAME, ID_HTML_SPACER, &CMainFrame::OnSubToolCommand)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_HTML_FRAME, ID_HTML_SPACER, &CMainFrame::OnUpdateSubToolCommand)
+	ON_COMMAND_RANGE(ID_HTML_UI_TEXTBOX, ID_HTML_UI_PAGER, &CMainFrame::OnSubToolCommand)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_HTML_UI_TEXTBOX, ID_HTML_UI_PAGER, &CMainFrame::OnUpdateSubToolCommand)
 END_MESSAGE_MAP()
 
 static UINT indicators[] =
@@ -521,9 +525,12 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 	}
 	else if (curTool == ToolType::Frame || curTool == ToolType::Table || curTool == ToolType::ComponentHeading ||
 		curTool == ToolType::ComponentButton || curTool == ToolType::ComponentDivider || curTool == ToolType::ComponentSpacer ||
+		curTool == ToolType::UiComponent ||
 		bHtmlContextSelected)
 	{
-		btnIds = { ID_HTML_FRAME, ID_HTML_TABLE, ID_HTML_HEADING, ID_HTML_BUTTON, ID_HTML_DIVIDER, ID_HTML_SPACER };   // 프레임/테이블 도구 및 HTML 요소 선택 시: HTML 요소 아이콘 모음
+		btnIds = { ID_HTML_FRAME, ID_HTML_TABLE, ID_HTML_HEADING, ID_HTML_BUTTON, ID_HTML_DIVIDER, ID_HTML_SPACER,
+			ID_HTML_UI_TEXTBOX, ID_HTML_UI_INPUT, ID_HTML_UI_CHECK, ID_HTML_UI_COMBO, ID_HTML_UI_LIST,
+			ID_HTML_UI_BAR, ID_HTML_UI_TABS, ID_HTML_UI_BADGE, ID_HTML_UI_CARD, ID_HTML_UI_PAGER };   // 프레임/테이블 도구 및 HTML 요소 선택 시: HTML 요소 아이콘 모음
 	}
 	else if (m_subInputMode != SubInputMode::None)
 	{
@@ -635,6 +642,16 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_HTML_BUTTON:        imgIdx = 36; break;
 		case ID_HTML_DIVIDER:       imgIdx = 37; break;
 		case ID_HTML_SPACER:        imgIdx = 38; break;
+		case ID_HTML_UI_TEXTBOX: imgIdx = 39; break;
+		case ID_HTML_UI_INPUT: imgIdx = 40; break;
+		case ID_HTML_UI_CHECK: imgIdx = 41; break;
+		case ID_HTML_UI_COMBO: imgIdx = 42; break;
+		case ID_HTML_UI_LIST: imgIdx = 43; break;
+		case ID_HTML_UI_BAR: imgIdx = 44; break;
+		case ID_HTML_UI_TABS: imgIdx = 45; break;
+		case ID_HTML_UI_BADGE: imgIdx = 46; break;
+		case ID_HTML_UI_CARD: imgIdx = 47; break;
+		case ID_HTML_UI_PAGER: imgIdx = 48; break;
 		case ID_ALIGN_LEFT:         imgIdx = 23; break;
 		case ID_ALIGN_CENTERH:      imgIdx = 24; break;
 		case ID_ALIGN_RIGHT:        imgIdx = 25; break;
@@ -822,6 +839,11 @@ void CMainFrame::OnSubPolyline()
 	GetApp()->GetToolManager().SetActiveTool(ToolType::Polyline);
 }
 
+void CMainFrame::OnFilePreviewHtml()
+{
+	CHtmlPreviewFrame::Show();   // HTML 미리보기 (Step 4.6)
+}
+
 void CMainFrame::OnSubToolCommand(UINT nID)
 {
 	ToolType targetTool = ToolType::Select;
@@ -842,7 +864,13 @@ void CMainFrame::OnSubToolCommand(UINT nID)
 	case ID_HTML_BUTTON:   targetTool = ToolType::ComponentButton; break;
 	case ID_HTML_DIVIDER:  targetTool = ToolType::ComponentDivider; break;
 	case ID_HTML_SPACER:   targetTool = ToolType::ComponentSpacer; break;
-	default: return;
+		default:
+			if (nID >= ID_HTML_UI_TEXTBOX && nID <= ID_HTML_UI_PAGER) {
+				UiComponentTool::SetPending(static_cast<int>(nID - ID_HTML_UI_TEXTBOX));   // 표준 UI 컴포넌트 (4.5.17): 종류만 바꿔 같은 도구 사용
+				targetTool = ToolType::UiComponent;
+				break;
+			}
+			return;
 	}
 
 	GetApp()->GetToolManager().SetActiveTool(targetTool);
@@ -869,7 +897,10 @@ void CMainFrame::OnUpdateSubToolCommand(CCmdUI* pCmdUI)
 	case ID_HTML_BUTTON:   isCur = (active == ToolType::ComponentButton); break;
 	case ID_HTML_DIVIDER:  isCur = (active == ToolType::ComponentDivider); break;
 	case ID_HTML_SPACER:   isCur = (active == ToolType::ComponentSpacer); break;
-	default: break;
+		default:
+			if (pCmdUI->m_nID >= ID_HTML_UI_TEXTBOX && pCmdUI->m_nID <= ID_HTML_UI_PAGER)
+				isCur = (active == ToolType::UiComponent && UiComponentTool::Pending() == static_cast<int>(pCmdUI->m_nID - ID_HTML_UI_TEXTBOX));
+			break;
 	}
 	pCmdUI->Enable(TRUE);
 	pCmdUI->SetCheck(isCur ? 1 : 0);

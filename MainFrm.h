@@ -75,6 +75,7 @@ protected:
 	bool m_bClosing = false;   // 종료 중: 서브도구 바를 다시 만들면 파괴된 툴팁(DelTool assert)을 건드리므로 막음
 	afx_msg void OnWindowManager();
 	afx_msg void OnViewCustomize();
+	afx_msg void OnFilePreviewHtml();
 	afx_msg LRESULT OnToolbarCreateNew(WPARAM wp, LPARAM lp);
 	afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
 	afx_msg void OnOptionBarCommit(UINT nID);

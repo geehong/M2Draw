@@ -64,6 +64,7 @@ private:
 	void AppendIndent();
 	// 자유 배치 프레임 안의 자식 위치/제약 CSS (position:absolute + left/right/top/bottom). 부모가 자유 배치가 아니면 빈 문자열
 	std::string PositionDecls(const Node& node, bool& omitW, bool& omitH);
+	void ExportUiComponent(FrameNode& frame);   // 표준 UI 컴포넌트 -> 시맨틱 태그 (4.5.17)
 	void ExportTable(TableNode& table);   // <table>/<thead>/<tbody>/<tr>/<th>/<td> (또는 CSS Grid)
 	std::string StyleOrClassAttr(const std::string& prefix, const std::string& decls, const Node* node);
 

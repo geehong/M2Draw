@@ -22,3 +22,6 @@ M2Draw/Release/
 
 # User-specific files
 *.vcxproj.user
+
+# WebView2 SDK (third_party/fetch_webview2.ps1 로 내려받음)
+third_party/WebView2/

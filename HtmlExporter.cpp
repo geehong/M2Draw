@@ -2,6 +2,7 @@
 #include "HtmlExporter.h"
 #include "SvgWriter.h"
 #include "HtmlComponents/TableComponent.h"
+#include "HtmlComponents/UiComponents.h"
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
@@ -341,6 +342,7 @@ void HtmlExporter::Visit(GroupNode& node) {
 
 	// FrameNode 인 경우 시맨틱 Flexbox/컨테이너로 변환
 	if (auto* frame = dynamic_cast<FrameNode*>(&node)) {
+		if (frame->IsUiComponent()) { ExportUiComponent(*frame); return; }   // 표준 UI 컴포넌트 (4.5.17)
 		std::string tag = !frame->GetHtmlTag().empty() ? frame->GetHtmlTag() : "div";
 		std::ostringstream style;
 		style << BuildCommonStyleDecls(*frame);
@@ -483,6 +485,217 @@ static std::string CellContentHtml(const std::vector<TextNode*>& texts)
 		}
 	}
 	return out;
+}
+
+// ---------------- 표준 UI 컴포넌트 (4.5.17) ----------------
+static std::string UiEsc(const std::string& s)
+{
+	std::string out = EscapeHtml(s);
+	std::string r;
+	for (char c : out) { if (c == '\n') r += "<br>"; else r += c; }
+	return r;
+}
+
+static std::string UiHex(const FrameNode& f, const char* key, const char* def)
+{
+	return UiComp::HexFromColor(UiComp::ColorFromHex(f.GetUiProp(key, def), UiComp::ColorFromHex(def, Color(0, 0, 0, 1))));
+}
+
+void HtmlExporter::ExportUiComponent(FrameNode& f)
+{
+	const std::string kind = f.GetUiKind();
+	const std::string name = SanitizeClassName(kind);
+
+	// 바깥 요소가 가지는 공통 스타일: 보임/불투명도/그림자 + 위치(자유 배치 부모 안이면 absolute) + 크기
+	bool omitW = false, omitH = false;
+	const std::string pos = PositionDecls(f, omitW, omitH);
+	auto outer = [&](bool withH, const std::string& extra) {
+		std::ostringstream s;
+		s << BuildCommonStyleDecls(f) << pos << "box-sizing: border-box; ";
+		if (!omitW) s << "width: " << FormatUnit(f.GetWidth()) << "; ";
+		if (withH && !omitH) s << "height: " << FormatUnit(f.GetHeight()) << "; ";
+		s << extra;
+		return s.str();
+	};
+	auto attr = [&](const std::string& decls) { return StyleOrClassAttr(name, decls, &f); };
+	auto inner = [](const std::string& decls) { return " style=\"" + decls + "\""; };
+	auto num = [&](const char* key, float def) { return UiComp::PropNum(f, key, def); };
+	auto flag = [&](const char* key, bool def) { return UiComp::PropBool(f, key, def); };
+	auto& o = m_htmlStream;
+	auto line = [&](const std::string& s) { AppendIndent(); o << s << "\n"; };
+	const std::string ink = "#212429", border = "#c7ccd6", font = "font-family: 'Segoe UI', sans-serif; ";
+	const std::string accent = UiHex(f, "accent", "#1f8fff");
+
+	std::string open;   // 여는 태그 전체
+	if (kind == "textbox") {
+		std::string tag = f.GetUiProp("tag", "p");
+		static const char* ok[] = { "p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote" };
+		bool valid = false; for (auto* t : ok) if (tag == t) valid = true;
+		if (!valid) tag = "p";
+		std::ostringstream d;
+		d << "margin: 0; " << font << "font-size: " << FormatUnit(num("size", 16.0f)) << "; font-weight: " << (flag("bold", false) ? "700" : "400")
+			<< "; text-align: " << f.GetUiProp("align", "left") << "; line-height: " << num("lineHeight", 1.5f) << "; color: " << ink << "; ";
+		if (tag == "blockquote") d << "border-left: 4px solid #1f8fff; padding-left: 12px; font-style: italic; ";
+		line("<" + tag + attr(outer(false, d.str())) + ">" + UiEsc(f.GetUiProp("text")) + "</" + tag + ">");
+		return;
+	}
+	if (kind == "input") {
+		const std::string type = f.GetUiProp("type", "text");
+		std::ostringstream d;
+		d << font << "font-size: 15px; padding: " << (type == "textarea" ? "10px 12px" : "0 12px") << "; border: 1px solid " << border
+			<< "; border-radius: 6px; background: " << (flag("disabled", false) ? "#edeff2" : "#ffffff") << "; ";
+		const std::string common = " placeholder=\"" + EscapeHtml(f.GetUiProp("placeholder")) + "\"" + (flag("disabled", false) ? " disabled" : "");
+		if (type == "textarea") {
+			line("<textarea" + common + attr(outer(true, d.str() + "resize: none; ")) + ">" + EscapeHtml(f.GetUiProp("value")) + "</textarea>");
+		} else {
+			static const char* ok[] = { "text", "password", "email", "search", "number" };
+			std::string t = "text"; for (auto* x : ok) if (type == x) t = x;
+			line("<input type=\"" + t + "\"" + common + " value=\"" + EscapeHtml(f.GetUiProp("value")) + "\"" + attr(outer(true, d.str())) + ">");
+		}
+		return;
+	}
+	if (kind == "check") {
+		const std::string ck = f.GetUiProp("kind", "checkbox");
+		const std::string type = (ck == "radio") ? "radio" : "checkbox";
+		std::ostringstream d;
+		d << "display: inline-flex; align-items: center; gap: 8px; " << font << "font-size: 15px; color: " << ink << "; ";
+		line("<label" + attr(outer(true, d.str())) + ">");
+		++m_indent;
+		line("<input type=\"" + type + "\"" + (ck == "switch" ? " role=\"switch\"" : "") + (flag("checked", false) ? " checked" : "") +
+			inner("margin: 0; width: 20px; height: 20px; accent-color: " + accent + ";") + ">");
+		line("<span>" + UiEsc(f.GetUiProp("label")) + "</span>");
+		--m_indent;
+		line("</label>");
+		return;
+	}
+	if (kind == "combo") {
+		const auto opts = UiComp::PropList(f, "options");
+		const int sel = static_cast<int>(num("selected", -1.0f));
+		std::ostringstream d;
+		d << font << "font-size: 15px; padding: 0 12px; border: 1px solid " << border << "; border-radius: 6px; background: #ffffff; color: " << ink << "; ";
+		line("<select" + attr(outer(true, d.str())) + ">");
+		++m_indent;
+		const std::string ph = f.GetUiProp("placeholder");
+		if (!ph.empty()) line(std::string("<option value=\"\" disabled hidden") + (sel < 0 || sel >= static_cast<int>(opts.size()) ? " selected" : "") + ">" + UiEsc(ph) + "</option>");
+		for (size_t i = 0; i < opts.size(); ++i)
+			line("<option value=\"" + EscapeHtml(opts[i]) + "\"" + (static_cast<int>(i) == sel ? " selected" : "") + ">" + UiEsc(opts[i]) + "</option>");
+		--m_indent;
+		line("</select>");
+		return;
+	}
+	if (kind == "list") {
+		const std::string lk = f.GetUiProp("kind", "ul"), marker = f.GetUiProp("marker", "disc");
+		const bool ordered = (lk == "ol"), box = (lk == "box");
+		const std::string tag = ordered ? "ol" : "ul";
+		std::string lst = "none";
+		if (!box) {
+			if (ordered) lst = (marker == "alpha") ? "lower-alpha" : (marker == "roman") ? "lower-roman" : "decimal";
+			else lst = (marker == "circle") ? "circle" : (marker == "square") ? "square" : "disc";
+		}
+		std::ostringstream d;
+		d << "margin: 0; padding: 0 0 0 " << (box ? "0" : "24px") << "; list-style: " << lst << "; " << font << "font-size: " << FormatUnit(num("size", 15.0f)) << "; color: " << ink << "; ";
+		line("<" + tag + attr(outer(false, d.str())) + ">");
+		++m_indent;
+		std::ostringstream li;
+		li << "margin-bottom: " << FormatUnit(num("gap", 6.0f)) << "; ";
+		if (box) li << "padding: 6px 12px; border: 1px solid " << border << "; border-radius: 6px; background: #ffffff; ";
+		for (const auto& it : UiComp::PropList(f, "items")) line("<li" + inner(li.str()) + ">" + UiEsc(it) + "</li>");
+		--m_indent;
+		line("</" + tag + ">");
+		return;
+	}
+	if (kind == "bar") {
+		const std::string bk = f.GetUiProp("kind", "progress");
+		const float mn = num("min", 0.0f), mx = num("max", 100.0f), v = num("value", 40.0f);
+		const std::string fill = UiHex(f, "fillColor", "#1f8fff"), track = UiHex(f, "trackColor", "#dde1e7");
+		const std::string th = FormatUnit(num("thickness", 8.0f));
+		if (bk == "divider") {
+			line("<hr" + attr(outer(false, "margin: 0; border: 0; border-top: " + th + " solid " + track + "; ")) + ">");
+		} else if (bk == "range") {
+			line("<input type=\"range\" min=\"" + std::to_string(static_cast<int>(mn)) + "\" max=\"" + std::to_string(static_cast<int>(mx)) +
+				"\" value=\"" + std::to_string(static_cast<int>(v)) + "\"" + attr(outer(false, "margin: 0; accent-color: " + fill + "; ")) + ">");
+		} else {
+			line("<progress value=\"" + std::to_string(static_cast<int>(v - mn)) + "\" max=\"" + std::to_string(static_cast<int>(mx - mn)) + "\"" +
+				attr(outer(false, "height: " + th + "; accent-color: " + fill + "; ")) + "></progress>");
+		}
+		return;
+	}
+	if (kind == "tabs") {
+		const auto tabs = UiComp::PropList(f, "tabs");
+		const int act = static_cast<int>(num("active", 0.0f));
+		const std::string col = UiHex(f, "color", "#1f8fff");
+		std::ostringstream d;
+		d << "display: flex; border-bottom: 1px solid " << border << "; ";
+		line("<div role=\"tablist\"" + attr(outer(true, d.str())) + ">");
+		++m_indent;
+		for (size_t i = 0; i < tabs.size(); ++i) {
+			const bool on = static_cast<int>(i) == act;
+			std::ostringstream b;
+			b << "padding: 0 14px; background: none; border: 0; " << font << "font-size: 15px; cursor: pointer; color: " << (on ? col : "#8c919e") << "; font-weight: " << (on ? "700" : "400")
+				<< "; border-bottom: 3px solid " << (on ? col : "transparent") << "; ";
+			line(std::string("<button role=\"tab\" aria-selected=\"") + (on ? "true" : "false") + "\"" + inner(b.str()) + ">" + UiEsc(tabs[i]) + "</button>");
+		}
+		--m_indent;
+		line("</div>");
+		return;
+	}
+	if (kind == "badge") {
+		const std::string col = UiHex(f, "color", "#1f8fff");
+		std::ostringstream d;
+		d << "display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 999px; background: " << col << "; color: #ffffff; " << font << "font-size: 13px; font-weight: 700; ";
+		std::string body = UiEsc(f.GetUiProp("text"));
+		if (flag("closable", false)) body += " <button aria-label=\"닫기\"" + inner("background: none; border: 0; color: #ffffff; cursor: pointer; padding: 0;") + ">&times;</button>";
+		line("<span" + attr(outer(true, d.str())) + ">" + body + "</span>");
+		return;
+	}
+	if (kind == "card") {
+		std::ostringstream d;
+		d << "border: 1px solid " << border << "; border-radius: 12px; background: #ffffff; overflow: hidden; " << font << "color: " << ink << "; ";
+		line("<article" + attr(outer(true, d.str())) + ">");
+		++m_indent;
+		const float ih = num("imageH", 120.0f);
+		if (ih > 0.0f) line("<div role=\"img\" aria-label=\"이미지\"" + inner("height: " + FormatUnit(ih) + "; background: #e6ebf2;") + "></div>");
+		line("<div" + inner("padding: 16px;") + ">");
+		++m_indent;
+		line("<h3" + inner("margin: 0 0 6px; font-size: 18px;") + ">" + UiEsc(f.GetUiProp("title")) + "</h3>");
+		line("<p" + inner("margin: 0 0 12px; font-size: 14px; color: #61666f;") + ">" + UiEsc(f.GetUiProp("body")) + "</p>");
+		const std::string bt = f.GetUiProp("button");
+		if (!bt.empty()) line("<button" + inner("height: 36px; padding: 0 18px; border: 0; border-radius: 8px; background: #1f8fff; color: #ffffff; font-size: 14px; font-weight: 700; cursor: pointer;") + ">" + UiEsc(bt) + "</button>");
+		--m_indent;
+		line("</div>");
+		--m_indent;
+		line("</article>");
+		return;
+	}
+	if (kind == "pager") {
+		const auto items = UiComp::PropList(f, "items");
+		const int act = static_cast<int>(num("active", 0.0f));
+		const bool crumb = f.GetUiProp("kind", "pagination") == "breadcrumb";
+		line(std::string("<nav aria-label=\"") + (crumb ? "breadcrumb" : "pagination") + "\"" + attr(outer(true, font + "font-size: 14px; ")) + ">");
+		++m_indent;
+		line(std::string("<") + (crumb ? "ol" : "ul") + inner("display: flex; align-items: center; gap: " + std::string(crumb ? "8px" : "6px") + "; margin: 0; padding: 0; list-style: none; height: 100%;") + ">");
+		++m_indent;
+		for (size_t i = 0; i < items.size(); ++i) {
+			const bool on = static_cast<int>(i) == act;
+			const bool last = (i + 1 == items.size());
+			std::string a;
+			if (crumb) {
+				a = last ? "<span aria-current=\"page\">" + UiEsc(items[i]) + "</span>" : "<a href=\"#\"" + inner("color: #1f8fff; text-decoration: none;") + ">" + UiEsc(items[i]) + "</a> <span aria-hidden=\"true\">/</span>";
+			} else {
+				a = std::string("<a href=\"#\"") + (on ? " aria-current=\"page\"" : "") +
+					inner(std::string("display: inline-block; min-width: 32px; height: 32px; line-height: 32px; text-align: center; border-radius: 6px; text-decoration: none; padding: 0 6px; box-sizing: border-box; ") +
+						(on ? "background: #1f8fff; color: #ffffff; font-weight: 700;" : "border: 1px solid " + border + "; color: " + ink + ";")) + ">" + UiEsc(items[i]) + "</a>";
+			}
+			line("<li>" + a + "</li>");
+		}
+		--m_indent;
+		line(std::string("</") + (crumb ? "ol" : "ul") + ">");
+		--m_indent;
+		line("</nav>");
+		return;
+	}
+	// 알 수 없는 종류: 일반 div
+	line("<div" + attr(outer(true, "")) + "></div>");
 }
 
 void HtmlExporter::ExportTable(TableNode& t)

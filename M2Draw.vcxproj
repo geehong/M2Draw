@@ -200,6 +200,21 @@
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\WebView2\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
+    <Link>
+      <AdditionalDependencies>$(ProjectDir)third_party\WebView2\x64\WebView2LoaderStatic.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='Win32'">
+    <Link>
+      <AdditionalDependencies>$(ProjectDir)third_party\WebView2\x86\WebView2LoaderStatic.lib;version.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="ChildFrm.h" />
     <ClInclude Include="D2DGraphicEngine.h" />
@@ -237,6 +252,8 @@
     <ClInclude Include="ClipboardSvg.h" />
     <ClInclude Include="RasterExport.h" />
     <ClInclude Include="HtmlComponents\TableComponent.h" />
+    <ClInclude Include="HtmlComponents\UiComponents.h" />
+    <ClInclude Include="HtmlPreview.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ChildFrm.cpp" />
@@ -252,6 +269,8 @@
     <ClCompile Include="RuntimeVerification.cpp" />
     <ClCompile Include="D2DShadowRender.cpp" />
     <ClCompile Include="HtmlComponents\TableComponent.cpp" />
+    <ClCompile Include="HtmlComponents\UiComponents.cpp" />
+    <ClCompile Include="HtmlPreview.cpp" />
     <ClCompile Include="D2DPropertyView.cpp" />
     <ClCompile Include="D2DLayer.cpp" />
     <ClCompile Include="LayerWnd.cpp" />

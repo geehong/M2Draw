@@ -233,6 +233,22 @@ protected:
 	std::shared_ptr<M2DrawButton>       m_btnTblMergeR, m_btnTblMergeD, m_btnTblSplit;
 	void ApplyTableProps(const std::function<void(ge::TableNode&)>& fn, const wchar_t* undoName);
 	void SyncTableControls();
+
+	// 표준 HTML UI 컴포넌트 (Step 4.5.17): 선택된 컴포넌트의 종류별 속성을 UiComp::Describe 로 받아 슬롯에 채우는 데이터 구동 구역
+	static constexpr int kUiSlots = 8;
+	std::shared_ptr<M2DrawLabel>        m_lblUi;
+	std::shared_ptr<M2DrawLabel>        m_lblUiSlot[kUiSlots];
+	std::shared_ptr<M2DrawComboBox>     m_cboUiSlot[kUiSlots];
+	std::shared_ptr<M2DrawTextInput>    m_txtUiSlot[kUiSlots];
+	std::shared_ptr<M2DrawCheckBox>     m_chkUiSlot[kUiSlots];
+	std::shared_ptr<M2DrawNumericInput> m_spinUiSlot[kUiSlots];
+	std::string                         m_uiSlotKey[kUiSlots];       // 슬롯이 편집하는 속성 키 (빈 문자열 = 미사용)
+	int                                 m_uiSlotType[kUiSlots] = {}; // UiComp::PropDesc::Type
+	std::vector<std::string>            m_uiSlotChoices[kUiSlots];   // Choice 슬롯의 값 목록
+	std::string                         m_uiSlotsKind;               // 콤보 항목을 만든 컴포넌트 종류
+	ge::FrameNode* GetSelectedUiComponent() const;
+	void ApplyUiProp(const std::string& key, const std::string& value);
+	void SyncUiComponentControls();
 	std::shared_ptr<M2DrawLabel>        m_lblStrokeWidth;      // "Stroke Width"
 	std::shared_ptr<M2DrawSlider>       m_sliderStrokeWidth;   // Stroke width bar
 	std::shared_ptr<M2DrawNumericInput> m_spinStrokeWidth;     // Stroke width number input

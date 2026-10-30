@@ -478,43 +478,43 @@
 > 3. **객체별 맞춤형 전용 속성창 (`CD2DPropertyView`)**: 컴포넌트를 선택하면 해당 컴포넌트 종류에 맞는 전용 속성 섹션이 Transform 위에 표시되어, 값을 바꾸면 내부 벡터/텍스트 모양과 HTML 메타데이터가 즉시 함께 갱신된다.
 > 4. **시맨틱 HTML 출력 + SVG 왕복**: `m2:component` 및 전용 `m2:*` 속성으로 저장/복원(Undo 포함)하고, `HtmlExporter`에서 실제 표준 HTML 태그로 1:1 변환한다.
 
-- [ ] 4.5.17.1 **텍스트 박스 / 타이포그래피 컴포넌트 (`TextBox`: 일반 본문 `P`, 제목 `H1` ~ `H6`, 인용구 `Blockquote`)**
+- [x] 4.5.17.1 **텍스트 박스 / 타이포그래피 컴포넌트 (`TextBox`: 일반 본문 `P`, 제목 `H1` ~ `H6`, 인용구 `Blockquote`)** — 구현됨(2026-10-30): 종류 p/h1~h6/blockquote(프리셋 크기·굵기, 인용 막대), 내용/정렬/크기/굵기/줄 높이. 줄 높이는 HTML(CSS)에만 반영되고 캔버스 글자 간격에는 반영되지 않음(TextNode 에 줄간격 속성 없음). 높이는 글자 수 기반 추정.
   - **모델/형태**: 영역 텍스트(`TextNode`) 또는 여백/강조선을 가진 컨테이너 + 텍스트 단일 오브젝트
   - **전용 속성창**: 텍스트 역할/레벨 선택(`본문 (P)`, `H1`, `H2`, `H3`, `H4`, `H5`, `H6`, `인용구 (Blockquote)`), 레벨 변경 시 권장 폰트 크기/굵기 자동 프리셋 적용 옵션, 내용 입력, 정렬, 줄간격
   - **HTML 내보내기**: `<p>`, `<h1>`~`<h6>`, `<blockquote>` 시맨틱 태그 출력
 
-- [ ] 4.5.17.2 **텍스트 입력창 (`TextInput` / `Textarea`)**
+- [x] 4.5.17.2 **텍스트 입력창 (`TextInput` / `Textarea`)** — 구현됨: text/password/email/search/number/textarea, 안내 문구/값/비활성. 검색 돋보기, textarea 손잡이.
   - **모델/형태**: 외곽 입력 박스(`FrameNode` 또는 사각 `PathNode`) + 안내/입력 문구(`TextNode`) + 선택적 아이콘(벡터 돋보기 등)을 묶은 단일 오브젝트
   - **전용 속성창**: 입력 종류(`한 줄 텍스트(text)`, `비밀번호(password)`, `이메일(email)`, `검색(search)`, `숫자(number)`, `여러 줄(textarea)`), 안내 문구(`Placeholder`), 기본 입력값(`Value`), 비활성화(`Disabled`) 토글
   - **HTML 내보내기**: `<input type="..." placeholder="..." value="...">` 또는 `<textarea placeholder="...">...</textarea>`
 
-- [ ] 4.5.17.3 **체크박스 / 라디오 버튼 / 토글 스위치 (`Checkbox` / `Radio` / `Switch`)**
+- [x] 4.5.17.3 **체크박스 / 라디오 버튼 / 토글 스위치 (`Checkbox` / `Radio` / `Switch`)** — 구현됨: 체크박스/라디오/스위치, 선택됨, 라벨, 강조 색.
   - **모델/형태**: 벡터 도형(`PathNode`: 사각 박스 + 체크 `✓` 패스 / 원형 라디오 + 중심 점 / 캡슐 트랙 + 원형 스위치 노브) + 우측 라벨(`TextNode`)로 구성된 단일 오브젝트
   - **전용 속성창**: 종류 전환(`Checkbox` / `Radio` / `Switch`), 체크 상태(`Checked` On/Off — 변경 즉시 벡터 체크 마크/노브 위치 갱신), 라벨 문구, 강조 색(Accent Color)
   - **HTML 내보내기**: `<label><input type="checkbox|radio" checked> <span>라벨</span></label>`
 
-- [ ] 4.5.17.4 **콤보박스 / 드롭다운 (`ComboBox` / `Select`)**
+- [x] 4.5.17.4 **콤보박스 / 드롭다운 (`ComboBox` / `Select`)** — 구현됨: 옵션 목록(| 구분), 선택 번호, 안내 문구, 화살표.
   - **모델/형태**: 선택 상자 프레임 + 현재 선택 항목 텍스트(`TextNode`) + 우측 구분선 및 아래 화살표 벡터(`PathNode` `▾`)로 구성된 단일 오브젝트
   - **전용 속성창**: 항목 목록 입력(예: 줄바꿈/쉼표로 구분된 옵션 목록), 현재 표시할 기본 선택 항목(인덱스), 안내 문구
   - **HTML 내보내기**: `<select><option value="..." selected>항목1</option><option>항목2</option>...</select>`
 
-- [ ] 4.5.17.5 **리스트 (`List`: 불릿 목록 `ul` / 번호 목록 `ol` / 목록 그룹)**
+- [x] 4.5.17.5 **리스트 (`List`: 불릿 목록 `ul` / 번호 목록 `ol` / 목록 그룹)** — 구현됨: ul/ol/상자 목록, 마커(원/빈 원/사각/숫자/알파벳/로마자), 항목, 간격, 글자 크기.
   - **모델/형태**: 각 행마다 벡터 불릿(`PathNode`: 원점 `•`, 체크, 사각) 또는 번호(`TextNode`: `1.`, `2.`) + 항목 텍스트(`TextNode`)가 세로 간격에 맞춰 자동 배치되는 단일 오브젝트
   - **전용 속성창**: 리스트 종류(`순서 없는 목록(ul)`, `순서 있는 목록(ol)`, `구분선 박스 리스트`), 마커 스타일(점/숫자/체크/없음), 항목 추가·삭제·문구 편집, 행 간격(Gap)
   - **HTML 내보내기**: `<ul><li>...</li></ul>` 또는 `<ol><li>...</li></ol>`
 
-- [ ] 4.5.17.6 **바 컴포넌트 (`Bar`: 진행률 바 `Progress` / 슬라이더 `Range` / 구분선 `Divider`)**
+- [x] 4.5.17.6 **바 컴포넌트 (`Bar`: 진행률 바 `Progress` / 슬라이더 `Range` / 구분선 `Divider`)** — 구현됨: progress/range/divider, 값/최소/최대/값 표시/트랙·채움 색/두께.
   - **모델/형태**: 전체 트랙 사각형(`PathNode`) + 비율(`value / max`)만큼 채워지는 전경 바(`PathNode`) + (슬라이더일 때) 원형 손잡이 노브(`PathNode`) + 선택적 퍼센트 텍스트(`TextNode`)
   - **전용 속성창**: 바 종류(`Progress Bar` / `Range Slider`), 현재 값(`Value`), 최소/최대값(`Min`/`Max`), 퍼센트 라벨 표시 On/Off, 트랙 색 / 채움 색 / 바 두께
   - **HTML 내보내기**: `<progress value="..." max="...">` 또는 `<input type="range" min="..." max="..." value="...">`
 
-- [ ] 4.5.17.7 **추가 웹 UI 컴포넌트 후보 (필요 순으로 확장)**
+- [x] 4.5.17.7 **추가 웹 UI 컴포넌트 후보 (필요 순으로 확장)** — 구현됨: 탭, 배지(닫기 버튼 선택), 카드(이미지 영역/제목/내용/버튼), 페이지 번호/경로(breadcrumb).
   - **탭 바 (`Tabs`)**: 가로 탭 버튼 배열 + 활성 탭 강조선/배경 (속성: 탭 이름 목록, 활성 탭 번호)
   - **배지 / 태그 (`Badge` / `Chip`)**: 알약 모양 배경 + 짧은 상태 문구 + 선택적 닫기(`×`) 벡터 아이콘
   - **카드 (`Card`)**: 상단 이미지 영역 + 제목(`H3`) + 본문(`P`) + 하단 액션이 하나로 묶인 프리셋 컨테이너
   - **페이지네이션 / 빵부스러기 (`Pagination` / `Breadcrumb`)**: 페이지 번호 버튼 열 또는 경로(`홈 > 카테고리 > 상세`) 단일 오브젝트
 
-- [ ] 4.5.17.8 **공통 검증**: 각 컴포넌트 생성, 단일 오브젝트 클릭/이동/크기 조절(내부 요소 분리 방지), 전용 속성창 실시간 갱신, SVG(`m2:component`) 저장/복원 왕복, Undo/Redo, `HtmlExporter` 태그 출력(`GeModelPureCheck`) 검증
+- [x] 4.5.17.8 **공통 검증**: 각 컴포넌트 생성, 단일 오브젝트 클릭/이동/크기 조절(내부 요소 분리 방지), 전용 속성창 실시간 갱신, SVG(`m2:component`) 저장/복원 왕복, Undo/Redo, `HtmlExporter` 태그 출력(`GeModelPureCheck`) 검증 — 자체 검증 섹션 42 통과(생성 10종, 속성→재구성, 크기 변경 재구성, 복제, SVG File/Snapshot/Clean 왕복, HTML 태그 출력). 앱에서 10종 생성·클릭 선택·이동·속성창 콤보 변경(제목 2 → 크기 28/굵게)·Undo/Redo 일부 확인. **후속 수정(2026-10-30)**: ① 클릭 생성 텍스트 박스가 흐리던 원인 = 컴포넌트 채우기 알파 기본값 0.25 가 속성창 불투명도 슬라이더로 새어 프레임에 노드 불투명도 25%가 적용되던 것(속성창 동기화가 콜백을 일으키고 프레임이 그룹으로 취급됨) → 수정. ② 컴포넌트/버튼 위에 도형을 놓으면 그 안으로 흡수되던 문제(`DeepestFrameAt`) 수정. ③ 컴포넌트에 아트보드 이름표/내부 프레임 윤곽선이 붙던 것과 아트보드 목록 포함 제거. ④ 레이어 패널에서 컴포넌트 내부 도형을 펼치지 않음. **남은 한계**: Undo 후 선택이 컴포넌트 내부 자식으로 잡히는 경우가 있음(기존 Undo 선택 복원 방식), 글자 폭은 추정치라 탭/배지/경로 간격이 약간 다를 수 있음.
 
 ### Step 4.5.18 공통 외형(Appearance) & 그림자(Shadow) 통합 구조
 > **배경**: 새 컴포넌트(헤딩, 카드, 입력창 등)가 늘어날 때마다 외형 코드와 속성창 UI를 중복 작성하지 않도록, **모델 · 속성창 · HTML/SVG 내보내기** 세 곳의 외형 처리를 하나로 모은다.
@@ -545,12 +545,12 @@
 - [x] 4.5.19.4 **표 테두리 종류**: `TableNode` 테두리 `solid/dashed/dotted` — 렌더링, SVG(`m2:bstyle` + stroke-dasharray), HTML `border-style`, 자체 검증 — 완료: `TableNode::BorderStyle`, 렌더링 + `m2:bstyle` + stroke-dasharray + HTML `border-style`.
 
 ### Step 4.6 WebView2 미리보기
-- [ ] 4.6.0 **선행 점검**: `Microsoft.Web.WebView2` NuGet 패키지 추가(프로젝트 설정 변경)와 Evergreen 런타임 존재 확인/안내. 런타임이 없을 때의 대체 경로(시스템 브라우저로 열기 + 파일 변경 감시) 정의
-- [ ] 4.6.1 도킹 윈도우 또는 모달 다이얼로그에 Microsoft Edge WebView2 컨트롤 임베딩
-- [ ] 4.6.2 편집 중 실시간으로 HTML을 생성하여 WebView2 인스턴스에 스트리밍 렌더링
-- [ ] 4.6.3 뷰포트 너비 조절 슬라이더를 통한 모바일/태블릿/데스크톱 반응형 뷰 테스트
-- [ ] 4.6.4 빌드 확인 및 인앱 HTML 실시간 프리뷰 검증
-- [ ] 4.6.5 WebView2 `PrintToPdf`를 이용한 PDF 내보내기 (Step 5.5.4 를 별도 구현 없이 해결)
+- [x] 4.6.0 **선행 점검**: `Microsoft.Web.WebView2` NuGet 패키지 추가(프로젝트 설정 변경)와 Evergreen 런타임 존재 확인/안내. 런타임이 없을 때의 대체 경로(시스템 브라우저로 열기 + 파일 변경 감시) 정의 — 완료(2026-10-30): 런타임 156.0.4314.50 확인. NuGet 대신 `third_party/fetch_webview2.ps1` 로 SDK(헤더 + 정적 로더 lib)를 `third_party/WebView2/` 에 내려받고(저장소 제외) 프로젝트가 참조. 런타임이 없으면 임시 HTML 을 시스템 브라우저로 열고 2초 자동 새로고침(폴백은 코드만 작성, 런타임 없는 환경에서는 시험하지 못함).
+- [x] 4.6.1 도킹 윈도우 또는 모달 다이얼로그에 Microsoft Edge WebView2 컨트롤 임베딩 — 완료: 파일 → HTML 미리보기(`CHtmlPreviewFrame`, 별도 창).
+- [ ] 4.6.2 편집 중 실시간으로 HTML을 생성하여 WebView2 인스턴스에 스트리밍 렌더링 — 구현됨(편집이 한 틱(0.5초) 안정되면 HTML 재생성). 앱에서는 열기/새로고침 시 표시만 확인했고 **편집 중 자동 갱신은 직접 확인하지 못함**.
+- [x] 4.6.3 뷰포트 너비 조절 슬라이더를 통한 모바일/태블릿/데스크톱 반응형 뷰 테스트 — 완료: 폭 슬라이더(320~1920) + 모바일 375/태블릿 768/데스크톱 1280 프리셋. 모바일 375 로 폭이 줄어드는 것 확인. 단, 최상위(레이어 직속) 요소는 위치 지정 없이 세로로 쌓여 출력되므로 캔버스 배치와 다르게 보임(프레임 안 요소만 absolute 배치).
+- [ ] 4.6.4 빌드 확인 및 인앱 HTML 실시간 프리뷰 검증 — 빌드/자체 검증 통과, 앱에서 컴포넌트 7종이 WebView2 에 렌더되는 것 확인. 4.6.2 의 편집 중 갱신 확인 후 체크.
+- [x] 4.6.5 WebView2 `PrintToPdf`를 이용한 PDF 내보내기 (Step 5.5.4 를 별도 구현 없이 해결) — 완료: PDF 저장 버튼 → 유효한 PDF(%PDF-1.4, 2페이지, 80KB) 생성 확인. 용지 크기/여백은 WebView2 기본값.
 
 ### Step 4.7 반응형 브레이크포인트
 - [ ] 4.7.1 반응형 브레이크포인트(Desktop, Tablet, Mobile) 관리 모델 추가
@@ -596,7 +596,7 @@
 - [x] 5.5.1 해상도(DPI) 및 배율(1x, 2x, 4x) 지정이 가능한 내보내기 대화상자 구현 — 완료 (2026-10-30): 파일 → 이미지 내보내기(PNG/JPG) 대화상자: 형식, 배율(1x/2x/4x/8x), DPI, 투명 배경, 선택 영역만. 설정 기억.
 - [x] 5.5.2 WIC 기반 오프스크린 렌더 타깃(`ID2D1BitmapRenderTarget`)에 고해상도 렌더링 — 완료: WIC 비트맵 + `CreateWicBitmapRenderTarget` 오프스크린 렌더링(기존 `D2DRenderer` 재사용, 한 변 최대 16384px).
 - [x] 5.5.3 WIC 인코더를 통해 투명 배경 PNG 및 무손실 JPG 파일 저장 — 완료: WIC 인코더로 투명 PNG(32bpp BGRA) / JPG(24bpp, 품질 92, 문서 배경색 합성), DPI 메타데이터 기록.
-- [ ] 5.5.4 (선택) PDF 출력: Step 4.6.5(WebView2 `PrintToPdf`)로 해결 가능하면 별도 Direct2D Print Control 구현은 생략 — **건너뜀**: Step 4.6.5(WebView2 PrintToPdf)에 의존하며 4.6 은 이번에 진행하지 않음.
+- [x] 5.5.4 (선택) PDF 출력: Step 4.6.5(WebView2 `PrintToPdf`)로 해결 가능하면 별도 Direct2D Print Control 구현은 생략 — **건너뜀**: Step 4.6.5(WebView2 PrintToPdf)에 의존하며 4.6 은 이번에 진행하지 않음. — 4.6.5 로 해결(2026-10-30).
 - [x] 5.5.5 빌드 확인 및 출력된 고해상도 이미지 파일 품질 검증 — 완료: 자체 검증(2x 크기 200x100, 빨간 픽셀 색, PNG 투명/JPG 흰 배경, 영역 지정, 과대 출력 거부) + 앱에서 대화상자→저장 실행해 1800x1200 RGBA PNG 생성/선 색 확인.
 
 ### Step 5.6 페인트통 도구 (PaintBucketTool)
@@ -612,6 +612,18 @@
 
 > 기능 구현(Phase 1~5) 과정에서 누적된 결합도와 핫패스(Hot-path) 병목을 해소하고, 상용 벡터 일러스트 앱(Adobe Illustrator, Inkscape 등)과 비교해 구조적으로 달랐던 설계(바운딩 박스 정의, 객체 선택과 노드 편집의 분리, 라이브 도형 핸들, 복합 패스 등)를 벤치마킹하여 보완하는 단계.
 
+**진행 순서 및 의존 관계 (2026-10-30 코드 대조 검토 반영)** — 번호 순서가 아니라 아래 순서로 진행한다.
+1. **6.7.1, 6.7.2**: 앵커/핸들 좌표 버그 수정(그룹·프레임 안 패스, 코드로 확인된 실제 버그)과 죽은 코드 삭제. 작고 위험이 낮고 효과가 큼.
+2. **6.2**: 컴포넌트 판별 일원화. **4.5.17(표준 UI 컴포넌트)의 선행 조건** — 컴포넌트가 늘기 전에 먼저 한다.
+3. **6.8**: 정밀 기하 경계 / 시각적 경계. 스마트 가이드·정렬·**6.5.2 컬링의 선행 조건**(그림자·선 두께·클립을 아는 경계가 없으면 컬링이 요소를 잘못 생략할 수 있음).
+4. **6.6.1 ~ 6.6.3**(히트테스트/스냅 핫패스) → **6.5**(캐시 정리, 뷰포트 컬링)
+5. **6.3, 6.4**(Undo 메모리, 마스크 참조) → **6.1**(속성창 분리: 변경 범위가 가장 커서 회귀 검증이 중요, 새 UI 추가가 멈춘 뒤에)
+6. **6.9 ~ 6.12**(새 기능): UX 변경이 크므로 착수 전에 방향 확인. 6.11.3(화살표 키 이동·반전)은 작고 체감이 커서 앞당겨도 됨.
+7. **6.13 ~ 6.17**(Part D/E: 도형 확장, 변형 기즈모, HTML 컴포넌트 확장) — 검토 이후 추가된 단계. 의존/중복 정리:
+   - **6.15 ~ 6.17 은 4.5.17(표준 HTML UI 컴포넌트)과 내용이 겹친다** (텍스트 박스/헤딩/리스트/입력창/체크·라디오·스위치/콤보/바/탭/카드). 구현은 한 곳 기준으로 하고 다른 쪽은 참조로 바꿀 것(착수 전 4.5.17 과 6.15~6.17 중 어느 번호 체계로 통일할지 결정). 둘 다 **6.2 선행**.
+   - **6.14(변형 기즈모)는 5.2 와 일부 겹친다**: 다중 선택 결합 기즈모(스케일/회전/Ctrl+가장자리 전단)는 5.2 에서 이미 구현됨(`GroupTransform`). 6.14 는 **단일 선택 도형의 양방향 화살표 표시, 회전각에 맞춘 커서, 기준점(Pivot), HUD** 위주로 범위를 좁힐 것.
+   - **6.13(원호/도넛/화살표/말풍선 도형)** 은 `ShapeKind`/직렬화 확장이라 6.10(라이브 핸들), 6.8(정밀 경계, 호의 경계 계산)과 함께 진행하면 효율적.
+
 ---
 
 ### Part A. 코드 구조 리팩토링 및 아키텍처 정합성 개선 (기존 6.1 ~ 6.5 구체화)
@@ -626,6 +638,7 @@
 - [ ] 6.1.5 빌드 확인 및 모든 선택 대상(도형/그룹/텍스트/이미지/프레임/테이블/그리드/캔버스) 속성창 회귀 검증
 
 ### Step 6.2 노드/컴포넌트 타입 판별 일원화 (문자열/다중 `dynamic_cast` 제거)
+> **우선순위: 높음 — 4.5.17 컴포넌트 구현의 선행 조건** (컴포넌트마다 이름/태그/`dynamic_cast` 분기가 늘어나기 전에 정책 쿼리로 통일)
 > **대상 파일**: `D2DGraphicEngine.h`, `D2DGraphicEngine.cpp`, `ITool.cpp`, `D2DPropertyView.cpp`, `LayerWnd.cpp`, `SvgWriter.cpp`, `SvgReader.cpp`
 > **현황 및 문제점**: `HitTestSingleNode`(`ITool.cpp`), `HitTestTopShape`(`ITool.cpp`), `CD2DPropertyView::SyncControlsFromData`, `LayerWnd` 등에서 `GetName() == L"버튼"`, `GetHtmlTag() == "button"`, 다중 `dynamic_cast<FrameNode*/TableNode*/GroupNode*>` 조합으로 타입을 판별하고 있어 레이어 이름을 바꾸면 버튼 속성이 풀리거나 컴포넌트가 늘어날수록 조건문이 취약해짐.
 - [ ] 6.2.1 `ge::Node`(또는 `ge::GroupNode`)에 명시적 컴포넌트 식별자(`enum class ComponentKind { None, Frame, Button, Table, SymbolInstance }`) 및 선택/히트 정책 가상·헬퍼 함수(`IsAtomicComponent()`, `AllowsChildSelection()`) 도입
@@ -653,7 +666,7 @@
 > **대상 파일**: `D2DGraphicEngine.h`, `D2DGraphicEngine.cpp`, `M2DrawDoc.cpp`, `M2DrawView.cpp`
 > **현황 및 문제점**: 문서를 닫거나 도형을 대량 삭제/Undo 복원해도 `D2DRenderer`의 `m_geoCache`, `m_gradientCache`, `m_bitmapCache`, `m_textCache`(키: `NodeId`)에 삭제된 노드의 D2D 리소스가 무기한 잔류하며, 화면 밖(Off-screen) 객체도 매 프레임 D2D 드로우콜을 거침.
 - [ ] 6.5.1 `D2DRenderer::PruneCaches(const Document& doc)` 및 `ClearCaches()` 메소드 추가: 새 문서/문서 열기(`OnNewDocument`/`OnOpenDocument`) 시 전체 캐시 초기화, Undo/Redo 및 노드 삭제 시 현존하지 않는 `NodeId` 엔트리 정리
-- [ ] 6.5.2 `D2DRenderer::DrawNode`(`D2DGraphicEngine.cpp#L3045`) 진입부에서 노드의 월드 시각적 경계(그림자·선 두께 여유분 포함 `WorldBounds`)와 현재 뷰포트 월드 영역(`ViewportState` 역변환 사각형)의 AABB 교차 판정(Viewport Frustum Culling)을 수행하여 화면 밖 노드의 D2D 드로우콜 생략
+- [ ] 6.5.2 **(선행: 6.8.3 시각적 경계 — 그림자·선 두께·바깥 그림자를 포함한 경계가 없으면 컬링이 보여야 할 요소를 생략할 수 있음)** `D2DRenderer::DrawNode`(`D2DGraphicEngine.cpp#L3045`) 진입부에서 노드의 월드 시각적 경계(그림자·선 두께 여유분 포함 `WorldBounds`)와 현재 뷰포트 월드 영역(`ViewportState` 역변환 사각형)의 AABB 교차 판정(Viewport Frustum Culling)을 수행하여 화면 밖 노드의 D2D 드로우콜 생략
 - [ ] 6.5.3 빌드 확인 + 수백 개 이상의 도형/텍스트가 있는 문서에서 패닝/줌 프레임레이트 및 렌더링 정확도 검증
 
 ---
@@ -664,15 +677,16 @@
 > **대상 파일**: `D2DGraphicEngine.cpp`, `ITool.cpp`, `SnapManager.h/.cpp`, `M2DrawView.cpp`, `D2DShadowRender.cpp`
 > **현황 및 문제점 (코드 정밀 진단)**:
 > 1. **매 마우스 이동마다 임시 `D2DRenderer` 생성 및 기하 재생성**: `PathNode::HitTestScreenSpace`(`D2DGraphicEngine.cpp#L3663`), `ComputeGradientGizmo`(`ITool.cpp#L206`), `ComputePathBounds`(`ITool.cpp#L291`), `BaseShapeTool::DrawOverlay`(`ITool.cpp#L1530`), `BoxShapeTool::DrawOverlay`(`ITool.cpp#L1933`)에서 매 호출마다 스택에 지역 변수 `ge::D2DRenderer renderer; renderer.Initialize(...)`를 새로 생성함. 지역 렌더러는 `m_geoCache`가 비어 있으므로 `WM_MOUSEMOVE`마다 모든 패스의 `ID2D1PathGeometry`와 브러시를 처음부터 다시 빌드하고 즉시 파괴함. 또한 `HitTestScreenSpace`(`L3694`)는 D2D 판정 실패 시 모든 곡선 구간을 24분할 샘플링하는 `FindClosestSegment`까지 중복 수행함.
-> 2. **유휴 마우스 이동 시 전체 씬 곡선 분할 및 $O(N^2)$ 교차점 연산**: `CM2DrawView::OnMouseMove`(`M2DrawView.cpp#L724`)는 `SelectTool`이 아무것도 드래그하지 않는 유휴(`Mode::None`) 상태일 때도 매 픽셀 이동마다 `SnapManager::FindSnapPoint`(`SnapManager.cpp#L45`)를 호출함. 이 함수는 모든 `PathNode`의 곡선을 12분할 선분으로 테셀레이션하고 선분 간 $O(N^2)$ 교차 판정(`L180-L203`)을 수행하며, `excludeNode`가 전달되지 않아 도형 이동 중 자기 자신의 정점/모서리에 셀프 스냅되는 문제와 잠긴 노드(`IsEffectivelyLocked()`) 스냅 누락이 있음.
+> 2. **유휴 마우스 이동 시 전체 씬 곡선 분할(+ 자기 자신 스냅)** (2026-10-30 갱신): 오브젝트 스냅(Edge/Intersection, 5.1.0)은 마우스 근처 선분만 추려 교차 판정하므로 $O(N^2)$ 부분은 이미 완화되었다. **남은 문제**: (a) `CM2DrawView::OnMouseMove`(`M2DrawView.cpp:724`)가 드래그하지 않는 유휴 상태에서도 매 픽셀 `SnapManager::FindSnapPoint`를 호출하고, (b) 선분 수집을 위해 Edge/Intersection 이 켜져 있으면 매번 모든 `PathNode`의 곡선을 12분할로 다시 펴며, (c) `excludeNode`를 넘기지 않아 이동 중 자기 자신의 정점/선에 스냅되고 잠긴 노드(`IsEffectivelyLocked()`)가 스냅 대상에서 빠지지 않는다.
 > 3. **그림자 및 프레임 배지 매 프레임 재계산**: `D2DShadowRender.cpp`의 `BuildShadowGeometry`(`L16`)는 `D2DRenderer::GetGeometry` 캐시를 쓰지 않고 매 프레임 패스를 재빌드하며, 내부 그림자(`DrawNodeInsetShadow`, `L117`)는 매 프레임 `CombineWithGeometry(D2D1_COMBINE_MODE_EXCLUDE)`를 실행함. 또한 `D2DRenderer::DrawGroup`(`D2DGraphicEngine.cpp#L3277`)은 중첩 프레임마다 매 프레임 `CreateTextLayout`을 호출함.
 > 4. **투명 체커보드 수천 회 `FillRectangle` 루프**: `CM2DrawView::OnDraw`(`M2DrawView.cpp#L1026-L1048`)에서 8px 격자를 2중 `for`문 `FillRectangle`로 그려 고해상도/줌아웃 시 매 프레임 수천~수만 번의 D2D 드로우콜이 발생함.
 - [ ] 6.6.1 `PathNode::HitTestScreenSpace`, `ComputeGradientGizmo`, `ComputePathBounds`, `BaseShapeTool::DrawOverlay`에서 스택 지역 `D2DRenderer` 생성을 제거하고, 뷰의 공유 `D2DRenderer`(또는 `PathNode` 내부 버저닝된 공유 `ID2D1PathGeometry` 캐시)를 재사용하도록 리팩토링
 - [ ] 6.6.2 `HitTestSingleNode` / `PathNode::HitTestScreenSpace` 진입 시 월드 AABB(선 두께 절반 + 히트 공차 포함) 사전 필터링(Early-out)을 수행하고, D2D `FillContainsPoint`/`StrokeContainsPoint` 판정 후 불필요한 `FindClosestSegment` 이중 폴백 제거
-- [ ] 6.6.3 `CM2DrawView::OnMouseMove`에서 드래그/그리기 작업 중이 아닌 단순 커서 이동(`SelectTool`의 `Mode::None`, `PanTool`, `ZoomTool`) 시 `SnapManager::FindSnapPoint` 호출 생략; 드래그 중에는 선택된 노드 집합(`excludeNodes`)과 잠긴 노드(`IsEffectivelyLocked()`)를 스냅 대상에서 제외하고 노드별 월드 AABB로 곡선 테셀레이션 사전 필터링 적용
-- [ ] 6.6.4 `D2DShadowRender.cpp`에서 `renderer.GetGeometry(PathNode&)` 캐시를 공유하고, 프레임 4-코너 개별 반경(`!cr.IsUniform()`) 그림자 기하 지원 및 내부 그림자(Inset Shadow) 마스크 기하·프레임 배지 `IDWriteTextLayout`을 `(NodeId, version)` 기준으로 캐싱
-- [ ] 6.6.5 `CM2DrawView::OnDraw`(`M2DrawView.cpp#L1026-L1048`)의 투명 배경 체커보드 2중 루프를 2×2 타일 `ID2D1BitmapBrush`(`D2D1_EXTEND_MODE_WRAP`) 단 1회 `FillRectangle` 호출로 교체
+- [ ] 6.6.3 (위 문제 2 의 (a)(b)(c) 해결: 유휴 시 호출 생략, 선분 캐시를 노드 버전 기준으로 보관, `excludeNodes` 전달) `CM2DrawView::OnMouseMove`에서 드래그/그리기 작업 중이 아닌 단순 커서 이동(`SelectTool`의 `Mode::None`, `PanTool`, `ZoomTool`) 시 `SnapManager::FindSnapPoint` 호출 생략; 드래그 중에는 선택된 노드 집합(`excludeNodes`)과 잠긴 노드(`IsEffectivelyLocked()`)를 스냅 대상에서 제외하고 노드별 월드 AABB로 곡선 테셀레이션 사전 필터링 적용
+- [ ] 6.6.4 `D2DShadowRender.cpp`에서 `renderer.GetGeometry(PathNode&)` 캐시를 공유하고, 내부 그림자(Inset Shadow) 마스크 기하·프레임 배지 `IDWriteTextLayout`을 `(NodeId, version)` 기준으로 캐싱 (4-코너 반경 그림자는 기능 보강이므로 6.6.7 로 분리)
+- [ ] 6.6.5 (우선순위 낮음: 투명 배경 문서일 때만 영향) `CM2DrawView::OnDraw`(`M2DrawView.cpp#L1026-L1048`)의 투명 배경 체커보드 2중 루프를 2×2 타일 `ID2D1BitmapBrush`(`D2D1_EXTEND_MODE_WRAP`) 단 1회 `FillRectangle` 호출로 교체
 - [ ] 6.6.6 빌드 확인 + 복잡한 패스/그림자 다수 포함 문서에서 마우스 이동 CPU 점유율 및 FPS 향상 검증
+- [ ] 6.6.7 **(기능 보강)** 프레임 4-코너 개별 반경(`!cr.IsUniform()`)을 그림자 기하(`BuildShadowGeometry`)에도 반영 — 현재 바깥/안쪽 그림자가 사각형 또는 균일 둥근 사각형으로만 그려져 모서리 반경이 다르면 어긋남 (4.5.18 한계로 기록된 항목)
 
 ### Step 6.7 미사용 레거시 코드 제거 및 그룹 내 로컬/월드 좌표계 버그 수정
 > **대상 파일**: `D2DGraphicEngine.h/.cpp`, `M2DrawDoc.h`, `ITool.h/.cpp`
@@ -683,9 +697,9 @@
 >    - `ge::ICommand` 및 `ge::CommandStack`(`D2DGraphicEngine.h#L1476-L1496`, `D2DGraphicEngine.cpp#L3601-L3631`): `ge::UndoManager` 도입 이후 전혀 사용되지 않는 구형 커맨드 스택.
 >    - `CM2DrawDoc::m_currentPathNode`(`M2DrawDoc.h#L28, L32`): `m_currentPath`(`L40`)와 중복 선언된 미사용 멤버.
 >    - `BaseShapeTool::m_previewNode`(`ITool.h#L299`, `ITool.cpp#L1786-L1861, L1931-L1939`): `m_previewShape`와 중복 유지되던 사각형 전용 테스트 코드.
-- [ ] 6.7.1 `SelectTool::DrawOverlay`(`ITool.cpp#L1421-L1436`), `SelectTool::OnMouseMove`(`ITool.cpp#L688`), `BaseShapeTool::DrawCommittedShapeAnchors`(`ITool.cpp#L1627`) 등 모든 앵커/핸들 좌표 변환을 `GetWorldTransform()` 기반으로 통일하여 그룹/프레임 내부 패스 편집 정합성 수정
-- [ ] 6.7.2 `BaseShapeTool::m_previewNode` 분기 코드 제거(`m_previewShape`로 완전 일원화), `CM2DrawDoc::m_currentPathNode` 및 미사용 `ge::ICommand`/`ge::CommandStack` 제거
-- [ ] 6.7.3 `ITool.cpp`에 흩어진 히트테스트 헬퍼들을 `ge::HitTester`의 정적/멤버 인터페이스로 통합 정리
+- [ ] 6.7.1 (확인됨: `ITool.cpp:1567/1571/1580`, `1831~1844` 가 `GetTransform()` 사용, 렌더러 `D2DGraphicEngine.cpp:3643` 은 `worldXf` 사용 — 이동된 프레임/그룹 안 패스에서 앵커가 도형과 어긋남) `SelectTool::DrawOverlay`(`ITool.cpp#L1421-L1436`), `SelectTool::OnMouseMove`(`ITool.cpp#L688`), `BaseShapeTool::DrawCommittedShapeAnchors`(`ITool.cpp#L1627`) 등 모든 앵커/핸들 좌표 변환을 `GetWorldTransform()` 기반으로 통일하여 그룹/프레임 내부 패스 편집 정합성 수정
+- [ ] 6.7.2 (확인됨: `ICommand`/`CommandStack` 호출처 없음, `m_currentPathNode` 는 `reset()` 만 호출) `BaseShapeTool::m_previewNode` 분기 코드 제거(`m_previewShape`로 완전 일원화), `CM2DrawDoc::m_currentPathNode` 및 미사용 `ge::ICommand`/`ge::CommandStack` 제거
+- [ ] 6.7.3 히트테스트 이원화 정리 — **확인 결과 `ge::HitTester`(`D2DGraphicEngine.cpp:3560~`)는 정의만 있고 호출하는 곳이 없다.** 따라서 (선택지 A) `HitTester` 를 삭제하고 `ITool.cpp` 의 헬퍼(`HitTestSingleNode`/`HitTestDeepNode`/`HitTestTopShape`)를 유일한 구현으로 두거나, (선택지 B) 6.2 의 `ComponentKind` 정책 위에서 헬퍼를 `HitTester` 로 이전한다. 6.2 완료 후 결정 (기본안: A)
 - [ ] 6.7.4 빌드 확인 + 회전/이동된 그룹 및 프레임 내부 패스의 노드 편집 정확도 검증
 
 ---
@@ -710,6 +724,7 @@
 - [ ] 6.8.4 빌드 확인 + `RunPureModelVerification()`에 곡선 핸들이 돌출된 베지에 패스의 Tight Bounds 정확도 테스트 추가
 
 ### Step 6.9 직접 선택 / 노드 편집 도구(`NodeTool`, 단축키 `A`) 분리 및 다중 앵커 편집 고도화
+> **착수 전 확인 필요**: 현재 `V` 도구에서 앵커 편집이 되는 동작이 바뀌는 UX 변경이다 (기존 사용 방식 변경 여부 결정 후 진행).
 > **대상 파일**: `ITool.h`, `ITool.cpp`, `ToolManager.h`, `ToolOptionBar.h/.cpp`, `M2DrawView.cpp`, `MainFrm.cpp`
 > **현황 및 문제점**: 현재 `SelectTool`(`ITool.cpp#L1414-L1448`)은 도형 선택 시 8개 스케일 핸들과 모든 베지에 앵커/핸들을 한꺼번에 표시함. 또한 단일 앵커(`m_editSubPath`, `m_editNodeIdx`)만 드래그할 수 있어, 여러 정점을 드래그 박스로 한 번에 선택해 이동하거나 정점 타입(뾰족점 `Corner` ↔ 부드러운점 `Smooth` ↔ 대칭점 `Symmetric`)을 전환하는 Illustrator(`A`)/Inkscape(`N`) 수준의 노드 편집이 불가능함.
 - [ ] 6.9.1 **선택 도구(`SelectTool`, `V`)와 직접 선택/노드 도구(`NodeTool` 또는 `SelectTool`의 명시적 노드 편집 서브모드, 단축키 `A` / 더블클릭 진입) 역할 분리**:
@@ -725,6 +740,7 @@
 - [ ] 6.9.5 빌드 확인 + 다중 정점 선택 이동/삭제/타입 전환 및 Undo 왕복 검증
 
 ### Step 6.10 캔버스 라이브 도형 위젯(Live Shape Handles) 및 모서리 반경 보존 스케일링
+> **참고**: 6.10.1(스케일 시 모서리 반경 보존)은 작고 독립적이라 먼저 해도 된다. 라이브 핸들(6.10.2)은 6.9 의 선택/편집 분리 방향이 정해진 뒤 진행.
 > **대상 파일**: `D2DGraphicEngine.h/.cpp`, `ITool.h/.cpp`, `M2DrawView.cpp`
 > **현황 및 문제점**: Illustrator의 Live Shapes나 Inkscape의 도형 핸들처럼 캔버스 위에서 직접 마우스로 둥근 사각형의 모서리 반경(`rx`), 별의 안쪽 반경 비율(`innerRatio`), 기어의 톱니 깊이(`depthRatio`)/내경(`boreRatio`)을 조절하는 직관적 위젯이 없음. 또한 둥근 사각형을 `SelectTool`로 비균등 스케일(`ApplyScale`)하면 아핀 행렬(`m_xf`)만 늘어났다가 모서리 원호가 타원형으로 찌그러짐.
 - [ ] 6.10.1 **파라메트릭 사각형 스케일 시 모서리 반경 보존**: `SelectTool::ApplyScale`(`ITool.cpp#L106`)에서 `FrameNode::ResizeFrame`과 마찬가지로, 파라메트릭 도형(`IsParametric() == true`, 특히 `ShapeKind::Rect`)을 스케일할 때 행렬 스케일 왜곡 대신 `ShapeParams`의 폭/높이(`w`, `h`)를 갱신하고 `RebuildFromParams()`를 호출하여 모서리 반경(`rx`, `ry`)이 찌그러지지 않고 유지되도록 개선
@@ -743,7 +759,7 @@
   - 만들기: 선택된 복수의 `PathNode`들의 서브패스들을 최상위 도형의 로컬 좌표계로 변환하여 단일 `PathNode`(`FillMode::Alternate`)의 `m_paths`로 병합
   - 풀기(Break Apart): 다중 `SubPath`를 가진 `PathNode`를 각각의 독립된 단일 서브패스 `PathNode`들로 분리
 - [ ] 6.11.2 **패스 이동(`PathOp::OffsetPath`) 구현**: 선택된 패스를 지정한 거리($\pm d$ px)만큼 바깥쪽 확장 또는 안쪽 축소한 신규 `PathNode`를 생성 (D2D `Widen` + 윤곽선 추출/불리언 조합 활용)하여 스티커 외곽선·테두리 제작 지원
-- [ ] 6.11.3 **키보드 방향키 미세 이동(Nudge) 및 대칭 반전(Flip) / 90° 회전**:
+- [ ] 6.11.3 (확인됨: `M2DrawView.cpp` 에 방향키 처리가 전혀 없음, 작고 체감이 커서 앞당겨도 됨) **키보드 방향키 미세 이동(Nudge) 및 대칭 반전(Flip) / 90° 회전**:
   - `CM2DrawView::OnKeyDown`(`M2DrawView.cpp#L810`)에서 텍스트 편집 중이 아닐 때 `VK_LEFT`/`VK_RIGHT`/`VK_UP`/`VK_DOWN` 입력 시 선택 객체를 1px(`Shift` 누름 시 10px) 이동하고 연속 키 입력을 단일 Undo 스냅샷으로 병합
   - `Transformer::FlipHorizontal(Document&)`, `Transformer::FlipVertical(Document&)`, `Rotate90CW/CCW` 구현 및 상단 정렬/변형 툴바·우클릭 메뉴 연동
 - [ ] 6.11.4 빌드 확인 + 복합 패스 구멍 뚫기/분리, 오프셋 패스, 화살표 키 이동 및 반전 검증
@@ -763,6 +779,120 @@
 - [ ] 6.12.3 **문서 색상/그라디언트 스와치(Document Swatches) 및 최근 색상 팔레트**:
   - `CD2DPropertyView`의 고정 16색 팔레트 하단에 '문서 사용 색상(Document Colors) / 사용자 등록 스와치' 슬롯을 추가하고 SVG `<defs>` 스와치와 연동
 - [ ] 6.12.4 빌드 확인 + 눈금자 가이드라인 생성/스냅/저장 왕복 및 스포이드 스타일 복제 검증
+
+---
+
+### Part D. 2D 벡터 도형/제도 툴 확장 및 오브젝트 양방향 변형(Transform) 기즈모·기능 고도화
+
+### Step 6.13 원호(Arc)·부채꼴(Pie)·현(Chord)·3점 아크(3-Point Arc)·도넛·화살표·말풍선 등 2D 벡터 툴 대폭 추가
+> **대상 파일**: `D2DGraphicEngine.h/.cpp`, `ITool.h/.cpp`, `ToolManager.h/.cpp`, `ToolOptionBar.h/.cpp`, `MainFrm.cpp`, `SvgWriter.cpp`, `SvgReader.cpp`
+> **현황 및 문제점**: 현재 `ShapeKind`는 `Rect`, `Ellipse`, `Polygon`, `Star`, `Gear`, `Spiral`, `Heart` 7종뿐이며, CAD/일러스트 앱의 핵심 2D 곡선 도구인 **원호(Arc)/부채꼴(Pie)/현(Chord)/도넛호**, **3점 지정 원호 도구(3-Point Arc)**, 그리고 다이어그램·일러스트 제작에 필수적인 **도넛(Ring), 블록 화살표(Block Arrow), 말풍선(Callout), 십자(Cross), 마름모/사다리꼴/평행사변형, 모따기 사각형(Chamfer Rect), 물결/지그재그(Wave), 동심원/방사형 격자(Polar Grid)** 가 없음.
+- [ ] 6.13.1 **파라메트릭 원호 / 부채꼴 / 현 / 도넛 아크 도구 (`ShapeKind::Arc`, `ToolType::Arc`, `ArcParams`) 구현**:
+  - `ArcParams` 정의: `cx`, `cy`, `rx`, `ry`, `startAngleDeg`(시작각, 기본 `0°`), `sweepAngleDeg`(스윕각, 기본 `270°`), `innerRatio`(내경 비율 `0.0~0.95`, `0`이면 일반 원호/부채꼴, `>0`이면 도넛 아크), `enum class ArcMode { OpenArc, Pie, Chord, DonutSector }`
+  - `PathNode::RebuildFromParams()` 및 `BoxShapeTool::UpdatePreviewGeometry()`: 임의 각도 구간을 $90^\circ$ 이하 분할 3차 베지에 곡선($k = \frac{4}{3}\tan(\Delta\theta / 4)$)으로 정밀 근사하고, 모드에 따라 열린 호(`OpenArc`), 중심점 연결 부채꼴(`Pie`), 양 끝점 직선 현(`Chord`), 안·바깥 호 연결 도넛 섹터(`DonutSector`) 생성
+  - 캔버스 라이브 핸들 연동: 시작각 핸들($\circ$), 끝각 핸들($\circ$), 내경 핸들($\diamond$)을 마우스로 드래그해 호 각도 및 모드를 즉시 조절 (Inkscape/Illustrator 방식)
+- [ ] 6.13.2 **3점 원호 제도 도구 (`ThreePointArcTool`, `ToolType::Arc3Point`) 신규 구현**:
+  - ① 시작점($P_1$) 클릭 → ② 끝점($P_2$) 클릭(또는 드래그) → ③ 호가 통과하는 곡률점($P_3$, 불룩한 높이) 이동 후 클릭 시, 세 점의 외접원 방정식으로부터 중심 $(C_x, C_y)$·반지름 $R$·시작각/스윕각을 역산하여 정확한 원호 `PathNode` 생성 (세 점이 일직선이면 선분으로 폴백)
+  - 드래그 중 외접원 점선 가이드, 현(Chord) 보조선, 중심점 마커 및 반지름($R$)·중심각($\theta^\circ$) 치수 배지 실시간 표시 (`Shift` = 반원 $180^\circ$ 고정)
+- [ ] 6.13.3 **도넛/링 (`ShapeKind::Donut`), 방사형 그리드 (`ShapeKind::PolarGrid`), 직교 그리드 (`ShapeKind::RectGrid`) 도구 추가**:
+  - `ShapeKind::Donut` (`DonutParams`): 외경(`rx`, `ry`)과 내경 비율(`innerRatio`, 기본 `0.5`)을 갖는 2-서브패스(`FillMode::Alternate`) 동심원 도넛
+  - `ShapeKind::PolarGrid` (`PolarGridParams`): 동심원 분할 수(`rings`)와 방사선 분할 수(`spokes`)를 지정해 과녁/레이더 차트용 방사형 격자 생성
+  - `ShapeKind::RectGrid` (`RectGridParams`): 행(`rows`) × 열(`cols`) 벡터 격자 도형 생성
+- [ ] 6.13.4 **다이어그램·일러스트용 확장 2D 파라메트릭 도형 세트 추가**:
+  - **블록 화살표 (`ShapeKind::BlockArrow`, `ArrowParams`)**: 단방향/양방향(`doubleHeaded`), 화살촉 길이 비율(`headLengthRatio`), 몸통 두께 비율(`shaftWidthRatio`) 조절
+  - **말풍선 / 콜아웃 (`ShapeKind::Callout`, `CalloutParams`)**: 둥근 사각형/타원 본체(`rx`) + 드래그 가능한 꼬리 끝점(`tailTipX`, `tailTipY`, `tailWidth`)
+  - **십자형 (`ShapeKind::Cross`, `armRatio`)**, **마름모/사다리꼴/평행사변형 (`ShapeKind::Diamond`, `Trapezoid`, `Parallelogram`, `topRatio`/`skewRatio`)**, **모따기 사각형/캡슐 (`ShapeKind::ChamferRect`, `Capsule`)**, **물결/지그재그 선 (`ShapeKind::Wave`, 주기 `waves`·진폭 `amplitude`·사인파/지그재그 전환)**
+- [ ] 6.13.5 `SvgWriter`/`SvgReader`에 신규 `ShapeKind` 및 `ShapeParams` 직렬화(`m2:kind`, `m2:params`) 왕복 연동, `CToolOptionBar`에 원호 각도/모드·화살표·말풍선·격자 옵션 UI 추가 및 빌드/검증
+
+### Step 6.14 오브젝트 변형 표시(모서리·면 양방향 변형 화살표 기즈모) 및 변형(Skew/Shear·모서리 회전·기준점 Pivot) 기능 고도화
+> **대상 파일**: `ITool.h/.cpp` (`SelectTool`), `D2DGraphicEngine.h/.cpp` (`Transformer`), `GroupTransform.h/.cpp`, `D2DPropertyView.h/.cpp`
+> **현황 및 문제점 (코드 정밀 진단)**:
+> 1. **모서리·면 양방향 변형 화살표 시각 기즈모 부재**: `SelectTool::DrawOverlay`(`ITool.cpp#L1527-L1556`)는 8개 바운딩 박스 핸들을 단순한 작은 흰색 사각형(`3.5px`)으로만 그리며, 모서리나 면(변)에 마우스를 올렸을 때 어느 방향으로 늘어나고 회전하고 기울어지는지 보여주는 **양방향 변형 화살표(크기 조절 `↖↘`/`↗↙`/`↕`/`↔`, 전단 기울이기 `⇄`/`⇅`, 모서리 회전 `⤸`/`⤹`)** 시각적 기즈모가 전혀 없음.
+> 2. **회전된 도형에서 커서 화살표 방향 불일치**: `SelectTool::GetCursor()`(`ITool.cpp#L457-L475`)가 도형의 회전 각도를 무시하고 항상 고정된 시스템 커서(`Handle::T` → `IDC_SIZENS`)만 반환하여, $45^\circ$나 $90^\circ$ 회전된 도형의 모서리/면을 잡을 때 화살표 방향이 실제 변형 방향과 어긋남.
+> 3. **변형 기능 부족**: 단일 선택 도형에서 **면(Edge) 드래그 기울이기(Shear / Skew)**, **4개 모서리 바깥쪽 근접 회전(Corner Proximity Rotate)**, **변형 기준점(Transform Origin / Pivot Point $\oplus$) 지정**, **드래그 중 실시간 각도·배율·전단각 HUD 배지**가 없음.
+- [ ] 6.14.1 **모서리·면 양방향 변형 화살표(Bi-directional Transform Arrows) 캔버스 기즈모 렌더링**:
+  - `SelectTool::DrawOverlay`에서 선택된 오브젝트(단일/다중 공통)의 모서리(`TL`, `TR`, `BR`, `BL`) 및 면 중앙(`T`, `R`, `B`, `L`) 핸들 호버·드래그 시, 도형의 월드 회전 각도($\theta$)에 맞춰 회전된 선명한 D2D 벡터 **양방향 화살표 아이콘**을 핸들 위치에 오버레이 표시:
+    - **크기 조절(Scale) 상태**: 모서리 대각선 양방향 화살표(`↖↘`, `↗↙`) 및 상하/좌우 면 수직 양방향 화살표(`↕`, `↔`)
+    - **면 기울이기/전단(Shear / Skew) 상태** (`Ctrl` 누름 또는 도형 재클릭을 통한 회전·기울이기 변형 모드 전환 시): 상하/좌우 면 핸들에 변과 평행한 **양방향 어긋남 전단 화살표(`⇄`, `⇅`)** 표시
+    - **모서리/상단 회전(Rotate) 상태** (상단 회전 핸들 및 4개 모서리 바깥쪽 $8\sim 18\text{px}$ 구역 호버 시): 모서리를 감싸는 **양방향 곡선 회전 화살표(`⤸`/`⤹`)** 표시
+- [ ] 6.14.2 **도형 회전각 연동 동적 마우스 커서 방향 보정**:
+  - `SelectTool::GetCursor()`에서 선택 객체의 월드 행렬 회전각 $\theta = \text{atan2}(m_{12}, m_{11})$을 반영해, 각 모서리·면 핸들의 실제 화면 축 각도를 $22.5^\circ$ 단위로 계산하여 `IDC_SIZENS`(↕), `IDC_SIZEWE`(↔), `IDC_SIZENWSE`(↖↘), `IDC_SIZENESW`(↗↙) 중 실제 변형 축과 일치하는 양방향 커서 반환
+- [ ] 6.14.3 **인터랙티브 변형 모드 확장 (모서리 회전 · 면 전단 Skew · 기준점 Pivot 이동 · 2차 클릭 모드 전환)**:
+  - **4개 모서리 바깥쪽 근접 회전(Corner Proximity Rotation)**: 상단 회전 봉까지 마우스를 이동하지 않아도 4개 모서리 핸들 바깥쪽($8\sim 18\text{px}$)에서 드래그하면 즉시 회전 시작 (`Shift` = $15^\circ$ 스냅)
+  - **Inkscape/CorelDRAW식 재클릭 변형 모드 토글 & `Ctrl` 면 드래그 전단(Shear/Skew)**: 이미 선택된 도형을 한 번 더 클릭(또는 `Ctrl`+면 핸들 드래그)하면 모서리 핸들은 **양방향 회전 화살표**로, 상하/좌우 면 핸들은 **양방향 기울이기(Skew `⇄`/`⇅`) 화살표**로 전환되어 단일·다중 도형 모두 직관적인 면 기울이기(`Transformer::ComputeShearMatrix`) 지원
+  - **변형 기준점(Transform Origin / Pivot Point $\oplus$) 기즈모 및 드래그 이동**: 도형 중심에 기준점 마커($\oplus$)를 표시하고, 마우스로 기준점을 모서리·변·임의 좌표(오브젝트 스냅 연동)로 옮기면 해당 기준점을 중심으로 회전·스케일·전단·대칭 반전 수행 (더블클릭 시 중심으로 리셋)
+  - **실시간 변형 HUD 플로팅 배지 & 속성창 수치 입력**: 드래그 중 커서 옆에 크기($W \times H$, 배율 $\%$), 회전각($\theta^\circ$), 전단각($\text{Skew } X^\circ, Y^\circ$) 배지 표시; `CD2DPropertyView` Transform 섹션에 `Skew X/Y`, `비율 고정(🔒)`, `9점 기준점 선택기(9-Point Reference Grid)` 추가
+- [ ] 6.14.4 빌드 확인 + 모서리/면 양방향 화살표 기즈모, 회전 도형 커서 동기화, 면 기울이기(Skew), 모서리 회전, 기준점($\oplus$) 이동 및 Undo 검증
+
+---
+
+### Part E. HTML UI / 폼(Form) / 타이포그래피 / 시맨틱 레이아웃 컴포넌트 대폭 확장 (래스터화 없는 100% 벡터 + 시맨틱 HTML/CSS)
+
+> **핵심 설계 원칙**:
+> 1. **래스터화 절대 금지 (No Rasterization / Pure Semantic DOM)**: 일반 텍스트 박스, 입력창, 리스트박스, 콤보박스, 체크박스, 라디오, 리스트, 헤딩 등 모든 HTML 컴포넌트는 캔버스에서는 Direct2D/DirectWrite 벡터로 선명하게 렌더링하고, HTML 내보내기(`HtmlExporter`) 시 **절대로 이미지(`<img>`)나 `<svg>` 패스로 래스터화/굽지 않고** 순수 시맨틱 HTML5 태그(`<p>`, `<div>`, `<h1>~<h6>`, `<input>`, `<textarea>`, `<select>`, `<option>`, `<label>`, `<ul>`, `<ol>`, `<li>`, `<hr>` 등)와 CSS 스타일로 1:1 출력한다.
+> 2. **SVG 왕복 무손실 (`SvgWriter`/`SvgReader`)**: `m2:component`, `m2:html-tag`, `m2:ui-props`(옵션 항목 목록, 선택 인덱스, 체크 상태, 플레이스홀더, 입력 타입, 헤딩 레벨 등)를 직렬화하여 `.svg` 파일로 저장 후 다시 열어도 모든 HTML 컴포넌트 속성이 완벽히 복원된다.
+
+### Step 6.15 HTML 타이포그래피 & 일반 텍스트 박스(비래스터 본문 박스)·헤드(`H1~H6`)·리스트(`ul`/`ol` 목록) 컴포넌트
+> **대상 파일**: `D2DGraphicEngine.h/.cpp`, `ITool.h/.cpp`, `ToolManager.cpp`, `HtmlExporter.h/.cpp`, `D2DPropertyView.h/.cpp`, `SvgWriter.cpp`, `SvgReader.cpp`
+> **현황 및 문제점**:
+> 1. **일반 텍스트 박스 부재**: 제목용 단문 텍스트 외에, 박스 영역 안에 긴 일반 본문/설명글을 담고 배경·테두리·패딩·자동 줄바꿈·정렬을 가지며 **래스터화되지 않는 일반 텍스트 박스(Paragraph / Content Box)** 도구가 없음.
+> 2. **헤드(`Heading`) 태그 누락**: `ComponentKind::Heading`(`ToolManager.cpp#L593`)이 `TextNode` 생성 시 `SetHtmlTag("h1")`을 지정하지 않아 HTML 내보내기 시 일반 `<p>`로 출력되며, `H1`~`H6` 단계 전환 기능이 없음.
+> 3. **목록(`List`) 및 시맨틱 구분선(`<hr>`) 미비**: 글머리 기호(`<ul><li>`)·번호 매기기(`<ol><li>`) 리스트 컴포넌트가 없으며, `ComponentDivider`(`ToolManager.cpp#L653`)는 `PathNode`로 생성되어 `<hr>` 대신 인라인 `<svg>`로 출력됨.
+- [ ] 6.15.1 **일반 텍스트 박스 컴포넌트 (`ComponentTextBox` / `ParagraphBox`, 래스터화 안 함) 구현**:
+  - 드래그한 사각형 영역 안에 여러 줄의 일반 텍스트가 자동 줄바꿈(Word-wrap)되어 들어가는 컨테이너형 본문 텍스트 박스 (`<div>` 또는 `<p>` 선택 가능)
+  - 배경색, 테두리(전체 또는 상/우/하/좌 개별 변, `border-left` 인용 스타일 포함), 모서리 반경(`border-radius`), 내부 여백(`padding`), 가로/세로 정렬, 줄간격(`line-height`), 넘침 옵션(`overflow: visible | hidden | auto`) 지원
+  - 더블클릭 시 캔버스 인라인 텍스트 편집(`BeginTextInlineEdit`) 진입; `HtmlExporter`에서 **래스터화나 `<svg>` 변환 없이 100% 순수 HTML 텍스트 요소(`<div>`/`<p>`)와 CSS**로 출력
+- [ ] 6.15.2 **헤드 (`Heading` `<h1>`~`<h6>`) 컴포넌트 고도화**:
+  - 생성 시 기본 `m_htmlTag = "h1"`을 명시 설정하고, 속성창/상단 옵션바에 **헤딩 레벨 선택(`H1` 36px / `H2` 28px / `H3` 22px / `H4` 18px / `H5` 16px / `H6` 14px)** 드롭다운 추가 (레벨 변경 시 `m_htmlTag`와 폰트 크기·굵기 자동 연동)
+- [ ] 6.15.3 **리스트 컴포넌트 (`ComponentList`: 순서 없는 목록 `<ul>`, 순서 있는 목록 `<ol>`, 체크 리스트) 구현**:
+  - 리스트 종류 선택: 불릿 리스트(`<ul>`: `•`, `◦`, `▪`), 번호 리스트(`<ol>`: `1. 2. 3.`, `A. B. C.`, `i. ii. iii.`), 체크형 목록
+  - 줄바꿈(`\n`)으로 구분된 각 줄을 개별 항목(`<li>`)으로 인식하여 캔버스에서는 글머리 기호/번호와 들여쓰기(Hanging Indent)·항목 간격(`li gap`)을 D2D로 선명하게 렌더링하고, `HtmlExporter`에서는 시맨틱 `<ul>\n  <li>항목 1</li>...\n</ul>` 또는 `<ol>`로 출력
+- [ ] 6.15.4 **인용구(`<blockquote>`), 코드 블록(`<pre><code>`), 배지/칩(`<span>` Badge/Chip), 라벨(`<label>`) 및 시맨틱 구분선(`<hr>`) 보완**:
+  - `ComponentDivider`(구분선)에 `m_htmlTag = "hr"`을 부여하여 `HtmlExporter`가 `<svg>`가 아닌 시맨틱 `<hr class="..." />` 태그로 출력하도록 수정
+  - `<blockquote>`(좌측 강조 보더 + 배경), `<pre><code>`(고정폭 폰트 코드 박스), `<span>`(알약형 상태 배지/태그) 컴포넌트 프리셋 추가
+- [ ] 6.15.5 빌드 확인 + 일반 텍스트 박스(비래스터)·헤드(`H1~H6`)·리스트(`ul`/`ol`)·구분선(`<hr>`)의 캔버스 렌더링, 인라인 편집, SVG 왕복 및 HTML 출력 검증
+
+### Step 6.16 HTML 폼(Form) & 인터랙티브 컨트롤 컴포넌트 (Input 입력창, Textarea, ComboBox 콤보, ListBox 리스트박스, Checkbox 체크, Radio, Switch 등)
+> **대상 파일**: `D2DGraphicEngine.h/.cpp`, `HtmlComponents/FormComponents.h/.cpp`(신규 모듈), `ITool.h/.cpp`, `ToolManager.cpp`, `HtmlExporter.cpp`, `D2DPropertyView.h/.cpp`, `MainFrm.cpp`
+> **현황 및 문제점**: 웹 UI/대시보드/어드민 화면 디자인에 필수적인 입력 폼 요소(`텍스트 입력창`, `멀티라인 입력창`, `콤보박스/드롭다운`, `리스트박스`, `체크박스`, `라디오 버튼`, `토글 스위치`, `슬라이더`, `프로그레스 바`)가 전혀 없어 도형과 글자를 수동으로 조합해야 하며, 이 경우 HTML 내보내기 시 실제 동작하는 `<input>`, `<select>`, `<textarea>` 태그로 변환되지 않음.
+- [ ] 6.16.1 **폼 컨트롤 데이터 모델 (`ge::HtmlControlProps` & `HtmlControlKind`) 설계**:
+  - `enum class HtmlControlKind`: `None`, `TextInput`(`<input>`), `TextArea`(`<textarea>`), `SelectCombo`(`<select>`), `ListBox`(`<select multiple size>`), `Checkbox`(`<input type="checkbox">`), `Radio`(`<input type="radio">`), `ToggleSwitch`, `RangeSlider`(`<input type="range">`), `ProgressBar`(`<progress>`)
+  - `struct HtmlControlProps`: `inputType`(`"text"`, `"password"`, `"email"`, `"number"`, `"search"`, `"date"`, `"tel"`, `"url"`), `placeholder`(안내 문구), `value`(초기값), `name`(폼 필드명), `options`(`std::vector<std::wstring>` — 콤보/리스트박스 항목 목록), `selectedIndex`(기본 선택 항목), `visibleRows`(리스트박스/텍스트에어리어 줄 수), `checked`(체크/On 상태), `disabled`(비활성 상태), `required`(필수 여부), `minVal`, `maxVal`, `stepVal`
+  - `SvgWriter`/`SvgReader`에서 `m2:ctrl-kind`, `m2:ctrl-props` 속성으로 무손실 직렬화/역직렬화
+- [ ] 6.16.2 **한 줄 입력창 (`TextInput` `<input>`) 및 멀티라인 입력창 (`TextArea` `<textarea>`) 컴포넌트**:
+  - `TextInput` (기본 `220×38px`): 캔버스에 입력 필드 테두리·배경·플레이스홀더(회색 텍스트) 또는 입력값(`value`)·타입별 보조 아이콘(검색 돋보기, 비밀번호 점 표시, 날짜 달력 아이콘)을 D2D로 렌더링 → HTML 내보내기 시 `<input type="..." name="..." placeholder="..." value="..." />` 출력 (래스터화 없음)
+  - `TextArea` (기본 `260×100px`): 여러 줄 텍스트 영역 + 우하단 리사이즈 빗살 그립 D2D 렌더링 → HTML 내보내기 시 `<textarea rows="..." placeholder="...">...</textarea>` 출력
+- [ ] 6.16.3 **콤보박스 / 드롭다운 컴포넌트 (`SelectCombo` `<select><option>`)**:
+  - 캔버스 렌더링 (기본 `200×38px`): 테두리 박스 + 현재 선택된 옵션(`options[selectedIndex]`) 텍스트 + 우측 구분선 및 드롭다운 역삼각형 화살표(`▾`) 벡터 렌더링
+  - 속성창 편집: 옵션 항목 목록(줄 단위 입력/추가/삭제) 및 기본 선택 인덱스(`selectedIndex`) 변경 시 캔버스 표시 즉시 갱신
+  - HTML 출력: `<select name="..."><option value="item1" selected>항목 1</option><option value="item2">항목 2</option>...</select>` 시맨틱 출력
+- [ ] 6.16.4 **리스트박스 컴포넌트 (`ListBox` `<select size="N" multiple>`)**:
+  - 캔버스 렌더링 (기본 `200×140px`): 박스를 행 높이(예: `28px`)로 나누어 `options` 항목들을 나열하고, 선택된 행(`selectedIndex`)에 파란색 선택 강조 배경(`#e6f0ff`)과 우측 스크롤바 트랙/썸(Thumb)을 D2D 벡터로 렌더링
+  - 속성창 편집: 항목 목록(`options`), 표시 행 수(`size`), 다중 선택 허용(`multiple`), 선택 행 지정 지원
+  - HTML 출력: `<select size="5" multiple><option ...>항목 1</option>...</select>` 시맨틱 출력
+- [ ] 6.16.5 **체크박스 (`Checkbox`), 라디오 버튼 (`Radio`), 토글 스위치 (`ToggleSwitch`) 컴포넌트**:
+  - `Checkbox`: 좌측 `18×18px` 둥근 사각형 체크 박스(`checked == true`이면 파란 배경 + 흰색 벡터 체크 마크 `✓`, `false`이면 흰 배경 + 회색 테두리) + 우측 라벨 텍스트. 캔버스 더블클릭 또는 속성창에서 즉시 체크 토글. HTML `<label class="..."><input type="checkbox" checked /> <span>라벨</span></label>` 출력
+  - `Radio`: 좌측 `18×18px` 원형 라디오 외곽선(`checked == true`이면 내부 파란 동심원 채움) + 우측 라벨 텍스트 + 라디오 그룹명(`name`). HTML `<label class="..."><input type="radio" name="..." checked /> <span>라벨</span></label>` 출력
+  - `ToggleSwitch`: `44×24px` 캡슐형 트랙(On=파란색/초록색, Off=회색) + 좌우로 이동하는 흰색 원형 노브 + 라벨 텍스트. 순수 CSS 토글 스위치 마크업으로 HTML 출력
+- [ ] 6.16.6 **슬라이더 (`RangeSlider` `<input type="range">`) & 프로그레스 바 (`ProgressBar` `<progress>`) 컴포넌트**:
+  - `minVal`(기본 0), `maxVal`(기본 100), `value`(기본 60) 비율에 따라 채워진 트랙 막대 폭과 원형 슬라이더 손잡이/퍼센트 텍스트(`60%`)를 D2D로 실시간 렌더링하고 시맨틱 `<input type="range">` 및 `<progress value="60" max="100">`로 출력
+- [ ] 6.16.7 빌드 확인 + 모든 폼 컨트롤(입력창, 텍스트에어리어, 콤보, 리스트박스, 체크, 라디오, 스위치, 슬라이더, 프로그레스) 생성·속성창 편집·SVG 왕복·HTML 출력 검증
+
+### Step 6.17 시맨틱 웹 레이아웃 랜드마크 및 복합 UI 컴포넌트 (Card, NavBar, Tabs, Accordion, Alert, Modal, Image Placeholder)
+> **대상 파일**: `HtmlComponents/FormComponents.h/.cpp`, `ToolManager.cpp`, `HtmlExporter.cpp`, `D2DPropertyView.cpp`, `MainFrm.cpp`
+> **현황 및 문제점**: 개별 버튼/프레임 외에 실제 웹 페이지의 골격을 이루는 시맨틱 영역(`<header>`, `<nav>`, `<main>`, `<section>`, `<article>`, `<aside>`, `<footer>`, `<form>`) 지정과 자주 쓰이는 복합 패턴(카드, 네비게이션 바, 탭, 아코디언, 알림 배너 등)을 빠르게 삽입하는 기능이 부족함.
+- [ ] 6.17.1 **시맨틱 HTML5 랜드마크 태그 선택기**: `FrameNode` 선택 시 속성창에서 HTML 태그를 `div`, `header`, `nav`, `main`, `section`, `article`, `aside`, `footer`, `form`, `fieldset`, `dialog` 중 하나로 지정할 수 있는 드롭다운 추가 (프레임 상단 배지에 `Frame 1 <header>`와 같이 태그명 함께 표시)
+- [ ] 6.17.2 **복합 UI 패턴 컴포넌트 프리셋 (Auto-Layout 기반 조합 생성)**:
+  - **카드 (`Card`)**: `FrameLayoutMode::Column` 프레임 안에 상단 이미지 플레이스홀더 + 헤딩(`<h3>`) + 일반 텍스트 박스(`<p>`) + 하단 버튼(`<button>`)이 자동 배치된 카드 생성
+  - **네비게이션 바 (`NavBar` `<nav>`) & 탭 바 (`Tabs`)**: `FrameLayoutMode::Row` 프레임 안에 브랜드 로고 텍스트 + 메뉴 링크 항목들 + 우측 액션 버튼이 정렬된 헤더/탭 생성
+  - **아코디언 / 접기-펼치기 (`Accordion` `<details><summary>`)**: 제목 표시줄(`▸` / `▾` 아이콘 + `<summary>`)과 본문 컨테이너로 구성되어 HTML 내보내기 시 별도 JS 없이도 브라우저에서 클릭으로 접고 펼쳐지는 `<details open><summary>...</summary>...</details>` 출력
+  - **알림 박스 (`Alert` Info / Success / Warning / Danger)**: 상태 색상 테두리/배경 + 아이콘 + 메시지 텍스트 박스 생성
+- [ ] 6.17.3 **HTML 컴포넌트 툴바·서브툴바·삽입 메뉴 UI 확장**:
+  - `MainFrm.cpp`(`UpdateSubToolBar`) 및 좌측 툴박스/상단 메뉴에서 HTML 컴포넌트들을 직관적인 아이콘과 툴팁으로 배치:
+    - **레이아웃/기본**: `프레임(div/section)`, `테이블(table)`, `구분선(hr)`, `간격(spacer)`, `카드(card)`, `아코디언(details)`
+    - **타이포그래피**: `헤딩(h1~h6)`, `일반 텍스트 박스(p/div, 비래스터)`, `리스트(ul/ol)`, `인용/코드(blockquote/code)`, `배지(span)`
+    - **폼 컨트롤**: `버튼(button)`, `텍스트 입력(input)`, `멀티라인 입력(textarea)`, `콤보박스(select)`, `리스트박스(select multiple)`, `체크박스(checkbox)`, `라디오(radio)`, `스위치(switch)`, `슬라이더(range)`, `프로그레스(progress)`
+- [ ] 6.17.4 빌드 확인 + 모든 추가 HTML 컴포넌트의 생성·리사이즈·속성 변경·SVG 저장/열기·HTML 내보내기 종합 검증
 
 ---
 

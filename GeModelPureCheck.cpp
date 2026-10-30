@@ -15,6 +15,7 @@
 #include "SmartGuides.h"
 #include "GroupTransform.h"
 #include "HtmlComponents/TableComponent.h"
+#include "HtmlComponents/UiComponents.h"
 #include "UndoManager.h"
 #include "GeModelPureCheck.h"
 
@@ -2366,6 +2367,143 @@ bool RunPureModelVerification(std::wstring* failure)
 		Rect2 u3;
 		GE_CHECK(UnionWorldBounds(s2, u3) && std::fabs(u3.right - 120.0f) < 0.05f && std::fabs(u3.bottom - 10.0f) < 0.05f, L"레이어 직속 노드의 다중 스케일이 틀림");
 		GE_CHECK(!UnionWorldBounds({}, u3), L"빈 목록의 경계 상자가 있다고 판정됨");
+	}
+
+	// ---- 42. 표준 HTML UI 컴포넌트 (4.5.17) ------------------------------------------------------
+	{
+		using namespace UiComp;
+		// (a) 10종 모두 생성: 자식 도형이 있고, 기본 크기/종류/속성이 채워짐
+		Document d;
+		FrameNode* made[kKindCount] = {};
+		for (int k = 0; k < kKindCount; ++k) {
+			auto c = Create(static_cast<Kind>(k), 10.0f + k * 5.0f, 20.0f);
+			GE_CHECK(c && c->IsUiComponent() && c->GetUiKind() == KindId(static_cast<Kind>(k)), L"UI 컴포넌트 생성 실패");
+			GE_CHECK(!c->GetChildren().empty() && !c->GetUiProps().empty(), L"UI 컴포넌트에 자식 도형/속성이 없음");
+			GE_CHECK(c->GetWidth() > 5.0f && c->GetHeight() > 5.0f, L"UI 컴포넌트 기본 크기가 비정상");
+			made[k] = static_cast<FrameNode*>(d.AddShape(std::move(c)));
+			d.AssignIds(*made[k]);
+			GE_CHECK(IsAtomicComponent(made[k]), L"UI 컴포넌트가 하나의 오브젝트로 판정되지 않음");
+			GE_CHECK(!Describe(*made[k]).empty() && Describe(*made[k]).size() <= 8, L"속성 기술자 개수가 비정상");
+		}
+
+		// 불투명도/글자 색 알파가 1 인지 (클릭 생성/드래그 생성 모두)
+		for (float cw : { 0.0f, 400.0f }) for (float ch : { 0.0f, 31.0f }) {
+			auto tbx = Create(Kind::TextBox, 0.0f, 0.0f, cw, ch);
+			GE_CHECK(tbx->GetOpacity() == 1.0f, L"텍스트 박스 프레임 불투명도가 1 이 아님");
+			for (const auto& kid : tbx->GetChildren()) GE_CHECK(kid->GetOpacity() == 1.0f && kid->GetStyle().fill.color.a == 1.0f && kid->GetStyle().fill.color.r < 0.3f, L"텍스트 박스 글자가 연하게 만들어짐");
+		}
+		// (b) 속성 변경 -> 자식 재구성 (텍스트 박스: 태그 프리셋 / 콤보: 선택 / 체크: 종류)
+		FrameNode* tb = made[static_cast<int>(Kind::TextBox)];
+		const size_t beforeKids = tb->GetChildren().size();
+		GE_CHECK(SetProperty(*tb, "tag", "h1") && tb->GetUiProp("size") == "32" && tb->GetUiProp("bold") == "1", L"제목 프리셋 크기/굵기가 적용되지 않음");
+		GE_CHECK(SetProperty(*tb, "tag", "blockquote") && tb->GetChildren().size() == beforeKids + 1, L"인용구 막대가 추가되지 않음");
+		GE_CHECK(!SetProperty(*tb, "tag", "blockquote"), L"같은 값 설정이 변경으로 처리됨");
+		auto* text0 = dynamic_cast<TextNode*>(tb->GetChildren().back().get());
+		GE_CHECK(text0 && text0->GetFontSize() == 18.0f, L"인용구 글자 크기 프리셋이 틀림");
+
+		FrameNode* combo = made[static_cast<int>(Kind::Combo)];
+		GE_CHECK(SetProperty(*combo, "selected", "1"), L"콤보 선택 변경 실패");
+		bool foundOpt2 = false;
+		for (const auto& ch : combo->GetChildren())
+			if (auto* tn = dynamic_cast<TextNode*>(ch.get())) if (WideToUtf8(tn->GetText()) == "옵션 2") foundOpt2 = true;
+		GE_CHECK(foundOpt2, L"콤보 선택값 글자가 표시되지 않음");
+
+		FrameNode* chk = made[static_cast<int>(Kind::Check)];
+		const size_t checkedKids = chk->GetChildren().size();
+		GE_CHECK(SetProperty(*chk, "checked", "0") && chk->GetChildren().size() < checkedKids, L"체크 해제 시 표시(체크 모양)가 사라지지 않음");
+		GE_CHECK(SetProperty(*chk, "kind", "switch") && chk->GetUiProp("kind") == "switch", L"스위치 종류 변경 실패");
+
+		// (c) 크기 변경 -> 자식 재구성 (ResizeFrame 후크). 진행 막대는 폭에 비례해 채움 길이가 바뀜
+		FrameNode* bar = made[static_cast<int>(Kind::Bar)];
+		auto fillW = [&](FrameNode* b) {
+			for (const auto& ch : b->GetChildren()) if (ch->GetName() == L"채움") { Rect2 lb; ch->GetLocalBounds(lb); return lb.Width(); }
+			return -1.0f;
+		};
+		const float fw0 = fillW(bar);
+		bar->ResizeFrame(bar->GetWidth() * 2.0f, bar->GetHeight());
+		GE_CHECK(fw0 > 0.0f && fillW(bar) > fw0 * 1.5f, L"컴포넌트 크기 변경 시 자식이 다시 만들어지지 않음");
+		GE_CHECK(SetProperty(*bar, "value", "100") && fillW(bar) > 0.0f, L"진행 값 변경 실패");
+
+		// (d) Clone 이 종류/속성/자식을 모두 복제
+		auto cl = made[static_cast<int>(Kind::List)]->Clone();
+		auto* clf = dynamic_cast<FrameNode*>(cl.get());
+		GE_CHECK(clf && clf->GetUiKind() == "list" && clf->GetUiProps() == made[static_cast<int>(Kind::List)]->GetUiProps() &&
+			clf->GetChildren().size() == made[static_cast<int>(Kind::List)]->GetChildren().size(), L"UI 컴포넌트 복제가 불완전");
+
+		// (e) SVG 왕복 (File): 종류/속성(한글, 특수문자 포함)/자식 수가 보존되고 읽을 때 자식이 중복 생성되지 않음
+		SetProperty(*made[static_cast<int>(Kind::Card)], "title", "제목; a=b \"따옴표\" <태그> & 100%");
+		SvgWriter w;
+		const std::string svg = w.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(svg.find("m2:ui=\"card\"") != std::string::npos, L"SVG 에 m2:ui 가 없음");
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"UI 컴포넌트 SVG 읽기 실패");
+		int matched = 0;
+		for (const auto& ch : back.GetLayers()[0]->GetChildren()) {
+			auto* f = dynamic_cast<FrameNode*>(ch.get());
+			if (!f || !f->IsUiComponent()) continue;
+			Kind k; GE_CHECK(KindFromId(f->GetUiKind(), k), L"읽은 컴포넌트 종류가 알 수 없음");
+			FrameNode* orig = made[static_cast<int>(k)];
+			GE_CHECK(f->GetUiProps() == orig->GetUiProps(), L"UI 컴포넌트 속성 왕복 실패");
+			GE_CHECK(f->GetChildren().size() == orig->GetChildren().size(), L"UI 컴포넌트 자식 수 왕복 실패");
+			++matched;
+		}
+		GE_CHECK(matched == kKindCount, L"일부 UI 컴포넌트가 SVG 왕복에서 사라짐");
+		// Snapshot(Undo)도 같은 결과
+		GE_CHECK(w.WriteString(d, SvgWriteOptions(SvgWriteMode::Snapshot)) == svg, L"UI 컴포넌트 Snapshot 이 File 과 다름");
+		// Clean 은 m2:ui 없이 일반 도형으로 보임
+		const std::string clean = w.WriteString(d, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(clean.find("m2:ui") == std::string::npos, L"Clean SVG 에 m2:ui 가 남음");
+
+		// (f) 다시 읽은 컴포넌트도 편집 가능 (속성 -> 재구성)
+		FrameNode* backTabs = nullptr;
+		for (const auto& ch : back.GetLayers()[0]->GetChildren())
+			if (auto* f = dynamic_cast<FrameNode*>(ch.get())) if (f->GetUiKind() == "tabs") backTabs = f;
+		GE_CHECK(backTabs && SetProperty(*backTabs, "active", "2"), L"읽은 컴포넌트 속성 편집 실패");
+
+		// (g) HTML 내보내기: 종류별 시맨틱 태그
+		HtmlExporter ex;
+		HtmlExportOptions opt;
+		opt.singleFile = true;
+		SetProperty(*made[static_cast<int>(Kind::Input)], "type", "password");
+		d.AssignIds(*d.GetLayers()[0]);
+		std::string html = ex.Export(d, opt).html;
+		GE_CHECK(html.find("<blockquote") != std::string::npos && html.find("</blockquote>") != std::string::npos, L"<blockquote> 출력 누락");
+		GE_CHECK(html.find("<input type=\"password\"") != std::string::npos, L"<input type=password> 출력 누락");
+		GE_CHECK(html.find("role=\"switch\"") != std::string::npos && html.find("type=\"checkbox\"") != std::string::npos, L"스위치 <input> 출력 누락");
+		GE_CHECK(html.find("<select") != std::string::npos && html.find("<option value=\"옵션 2\" selected>") != std::string::npos, L"<select>/<option selected> 출력 누락");
+		GE_CHECK(html.find("<ul") != std::string::npos && html.find("<li") != std::string::npos, L"<ul>/<li> 출력 누락");
+		GE_CHECK(html.find("<progress") != std::string::npos, L"<progress> 출력 누락");
+		GE_CHECK(html.find("role=\"tablist\"") != std::string::npos && html.find("role=\"tab\"") != std::string::npos, L"탭 role 출력 누락");
+		GE_CHECK(html.find("<article") != std::string::npos && html.find("<h3") != std::string::npos, L"<article>/<h3> 출력 누락");
+		GE_CHECK(html.find("aria-label=\"pagination\"") != std::string::npos, L"<nav aria-label=pagination> 출력 누락");
+		GE_CHECK(html.find("&lt;태그&gt;") != std::string::npos && html.find("<태그>") == std::string::npos, L"카드 제목의 HTML 이스케이프가 안 됨");
+		// 종류별 변형: textarea / range / divider / ol / breadcrumb
+		SetProperty(*made[static_cast<int>(Kind::Input)], "type", "textarea");
+		SetProperty(*made[static_cast<int>(Kind::Bar)], "kind", "range");
+		SetProperty(*made[static_cast<int>(Kind::List)], "kind", "ol");
+		SetProperty(*made[static_cast<int>(Kind::Pager)], "kind", "breadcrumb");
+		html = ex.Export(d, opt).html;
+		GE_CHECK(html.find("<textarea") != std::string::npos && html.find("type=\"range\"") != std::string::npos &&
+			html.find("<ol") != std::string::npos && html.find("aria-label=\"breadcrumb\"") != std::string::npos, L"종류 변형(textarea/range/ol/breadcrumb) 출력 누락");
+		SetProperty(*made[static_cast<int>(Kind::Bar)], "kind", "divider");
+		html = ex.Export(d, opt).html;
+		GE_CHECK(html.find("<hr") != std::string::npos, L"<hr> 출력 누락");
+
+		// (h) 프레임 안에 넣은 컴포넌트: 스마트 가이드 후보에 컴포넌트 자신만 들어가고 내부 도형은 안 들어감
+		Document d2;
+		auto outer = std::make_unique<FrameNode>();
+		outer->SetFrameSize(400.0f, 300.0f);
+		FrameNode* of = static_cast<FrameNode*>(d2.AddShape(std::move(outer)));
+		FrameNode* inner = static_cast<FrameNode*>(of->AddChild(Create(Kind::Card, 20.0f, 20.0f)));
+		d2.AssignIds(*of);
+		Node* other = d2.AddShape(MakePath(L"x", 500.0f, 0.0f));
+		GuideTargets gt = CollectGuideTargets({ other });
+		GE_CHECK(gt.rects.size() < 8, L"컴포넌트 내부 도형이 스마트 가이드 후보에 들어감");
+		// 컴포넌트 위 좌표의 컨테이너는 바깥 프레임 (컴포넌트로 흡수되지 않음), 아트보드 목록에도 없음
+		GE_CHECK(d2.FindFrameAt(Vec2{ 50.0f, 50.0f }) == of, L"UI 컴포넌트가 프레임 컨테이너로 잡힘");
+		GE_CHECK(d.GetArtboards().empty(), L"UI 컴포넌트가 아트보드 목록에 들어감");
+		GE_CHECK(Create(Kind::TextBox, 0.0f, 0.0f)->GetStyle().fill.color.a == 1.0f, L"컴포넌트 채우기 알파가 1 이 아님");
+		(void)inner;
 	}
 
 #undef GE_CHECK

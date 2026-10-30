@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "SvgReader.h"
+#include "HtmlComponents/UiComponents.h"
 #include "D2DGraphicEngine.h"
 #include "D2DLayer.h"
 
@@ -1077,6 +1078,10 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 						auto fn = std::make_unique<FrameNode>();
 						fn->SetFrameSize(attrs.count(L"m2:w") ? ParseLength(attrs[L"m2:w"], 100.0f) : 100.0f, attrs.count(L"m2:h") ? ParseLength(attrs[L"m2:h"], 100.0f) : 100.0f);
 						fn->SetClip(!(attrs.count(L"m2:clip") && attrs[L"m2:clip"] == L"false"));
+							if (attrs.count(L"m2:ui")) {
+								fn->SetUiKind(UiComp::WideToUtf8(attrs[L"m2:ui"]));
+								if (attrs.count(L"m2:uiProps")) fn->SetUiProps(UiComp::DecodeProps(UiComp::WideToUtf8(attrs[L"m2:uiProps"])));
+							}
 						if (attrs.count(L"m2:radius")) fn->SetCornerRadius(ParseLength(attrs[L"m2:radius"], 0.0f));
 							if (attrs.count(L"m2:radius4")) {
 								const std::vector<float> v = ParseFloatList(attrs[L"m2:radius4"]);

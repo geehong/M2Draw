@@ -140,7 +140,7 @@ static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const
 		ge::Node* checkBtn = deep;
 		while (checkBtn)
 		{
-			if (checkBtn->GetName() == L"버튼" || checkBtn->GetHtmlTag() == "button")
+			if (ge::IsAtomicComponent(checkBtn))
 			{
 				hitTarget = checkBtn;
 				return true;

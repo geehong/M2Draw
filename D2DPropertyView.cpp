@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "D2DPropertyView.h"
+#include "HtmlComponents/UiComponents.h"
 #include "M2DrawDoc.h"
 #include "M2Draw.h"
 #include "MainFrm.h"
@@ -499,6 +500,79 @@ void CD2DPropertyView::ApplyTableProps(const std::function<void(ge::TableNode&)>
 	SyncTableControls();
 	m_pActiveDoc->UpdateAllViews(nullptr);
 	SafeInvalidate(FALSE);
+}
+
+ge::FrameNode* CD2DPropertyView::GetSelectedUiComponent() const
+{
+	auto* fr = dynamic_cast<ge::FrameNode*>(GetSelectedShape());
+	return (fr && fr->IsUiComponent()) ? fr : nullptr;
+}
+
+void CD2DPropertyView::ApplyUiProp(const std::string& key, const std::string& value)
+{
+	if (m_bUpdating || !m_pActiveDoc || key.empty()) return;
+	ge::FrameNode* ui = GetSelectedUiComponent();
+	if (!ui) return;
+	if (!ge::UiComp::SetProperty(*ui, key, value)) return;
+	m_pActiveDoc->SetModifiedFlag(TRUE);
+	m_pActiveDoc->CommitUndoPoint(L"컴포넌트 속성 변경");
+	SyncUiComponentControls();   // 종류 변경 등이 다른 속성(크기/굵기)을 바꿀 수 있음
+	m_pActiveDoc->UpdateAllViews(nullptr);
+	if (GetSafeHwnd()) { CRect rc; GetClientRect(&rc); UpdateLayout(static_cast<float>(rc.Width()), static_cast<float>(rc.Height())); }
+	SafeInvalidate(FALSE);
+}
+
+void CD2DPropertyView::SyncUiComponentControls()
+{
+	ge::FrameNode* ui = GetSelectedUiComponent();
+	if (!ui) return;
+	const bool prev = m_bUpdating;
+	m_bUpdating = true;
+	const auto descs = ge::UiComp::Describe(*ui);
+	const bool kindChanged = (m_uiSlotsKind != ui->GetUiKind());
+	for (int i = 0; i < kUiSlots; ++i)
+	{
+		if (i >= static_cast<int>(descs.size())) { m_uiSlotKey[i].clear(); continue; }
+		const auto& d = descs[i];
+		m_uiSlotKey[i] = d.key;
+		m_uiSlotType[i] = static_cast<int>(d.type);
+		if (m_lblUiSlot[i]) m_lblUiSlot[i]->SetText(d.label);
+		const std::string val = ui->GetUiProp(d.key);
+		switch (d.type)
+		{
+		case ge::UiComp::PropDesc::Choice:
+			if (m_cboUiSlot[i])
+			{
+				if (kindChanged || m_cboUiSlot[i]->GetItemCount() != static_cast<int>(d.choices.size()))
+				{
+					m_cboUiSlot[i]->ClearItems();
+					m_uiSlotChoices[i].clear();
+					for (const auto& c : d.choices) { m_cboUiSlot[i]->AddItem(c.second); m_uiSlotChoices[i].push_back(c.first); }
+				}
+				int sel = 0;
+				for (size_t k = 0; k < m_uiSlotChoices[i].size(); ++k) if (m_uiSlotChoices[i][k] == val) sel = static_cast<int>(k);
+				m_cboUiSlot[i]->SetCurSel(sel, false);
+			}
+			break;
+		case ge::UiComp::PropDesc::Bool:
+			if (m_chkUiSlot[i]) { m_chkUiSlot[i]->SetText(d.label); m_chkUiSlot[i]->SetChecked(ge::UiComp::PropBool(*ui, d.key)); }
+			break;
+		case ge::UiComp::PropDesc::Number:
+			if (m_spinUiSlot[i])
+			{
+				m_spinUiSlot[i]->SetRange(d.minV, d.maxV);
+				m_spinUiSlot[i]->SetStep(d.step);
+				m_spinUiSlot[i]->SetDecimals(d.step < 1.0f ? 1 : 0);
+				m_spinUiSlot[i]->SetValue(ge::UiComp::PropNum(*ui, d.key), false);
+			}
+			break;
+		default:   // Text / Multi / ColorHex
+			if (m_txtUiSlot[i]) m_txtUiSlot[i]->SetText(ge::UiComp::Utf8ToWide(val));
+			break;
+		}
+	}
+	m_uiSlotsKind = ui->GetUiKind();
+	m_bUpdating = prev;
 }
 
 void CD2DPropertyView::SyncTableControls()
@@ -1221,7 +1295,7 @@ void CD2DPropertyView::InitControls()
 		m_sliderOpacity->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
 			m_fOpacity = val;
 			if (m_spinOpacity) m_spinOpacity->SetValue(val);
-			if (IsGroupSelected())
+			if (IsGroupSelected() && !IsFrameSelected())   // 프레임의 불투명도는 노드가 아니라 배경/테두리 알파
 			{
 				ApplyGroupAppearance();
 				SafeInvalidate(FALSE);
@@ -1241,7 +1315,7 @@ void CD2DPropertyView::InitControls()
 		m_spinOpacity->SetOnChanged([this](M2DrawNumericInput* /*pNum*/, double val) {
 			m_fOpacity = static_cast<float>(val);
 			if (m_sliderOpacity) m_sliderOpacity->SetValue(m_fOpacity);
-			if (IsGroupSelected())
+			if (IsGroupSelected() && !IsFrameSelected())   // 프레임의 불투명도는 노드가 아니라 배경/테두리 알파
 			{
 				ApplyGroupAppearance();
 				SafeInvalidate(FALSE);
@@ -1754,6 +1828,46 @@ void CD2DPropertyView::InitControls()
 		});
 		m_pCurrentPanel->AddChild(m_btnTblSplit);
 
+		// 표준 UI 컴포넌트 속성 슬롯 (4.5.17): 값이 바뀌면 UiComp::SetProp 이 속성 변경 + 자식 재구성을 한다
+		m_lblUi = std::make_shared<M2DrawLabel>(L"● UI Component");
+		m_pCurrentPanel->AddChild(m_lblUi);
+		for (int i = 0; i < kUiSlots; ++i)
+		{
+			m_lblUiSlot[i] = std::make_shared<M2DrawLabel>(L"");
+			m_pCurrentPanel->AddChild(m_lblUiSlot[i]);
+
+			m_cboUiSlot[i] = std::make_shared<M2DrawComboBox>();
+			m_cboUiSlot[i]->SetItemHeight(20.0f);
+			m_cboUiSlot[i]->SetOnSelectionChanged([this, i](M2DrawComboBox*, int sel) {
+				if (sel < 0 || sel >= static_cast<int>(m_uiSlotChoices[i].size())) return;
+				ApplyUiProp(m_uiSlotKey[i], m_uiSlotChoices[i][sel]);
+			});
+			m_pCurrentPanel->AddChild(m_cboUiSlot[i]);
+
+			m_txtUiSlot[i] = std::make_shared<M2DrawTextInput>();
+			m_txtUiSlot[i]->SetOnCommit([this, i](M2DrawTextInput*, const std::wstring& text) {
+				if (m_uiSlotType[i] == static_cast<int>(ge::UiComp::PropDesc::ColorHex)) {
+					const std::string hex = ge::UiComp::WideToUtf8(text);
+					if (hex.size() != 7 || hex[0] != '#') { SyncUiComponentControls(); return; }   // "#rrggbb" 형식만 허용
+					ApplyUiProp(m_uiSlotKey[i], hex);
+					return;
+				}
+				ApplyUiProp(m_uiSlotKey[i], ge::UiComp::WideToUtf8(text));
+			});
+			m_pCurrentPanel->AddChild(m_txtUiSlot[i]);
+
+			m_chkUiSlot[i] = std::make_shared<M2DrawCheckBox>(L"", false);
+			m_chkUiSlot[i]->SetOnChanged([this, i](M2DrawCheckBox*, bool b) { ApplyUiProp(m_uiSlotKey[i], b ? "1" : "0"); });
+			m_pCurrentPanel->AddChild(m_chkUiSlot[i]);
+
+			m_spinUiSlot[i] = std::make_shared<M2DrawNumericInput>(0.0, 100.0, 0.0, 1.0);
+			m_spinUiSlot[i]->SetOnChanged([this, i](M2DrawNumericInput*, double v) {
+				char buf[32]; sprintf_s(buf, "%g", v);
+				ApplyUiProp(m_uiSlotKey[i], buf);
+			});
+			m_pCurrentPanel->AddChild(m_spinUiSlot[i]);
+		}
+
 		// 7. Stroke Width Label & Slider Bar & Number Input
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
@@ -2241,7 +2355,7 @@ void CD2DPropertyView::SyncControlsFromData()
 
 		// 그룹이면 "Opacity" 가 노드 불투명도임을 라벨로 구분하고 혼합 모드 콤보를 현재 값으로 맞춤
 		if (m_lblOpacity)
-			m_lblOpacity->SetText(IsGroupSelected() ? L"Group Opacity (%)" : L"Opacity (%)");
+			m_lblOpacity->SetText(IsGroupSelected() && !IsFrameSelected() ? L"Group Opacity (%)" : L"Opacity (%)");
 		if (m_cboBlend && IsGroupSelected())
 			m_cboBlend->SetCurSel(static_cast<int>(GetSelectedShape()->GetBlendMode()), false);
 
@@ -2317,6 +2431,7 @@ void CD2DPropertyView::SyncControlsFromData()
 		// 테이블: 컨트롤 값을 노드 현재 값으로 맞춤
 		if (dynamic_cast<ge::TableNode*>(GetSelectedShape())) SyncTableControls();
 		SyncFrameExtraControls();
+		SyncUiComponentControls();
 
 		CanvasUnit curUnit = GetApp()->GetGrid().unit;
 		const wchar_t* unitSuffix = GetCanvasUnitSuffix(curUnit);
@@ -2403,8 +2518,8 @@ void CD2DPropertyView::SyncControlsFromData()
 				m_shapeWheel->SetColorHSL(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
 		}
 
-		if (m_sliderOpacity) m_sliderOpacity->SetValue(m_fOpacity);
-		if (m_spinOpacity)   m_spinOpacity->SetValue(m_fOpacity);
+		if (m_sliderOpacity) m_sliderOpacity->SetValue(m_fOpacity, false);   // 동기화가 콜백(노드 수정)을 일으키지 않게
+		if (m_spinOpacity)   m_spinOpacity->SetValue(m_fOpacity, false);
 
 		// 만약 선택된 도형이 있다면 도형의 픽셀 단위 선 굵기로부터 현재 단위값 갱신
 		if (GetSelectedShape())
@@ -2757,7 +2872,7 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 
 		// 프레임 속성: Transform 바로 위 (프레임이 선택된 경우만)
 		{
-			const bool isFrame = IsFrameSelected();
+			const bool isFrame = IsFrameSelected() && !GetSelectedUiComponent();   // UI 컴포넌트는 프레임 속성 대신 전용 구역
 			auto* frNode = isFrame ? dynamic_cast<ge::FrameNode*>(GetSelectedShape()) : nullptr;
 			const bool hasAutoLayout = isFrame && frNode && (frNode->GetLayoutMode() != ge::FrameLayoutMode::None);
 			auto* parentFr = frNode ? dynamic_cast<ge::FrameNode*>(frNode->GetParent()) : nullptr;
@@ -2856,6 +2971,36 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			}
 		}
 
+
+		// 표준 UI 컴포넌트 속성 (4.5.17): 종류별 슬롯을 Transform 바로 위에 배치
+		{
+			ge::FrameNode* uiComp = GetSelectedUiComponent();
+			if (uiComp) SyncUiComponentControls();
+			if (m_lblUi) m_lblUi->SetVisible(uiComp != nullptr);
+			if (m_lblUi && uiComp) { m_lblUi->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			for (int i = 0; i < kUiSlots; ++i)
+			{
+				const bool on = uiComp && !m_uiSlotKey[i].empty();
+				const int ty = m_uiSlotType[i];
+				using PT = ge::UiComp::PropDesc;
+				const bool isBool = on && ty == PT::Bool;
+				if (m_lblUiSlot[i]) m_lblUiSlot[i]->SetVisible(on && !isBool);
+				if (m_cboUiSlot[i]) m_cboUiSlot[i]->SetVisible(on && ty == PT::Choice);
+				if (m_chkUiSlot[i]) m_chkUiSlot[i]->SetVisible(isBool);
+				if (m_spinUiSlot[i]) m_spinUiSlot[i]->SetVisible(on && ty == PT::Number);
+				if (m_txtUiSlot[i]) m_txtUiSlot[i]->SetVisible(on && (ty == PT::Text || ty == PT::Multi || ty == PT::ColorHex));
+				if (!on) continue;
+				if (!isBool && m_lblUiSlot[i]) { m_lblUiSlot[i]->SetBounds(left, y, right, y + 16.0f); y += 18.0f; }
+				const std::shared_ptr<M2DrawControl> ctl =
+					ty == PT::Choice ? std::static_pointer_cast<M2DrawControl>(m_cboUiSlot[i]) :
+					ty == PT::Bool ? std::static_pointer_cast<M2DrawControl>(m_chkUiSlot[i]) :
+					ty == PT::Number ? std::static_pointer_cast<M2DrawControl>(m_spinUiSlot[i]) :
+					std::static_pointer_cast<M2DrawControl>(m_txtUiSlot[i]);
+				if (ctl) ctl->SetBounds(left, y, right, y + 24.0f);
+				y += 30.0f;
+			}
+			if (uiComp) y += 6.0f;
+		}
 
 		// 테이블 속성: Transform 바로 위 (테이블이 선택된 경우만)
 		{

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "SvgWriter.h"
+#include "HtmlComponents/UiComponents.h"
 #include "D2DGraphicEngine.h"
 #include "D2DLayer.h"
 
@@ -493,6 +494,8 @@ void SvgWriter::Visit(GroupNode& node) {
 		if (Meta()) {
 			m_output += " m2:frame=\"true\" m2:w=\"" + FormatFloat(frame->GetWidth()) + "\" m2:h=\"" + FormatFloat(frame->GetHeight()) +
 				"\" m2:clip=\"" + std::string(frame->IsClip() ? "true" : "false") + "\" m2:radius=\"" + FormatFloat(frame->GetCornerRadius()) + "\"";
+				if (frame->IsUiComponent())
+					m_output += " m2:ui=\"" + frame->GetUiKind() + "\" m2:uiProps=\"" + ge::UiComp::EncodeProps(frame->GetUiProps()) + "\"";
 				if (!frame->GetCornerRadii().IsUniform()) {
 					const CornerRadii& cr4 = frame->GetCornerRadii();
 					m_output += " m2:radius4=\"" + FormatFloat(cr4.tl) + "," + FormatFloat(cr4.tr) + "," + FormatFloat(cr4.br) + "," + FormatFloat(cr4.bl) + "\"";

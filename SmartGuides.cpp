@@ -25,7 +25,7 @@ void CollectRects(const GroupNode& g, const std::vector<Node*>& exclude, std::ve
 		if (out.size() >= 800) return;   // 성능 상한
 		Rect2 b;
 		if (GuideWorldBounds(*n, b)) out.push_back(b);
-		if (dynamic_cast<TableNode*>(n)) continue;   // 표 칸 내용은 후보로 쓰지 않음
+		if (dynamic_cast<TableNode*>(n) || IsAtomicComponent(n)) continue;   // 표 칸/컴포넌트 내부는 후보로 쓰지 않음
 		if (auto* gc = dynamic_cast<GroupNode*>(n)) CollectRects(*gc, exclude, out);
 	}
 }

@@ -184,6 +184,7 @@ BEGIN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
         MENUITEM "SVG 내보내기(&E)...\tCtrl+Shift+E", ID_FILE_EXPORT_SVG
         MENUITEM "HTML 내보내기(&H)...",             ID_FILE_EXPORT_HTML
+        MENUITEM "HTML 미리보기(&P)...",             ID_FILE_PREVIEW_HTML
         MENUITEM "이미지 내보내기(&J)... (PNG/JPG)",    ID_FILE_EXPORT_IMAGE
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM SEPARATOR
@@ -228,6 +229,7 @@ BEGIN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
         MENUITEM "SVG 내보내기(&E)...\tCtrl+Shift+E", ID_FILE_EXPORT_SVG
         MENUITEM "HTML 내보내기(&H)...",             ID_FILE_EXPORT_HTML
+        MENUITEM "HTML 미리보기(&P)...",             ID_FILE_PREVIEW_HTML
         MENUITEM "이미지 내보내기(&J)... (PNG/JPG)",    ID_FILE_EXPORT_IMAGE
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM "저장(&S)\tCtrl+S",               ID_FILE_SAVE
@@ -573,6 +575,7 @@ BEGIN
     ID_TEXT_TO_PATH          "선택한 텍스트를 편집 가능한 패스(윤곽선)로 변환합니다.\n윤곽선으로 변환"
     ID_FILE_PLACE_IMAGE      "이미지 파일을 캔버스에 가져옵니다.\n이미지 가져오기"
     ID_FILE_EXPORT_SVG       "순수 SVG(Illustrator/Inkscape/Figma/브라우저 호환)로 내보냅니다.\nSVG 내보내기"
+    ID_FILE_PREVIEW_HTML     "WebView2 로 현재 문서의 HTML 을 실시간 미리 봅니다. 폭 조절과 PDF 저장도 지원합니다.\nHTML 미리보기"
     ID_FILE_EXPORT_HTML      "시맨틱 HTML/CSS 반응형 웹 파일로 내보냅니다.\nHTML 내보내기"
     ID_FILE_EXPORT_IMAGE     "배율/해상도를 지정해 PNG 또는 JPG 이미지로 내보냅니다.\n이미지 내보내기"
     ID_SUB_SIMPLIFY          "정점을 줄여 패스를 단순화합니다. 허용 오차를 입력한 뒤 적용하세요.
@@ -626,6 +629,16 @@ BEGIN
     ID_HTML_BUTTON           "버튼: 드래그한 상자에 라벨이 있는 버튼을 만듭니다.\n버튼"
     ID_HTML_DIVIDER          "구분선: 드래그한 길이의 가로 구분선을 만듭니다.\n구분선"
     ID_HTML_SPACER           "간격 추가: 드래그한 상자 크기의 빈 간격(점선)을 만듭니다.\n간격 추가"
+    ID_HTML_UI_TEXTBOX        "텍스트 박스: 드래그한 크기의 문단/제목/인용 텍스트 상자를 만듭니다.\n텍스트 박스"
+    ID_HTML_UI_INPUT          "입력 필드: 텍스트/비밀번호/이메일/검색/숫자/여러 줄 입력창을 만듭니다.\n입력 필드"
+    ID_HTML_UI_CHECK          "체크/라디오/스위치: 선택 컨트롤을 만듭니다.\n체크 컨트롤"
+    ID_HTML_UI_COMBO          "콤보 박스: 옵션 목록이 있는 선택 상자를 만듭니다.\n콤보 박스"
+    ID_HTML_UI_LIST           "목록: 글머리/번호/상자 목록을 만듭니다.\n목록"
+    ID_HTML_UI_BAR            "막대: 진행 표시줄/슬라이더/구분선을 만듭니다.\n막대"
+    ID_HTML_UI_TABS           "탭: 탭 메뉴를 만듭니다.\n탭"
+    ID_HTML_UI_BADGE          "배지: 작은 알약 모양 라벨을 만듭니다.\n배지"
+    ID_HTML_UI_CARD           "카드: 이미지/제목/내용/버튼이 있는 카드를 만듭니다.\n카드"
+    ID_HTML_UI_PAGER          "페이지/경로: 페이지 번호 또는 경로(breadcrumb)를 만듭니다.\n페이지 경로"
     ID_FILE_NEW             "새 문서를 만듭니다.\n새로 만들기"
     ID_FILE_OPEN            "기존 문서를 엽니다.\n열기"
     ID_FILE_CLOSE           "활성 문서를 닫습니다.\n닫기"

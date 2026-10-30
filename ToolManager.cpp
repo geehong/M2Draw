@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "ToolManager.h"
+#include "HtmlComponents/UiComponents.h"
 #include "M2DrawDoc.h"
 #include "M2DrawView.h"
 #include "M2Draw.h"
@@ -711,6 +712,63 @@ void ComponentTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* bru
 	rt->DrawRectangle(rc, brush, 1.0f);
 }
 
+// ---------------- 표준 HTML UI 컴포넌트 도구 (4.5.17) ----------------
+int UiComponentTool::s_pending = 0;
+
+void UiComponentTool::OnDown(const ToolEvent& e)
+{
+	m_drag = true;
+	const ge::Vec2 sp_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides);
+	m_startW = m_curW = D2D1::Point2F(sp_.x, sp_.y);
+}
+
+void UiComponentTool::OnMove(const ToolEvent& e)
+{
+	const ge::Vec2 hv_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides);
+	if (!m_drag) return;
+	m_curW = D2D1::Point2F(hv_.x, hv_.y);
+}
+
+void UiComponentTool::OnUp(const ToolEvent& e)
+{
+	if (!m_drag) return;
+	m_drag = false;
+	if (!e.pDoc) return;
+	{ const ge::Vec2 sp_ = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides); m_curW = D2D1::Point2F(sp_.x, sp_.y); }
+	CM2DrawDoc* pDoc = e.pDoc;
+
+	float x0 = (std::min)(m_startW.x, m_curW.x), y0 = (std::min)(m_startW.y, m_curW.y);
+	float w = std::fabs(m_curW.x - m_startW.x), h = std::fabs(m_curW.y - m_startW.y);
+	if (w < 6.0f && h < 6.0f) { x0 = m_startW.x; y0 = m_startW.y; w = h = 0.0f; }   // 클릭만: 기본 크기
+	else { if (w < 6.0f) w = 0.0f; if (h < 6.0f) h = 0.0f; }
+
+	const int kind = (std::max)(0, (std::min)(ge::UiComp::kKindCount - 1, s_pending));
+	auto fr = ge::UiComp::Create(static_cast<ge::UiComp::Kind>(kind), x0, y0, w, h);
+	const std::wstring undo = std::wstring(ge::UiComp::KindLabel(static_cast<ge::UiComp::Kind>(kind))) + L" 추가";
+	ge::Node* added = pDoc->GetDoc().AddShapeAt(std::move(fr), ge::Vec2{ m_startW.x, m_startW.y });
+	if (!added) return;
+
+	pDoc->GetDoc().SetSelection({ added });
+	pDoc->SetModifiedFlag(TRUE);
+	pDoc->CommitUndoPoint(undo.c_str());
+	LogAppEvent(_T("[UI 컴포넌트] 요소 추가"));
+	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+	if (SelectTool* sel = GetApp()->GetToolManager().GetSelectTool()) sel->SelectNode(added, pDoc);
+	pDoc->UpdateAllViews(nullptr);
+}
+
+void UiComponentTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* /*pDoc*/)
+{
+	if (!rt || !brush) return;
+	DrawGuideLines(rt, brush, m_guides, zoom, pan);
+	if (!m_drag) return;
+	const D2D1_RECT_F rc = WorldRectToScreen(m_startW, m_curW, zoom, pan);
+	brush->SetColor(D2D1::ColorF(0.12f, 0.56f, 1.0f, 0.10f));
+	rt->FillRectangle(rc, brush);
+	brush->SetColor(D2D1::ColorF(0.12f, 0.56f, 1.0f, 1.0f));
+	rt->DrawRectangle(rc, brush, 1.0f);
+}
+
 // ---------------- ToolManager ----------------
 ToolManager::ToolManager()
 	: m_activeType(ToolType::Select)
@@ -740,6 +798,7 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Button));
 	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Divider));
 	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Spacer));
+	m_tools.push_back(std::make_unique<UiComponentTool>());
 	m_tools.push_back(std::make_unique<ZoomInTool>());
 	m_tools.push_back(std::make_unique<ZoomOutTool>());
 	m_tools.push_back(std::make_unique<GradientTool>());

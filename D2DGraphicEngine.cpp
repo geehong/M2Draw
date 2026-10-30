@@ -379,6 +379,7 @@ std::unique_ptr<Node> FrameNode::Clone() const
 	copy->m_layoutMode = m_layoutMode; copy->m_gap = m_gap; copy->m_pad = m_pad;
 	copy->m_mainAlign = m_mainAlign; copy->m_crossAlign = m_crossAlign;
 	copy->m_sizingW = m_sizingW; copy->m_sizingH = m_sizingH;
+	copy->m_uiKind = m_uiKind; copy->m_uiProps = m_uiProps;
 	for (const auto& c : m_children) copy->AddChild(c->Clone());
 	return copy;
 }
@@ -830,6 +831,8 @@ bool FrameNode::ApplyLayout()
 	return changed;
 }
 
+void (*FrameNode::s_uiRebuildHook)(FrameNode&) = nullptr;
+
 void FrameNode::ResizeFrame(float w, float h)
 {
 	w = (std::max)(1.0f, w);
@@ -879,6 +882,7 @@ void FrameNode::ResizeFrame(float w, float h)
 	}
 	m_w = w;
 	m_h = h;
+	if (IsUiComponent() && s_uiRebuildHook) { s_uiRebuildHook(*this); Invalidate(); return; }   // 컴포넌트는 새 크기에 맞춰 자식을 다시 만든다
 	if (free) ClampChildren();   // 부모가 줄어들면 자식도 범위 안으로
 	Invalidate();
 	ApplyLayout();
@@ -1134,6 +1138,7 @@ std::vector<FrameNode*> Document::GetArtboards() const
 			{
 				if (auto* frame = dynamic_cast<FrameNode*>(child.get()))
 				{
+					if (frame->IsUiComponent()) continue;   // UI 컴포넌트는 아트보드가 아님
 					artboards.push_back(frame);
 				}
 			}
@@ -1200,6 +1205,7 @@ static FrameNode* DeepestFrameAt(const GroupNode& g, Vec2 w, const Node* exclude
 		if (!c || c == exclude || !c->IsVisible() || c->IsLocked()) continue;
 		auto* gc = dynamic_cast<GroupNode*>(c);
 		if (!gc || dynamic_cast<TableNode*>(c) || gc->IsClippingMask()) continue;
+		if (IsAtomicComponent(c)) continue;   // 버튼/UI 컴포넌트는 컨테이너가 아님 (안으로 흡수되면 재구성 때 사라짐)
 		if (auto* fr = dynamic_cast<FrameNode*>(gc)) {
 			Matrix2D inv = fr->GetWorldTransform();
 			if (!inv.Invert()) continue;
@@ -3238,9 +3244,10 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 	std::string roleTag;
 	if (frame) { roleTag = frame->GetHtmlTag(); if (roleTag == "div") roleTag.clear(); }
 	const bool isTopFrame = frame && (!node.GetParent() || node.GetParent()->Kind() == NodeKind::Layer);
+	const bool uiComp = frame && frame->IsUiComponent();   // UI 컴포넌트는 아트보드 이름표/내부 프레임 윤곽선 표시 대상이 아님
 
 	// 내부 컨테이너 프레임: 역할이 지정된 경우 좌상단 안쪽에 작은 배지 [header] 이름 표시
-	if (frame && !isTopFrame && m_rt && m_brush) {   // 내부 프레임 윤곽선: 흰 배경 위에서도 범위가 보이는 편집용 표시 (저장/내보내기에는 들어가지 않음)
+	if (frame && !uiComp && !isTopFrame && m_rt && m_brush) {   // 내부 프레임 윤곽선: 흰 배경 위에서도 범위가 보이는 편집용 표시 (저장/내보내기에는 들어가지 않음)
 		const D2D1_MATRIX_3X2_F fmo = (worldXf * view.ToMatrix()).ToD2D();
 		m_rt->SetTransform(fmo);
 		m_brush->SetColor(D2D1::ColorF(0.30f, 0.50f, 0.90f, 0.75f));
@@ -3248,7 +3255,7 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 		m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
 	}
 	// 내부 프레임 배지: [역할] 이름  W × H. 배지가 프레임보다 길거나(너비/높이) 안에 자식이 있으면 안쪽이 아니라 프레임 위쪽에 표시 (4.5.8.3)
-	if (frame && !isTopFrame && m_rt && m_brush) {
+	if (frame && !uiComp && !isTopFrame && m_rt && m_brush) {
 		static ComPtr<IDWriteFactory> s_dwBadge;
 		static ComPtr<IDWriteTextFormat> s_fmtBadge;
 		if (!s_dwBadge) {
@@ -3296,7 +3303,7 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 	}
 
 	// 최상위 프레임(Artboard): 캔버스 위에 Figma 스타일로 상단 이름 라벨 표시 (예: "Frame 1  1920 × 1080")
-	if (isTopFrame && m_rt && m_brush) {
+	if (isTopFrame && !uiComp && m_rt && m_brush) {
 		static ComPtr<IDWriteFactory> s_dwLabel;
 		static ComPtr<IDWriteTextFormat> s_fmtLabel;
 		if (!s_dwLabel) {

@@ -80,6 +80,9 @@ public:
 	bool ConvertTextToPath();
 	afx_msg void OnFilePlaceImage();
 	afx_msg void OnFileExportSvg();   // 순수 SVG 내보내기 (옵션: 텍스트 윤곽선 변환)
+	// HTML 미리보기(Step 4.6)용: 선택된 최상위 아트보드(없으면 nullptr = 문서 전체)와 현재 문서의 HTML
+	ge::FrameNode* GetSelectedTopArtboard();
+	std::string BuildPreviewHtml();
 	afx_msg void OnFileExportHtml();  // 시맨틱 HTML/CSS 내보내기 (Step 4.5)
 	afx_msg void OnFileExportImage(); // PNG/JPG 래스터 내보내기 (Step 5.5)
 	// --- 클립보드 (Step 5.4): SVG 로 교환 (CF_UNICODETEXT + image/svg+xml) ---
