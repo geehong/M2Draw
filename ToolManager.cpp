@@ -1,4 +1,7 @@
 #include "pch.h"
+#include "PathTrim.h"
+#include "MainFrm.h"
+#include "ShapePresets.h"
 #include "ToolManager.h"
 #include "HtmlComponents/UiComponents.h"
 #include "M2DrawDoc.h"
@@ -770,6 +773,552 @@ void UiComponentTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 	rt->DrawRectangle(rc, brush, 1.0f);
 }
 
+// ---------------- 트림 도구 (Step 6.21) ----------------
+namespace {
+
+// 대상 로컬 좌표계로 옮긴 절단 세그먼트 (절단 개체 = PathNode 의 모든 부분 경로, 임시 직선 = 직선 세그먼트)
+std::vector<ge::Trim::Cubic> BuildCutters(ge::Document& doc, const std::vector<ge::NodeId>& ids,
+	const std::vector<std::pair<ge::Vec2, ge::Vec2>>& lines, const ge::Matrix2D& targetInv)
+{
+	std::vector<ge::Trim::Cubic> out;
+	for (ge::NodeId id : ids)
+	{
+		auto* ps = dynamic_cast<ge::PathNode*>(doc.FindById(id));
+		if (!ps) continue;
+		const ge::Matrix2D cw = ps->GetWorldTransform();
+		for (const auto& sp : ps->GetPaths())
+		{
+			for (ge::Trim::Cubic c : ge::Trim::ToCubics(sp))
+			{
+				auto toLocal = [&](ge::Vec2 p) { return targetInv.TransformPoint(cw.TransformPoint(p)); };
+				out.push_back(ge::Trim::Cubic{ toLocal(c.p0), toLocal(c.p1), toLocal(c.p2), toLocal(c.p3) });
+			}
+		}
+	}
+	for (const auto& ln : lines)
+	{
+		const ge::Vec2 a = targetInv.TransformPoint(ln.first), b = targetInv.TransformPoint(ln.second);
+		out.push_back(ge::Trim::Cubic{ a, a, b, b });
+	}
+	return out;
+}
+
+// 클릭한 패스 (격리 그룹 또는 활성 레이어의 직속 자식, 위에서부터). exclude 는 제외할 절단 개체
+ge::PathNode* HitTrimPath(CM2DrawDoc* pDoc, const ToolEvent& e, const std::vector<ge::NodeId>& exclude)
+{
+	ge::GroupNode* scope = pDoc->GetDoc().GetIsolationGroup();
+	if (!scope) scope = pDoc->GetDoc().GetActiveLayer();
+	if (!scope) return nullptr;
+	const auto& kids = scope->GetChildren();
+	for (int i = static_cast<int>(kids.size()) - 1; i >= 0; --i)
+	{
+		auto* ps = dynamic_cast<ge::PathNode*>(kids[i].get());
+		if (!ps || !ps->IsVisible() || ps->IsLocked()) continue;
+		if (std::find(exclude.begin(), exclude.end(), ps->GetId()) != exclude.end()) continue;
+		if (ps->HitTestScreenSpace(D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y)), 8.0f, e.view, e.pD2DFactory).part != ge::HitResult::Part::None)
+			return ps;
+	}
+	return nullptr;
+}
+
+} // namespace
+
+void TrimTool::UpdatePrompt() const
+{
+	const wchar_t* e = m_extendCutters ? L"예" : L"아니요";
+	const wchar_t* a = m_virtualCuts ? L"예" : L"아니요";
+	CString s;
+	if (m_stage == Stage::Cutters)
+	{
+		s.Format(_T("절단 개체 선택%s (절단_선_연장(E)=%s  가상_교차(A)=%s  선(L)%s)"),
+			m_hasLineStart ? _T(" - 직선의 두 번째 점을 클릭") : _T(""), e, a, m_lineMode ? _T("[켜짐]") : _T(""));
+		if (!m_cutterIds.empty() || !m_lines.empty())
+			s += _T(" 완료되면 Enter 키를 누르십시오");
+	}
+	else
+	{
+		s.Format(_T("트림할 개체 선택. 연장하려면 Shift 키를 누르면서 선택. 완료되면 Enter 키를 누르십시오 (절단_선_연장(E)=%s  가상_교차(A)=%s  실행취소(U))"), e, a);
+	}
+	SetAppStatusText(s);
+}
+
+void TrimTool::Finish()
+{
+	m_stage = Stage::Cutters;
+	m_cutterIds.clear();
+	m_lines.clear();
+	m_lineMode = false;
+	m_hasLineStart = false;
+	SetAppStatusText(_T("트림 종료"));
+	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
+}
+
+void TrimTool::OnDown(const ToolEvent& e)
+{
+	CM2DrawDoc* pDoc = e.pDoc;
+	if (!pDoc) return;
+	const ge::Vec2 w{ e.worldPt.x, e.worldPt.y };
+
+	if (m_stage == Stage::Cutters)
+	{
+		if (m_lineMode)
+		{
+			if (!m_hasLineStart) { m_lineStart = w; m_hasLineStart = true; }
+			else { m_lines.push_back(LineCutter{ m_lineStart, w }); m_hasLineStart = false; }
+		}
+		else if (ge::PathNode* hit = HitTrimPath(pDoc, e, {}))
+		{
+			const ge::NodeId id = hit->GetId();
+			auto it = std::find(m_cutterIds.begin(), m_cutterIds.end(), id);
+			if (it == m_cutterIds.end()) m_cutterIds.push_back(id);
+			else m_cutterIds.erase(it);
+		}
+		UpdatePrompt();
+		pDoc->UpdateAllViews(nullptr);
+		return;
+	}
+
+	// 2단계: 대상 조각 클릭 (Shift = 끝점 연장)
+	ge::PathNode* target = HitTrimPath(pDoc, e, m_cutterIds);
+	if (!target)
+	{
+		SetAppStatusText(_T("트림할 개체를 찾지 못했습니다"));
+		return;
+	}
+	ge::Matrix2D tw = target->GetWorldTransform();
+	ge::Matrix2D tinv = tw;
+	if (!tinv.Invert()) return;
+	const ge::Vec2 local = tinv.TransformPoint(w);
+	const float zoomTol = 12.0f / (std::max)(e.view.zoom, 0.01f);
+
+	// 조각이 여러 개면 클릭에 가장 가까운 부분 경로
+	const auto& paths = target->GetPaths();
+	size_t best = 0;
+	float bestD = 1e30f;
+	for (size_t i = 0; i < paths.size(); ++i)
+	{
+		float d = 0.0f;
+		ge::Trim::NearestParam(ge::Trim::ToCubics(paths[i]), local, &d);
+		if (d < bestD) { bestD = d; best = i; }
+	}
+	if (paths.empty()) return;
+
+	const auto cutters = BuildCutters(pDoc->GetDoc(), m_cutterIds, [this] {
+		std::vector<std::pair<ge::Vec2, ge::Vec2>> v; for (const auto& l : m_lines) v.push_back({ l.a, l.b }); return v; }(), tinv);
+
+	ge::Trim::TrimResult res;
+	if (e.shiftDown)
+	{
+		ge::SubPath extended;
+		if (!ge::Trim::ExtendEnd(paths[best], cutters, m_virtualCuts, local, zoomTol, extended))
+		{
+			SetAppStatusText(_T("연장할 교차점이 없습니다"));
+			return;
+		}
+		res.pieces.push_back(extended);
+		res.ok = true;
+	}
+	else
+	{
+		res = ge::Trim::TrimAtClick(paths[best], cutters, m_extendCutters, local);
+		if (!res.ok)
+		{
+			SetAppStatusText(_T("잘라낼 교차점이 없습니다 (닫힌 경로는 교차점이 2개 이상 필요)"));
+			return;
+		}
+	}
+	ApplyResult(pDoc, target, best, res.pieces);
+	pDoc->UpdateAllViews(nullptr);
+	UpdatePrompt();
+}
+
+void TrimTool::ApplyResult(CM2DrawDoc* pDoc, ge::PathNode* target, size_t subIdx, const std::vector<ge::SubPath>& pieces)
+{
+	ge::Document& doc = pDoc->GetDoc();
+	ge::GroupNode* parent = target->GetParent();
+	if (!parent) return;
+	const std::vector<ge::SubPath> before = target->GetPaths();
+	std::vector<ge::SubPath> keep;
+	for (size_t i = 0; i < before.size(); ++i)
+	{
+		if (i == subIdx)
+		{
+			if (!pieces.empty()) keep.push_back(pieces[0]);   // 첫 조각은 원래 노드에 남긴다
+		}
+		else keep.push_back(before[i]);
+	}
+
+	// 둘째 조각 이후는 형제 노드로 (라이노처럼 트림 한 번에 개체가 둘로 나뉜다)
+	const int index = parent->IndexOf(target);
+	int insertAt = index + 1;
+	for (size_t k = 1; k < pieces.size(); ++k)
+	{
+		auto sib = target->Clone();
+		auto* ps = dynamic_cast<ge::PathNode*>(sib.get());
+		if (!ps) continue;
+		ps->SetPaths(std::vector<ge::SubPath>{ pieces[k] });
+		ps->SetShapeKind(ge::ShapeKind::Path);
+		ps->SetParams(ge::ShapeParams{});
+		ge::Node* added = parent->AddChild(std::move(sib), insertAt++);
+		if (added) doc.AssignIds(*added);
+	}
+
+	target->SetPaths(keep);
+	target->SetShapeKind(ge::ShapeKind::Path);
+	target->SetParams(ge::ShapeParams{});
+	if (keep.empty()) parent->RemoveChild(target);
+
+	doc.ClearSelection();
+	if (!keep.empty()) doc.SetSelection({ target });
+	pDoc->SetModifiedFlag(TRUE);
+	pDoc->CommitUndoPoint(L"트림");
+	LogAppEvent(_T("[트림] 조각 잘라내기 완료"));
+	if (CWnd* mf = AfxGetMainWnd())
+		if (mf->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+			static_cast<CMainFrame*>(mf)->GetLayerWnd().RefreshLayers();
+}
+
+void TrimTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
+{
+	switch (nChar)
+	{
+	case VK_RETURN:
+		if (m_stage == Stage::Cutters)
+		{
+			if (m_cutterIds.empty() && m_lines.empty()) { Finish(); return; }   // 절단 개체가 없으면 종료
+			m_stage = Stage::Target;
+			m_lineMode = false;
+			m_hasLineStart = false;
+			UpdatePrompt();
+		}
+		else Finish();
+		break;
+	case VK_ESCAPE:
+		Finish();
+		break;
+	case 'E':
+		m_extendCutters = !m_extendCutters;
+		UpdatePrompt();
+		break;
+	case 'A':
+		m_virtualCuts = !m_virtualCuts;
+		UpdatePrompt();
+		break;
+	case 'L':
+		if (m_stage == Stage::Cutters)
+		{
+			m_lineMode = !m_lineMode;
+			m_hasLineStart = false;
+			UpdatePrompt();
+		}
+		break;
+	case 'U':
+		if (CWnd* mf = AfxGetMainWnd()) mf->PostMessage(WM_COMMAND, ID_EDIT_UNDO);   // 직전 트림 실행 취소
+		break;
+	default:
+		break;
+	}
+	if (pDoc) pDoc->UpdateAllViews(nullptr);
+}
+
+void TrimTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
+{
+	if (!rt || !brush || !pDoc) return;
+	const ge::Viewport view{ zoom, { pan.x, pan.y } };
+	brush->SetColor(D2D1::ColorF(0.95f, 0.45f, 0.15f, 0.9f));   // 절단 개체: 주황
+	auto drawCubic = [&](const ge::Trim::Cubic& c, const ge::Matrix2D& xf) {
+		ge::Vec2 prev = xf.TransformPoint(c.p0);
+		for (int k = 1; k <= 16; ++k)
+		{
+			const float t = static_cast<float>(k) / 16.0f, u = 1.0f - t;
+			const float a = u * u * u, b = 3 * u * u * t, cc = 3 * u * t * t, d = t * t * t;
+			const ge::Vec2 p{ a * c.p0.x + b * c.p1.x + cc * c.p2.x + d * c.p3.x, a * c.p0.y + b * c.p1.y + cc * c.p2.y + d * c.p3.y };
+			const ge::Vec2 cur = xf.TransformPoint(p);
+			const D2D1_POINT_2F s0 = ge::CoordinateSpace::LocalToScreen(D2D1::Point2F(prev.x, prev.y), ge::Matrix2D::Identity(), view);
+			const D2D1_POINT_2F s1 = ge::CoordinateSpace::LocalToScreen(D2D1::Point2F(cur.x, cur.y), ge::Matrix2D::Identity(), view);
+			rt->DrawLine(s0, s1, brush, 1.5f);
+			prev = cur;
+		}
+	};
+	for (ge::NodeId id : m_cutterIds)
+	{
+		auto* ps = dynamic_cast<ge::PathNode*>(pDoc->GetDoc().FindById(id));
+		if (!ps) continue;
+		for (const auto& sp : ps->GetPaths())
+			for (const auto& c : ge::Trim::ToCubics(sp)) drawCubic(c, ps->GetWorldTransform());
+	}
+	for (const auto& l : m_lines)
+	{
+		const ge::Trim::Cubic c{ l.a, l.a, l.b, l.b };
+		drawCubic(c, ge::Matrix2D::Identity());
+	}
+	if (m_hasLineStart)
+	{
+		brush->SetColor(D2D1::ColorF(0.95f, 0.45f, 0.15f, 0.6f));
+		const ge::Vec2 p = m_lineStart;
+		const D2D1_POINT_2F s = ge::CoordinateSpace::LocalToScreen(D2D1::Point2F(p.x, p.y), ge::Matrix2D::Identity(), view);
+		rt->FillEllipse(D2D1::Ellipse(s, 3.5f, 3.5f), brush);
+	}
+}
+
+// ---------------- 도형 프리셋 도구 (Step 6.13 / 6.18.3) ----------------
+namespace {
+
+// 드래그형 도형의 경로와 이름. s = 시작점, c = 현재점 (월드 좌표)
+bool BuildDragShape(ToolType t, ge::Vec2 s, ge::Vec2 c, std::vector<ge::SubPath>& out, const wchar_t*& name, ge::Vec2& anchor)
+{
+	const float dx = c.x - s.x, dy = c.y - s.y;
+	const float w = std::fabs(dx), h = std::fabs(dy);
+	const float dist = std::sqrt(dx * dx + dy * dy);
+	const float x0 = (std::min)(s.x, c.x), y0 = (std::min)(s.y, c.y);
+	switch (t)
+	{
+	case ToolType::RoundRect:
+		out = ge::Shapes::RoundedRect(x0, y0, w, h, 0.2f * (std::min)(w, h));
+		name = L"둥근 사각형"; anchor = ge::Vec2{ x0, y0 };
+		return true;
+	case ToolType::Square:
+	{
+		const float side = (std::max)(w, h);
+		const float sx = dx < 0.0f ? s.x - side : s.x, sy = dy < 0.0f ? s.y - side : s.y;
+		out = ge::Shapes::RoundedRect(sx, sy, side, side, 0.0f);
+		name = L"정사각형"; anchor = ge::Vec2{ sx, sy };
+		return true;
+	}
+	case ToolType::Diamond:
+		out = ge::Shapes::Diamond(x0, y0, w, h);
+		name = L"마름모"; anchor = ge::Vec2{ x0, y0 };
+		return true;
+	case ToolType::CircleCenter:
+		out = ge::Shapes::Ellipse(s.x, s.y, dist, dist);
+		name = L"원"; anchor = s;
+		return true;
+	case ToolType::Donut:
+		out = ge::Shapes::Donut(s.x, s.y, dist, 0.5f);
+		name = L"도넛"; anchor = s;
+		return true;
+	case ToolType::Pie:
+	{
+		const float a0 = std::atan2(dy, dx);
+		out = ge::Shapes::Pie(s.x, s.y, dist, a0, a0 + 1.5707963f);
+		name = L"파이"; anchor = s;
+		return true;
+	}
+	default:
+		return false;
+	}
+}
+
+} // namespace
+
+const wchar_t* PresetShapeTool::GetName() const
+{
+	switch (m_type)
+	{
+	case ToolType::RoundRect:    return L"둥근 사각형 도구";
+	case ToolType::Square:       return L"정사각형 도구";
+	case ToolType::Diamond:      return L"마름모 도구";
+	case ToolType::CircleCenter: return L"중심에서 원 도구";
+	case ToolType::Circle3Pt:    return L"3점 원 도구";
+	case ToolType::Arc3Pt:       return L"3점 호 도구";
+	case ToolType::Pie:          return L"파이 도구";
+	case ToolType::Donut:        return L"도넛 도구";
+	default:                     return L"도형 도구";
+	}
+}
+
+void PresetShapeTool::Reset()
+{
+	m_started = false;
+	m_dragging = false;
+	m_waiting = false;
+	m_pts.clear();
+	m_guides.clear();
+}
+
+void PresetShapeTool::Commit(CM2DrawDoc* pDoc, const std::vector<ge::SubPath>& paths, const wchar_t* name, ge::Vec2 anchor)
+{
+	Reset();
+	if (!pDoc || paths.empty()) return;
+	auto pn = std::make_unique<ge::PathNode>();
+	pn->SetPaths(paths);
+	pn->SetName(name);
+	ge::Node* added = pDoc->GetDoc().AddShapeAt(std::move(pn), anchor);
+	if (!added) return;
+	pDoc->GetDoc().SetSelection({ added });
+	pDoc->SetModifiedFlag(TRUE);
+	pDoc->CommitUndoPoint((std::wstring(name) + L" 추가").c_str());
+	LogAppEvent(_T("[도형 도구] 도형 추가"));
+	pDoc->UpdateAllViews(nullptr);
+}
+
+void PresetShapeTool::Complete(CM2DrawDoc* pDoc, ge::Vec2 cur)
+{
+	std::vector<ge::SubPath> paths;
+	const wchar_t* name = L"도형";
+	ge::Vec2 anchor = m_start;
+	if (!BuildDragShape(m_type, m_start, cur, paths, name, anchor)) { Reset(); return; }
+	Commit(pDoc, paths, name, anchor);
+}
+
+void PresetShapeTool::CompleteClick(CM2DrawDoc* pDoc)
+{
+	if (m_pts.size() < 3) return;
+	if (m_type == ToolType::Circle3Pt)
+	{
+		ge::Vec2 c{};
+		float r = 0.0f;
+		if (!ge::Shapes::CircleThrough3(m_pts[0], m_pts[1], m_pts[2], c, r))
+		{
+			SetAppStatusText(_T("세 점이 일직선이라 원을 만들 수 없습니다. 다른 점을 찍으세요."));
+			m_pts.resize(2);
+			return;
+		}
+		Commit(pDoc, ge::Shapes::Ellipse(c.x, c.y, r, r), L"원", c);
+		return;
+	}
+	const auto paths = ge::Shapes::ArcThrough3(m_pts[0], m_pts[2], m_pts[1]);   // 시작점, 중간 점(세 번째 클릭), 끝점
+	if (paths.empty())
+	{
+		SetAppStatusText(_T("세 점이 일직선이라 호를 만들 수 없습니다. 다른 점을 찍으세요."));
+		m_pts.resize(2);
+		return;
+	}
+	Commit(pDoc, paths, L"호", m_pts[0]);
+}
+
+void PresetShapeTool::OnDown(const ToolEvent& e)
+{
+	if (!e.pDoc) return;
+	const ge::Vec2 sp = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides);
+	if (IsClickTool())
+	{
+		// 3점형: 클릭마다 한 점씩 (같은 자리 중복 클릭은 무시)
+		if (!m_pts.empty())
+		{
+			const float dx = sp.x - m_pts.back().x, dy = sp.y - m_pts.back().y;
+			if (dx * dx + dy * dy < 4.0f) return;
+		}
+		m_pts.push_back(sp);
+		m_cur = sp;
+		m_started = true;
+		if (m_pts.size() >= 3) CompleteClick(e.pDoc);
+		return;
+	}
+	// 드래그형: 두 번째 클릭 대기 중이면 그 클릭에서 완성 (BoxShapeTool 과 같은 규칙: 4px 초과 이동만 인정)
+	if (m_waiting)
+	{
+		const float dx = sp.x - m_start.x, dy = sp.y - m_start.y;
+		if (dx * dx + dy * dy > 16.0f) Complete(e.pDoc, sp);
+		return;
+	}
+	m_started = true;
+	m_dragging = true;
+	m_start = m_cur = sp;
+}
+
+void PresetShapeTool::OnMove(const ToolEvent& e)
+{
+	m_cur = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides);
+}
+
+void PresetShapeTool::OnUp(const ToolEvent& e)
+{
+	if (IsClickTool() || !m_dragging) return;
+	m_dragging = false;
+	if (!e.pDoc) return;
+	const ge::Vec2 cur = SnapCreationPoint(e, ge::Vec2{ e.worldPt.x, e.worldPt.y }, m_guides);
+	m_cur = cur;
+	const float dx = cur.x - m_start.x, dy = cur.y - m_start.y;
+	if (dx * dx + dy * dy > 16.0f)
+		Complete(e.pDoc, cur);        // 끌어서 떼면 바로 완성
+	else
+		m_waiting = true;             // 제자리 클릭: 미리보기를 보이며 두 번째 클릭을 기다림
+}
+
+bool PresetShapeTool::OnDoubleClicked(CM2DrawDoc* /*pDoc*/)
+{
+	Reset();
+	return true;   // 선택 도구로 전환 신호
+}
+
+bool PresetShapeTool::OnRightClicked(CM2DrawDoc* /*pDoc*/)
+{
+	Reset();
+	return true;   // 선택 도구로 전환 신호
+}
+
+void PresetShapeTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
+{
+	if (nChar == VK_ESCAPE)
+	{
+		Reset();
+		if (pDoc) pDoc->UpdateAllViews(nullptr);
+	}
+}
+
+void PresetShapeTool::DrawPaths(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const std::vector<ge::SubPath>& paths,
+	float zoom, D2D1_POINT_2F pan) const
+{
+	auto toScreen = [&](ge::Vec2 w) { return D2D1::Point2F(w.x * zoom + pan.x, w.y * zoom + pan.y); };
+	for (const auto& sp : paths)
+	{
+		for (const auto& c : ge::Trim::ToCubics(sp))
+		{
+			ge::Vec2 prev = c.p0;
+			for (int k = 1; k <= 12; ++k)
+			{
+				const float t = static_cast<float>(k) / 12.0f, u = 1.0f - t;
+				const float a = u * u * u, b = 3 * u * u * t, cc = 3 * u * t * t, d = t * t * t;
+				const ge::Vec2 p{ a * c.p0.x + b * c.p1.x + cc * c.p2.x + d * c.p3.x, a * c.p0.y + b * c.p1.y + cc * c.p2.y + d * c.p3.y };
+				rt->DrawLine(toScreen(prev), toScreen(p), brush, 1.2f);
+				prev = p;
+			}
+		}
+	}
+}
+
+void PresetShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* /*pDoc*/)
+{
+	if (!rt || !brush) return;
+	DrawGuideLines(rt, brush, m_guides, zoom, pan);
+	auto toScreen = [&](ge::Vec2 w) { return D2D1::Point2F(w.x * zoom + pan.x, w.y * zoom + pan.y); };
+	brush->SetColor(D2D1::ColorF(0.35f, 0.38f, 0.45f, 1.0f));
+	if (IsClickTool())
+	{
+		// 찍은 점 + 마우스 위치까지의 미리보기 (두 점이면 세 번째 점 위치로 원/호 미리보기)
+		std::vector<ge::Vec2> pts = m_pts;
+		if (!pts.empty()) pts.push_back(m_cur);
+		for (const auto& p : m_pts) rt->FillEllipse(D2D1::Ellipse(toScreen(p), 3.0f, 3.0f), brush);
+		if (pts.size() == 2)
+		{
+			rt->DrawLine(toScreen(pts[0]), toScreen(pts[1]), brush, 1.0f);
+		}
+		else if (pts.size() == 3)
+		{
+			if (m_type == ToolType::Circle3Pt)
+			{
+				ge::Vec2 c{};
+				float r = 0.0f;
+				if (ge::Shapes::CircleThrough3(pts[0], pts[1], pts[2], c, r))
+					rt->DrawEllipse(D2D1::Ellipse(toScreen(c), r * zoom, r * zoom), brush, 1.0f);
+			}
+			else
+			{
+				DrawPaths(rt, brush, ge::Shapes::ArcThrough3(pts[0], pts[2], pts[1]), zoom, pan);
+			}
+		}
+		return;
+	}
+	if (!m_started) return;
+	rt->FillEllipse(D2D1::Ellipse(toScreen(m_start), 3.0f, 3.0f), brush);
+	std::vector<ge::SubPath> paths;
+	const wchar_t* name = L"";
+	ge::Vec2 anchor{};
+	if (BuildDragShape(m_type, m_start, m_cur, paths, name, anchor))
+		DrawPaths(rt, brush, paths, zoom, pan);
+}
+
 // ---------------- ToolManager ----------------
 ToolManager::ToolManager()
 	: m_activeType(ToolType::Select)
@@ -803,6 +1352,10 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Divider));
 	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Spacer));
 	m_tools.push_back(std::make_unique<UiComponentTool>());
+	m_tools.push_back(std::make_unique<TrimTool>());
+	for (ToolType t : { ToolType::RoundRect, ToolType::Square, ToolType::Diamond, ToolType::CircleCenter,
+	                    ToolType::Circle3Pt, ToolType::Arc3Pt, ToolType::Pie, ToolType::Donut })
+		m_tools.push_back(std::make_unique<PresetShapeTool>(t));
 	m_tools.push_back(std::make_unique<ZoomInTool>());
 	m_tools.push_back(std::make_unique<ZoomOutTool>());
 	m_tools.push_back(std::make_unique<GradientTool>());

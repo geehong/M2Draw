@@ -76,6 +76,9 @@ protected:
 	afx_msg void OnWindowManager();
 	afx_msg void OnViewCustomize();
 	afx_msg void OnFilePreviewHtml();
+	afx_msg void OnToolMenuCommand(UINT nID);
+	afx_msg void OnUpdateToolMenuCommand(CCmdUI* pCmdUI);
+	afx_msg void OnHelpShortcuts();
 	afx_msg LRESULT OnToolbarCreateNew(WPARAM wp, LPARAM lp);
 	afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
 	afx_msg void OnOptionBarCommit(UINT nID);

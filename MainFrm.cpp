@@ -8,6 +8,7 @@
 
 #include "MainFrm.h"
 #include "M2DrawDoc.h"
+#include "ToolGroups.h"
 #include "HtmlPreview.h"
 
 #ifdef _DEBUG
@@ -29,6 +30,9 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_COMMAND(ID_WINDOW_MANAGER, &CMainFrame::OnWindowManager)
 	ON_COMMAND(ID_VIEW_CUSTOMIZE, &CMainFrame::OnViewCustomize)
 	ON_COMMAND(ID_FILE_PREVIEW_HTML, &CMainFrame::OnFilePreviewHtml)
+	ON_COMMAND_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_DONUT, &CMainFrame::OnToolMenuCommand)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_DONUT, &CMainFrame::OnUpdateToolMenuCommand)
+	ON_COMMAND(ID_HELP_SHORTCUTS, &CMainFrame::OnHelpShortcuts)
 	ON_REGISTERED_MESSAGE(AFX_WM_CREATETOOLBAR, &CMainFrame::OnToolbarCreateNew)
 	ON_WM_SETTINGCHANGE()
 	ON_COMMAND_RANGE(ID_OPT_FIRST, ID_OPT_LAST, &CMainFrame::OnOptionBarCommit)
@@ -93,6 +97,8 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	}
 
 	m_wndMenuBar.SetPaneStyle(m_wndMenuBar.GetPaneStyle() | CBRS_SIZE_DYNAMIC | CBRS_TOOLTIPS | CBRS_FLYBY);
+	// 최근 사용 메뉴만 보이는 개인화 기능을 끈다: 도구/오브젝트 메뉴의 항목이 '>>' 뒤에 숨지 않도록 (Step 6.19)
+	m_wndMenuBar.SetRecentlyUsedMenus(FALSE);
 
 	// 메뉴 모음을 활성화해도 포커스가 이동하지 않게 합니다.
 	CMFCPopupMenu::SetForceMenuFocus(FALSE);
@@ -458,6 +464,44 @@ void CMainFrame::OnToolChanged(ToolType newTool)
 	UpdateSubToolBar(newTool);
 }
 
+static UINT ToolMenuIdOf(ToolType t)
+{
+	switch (t)
+	{
+	case ToolType::Pen: return ID_TOOLMENU_PEN;
+	case ToolType::Line: return ID_TOOLMENU_LINE;
+	case ToolType::Polyline: return ID_TOOLMENU_POLYLINE;
+	case ToolType::Rect: return ID_TOOLMENU_RECT;
+	case ToolType::Triangle: return ID_TOOLMENU_TRIANGLE;
+	case ToolType::RoundRect: return ID_TOOLMENU_ROUNDRECT;
+	case ToolType::Square: return ID_TOOLMENU_SQUARE;
+	case ToolType::Diamond: return ID_TOOLMENU_DIAMOND;
+	case ToolType::Ellipse: return ID_TOOLMENU_ELLIPSE;
+	case ToolType::CircleCenter: return ID_TOOLMENU_CIRCLECENTER;
+	case ToolType::Circle3Pt: return ID_TOOLMENU_CIRCLE3PT;
+	case ToolType::Arc3Pt: return ID_TOOLMENU_ARC3PT;
+	case ToolType::Pie: return ID_TOOLMENU_PIE;
+	case ToolType::Donut: return ID_TOOLMENU_DONUT;
+	case ToolType::Polygon: return ID_TOOLMENU_POLYGON;
+	case ToolType::Star: return ID_TOOLMENU_STAR;
+	case ToolType::Gear: return ID_TOOLMENU_GEAR;
+	case ToolType::Spiral: return ID_TOOLMENU_SPIRAL;
+	case ToolType::Heart: return ID_TOOLMENU_HEART;
+	case ToolType::Frame: return ID_TOOLMENU_FRAME;
+	case ToolType::Table: return ID_TOOLMENU_TABLE;
+	case ToolType::ComponentHeading: return ID_TOOLMENU_HEADING;
+	case ToolType::ComponentButton: return ID_TOOLMENU_BUTTON;
+	case ToolType::ComponentDivider: return ID_TOOLMENU_DIVIDER;
+	case ToolType::ComponentSpacer: return ID_TOOLMENU_SPACER;
+	case ToolType::PaintBucket: return ID_TOOLMENU_PAINTBUCKET;
+	case ToolType::Gradient: return ID_TOOLMENU_GRADIENT;
+	case ToolType::ZoomIn: return ID_TOOLMENU_ZOOMIN;
+	case ToolType::ZoomOut: return ID_TOOLMENU_ZOOMOUT;
+	case ToolType::Trim: return ID_TOOLMENU_TRIM;
+	default: return 0;
+	}
+}
+
 void CMainFrame::UpdateSubToolBar(ToolType curTool)
 {
 	// 종료 중이면 툴바를 건드리지 않음: 툴바의 툴팁은 OnDestroy 에서 이미 파괴되어 버튼 교체 시 DelTool 디버그 assert 발생
@@ -559,6 +603,19 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 			btnIds.insert(btnIds.end(), { ID_SUB_OUTLINE, ID_SUB_SIMPLIFY, ID_SUB_SMOOTH, ID_PATH_REVERSE, ID_PATH_JOIN });
 	}
 
+	// 도구 그룹 (사각형/원/다각형/펜/채우기/보기): 현재 도구가 속한 그룹 전체를 서브 도구 바에 보여준다 (Step 6.18)
+	if (btnIds.empty())
+	{
+		if (const ToolGroupDef* grp = FindToolGroup(curTool))
+		{
+			const ToolType h = grp->head;
+			const bool action = h == ToolType::ActionGroup || h == ToolType::ActionToFront || h == ToolType::ActionBooleanUnion || h == ToolType::ActionClipMask;
+			if (!action)
+				for (ToolType it : grp->items)
+					if (UINT id = ToolMenuIdOf(it)) btnIds.push_back(id);
+		}
+	}
+
 	if (btnIds.empty())
 	{
 		switch (curTool)
@@ -608,6 +665,36 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		int imgIdx = -1;
 		switch (id)
 		{
+		case ID_TOOLMENU_RECT: imgIdx = 0; break;
+		case ID_TOOLMENU_TRIANGLE: imgIdx = 1; break;
+		case ID_TOOLMENU_POLYGON: imgIdx = 2; break;
+		case ID_TOOLMENU_STAR: imgIdx = 3; break;
+		case ID_TOOLMENU_GEAR: imgIdx = 4; break;
+		case ID_TOOLMENU_SPIRAL: imgIdx = 5; break;
+		case ID_TOOLMENU_HEART: imgIdx = 6; break;
+		case ID_TOOLMENU_ZOOMIN: imgIdx = 7; break;
+		case ID_TOOLMENU_ZOOMOUT: imgIdx = 8; break;
+		case ID_TOOLMENU_POLYLINE: imgIdx = 22; break;
+		case ID_TOOLMENU_FRAME: imgIdx = 33; break;
+		case ID_TOOLMENU_TABLE: imgIdx = 34; break;
+		case ID_TOOLMENU_HEADING: imgIdx = 35; break;
+		case ID_TOOLMENU_BUTTON: imgIdx = 36; break;
+		case ID_TOOLMENU_DIVIDER: imgIdx = 37; break;
+		case ID_TOOLMENU_SPACER: imgIdx = 38; break;
+		case ID_TOOLMENU_PEN: imgIdx = 49; break;
+		case ID_TOOLMENU_LINE: imgIdx = 50; break;
+		case ID_TOOLMENU_ELLIPSE: imgIdx = 51; break;
+		case ID_TOOLMENU_ROUNDRECT: imgIdx = 52; break;
+		case ID_TOOLMENU_SQUARE: imgIdx = 53; break;
+		case ID_TOOLMENU_DIAMOND: imgIdx = 54; break;
+		case ID_TOOLMENU_CIRCLECENTER: imgIdx = 55; break;
+		case ID_TOOLMENU_CIRCLE3PT: imgIdx = 56; break;
+		case ID_TOOLMENU_ARC3PT: imgIdx = 57; break;
+		case ID_TOOLMENU_PIE: imgIdx = 58; break;
+		case ID_TOOLMENU_DONUT: imgIdx = 59; break;
+		case ID_TOOLMENU_PAINTBUCKET: imgIdx = 60; break;
+		case ID_TOOLMENU_GRADIENT: imgIdx = 61; break;
+		case ID_TOOLMENU_TRIM: imgIdx = 62; break;
 		case ID_TOOL_RECT:          imgIdx = 0; break;
 		case ID_TOOL_TRIANGLE:      imgIdx = 1; break;
 		case ID_TOOL_POLYGON:       imgIdx = 2; break;
@@ -683,6 +770,21 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		const wchar_t* tip = nullptr;
 		switch (id)
 		{
+		case ID_TOOLMENU_PEN: tip = L"펜"; break;
+		case ID_TOOLMENU_LINE: tip = L"직선"; break;
+		case ID_TOOLMENU_RECT: tip = L"사각형"; break;
+		case ID_TOOLMENU_ROUNDRECT: tip = L"둥근 사각형"; break;
+		case ID_TOOLMENU_SQUARE: tip = L"정사각형"; break;
+		case ID_TOOLMENU_DIAMOND: tip = L"마름모"; break;
+		case ID_TOOLMENU_ELLIPSE: tip = L"타원"; break;
+		case ID_TOOLMENU_CIRCLECENTER: tip = L"중심에서 원"; break;
+		case ID_TOOLMENU_CIRCLE3PT: tip = L"3점 원"; break;
+		case ID_TOOLMENU_ARC3PT: tip = L"3점 호"; break;
+		case ID_TOOLMENU_PIE: tip = L"파이(부채꼴)"; break;
+		case ID_TOOLMENU_DONUT: tip = L"도넛"; break;
+		case ID_TOOLMENU_PAINTBUCKET: tip = L"페인트 통"; break;
+		case ID_TOOLMENU_GRADIENT: tip = L"그라디언트"; break;
+		case ID_TOOLMENU_TRIM: tip = L"트림"; break;
 		case ID_TOOL_RECT: tip = L"사각형"; break;
 		case ID_TOOL_TRIANGLE: tip = L"삼각형"; break;
 		case ID_TOOL_POLYGON: tip = L"정다각형"; break;
@@ -842,6 +944,100 @@ void CMainFrame::OnSubPolyline()
 void CMainFrame::OnFilePreviewHtml()
 {
 	CHtmlPreviewFrame::Show();   // HTML 미리보기 (Step 4.6)
+}
+
+// 상단 "도구" 메뉴 표 (Step 6.19.2). 항목 ID 와 활성 도구 타입. HTML UI 컴포넌트는 ui 인덱스로 종류를 고른다
+struct ToolMenuEntry
+{
+	UINT     id;
+	ToolType type;
+	int      ui;   // -1: 해당 없음, 0~9: UiComponentTool 종류
+};
+
+static const ToolMenuEntry kToolMenu[] = {
+	{ ID_TOOLMENU_SELECT, ToolType::Select },
+	{ ID_TOOLMENU_PAN, ToolType::Pan },
+	{ ID_TOOLMENU_PEN, ToolType::Pen },
+	{ ID_TOOLMENU_LINE, ToolType::Line },
+	{ ID_TOOLMENU_ELLIPSE, ToolType::Ellipse },
+	{ ID_TOOLMENU_TEXT, ToolType::Text },
+	{ ID_TOOLMENU_PAINTBUCKET, ToolType::PaintBucket },
+	{ ID_TOOLMENU_GRADIENT, ToolType::Gradient },
+	{ ID_TOOLMENU_RECT, ToolType::Rect },
+	{ ID_TOOLMENU_TRIANGLE, ToolType::Triangle },
+	{ ID_TOOLMENU_POLYLINE, ToolType::Polyline },
+	{ ID_TOOLMENU_POLYGON, ToolType::Polygon },
+	{ ID_TOOLMENU_STAR, ToolType::Star },
+	{ ID_TOOLMENU_GEAR, ToolType::Gear },
+	{ ID_TOOLMENU_SPIRAL, ToolType::Spiral },
+	{ ID_TOOLMENU_HEART, ToolType::Heart },
+	{ ID_TOOLMENU_ZOOMIN, ToolType::ZoomIn },
+	{ ID_TOOLMENU_ZOOMOUT, ToolType::ZoomOut },
+	{ ID_TOOLMENU_FRAME, ToolType::Frame },
+	{ ID_TOOLMENU_TABLE, ToolType::Table },
+	{ ID_TOOLMENU_HEADING, ToolType::ComponentHeading },
+	{ ID_TOOLMENU_BUTTON, ToolType::ComponentButton },
+	{ ID_TOOLMENU_DIVIDER, ToolType::ComponentDivider },
+	{ ID_TOOLMENU_SPACER, ToolType::ComponentSpacer },
+	{ ID_TOOLMENU_UI_TEXTBOX, ToolType::UiComponent, 0 },
+	{ ID_TOOLMENU_UI_INPUT, ToolType::UiComponent, 1 },
+	{ ID_TOOLMENU_UI_CHECK, ToolType::UiComponent, 2 },
+	{ ID_TOOLMENU_UI_COMBO, ToolType::UiComponent, 3 },
+	{ ID_TOOLMENU_UI_LIST, ToolType::UiComponent, 4 },
+	{ ID_TOOLMENU_UI_BAR, ToolType::UiComponent, 5 },
+	{ ID_TOOLMENU_UI_TABS, ToolType::UiComponent, 6 },
+	{ ID_TOOLMENU_UI_BADGE, ToolType::UiComponent, 7 },
+	{ ID_TOOLMENU_UI_CARD, ToolType::UiComponent, 8 },
+	{ ID_TOOLMENU_UI_PAGER, ToolType::UiComponent, 9 },
+	{ ID_TOOLMENU_TRIM, ToolType::Trim, -1 },
+	{ ID_TOOLMENU_ROUNDRECT, ToolType::RoundRect, -1 },
+	{ ID_TOOLMENU_SQUARE, ToolType::Square, -1 },
+	{ ID_TOOLMENU_DIAMOND, ToolType::Diamond, -1 },
+	{ ID_TOOLMENU_CIRCLECENTER, ToolType::CircleCenter, -1 },
+	{ ID_TOOLMENU_CIRCLE3PT, ToolType::Circle3Pt, -1 },
+	{ ID_TOOLMENU_ARC3PT, ToolType::Arc3Pt, -1 },
+	{ ID_TOOLMENU_PIE, ToolType::Pie, -1 },
+	{ ID_TOOLMENU_DONUT, ToolType::Donut, -1 },
+};
+
+static const ToolMenuEntry* FindToolMenu(UINT nID)
+{
+	for (const ToolMenuEntry& e : kToolMenu)
+		if (e.id == nID) return &e;
+	return nullptr;
+}
+
+void CMainFrame::OnToolMenuCommand(UINT nID)
+{
+	const ToolMenuEntry* e = FindToolMenu(nID);
+	if (!e) return;
+	if (e->ui >= 0) UiComponentTool::SetPending(e->ui);
+	GetApp()->GetToolManager().SetActiveTool(e->type);
+}
+
+void CMainFrame::OnUpdateToolMenuCommand(CCmdUI* pCmdUI)
+{
+	const ToolMenuEntry* e = FindToolMenu(pCmdUI->m_nID);
+	const ToolType active = GetApp()->GetToolManager().GetActiveType();
+	bool isCur = e && active == e->type;
+	if (e && e->ui >= 0) isCur = isCur && UiComponentTool::Pending() == e->ui;
+	pCmdUI->Enable(TRUE);
+	pCmdUI->SetCheck(isCur ? 1 : 0);
+}
+
+void CMainFrame::OnHelpShortcuts()
+{
+	AfxMessageBox(
+		L"도구 단축키\n"
+		L"  V 선택   H 손도구 (Space 누른 채 드래그도 가능)   P 펜   L 직선\n"
+		L"  M 사각형   E 타원   G 다각형   T 텍스트   F 프레임\n"
+		L"  K 페인트 통   D 그라디언트   Z 확대   X 축소\n\n"
+		L"명령 단축키\n"
+		L"  Ctrl+G 그룹   Ctrl+Shift+G 그룹 해제   Ctrl+D 복제\n"
+		L"  Ctrl+] / Ctrl+[ 앞으로 / 뒤로   Ctrl+J 연결   Ctrl+7 클리핑 마스크\n"
+		L"  Ctrl+1 실제 크기   Ctrl+0 화면에 맞추기\n"
+		L"  Ctrl+Shift+U/S/I/X/T 패스파인더 (합치기/빼기/교차/제외/트림)",
+		MB_ICONINFORMATION);
 }
 
 void CMainFrame::OnSubToolCommand(UINT nID)

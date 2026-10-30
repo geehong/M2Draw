@@ -175,6 +175,16 @@ LANGUAGE 18, 1
 // 메뉴
 //
 
+// 파일 > 내보내기 하위 메뉴 (두 메뉴 템플릿이 같은 정의를 쓴다: Step 6.19.1)
+#define M2_EXPORT_MENU_ITEMS \
+    POPUP "내보내기(&E)" \
+    BEGIN \
+        MENUITEM "SVG 내보내기(&S)...\tCtrl+Shift+E", ID_FILE_EXPORT_SVG \
+        MENUITEM "HTML 내보내기(&H)...", ID_FILE_EXPORT_HTML \
+        MENUITEM "HTML 미리보기(&P)...", ID_FILE_PREVIEW_HTML \
+        MENUITEM "이미지 내보내기(&I)... (PNG/JPG)", ID_FILE_EXPORT_IMAGE \
+    END
+
 IDR_MAINFRAME MENU
 BEGIN
     POPUP "파일(&F)"
@@ -182,10 +192,7 @@ BEGIN
         MENUITEM "새로 만들기(&N)\tCtrl+N",                ID_FILE_NEW
         MENUITEM "열기(&O)...\tCtrl+O",            ID_FILE_OPEN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
-        MENUITEM "SVG 내보내기(&E)...\tCtrl+Shift+E", ID_FILE_EXPORT_SVG
-        MENUITEM "HTML 내보내기(&H)...",             ID_FILE_EXPORT_HTML
-        MENUITEM "HTML 미리보기(&P)...",             ID_FILE_PREVIEW_HTML
-        MENUITEM "이미지 내보내기(&J)... (PNG/JPG)",    ID_FILE_EXPORT_IMAGE
+        M2_EXPORT_MENU_ITEMS
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM SEPARATOR
         MENUITEM "인쇄 설정(&R)...",             ID_FILE_PRINT_SETUP
@@ -227,10 +234,7 @@ BEGIN
         MENUITEM "새로 만들기(&N)\tCtrl+N",                ID_FILE_NEW
         MENUITEM "열기(&O)...\tCtrl+O",            ID_FILE_OPEN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
-        MENUITEM "SVG 내보내기(&E)...\tCtrl+Shift+E", ID_FILE_EXPORT_SVG
-        MENUITEM "HTML 내보내기(&H)...",             ID_FILE_EXPORT_HTML
-        MENUITEM "HTML 미리보기(&P)...",             ID_FILE_PREVIEW_HTML
-        MENUITEM "이미지 내보내기(&J)... (PNG/JPG)",    ID_FILE_EXPORT_IMAGE
+        M2_EXPORT_MENU_ITEMS
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM "저장(&S)\tCtrl+S",               ID_FILE_SAVE
         MENUITEM "다른 이름으로 저장(&A)...",                 ID_FILE_SAVE_AS
@@ -251,11 +255,32 @@ BEGIN
         MENUITEM "잘라내기(&T)\tCtrl+X",                ID_EDIT_CUT
         MENUITEM "복사(&C)\tCtrl+C",               ID_EDIT_COPY
         MENUITEM "붙여넣기(&P)\tCtrl+V",              ID_EDIT_PASTE
+        MENUITEM SEPARATOR
+        MENUITEM "지우기(&D)\tDel",                    ID_EDIT_CLEAR
+        MENUITEM "복제(&M)\tCtrl+D",                   ID_EDIT_DUPLICATE
+        MENUITEM "모두 선택(&A)",                      ID_EDIT_SELECT_ALL
+        MENUITEM "선택 해제(&N)",                      ID_EDIT_DESELECT
     END
     POPUP "오브젝트(&O)"
     BEGIN
         MENUITEM "그룹(&G)\tCtrl+G",                 ID_OBJECT_GROUP
         MENUITEM "그룹 해제(&U)\tCtrl+Shift+G",      ID_OBJECT_UNGROUP
+        MENUITEM "프레임으로 감싸기(&Z)",               ID_OBJECT_WRAP_FRAME
+        MENUITEM "그룹 안으로 들어가기(&E)",            ID_OBJECT_ENTER_GROUP
+        MENUITEM "그룹 밖으로 나가기(&X)",              ID_OBJECT_EXIT_GROUP
+        MENUITEM SEPARATOR
+        POPUP "정렬(&A)"
+        BEGIN
+            MENUITEM "왼쪽 맞춤(&L)",                    ID_ALIGN_LEFT
+            MENUITEM "가로 가운데 맞춤(&H)",             ID_ALIGN_CENTERH
+            MENUITEM "오른쪽 맞춤(&R)",                  ID_ALIGN_RIGHT
+            MENUITEM "위쪽 맞춤(&T)",                    ID_ALIGN_TOP
+            MENUITEM "세로 가운데 맞춤(&M)",             ID_ALIGN_CENTERV
+            MENUITEM "아래쪽 맞춤(&B)",                  ID_ALIGN_BOTTOM
+            MENUITEM SEPARATOR
+            MENUITEM "가로 간격 균등(&D)",               ID_DISTRIBUTE_H
+            MENUITEM "세로 간격 균등(&V)",               ID_DISTRIBUTE_V
+        END
         MENUITEM SEPARATOR
         MENUITEM "맨 앞으로(&F)\tCtrl+Shift+]",       ID_OBJECT_FRONT
         MENUITEM "앞으로(&W)\tCtrl+]",                 ID_OBJECT_FORWARD
@@ -285,7 +310,7 @@ BEGIN
             MENUITEM "반시계 방향 90° 회전(&L)",         ID_OBJECT_ROT_CCW
         END
         MENUITEM SEPARATOR
-        POPUP "패스(&P)"
+        POPUP "패스(&N)"
         BEGIN
             MENUITEM "윤곽선 만들기 (외곽선 확장)(&O)",  ID_PATH_OUTLINE
             MENUITEM "단순화(&S)...",                  ID_PATH_SIMPLIFY
@@ -294,6 +319,66 @@ BEGIN
             MENUITEM SEPARATOR
             MENUITEM "텍스트를 윤곽선으로 변환(&C)",   ID_TEXT_TO_PATH
         END
+    END
+    POPUP "도구(&T)"
+    BEGIN
+        MENUITEM "선택(&V)\tV",                       ID_TOOLMENU_SELECT
+        MENUITEM "손도구(&H)\tH / Space",               ID_TOOLMENU_PAN
+        MENUITEM SEPARATOR
+        MENUITEM "펜(&P)\tP",                         ID_TOOLMENU_PEN
+        MENUITEM "폴리라인(&O)",                       ID_TOOLMENU_POLYLINE
+        MENUITEM "직선(&L)\tL",                        ID_TOOLMENU_LINE
+        MENUITEM SEPARATOR
+        MENUITEM "사각형(&M)\tM",                      ID_TOOLMENU_RECT
+        MENUITEM "둥근 사각형(&U)",                    ID_TOOLMENU_ROUNDRECT
+        MENUITEM "정사각형(&Q)",                      ID_TOOLMENU_SQUARE
+        MENUITEM "마름모(&D)",                        ID_TOOLMENU_DIAMOND
+        MENUITEM "삼각형(&I)",                         ID_TOOLMENU_TRIANGLE
+        MENUITEM "타원(&E)\tE",                        ID_TOOLMENU_ELLIPSE
+        MENUITEM "중심에서 원(&F)",                    ID_TOOLMENU_CIRCLECENTER
+        MENUITEM "3점 원",                            ID_TOOLMENU_CIRCLE3PT
+        MENUITEM "3점 호",                            ID_TOOLMENU_ARC3PT
+        MENUITEM "파이(부채꼴)",                       ID_TOOLMENU_PIE
+        MENUITEM "도넛",                              ID_TOOLMENU_DONUT
+        MENUITEM SEPARATOR
+        MENUITEM "정다각형(&G)\tG",                    ID_TOOLMENU_POLYGON
+        MENUITEM "별(&A)",                             ID_TOOLMENU_STAR
+        MENUITEM "기어(&R)",                           ID_TOOLMENU_GEAR
+        MENUITEM "스파이럴(&S)",                       ID_TOOLMENU_SPIRAL
+        MENUITEM "하트(&N)",                           ID_TOOLMENU_HEART
+        MENUITEM SEPARATOR
+        MENUITEM "텍스트(&T)\tT",                      ID_TOOLMENU_TEXT
+        MENUITEM SEPARATOR
+        POPUP "HTML 요소(&W)"
+        BEGIN
+            MENUITEM "프레임(&F)\tF",                   ID_TOOLMENU_FRAME
+            MENUITEM "테이블(&B)",                      ID_TOOLMENU_TABLE
+            MENUITEM "헤딩(&D)",                        ID_TOOLMENU_HEADING
+            MENUITEM "버튼(&U)",                        ID_TOOLMENU_BUTTON
+            MENUITEM "구분선(&Q)",                      ID_TOOLMENU_DIVIDER
+            MENUITEM "간격(&C)",                        ID_TOOLMENU_SPACER
+        END
+        POPUP "HTML UI 컴포넌트(&C)"
+        BEGIN
+            MENUITEM "텍스트 박스(&T)",                  ID_TOOLMENU_UI_TEXTBOX
+            MENUITEM "입력 필드(&I)",                   ID_TOOLMENU_UI_INPUT
+            MENUITEM "체크/라디오/스위치(&K)",           ID_TOOLMENU_UI_CHECK
+            MENUITEM "콤보 박스(&O)",                   ID_TOOLMENU_UI_COMBO
+            MENUITEM "목록(&L)",                        ID_TOOLMENU_UI_LIST
+            MENUITEM "진행/구분 막대(&B)",               ID_TOOLMENU_UI_BAR
+            MENUITEM "탭(&A)",                          ID_TOOLMENU_UI_TABS
+            MENUITEM "배지(&G)",                        ID_TOOLMENU_UI_BADGE
+            MENUITEM "카드(&D)",                        ID_TOOLMENU_UI_CARD
+            MENUITEM "페이지/경로(&P)",                  ID_TOOLMENU_UI_PAGER
+        END
+        MENUITEM SEPARATOR
+        MENUITEM "트림(&B)\tR",                        ID_TOOLMENU_TRIM
+        MENUITEM SEPARATOR
+        MENUITEM "페인트 통(&J)\tK",                    ID_TOOLMENU_PAINTBUCKET
+        MENUITEM "그라디언트(&Y)\tD",                   ID_TOOLMENU_GRADIENT
+        MENUITEM SEPARATOR
+        MENUITEM "확대(&Z)\tZ",                        ID_TOOLMENU_ZOOMIN
+        MENUITEM "축소(&X)\tX",                        ID_TOOLMENU_ZOOMOUT
     END
     POPUP "보기(&V)"
     BEGIN
@@ -306,6 +391,12 @@ BEGIN
         MENUITEM SEPARATOR
 
         MENUITEM "격자 표시(&G)",                 ID_VIEW_GRID
+        MENUITEM "격자에 맞춤(&N)",                ID_VIEW_SNAP_GRID
+        MENUITEM "눈금자(&R)",                    ID_VIEW_RULER
+        MENUITEM "스마트 가이드(&M)",              ID_VIEW_SMART_GUIDES
+        MENUITEM SEPARATOR
+        MENUITEM "실제 크기(&A)\tCtrl+1",           ID_VIEW_ACTUAL_SIZE
+        MENUITEM "화면에 맞추기(&F)\tCtrl+0",       ID_VIEW_FIT
 
         MENUITEM SEPARATOR
 
@@ -321,6 +412,7 @@ BEGIN
     END
     POPUP "도움말(&H)"
     BEGIN
+        MENUITEM "도구 단축키(&K)",                 ID_HELP_SHORTCUTS
         MENUITEM "M2Draw 정보(&A)...",          ID_APP_ABOUT
     END
 END
@@ -356,7 +448,7 @@ BEGIN
         MENUITEM "열기(&O)",                       ID_OPEN
         MENUITEM "연결 프로그램(&W)....",              ID_OPEN_WITH
         MENUITEM SEPARATOR
-        MENUITEM "컴파일(&C)",                    ID_DUMMY_COMPILE
+        MENUITEM "컴파일(&M)",                    ID_DUMMY_COMPILE
         MENUITEM SEPARATOR
         MENUITEM "잘라내기(&T)\tCtrl+X",                ID_EDIT_CUT
         MENUITEM "복사(&C)\tCtrl+C",               ID_EDIT_COPY
@@ -371,7 +463,7 @@ BEGIN
     POPUP "팝업"
     BEGIN
         MENUITEM "복사(&C)",                       ID_EDIT_COPY
-        MENUITEM "지우기(&C)",                      ID_EDIT_CLEAR
+        MENUITEM "지우기(&D)",                      ID_EDIT_CLEAR
         MENUITEM SEPARATOR
         MENUITEM "숨기기(&H)",                       ID_VIEW_OUTPUTWND
     END
@@ -389,6 +481,8 @@ END
 
 IDR_MAINFRAME ACCELERATORS
 BEGIN
+    "1",            ID_VIEW_ACTUAL_SIZE,    VIRTKEY,CONTROL
+    "0",            ID_VIEW_FIT,            VIRTKEY,CONTROL
     "N",            ID_FILE_NEW,            VIRTKEY,CONTROL
     "O",            ID_FILE_OPEN,           VIRTKEY,CONTROL
     "I",            ID_FILE_PLACE_IMAGE,    VIRTKEY,CONTROL,SHIFT
@@ -588,6 +682,69 @@ BEGIN
     ID_FILE_PLACE_IMAGE      "이미지 파일을 캔버스에 가져옵니다.\n이미지 가져오기"
     ID_FILE_EXPORT_SVG       "순수 SVG(Illustrator/Inkscape/Figma/브라우저 호환)로 내보냅니다.\nSVG 내보내기"
     ID_FILE_PREVIEW_HTML     "WebView2 로 현재 문서의 HTML 을 실시간 미리 봅니다. 폭 조절과 PDF 저장도 지원합니다.\nHTML 미리보기"
+    ID_EDIT_DUPLICATE "선택한 오브젝트를 복제합니다.\n복제"
+    ID_EDIT_DESELECT "선택을 해제합니다.\n선택 해제"
+    ID_OBJECT_ENTER_GROUP "선택한 그룹 안으로 들어가 개별 오브젝트를 편집합니다.\n그룹 안으로"
+    ID_OBJECT_EXIT_GROUP "그룹 편집 단계를 한 단계 위로 나갑니다.\n그룹 밖으로"
+    ID_VIEW_ACTUAL_SIZE "확대율을 100%로 바꿉니다.\n실제 크기"
+    ID_VIEW_FIT "문서가 화면에 들어오도록 확대율을 맞춥니다.\n화면에 맞추기"
+    ID_VIEW_RULER "눈금자를 표시하거나 숨깁니다.\n눈금자"
+    ID_VIEW_SMART_GUIDES "스마트 가이드(정렬선)를 켜거나 끕니다.\n스마트 가이드"
+    ID_VIEW_SNAP_GRID "격자에 맞춰 이동/그리기를 할지 켜거나 끕니다.\n격자에 맞춤"
+    ID_HELP_SHORTCUTS "도구와 주요 명령의 단축키 목록을 표시합니다.\n도구 단축키"
+    ID_OBJECT_WRAP_FRAME "선택한 오브젝트를 프레임으로 감쌉니다.
+프레임으로 감싸기"
+    ID_TOOLMENU_TRIM "트림 도구 (R)로 전환합니다. 절단 개체를 고른 뒤 잘라낼 조각을 클릭합니다.\n트림"
+    ID_TOOLMENU_ROUNDRECT "둥근 사각형 도구로 전환합니다. 드래그하여 만듭니다.
+둥근 사각형"
+    ID_TOOLMENU_SQUARE "정사각형 도구로 전환합니다. 드래그하여 만듭니다.
+정사각형"
+    ID_TOOLMENU_DIAMOND "마름모 도구로 전환합니다. 드래그한 상자에 맞춥니다.
+마름모"
+    ID_TOOLMENU_CIRCLECENTER "중심에서 원 도구로 전환합니다. 중심을 누르고 끌어 반지름을 정합니다.
+중심에서 원"
+    ID_TOOLMENU_CIRCLE3PT "3점 원 도구로 전환합니다. 원 위의 세 점을 클릭합니다.
+3점 원"
+    ID_TOOLMENU_ARC3PT "3점 호 도구로 전환합니다. 시작점, 끝점, 호 위의 점을 클릭합니다.
+3점 호"
+    ID_TOOLMENU_PIE "파이(부채꼴) 도구로 전환합니다. 중심을 누르고 끌어 반지름을 정합니다.
+파이"
+    ID_TOOLMENU_DONUT "도넛 도구로 전환합니다. 중심을 누르고 끌어 바깥 반지름을 정합니다.
+도넛"
+    ID_TOOLMENU_SELECT "선택 도구 (V)로 전환합니다.\n선택"
+    ID_TOOLMENU_PAN "손도구 (H)로 전환합니다.\n손도구"
+    ID_TOOLMENU_PEN "펜 도구 (P)로 전환합니다.\n펜"
+    ID_TOOLMENU_LINE "직선 도구 (L)로 전환합니다.\n직선"
+    ID_TOOLMENU_ELLIPSE "타원 도구 (E)로 전환합니다.\n타원"
+    ID_TOOLMENU_TEXT "텍스트 도구 (T)로 전환합니다.\n텍스트"
+    ID_TOOLMENU_PAINTBUCKET "페인트 통 도구 (K)로 전환합니다.\n페인트 통"
+    ID_TOOLMENU_GRADIENT "그라디언트 도구 (D)로 전환합니다.\n그라디언트"
+    ID_TOOLMENU_RECT "사각형 도구 (M)로 전환합니다.\n사각형"
+    ID_TOOLMENU_TRIANGLE "삼각형 도구로 전환합니다.\n삼각형"
+    ID_TOOLMENU_POLYLINE "열린 다각형(폴리라인) 도구로 전환합니다.\n폴리라인"
+    ID_TOOLMENU_POLYGON "정다각형 도구 (G)로 전환합니다.\n정다각형"
+    ID_TOOLMENU_STAR "별 도구로 전환합니다.\n별"
+    ID_TOOLMENU_GEAR "기어 도구로 전환합니다.\n기어"
+    ID_TOOLMENU_SPIRAL "스파이럴 도구로 전환합니다.\n스파이럴"
+    ID_TOOLMENU_HEART "하트 도구로 전환합니다.\n하트"
+    ID_TOOLMENU_ZOOMIN "확대 도구 (Z)로 전환합니다.\n확대"
+    ID_TOOLMENU_ZOOMOUT "축소 도구 (X)로 전환합니다.\n축소"
+    ID_TOOLMENU_FRAME "프레임 도구 (F)로 전환합니다.\n프레임"
+    ID_TOOLMENU_TABLE "테이블 도구로 전환합니다.\n테이블"
+    ID_TOOLMENU_HEADING "헤딩 도구로 전환합니다.\n헤딩"
+    ID_TOOLMENU_BUTTON "버튼 도구로 전환합니다.\n버튼"
+    ID_TOOLMENU_DIVIDER "구분선 도구로 전환합니다.\n구분선"
+    ID_TOOLMENU_SPACER "간격 도구로 전환합니다.\n간격"
+    ID_TOOLMENU_UI_TEXTBOX "텍스트 박스 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n텍스트 박스"
+    ID_TOOLMENU_UI_INPUT "입력 필드 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n입력 필드"
+    ID_TOOLMENU_UI_CHECK "체크/라디오/스위치 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n체크/라디오/스위치"
+    ID_TOOLMENU_UI_COMBO "콤보 박스 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n콤보 박스"
+    ID_TOOLMENU_UI_LIST "목록 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n목록"
+    ID_TOOLMENU_UI_BAR "진행/구분 막대 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n진행/구분 막대"
+    ID_TOOLMENU_UI_TABS "탭 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n탭"
+    ID_TOOLMENU_UI_BADGE "배지 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n배지"
+    ID_TOOLMENU_UI_CARD "카드 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n카드"
+    ID_TOOLMENU_UI_PAGER "페이지/경로 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n페이지/경로"
     ID_FILE_EXPORT_HTML      "시맨틱 HTML/CSS 반응형 웹 파일로 내보냅니다.\nHTML 내보내기"
     ID_FILE_EXPORT_IMAGE     "배율/해상도를 지정해 PNG 또는 JPG 이미지로 내보냅니다.\n이미지 내보내기"
     ID_SUB_SIMPLIFY          "정점을 줄여 패스를 단순화합니다. 허용 오차를 입력한 뒤 적용하세요.

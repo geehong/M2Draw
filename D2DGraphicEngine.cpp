@@ -2494,7 +2494,7 @@ Matrix2D Transformer::Translate(Vec2 d, const Matrix2D& initialXf)
 }
 
 std::optional<Matrix2D> Transformer::ScaleByHandle(int handleIdx, Vec2 curWorld,
-                                                   const Rect2& b, const Matrix2D& initialXf)
+                                                   const Rect2& b, const Matrix2D& initialXf, bool uniformCorner)
 {
     Matrix2D inv = initialXf;
     if (!inv.Invert()) return std::nullopt;
@@ -2518,6 +2518,8 @@ std::optional<Matrix2D> Transformer::ScaleByHandle(int handleIdx, Vec2 curWorld,
     }
 
     if (std::abs(sx) < 0.01f) sx = 0.01f;
+    // 모서리는 기본적으로 균등 비율 (uniformCorner): 두 비율의 평균을 같이 쓴다. Shift 는 자유 비율
+    if (uniformCorner && (handleIdx == 1 || handleIdx == 3 || handleIdx == 5 || handleIdx == 7)) { const float k = (sx + sy) * 0.5f; sx = sy = k; }
     if (std::abs(sy) < 0.01f) sy = 0.01f;
     return Matrix2D::Scale(sx, sy, anchor) * initialXf;
 }
@@ -2530,6 +2532,14 @@ Matrix2D Transformer::RotateAboutCenter(Vec2 startWorld, Vec2 curWorld,
     const float a1 = std::atan2(curWorld.y - centerWorld.y, curWorld.x - centerWorld.x);
     const float deg = (a1 - a0) * (180.0f / 3.14159265f);
     return initialXf * Matrix2D::Rotation(deg, centerWorld);
+}
+
+Matrix2D Transformer::RotateAboutPoint(Vec2 startWorld, Vec2 curWorld, Vec2 pivotWorld, const Matrix2D& initialXf)
+{
+    const float a0 = std::atan2(startWorld.y - pivotWorld.y, startWorld.x - pivotWorld.x);
+    const float a1 = std::atan2(curWorld.y - pivotWorld.y, curWorld.x - pivotWorld.x);
+    const float deg = (a1 - a0) * (180.0f / 3.14159265f);
+    return initialXf * Matrix2D::Rotation(deg, pivotWorld);
 }
 
 void Transformer::GetLocalHandlePoints(const Rect2& b, Vec2 out[9])

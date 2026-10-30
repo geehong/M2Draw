@@ -1391,7 +1391,7 @@ public:
     //    실패(역행렬 불가, 크기 0 등) 시 nullopt
     static std::optional<Matrix2D> ScaleByHandle(int handleIdx, Vec2 curWorld,
                                                  const Rect2& initialLocalBounds,
-                                                 const Matrix2D& initialXf);
+                                                 const Matrix2D& initialXf, bool uniformCorner = false);
 #ifndef GE_NO_D2D
     static std::optional<Matrix2D> ScaleByHandle(int handleIdx, D2D1_POINT_2F curWorld,
                                                  const D2D1_RECT_F& initialLocalBounds,
@@ -1402,6 +1402,8 @@ public:
     }
 #endif
 
+    // 3-1. 임의 피봇 기준 회전 (선택 도구의 회전 피봇, Step 6.14). pivotWorld 는 initialXf 와 같은 부모 좌표계
+    static Matrix2D RotateAboutPoint(Vec2 startWorld, Vec2 curWorld, Vec2 pivotWorld, const Matrix2D& initialXf);
     // 3. 중심점 기준 회전
     static Matrix2D RotateAboutCenter(Vec2 startWorld, Vec2 curWorld,
                                       const Rect2& initialLocalBounds,

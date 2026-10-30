@@ -254,6 +254,8 @@
     <ClInclude Include="HtmlComponents\TableComponent.h" />
     <ClInclude Include="HtmlComponents\UiComponents.h" />
     <ClInclude Include="HtmlPreview.h" />
+    <ClInclude Include="PathTrim.h" />
+    <ClInclude Include="ShapePresets.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="ChildFrm.cpp" />
@@ -271,6 +273,8 @@
     <ClCompile Include="HtmlComponents\TableComponent.cpp" />
     <ClCompile Include="HtmlComponents\UiComponents.cpp" />
     <ClCompile Include="HtmlPreview.cpp" />
+    <ClCompile Include="PathTrim.cpp" />
+    <ClCompile Include="ShapePresets.cpp" />
     <ClCompile Include="D2DPropertyView.cpp" />
     <ClCompile Include="D2DLayer.cpp" />
     <ClCompile Include="LayerWnd.cpp" />

@@ -104,7 +104,16 @@ enum class ToolType
 	UiComponent,           // 표준 HTML UI 컴포넌트 도구 (4.5.17): 어떤 종류인지는 UiComponentTool::SetPending 으로 지정
 	Arc,                   // 원호/파이/도넛 아크 도구 (6.13.1)
 	BlockArrow,            // 블록 화살표 도구 (6.13.2)
-	Callout                // 말풍선(콜아웃) 도구 (6.13.2)
+	Callout,               // 말풍선(콜아웃) 도구 (6.13.2)
+	Trim,                  // 트림 도구 (6.21): 라이노식 절단 개체 선택 -> 조각 클릭 (Shift: 끝점 연장)
+	RoundRect,             // 둥근 사각형 (6.18.3): 드래그
+	Square,                // 정사각형: 드래그 (한 변 = 큰 쪽 길이)
+	Diamond,               // 마름모: 드래그한 상자에 맞춤
+	CircleCenter,          // 중심에서 원: 중심 클릭 후 드래그로 반지름
+	Circle3Pt,             // 3점 원: 세 점 클릭
+	Arc3Pt,                // 3점 호: 시작점, 끝점, 호 위의 한 점 클릭
+	Pie,                   // 파이(부채꼴): 중심 클릭 후 드래그로 반지름 (각도는 드래그 방향에서 90도)
+	Donut                  // 도넛: 중심 클릭 후 드래그로 바깥 반지름 (안쪽은 50%)
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)
@@ -177,7 +186,7 @@ public:
 	ToolType GetType() const override { return ToolType::Select; }
 	const wchar_t* GetName() const override { return L"선택 도구 (Select)"; }
 	wchar_t GetShortcut() const override { return L'V'; }
-	enum class Mode { None, Moving, Scaling, Rotating, Skewing, EditNode, Marquee, GradientHandle, TableResize, MultiScale, MultiRotate, MultiSkew };
+	enum class Mode { None, Moving, Scaling, Rotating, Skewing, EditNode, Marquee, GradientHandle, TableResize, MultiScale, MultiRotate, MultiSkew, PivotDrag };
 	enum class Handle { None, TL, T, TR, R, BR, B, BL, L, Rotate };
 
 	HCURSOR GetCursor() const override;
@@ -196,6 +205,8 @@ public:
 	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; m_hoverCornerRotate = false; m_hoverAngleDeg = 0.0f; m_gradShape = nullptr; m_gradHandle = GradHandle::None; m_tbl = nullptr; m_hoverTbl = 0; m_guides.clear(); m_gaps.clear(); m_multiNodes.clear(); m_multiInitial.clear(); }
 
 	Handle GetActiveHandle() const { return m_handle; }
+	// 회전 피봇을 두 번 눌렀으면(더블클릭) 중심으로 되돌리고 true (Step 6.14). 뷰의 더블클릭 처리에서 호출
+	bool ResetPivotAt(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view);
 	void SetActiveHandle(Handle h) { m_handle = h; }
 
 private:
@@ -241,6 +252,15 @@ private:
 	std::vector<ge::Matrix2D> m_multiInitial;   // 드래그 시작 시점의 각 노드 로컬 변환
 	ge::Rect2                 m_multiRect{};    // 드래그 시작 시점의 결합 경계 상자 (월드)
 	Handle                    m_multiHandle = Handle::None;
+	// 회전 피봇 (Step 6.14): 선택 도구 상태이며 파일에 저장하지 않는다. 프레임(단일=도형 지역 상자, 다중=결합 상자) 안의 비율 좌표
+	ge::Vec2                  m_pivotFrac{ 0.5f, 0.5f };
+	std::vector<ge::Node*>    m_pivotSel;          // 피봇이 속한 선택 (선택이 바뀌면 중심으로 되돌림)
+	ge::Vec2                  m_rotPivot{};        // 단일 회전 시작 시점 피봇 (월드)
+	ge::Vec2                  m_multiPivot{};      // 다중 회전 시작 시점 피봇 (월드)
+	unsigned long             m_pivotClickTick = 0; // 피봇 두 번 클릭 판정 (중심 복귀)
+	D2D1_POINT_2F             m_pivotClickPt{};
+	bool                      m_shiftDown = false;
+	bool                      m_scaleFromGlyph = false;   // 크기 조절이 바깥 화살표(true)에서 시작했는지, 안쪽 점 핸들(false)인지
 	bool MultiHandlePositions(const std::vector<ge::Node*>& sel, const ViewportTransform& view, D2D1_POINT_2F out[9], ge::Rect2& rect) const;
 	void ApplyMultiTransform(const ToolEvent& e);
 	std::vector<ge::GapMark>   m_gaps;     // 같은 간격 표시 (5.1.3)
@@ -253,10 +273,18 @@ private:
 	void ApplyNodeEdit(ge::PathNode* shape, const ToolEvent& e);
 
 	Handle HitHandle(D2D1_POINT_2F screenPt, const D2D1_POINT_2F handles[9], float tolPx) const;
+	// 사각 핸들 또는 바깥 화살표 글리프 (모서리 대각선 / 변 직선 화살표) 판정 (6.14)
+	Handle HitHandleOrGlyph(D2D1_POINT_2F screenPt, const D2D1_POINT_2F handles[9], float tolPx) const;
+	// 점선 선택 상자 + 바깥 화살표 핸들 그리기
+	void DrawBoxGlyphs(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const D2D1_POINT_2F h[9]) const;
 	bool GetHandleScreenPositions(ge::Node* shape, const ViewportTransform& view, ID2D1Factory* f, D2D1_POINT_2F outHandles[9], D2D1_RECT_F* outLocalBounds = nullptr) const;
 	void ApplyMove(const std::vector<ge::Node*>& selection);
 	void ApplyScale(ge::Node* shape);
 	void ApplyRotate(ge::Node* shape);
+	bool PivotFrame(const std::vector<ge::Node*>& sel, ge::Matrix2D& xf, ge::Rect2& rect);
+	ge::Vec2 PivotWorld(const std::vector<ge::Node*>& sel);
+	void UpdatePivotDrag(const ToolEvent& e);
+	void DrawPivotMarker(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, D2D1_POINT_2F from, D2D1_POINT_2F to);
 	void ApplySkew(ge::Node* shape);
 };
 
@@ -604,6 +632,81 @@ private:
 	static int    s_pending;
 	bool          m_drag = false;
 	D2D1_POINT_2F m_startW{}, m_curW{};
+	std::vector<ge::GuideLine> m_guides;
+};
+
+// 트림 도구 (Step 6.21, 라이노 Trim 방식). 1단계: 절단 개체 선택 (클릭으로 토글, L 로 임시 직선, Enter 완료)
+// 2단계: 트림할 조각 클릭 (Shift+끝점 근처 클릭 = 연장). E=절단 선 연장, A=가상 교차, U=실행 취소, Enter=종료, Esc=취소
+class TrimTool : public ITool
+{
+public:
+	ToolType GetType() const override { return ToolType::Trim; }
+	const wchar_t* GetName() const override { return L"트림 도구 (Trim)"; }
+	wchar_t GetShortcut() const override { return L'R'; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnKeyDown(UINT nChar, CM2DrawDoc* pDoc) override;
+	bool HasActiveShape() const override { return m_stage == Stage::Target || !m_cutterIds.empty() || m_hasLineStart; }
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+private:
+	enum class Stage { Cutters, Target };
+	struct LineCutter { ge::Vec2 a, b; };   // 월드 좌표 임시 직선 (L 옵션)
+
+	void UpdatePrompt() const;
+	void Finish();
+	void ApplyResult(CM2DrawDoc* pDoc, ge::PathNode* target, size_t subIdx, const std::vector<ge::SubPath>& pieces);
+
+	Stage m_stage = Stage::Cutters;
+	std::vector<ge::NodeId> m_cutterIds;
+	std::vector<LineCutter> m_lines;
+	bool m_lineMode = false;
+	bool m_hasLineStart = false;
+	ge::Vec2 m_lineStart{};
+	bool m_extendCutters = false;   // E: 절단 선 연장 (직선 절단 개체를 무한 직선으로)
+	bool m_virtualCuts = true;      // A: 가상 교차 (끝점 연장 때 절단 개체의 연장선과도 교차)
+};
+
+// 도형 프리셋 도구 (Step 6.13 / 6.18.3): 사각형/원 변형. 종류마다 인스턴스 하나 (ToolManager 가 등록). 결과는 일반 PathNode
+// 흐름 (BoxShapeTool 과 같음): 드래그 후 떼면 완성 / 제자리 클릭 후 두 번째 클릭에서 완성 (미리보기 표시).
+// 3점 도구 (3점 원/3점 호): 점을 찍을 때마다 쌓고 세 번째 점에서 완성.
+class PresetShapeTool : public ITool
+{
+public:
+	explicit PresetShapeTool(ToolType t) : m_type(t) {}
+	ToolType GetType() const override { return m_type; }
+	const wchar_t* GetName() const override;
+	wchar_t GetShortcut() const override { return 0; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	void OnKeyDown(UINT nChar, CM2DrawDoc* pDoc) override;
+	// 더블클릭 / 우클릭: 작성 중인 도형을 버리고 선택 도구로 전환 (완료된 도형은 이미 문서에 있음)
+	bool OnDoubleClicked(CM2DrawDoc* pDoc) override;
+	bool OnRightClicked(CM2DrawDoc* pDoc) override;
+	bool HasActiveShape() const override { return m_started || !m_pts.empty(); }
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+private:
+	bool IsClickTool() const { return m_type == ToolType::Circle3Pt || m_type == ToolType::Arc3Pt; }
+	void Reset();
+	void Complete(CM2DrawDoc* pDoc, ge::Vec2 cur);       // 드래그형: 시작점과 현재점으로 도형 완성
+	void CompleteClick(CM2DrawDoc* pDoc);                // 3점형: 찍은 세 점으로 완성
+	void Commit(CM2DrawDoc* pDoc, const std::vector<ge::SubPath>& paths, const wchar_t* name, ge::Vec2 anchor);
+	void DrawPaths(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const std::vector<ge::SubPath>& paths,
+	               float zoom, D2D1_POINT_2F pan) const;
+
+	ToolType m_type;
+	bool m_started = false;      // 첫 점 확정 (드래그 시작 또는 첫 클릭)
+	bool m_dragging = false;     // 마우스를 누른 채 이동 중
+	bool m_waiting = false;      // 제자리 클릭 후 두 번째 클릭 대기
+	ge::Vec2 m_start{}, m_cur{};
+	std::vector<ge::Vec2> m_pts; // 3점형의 찍은 점
 	std::vector<ge::GuideLine> m_guides;
 };
 

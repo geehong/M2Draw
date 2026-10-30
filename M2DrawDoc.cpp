@@ -801,7 +801,7 @@ void CM2DrawDoc::OnBooleanOperation(UINT nID)
 	case ID_BOOLEAN_INTERSECT: PerformBooleanOperation(ge::BooleanMode::Intersect); break;
 	case ID_BOOLEAN_EXCLUDE:   PerformBooleanOperation(ge::BooleanMode::Exclude);   break;
 	case ID_BOOLEAN_TRIM:
-		AfxMessageBox(_T("트림/분할 기능은 다음 단계에서 추가될 예정입니다."), MB_ICONINFORMATION);
+		GetApp()->GetToolManager().SetActiveTool(ToolType::Trim);   // 트림은 대화형 도구 (Step 6.21)
 		break;
 	}
 }

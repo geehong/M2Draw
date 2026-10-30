@@ -449,6 +449,91 @@ bool SelectTool::IsOpenPath(ge::Node* shape)
 	return true;
 }
 
+// ---- 선택 가이드 상자 / 바깥 화살표 핸들 (Step 6.14) ----
+// 가이드 상자는 도형 상자에서 kGuideGap(px) 바깥. 도형 포인트와 함께 움직인다 (화면 좌표, 회전 포함)
+static const float kGuideGap = 25.0f;
+
+// 가이드 상자 모서리 g[0..3] = TL, TR, BR, BL (도형 상자 핸들 h[0], h[2], h[4], h[6] 기준)
+static void GuideCorners(const D2D1_POINT_2F h[9], D2D1_POINT_2F g[4])
+{
+	const D2D1_POINT_2F tl = h[0], tr = h[2], br = h[4], bl = h[6];
+	float ux = tr.x - tl.x, uy = tr.y - tl.y;
+	float ul = std::sqrt(ux * ux + uy * uy);
+	if (ul < 1e-3f) { ux = 1.0f; uy = 0.0f; ul = 1.0f; }
+	ux /= ul; uy /= ul;
+	float vx = bl.x - tl.x, vy = bl.y - tl.y;
+	float vl = std::sqrt(vx * vx + vy * vy);
+	if (vl < 1e-3f) { vx = 0.0f; vy = 1.0f; vl = 1.0f; }
+	vx /= vl; vy /= vl;
+	const float d = kGuideGap;
+	g[0] = D2D1::Point2F(tl.x - ux * d - vx * d, tl.y - uy * d - vy * d);
+	g[1] = D2D1::Point2F(tr.x + ux * d - vx * d, tr.y + uy * d - vy * d);
+	g[2] = D2D1::Point2F(br.x + ux * d + vx * d, br.y + uy * d + vy * d);
+	g[3] = D2D1::Point2F(bl.x - ux * d + vx * d, bl.y - uy * d + vy * d);
+}
+
+// 핸들 i (0~7: TL,T,TR,R,BR,B,BL,L) 가 놓이는 가이드 상의 점
+static D2D1_POINT_2F GuidePoint(const D2D1_POINT_2F g[4], int i)
+{
+	auto mid = [](D2D1_POINT_2F a, D2D1_POINT_2F b) { return D2D1::Point2F((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f); };
+	switch (i)
+	{
+	case 0: return g[0];
+	case 2: return g[1];
+	case 4: return g[2];
+	case 6: return g[3];
+	case 1: return mid(g[0], g[1]);
+	case 3: return mid(g[1], g[2]);
+	case 5: return mid(g[2], g[3]);
+	default: return mid(g[3], g[0]);
+	}
+}
+
+// 바깥 화살표 글리프 위치와 방향 (방향 = 중심에서 바깥쪽)
+static void ComputeGlyphs(const D2D1_POINT_2F h[9], D2D1_POINT_2F pos[8], D2D1_POINT_2F dir[8])
+{
+	D2D1_POINT_2F g[4];
+	GuideCorners(h, g);
+	const float cx = (h[0].x + h[4].x) * 0.5f, cy = (h[0].y + h[4].y) * 0.5f;
+	for (int i = 0; i < 8; ++i)
+	{
+		pos[i] = GuidePoint(g, i);
+		float dx = pos[i].x - cx, dy = pos[i].y - cy;
+		const float len = std::sqrt(dx * dx + dy * dy);
+		if (len < 1e-3f) { dx = 0.0f; dy = -1.0f; }
+		else { dx /= len; dy /= len; }
+		dir[i] = D2D1::Point2F(dx, dy);
+	}
+}
+
+// 회전 핸들: 위쪽 가이드 가운데에서 바깥으로 22px
+static D2D1_POINT_2F ComputeRotateHandle(const D2D1_POINT_2F h[9])
+{
+	D2D1_POINT_2F g[4];
+	GuideCorners(h, g);
+	const D2D1_POINT_2F top = GuidePoint(g, 1);
+	const float cx = (h[0].x + h[4].x) * 0.5f, cy = (h[0].y + h[4].y) * 0.5f;
+	float dx = top.x - cx, dy = top.y - cy;
+	const float len = std::sqrt(dx * dx + dy * dy);
+	if (len < 1e-3f) { dx = 0.0f; dy = -1.0f; }
+	else { dx /= len; dy /= len; }
+	return D2D1::Point2F(top.x + dx * 22.0f, top.y + dy * 22.0f);
+}
+
+// 양쪽 화살표 (중심 c, 방향 u, 반길이 half, 화살촉 크기 head)
+static void DrawDoubleArrow(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, D2D1_POINT_2F c, D2D1_POINT_2F u, float half, float head)
+{
+	const float px = -u.y, py = u.x;
+	const D2D1_POINT_2F a = D2D1::Point2F(c.x - u.x * half, c.y - u.y * half);
+	const D2D1_POINT_2F b = D2D1::Point2F(c.x + u.x * half, c.y + u.y * half);
+	const float w = 1.8f;
+	rt->DrawLine(a, b, brush, w);
+	rt->DrawLine(a, D2D1::Point2F(a.x + u.x * head + px * head * 0.6f, a.y + u.y * head + py * head * 0.6f), brush, w);
+	rt->DrawLine(a, D2D1::Point2F(a.x + u.x * head - px * head * 0.6f, a.y + u.y * head - py * head * 0.6f), brush, w);
+	rt->DrawLine(b, D2D1::Point2F(b.x - u.x * head + px * head * 0.6f, b.y - u.y * head + py * head * 0.6f), brush, w);
+	rt->DrawLine(b, D2D1::Point2F(b.x - u.x * head - px * head * 0.6f, b.y - u.y * head - py * head * 0.6f), brush, w);
+}
+
 static bool IsCornerRotateZone(D2D1_POINT_2F screenPt, const D2D1_POINT_2F handles[9])
 {
 	const D2D1_POINT_2F center = D2D1::Point2F(
@@ -536,6 +621,52 @@ HCURSOR SelectTool::GetCursor() const
 	}
 }
 
+SelectTool::Handle SelectTool::HitHandleOrGlyph(D2D1_POINT_2F screenPt, const D2D1_POINT_2F h[9], float tolPx) const
+{
+	const Handle hit = HitHandle(screenPt, h, tolPx);
+	if (hit != Handle::None) return hit;
+	D2D1_POINT_2F pos[8], dir[8];
+	ComputeGlyphs(h, pos, dir);
+	const float tolSq = 10.0f * 10.0f;
+	for (int i = 0; i < 8; ++i)
+	{
+		const float dx = screenPt.x - pos[i].x, dy = screenPt.y - pos[i].y;
+		if (dx * dx + dy * dy <= tolSq) return static_cast<Handle>(i + 1);
+	}
+	return Handle::None;
+}
+
+void SelectTool::DrawBoxGlyphs(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const D2D1_POINT_2F h[9]) const
+{
+	if (!rt || !brush) return;
+	// 점선 가이드 상자: 도형에서 25px 떨어진 바깥
+	D2D1_POINT_2F g[4];
+	GuideCorners(h, g);
+	brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.7f));
+	for (int e = 0; e < 4; ++e)
+	{
+		const D2D1_POINT_2F a = g[e], b = g[(e + 1) % 4];
+		const float dx = b.x - a.x, dy = b.y - a.y;
+		const float len = std::sqrt(dx * dx + dy * dy);
+		for (float d = 0.0f; d + 4.0f <= len; d += 7.0f)
+		{
+			const float t0 = d / len, t1 = (d + 4.0f) / len;
+			rt->DrawLine(D2D1::Point2F(a.x + dx * t0, a.y + dy * t0), D2D1::Point2F(a.x + dx * t1, a.y + dy * t1), brush, 1.0f);
+		}
+	}
+	// 바깥 화살표 핸들: 모서리 = 대각선 양쪽, 변 = 수직 양쪽 (가이드 점선 위에 놓임)
+	D2D1_POINT_2F pos[8], dir[8];
+	ComputeGlyphs(h, pos, dir);
+	for (int i = 0; i < 8; ++i)
+	{
+		const Handle ht = static_cast<Handle>(i + 1);
+		const bool active = (m_handle == ht && (m_mode == Mode::Scaling || m_mode == Mode::MultiScale)) || m_hoverHandle == ht;
+		brush->SetColor(active ? D2D1::ColorF(0.06f, 0.42f, 0.95f, 1.0f) : D2D1::ColorF(0.18f, 0.20f, 0.25f, 0.95f));
+		if (i % 2 == 0) DrawDoubleArrow(rt, brush, pos[i], dir[i], 8.0f, 4.2f);   // 모서리
+		else            DrawDoubleArrow(rt, brush, pos[i], dir[i], 7.0f, 3.8f);   // 변
+	}
+}
+
 SelectTool::Handle SelectTool::HitHandle(D2D1_POINT_2F screenPt, const D2D1_POINT_2F handles[9], float tolPx) const
 {
 	float tolSq = tolPx * tolPx;
@@ -571,6 +702,7 @@ bool SelectTool::GetHandleScreenPositions(ge::Node* shape, const ViewportTransfo
 	{
 		outHandles[i] = CoordinateSpace::LocalToScreen(localHandles[i], shape->GetWorldTransform(), view);
 	}
+	outHandles[8] = ComputeRotateHandle(outHandles);   // 회전 핸들은 가이드 상자 위쪽 바깥
 	return true;
 }
 
@@ -587,7 +719,7 @@ bool SelectTool::MultiHandlePositions(const std::vector<ge::Node*>& sel, const V
 	out[5] = view.WorldToScreen(D2D1::Point2F(cx, rect.bottom));
 	out[6] = view.WorldToScreen(D2D1::Point2F(rect.left, rect.bottom));
 	out[7] = view.WorldToScreen(D2D1::Point2F(rect.left, cy));
-	out[8] = D2D1::Point2F(out[1].x, out[1].y - 26.0f);   // 회전 핸들: 위쪽 가운데에서 26px 위
+	out[8] = ComputeRotateHandle(out);   // 회전 핸들: 가이드 상자 위쪽 바깥
 	return true;
 }
 
@@ -608,10 +740,10 @@ void SelectTool::ApplyMultiTransform(const ToolEvent& e)
 	ge::Matrix2D T = ge::Matrix2D::Identity();
 	if (m_mode == Mode::MultiRotate)
 	{
-		const float a0 = std::atan2(start.y - cy, start.x - cx), a1 = std::atan2(cur.y - cy, cur.x - cx);
+		const float a0 = std::atan2(start.y - m_multiPivot.y, start.x - m_multiPivot.x), a1 = std::atan2(cur.y - m_multiPivot.y, cur.x - m_multiPivot.x);
 		float deg = (a1 - a0) * 180.0f / 3.14159265f;
 		if (e.shiftDown) deg = std::round(deg / 15.0f) * 15.0f;   // Shift: 15도 단위
-		T = ge::MakeWorldRotation(deg, ge::Vec2{ cx, cy });
+		T = ge::MakeWorldRotation(deg, m_multiPivot);
 	}
 	else if (m_mode == Mode::MultiScale)
 	{
@@ -623,6 +755,7 @@ void SelectTool::ApplyMultiTransform(const ToolEvent& e)
 		float sx = 1.0f, sy = 1.0f;
 		if ((left || right) && std::fabs(hx - ax) > 1e-3f) sx = (cur.x - ax) / (hx - ax);
 		if ((top || bottom) && std::fabs(hy - ay) > 1e-3f) sy = (cur.y - ay) / (hy - ay);
+		if ((left || right) && (top || bottom) && (m_scaleFromGlyph ? !e.shiftDown : e.shiftDown)) { const float k = (sx + sy) * 0.5f; sx = sy = k; }   // 모서리 기본 균등
 		if (e.shiftDown && (left || right) && (top || bottom))   // Shift + 모서리: 비율 유지
 		{
 			const float s = (std::fabs(sx) > std::fabs(sy)) ? sx : sy;
@@ -702,6 +835,36 @@ float SelectTool::TableLocalAxis(ge::TableNode* tb, D2D1_POINT_2F worldPt, bool 
 void SelectTool::OnDown(const ToolEvent& e)
 {
 	if (!e.pDoc) return;
+	m_shiftDown = e.shiftDown;
+
+	// 0. 회전 피봇(빨간 사각형)을 잡으면 옮긴다. 같은 자리를 빠르게 두 번 누르면 중심으로 되돌림 (Step 6.14)
+	{
+		const std::vector<ge::Node*> psel = e.pDoc->GetDoc().GetSelection();
+		if (!psel.empty())
+		{
+			const ge::Vec2 pw = PivotWorld(psel);
+			const D2D1_POINT_2F ps = e.view.WorldToScreen(D2D1::Point2F(pw.x, pw.y));
+			const D2D1_POINT_2F sp = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+			const float dx = sp.x - ps.x, dy = sp.y - ps.y;
+			if (dx * dx + dy * dy <= 25.0f)
+			{
+				const unsigned long now = ::GetTickCount();
+				const float ddx = sp.x - m_pivotClickPt.x, ddy = sp.y - m_pivotClickPt.y;
+				if (m_pivotClickTick && now - m_pivotClickTick < 400 && ddx * ddx + ddy * ddy <= 36.0f)
+				{
+					m_pivotFrac = ge::Vec2{ 0.5f, 0.5f };
+					m_pivotClickTick = 0;
+					LogAppEvent(_T("[선택 도구] 회전 피봇을 중심으로 되돌림"));
+					e.pDoc->UpdateAllViews(nullptr);
+					return;
+				}
+				m_pivotClickTick = now;
+				m_pivotClickPt = sp;
+				m_mode = Mode::PivotDrag;
+				return;
+			}
+		}
+	}
 
 	// -1. 선택된 테이블의 안쪽 행/열 경계를 잡으면 크기 조절 (최우선)
 	if (e.pDoc->GetDoc().GetSelection().size() == 1)
@@ -778,7 +941,8 @@ void SelectTool::OnDown(const ToolEvent& e)
 		ge::Rect2 rc;
 		if (allOk && MultiHandlePositions(sel, e.view, hp, rc))
 		{
-			const Handle hit = HitHandle(screenPt, hp, 8.0f);
+			const Handle hit = HitHandleOrGlyph(screenPt, hp, 8.0f);
+			m_scaleFromGlyph = (HitHandle(screenPt, hp, 8.0f) == Handle::None);
 			if (hit != Handle::None)
 			{
 				m_multiNodes = sel;
@@ -788,6 +952,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 				m_multiInitial.clear();
 				for (ge::Node* n : sel) m_multiInitial.push_back(n->GetTransform());
 				const bool edge = (hit == Handle::T || hit == Handle::R || hit == Handle::B || hit == Handle::L);
+				m_multiPivot = PivotWorld(sel);
 				m_mode = (hit == Handle::Rotate) ? Mode::MultiRotate : ((e.ctrlDown && edge) ? Mode::MultiSkew : Mode::MultiScale);
 				LogAppEvent(m_mode == Mode::MultiRotate ? _T("[선택 도구] 다중 선택 회전 시작") : m_mode == Mode::MultiSkew ? _T("[선택 도구] 다중 선택 전단(Skew) 시작") : _T("[선택 도구] 다중 선택 크기 조절 시작"));
 				return;
@@ -823,13 +988,14 @@ void SelectTool::OnDown(const ToolEvent& e)
 	// 2. 이미 선택된 도형 중 닫힌 도형(열린 곡선/직선 제외)의 바운딩 박스 핸들 클릭 여부 검사
 	for (ge::Node* n : perNode)
 	{
-		if (!IsInteractive(n) || IsOpenPath(n)) continue;
+		if (!IsInteractive(n)) continue;
 		D2D1_POINT_2F handles[9];
 		D2D1_RECT_F localBounds;
 		if (!GetHandleScreenPositions(n, e.view, e.pD2DFactory, handles, &localBounds)) continue;
 
-		Handle hitH = HitHandle(screenPt, handles, 8.0f);
-		const bool cornerRot = (hitH == Handle::None) && IsCornerRotateZone(screenPt, handles);
+		Handle hitH = HitHandleOrGlyph(screenPt, handles, 8.0f);
+		m_scaleFromGlyph = (HitHandle(screenPt, handles, 8.0f) == Handle::None);
+		const bool cornerRot = false;   // 코너 회전 영역 없음: 회전은 상단 핸들 하나
 		if (hitH != Handle::None || cornerRot)
 		{
 			m_handle = cornerRot ? Handle::Rotate : hitH;
@@ -841,6 +1007,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 			if (cornerRot || hitH == Handle::Rotate)
 			{
 				m_mode = Mode::Rotating;
+				m_rotPivot = PivotWorld({ n });
 				LogAppEvent(_T("[선택 도구] 회전 핸들 드래그 시작"));
 			}
 			else if (e.ctrlDown && isEdge)
@@ -944,6 +1111,8 @@ void SelectTool::OnMove(const ToolEvent& e)
 	m_viewZoom = e.view.zoom;
 	m_ctrlDown = e.ctrlDown;
 	m_dragCurrentWorld = e.worldPt;
+	m_shiftDown = e.shiftDown;
+	if (m_mode == Mode::PivotDrag) { UpdatePivotDrag(e); return; }
 	D2D1_POINT_2F screenPt = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
 
 	if (m_mode == Mode::None)
@@ -988,7 +1157,7 @@ void SelectTool::OnMove(const ToolEvent& e)
 			ge::Rect2 rc;
 			if (MultiHandlePositions(sel, e.view, hp, rc))
 			{
-				const Handle hh = HitHandle(screenPt, hp, 8.0f);
+				const Handle hh = HitHandleOrGlyph(screenPt, hp, 8.0f);
 				if (hh != Handle::None) { m_hoverHandle = hh; return; }
 			}
 		}
@@ -1005,22 +1174,16 @@ void SelectTool::OnMove(const ToolEvent& e)
 				return;
 			}
 
-			if (!IsOpenPath(n))
 			{
 				D2D1_POINT_2F handles[9];
 				if (GetHandleScreenPositions(n, e.view, e.pD2DFactory, handles))
 				{
 					const ge::Matrix2D wxf = n->GetWorldTransform();
 					m_hoverAngleDeg = std::atan2(wxf.m12, wxf.m11) * (180.0f / 3.14159265358979323846f);
-					Handle hit = HitHandle(screenPt, handles, 8.0f);
+					Handle hit = HitHandleOrGlyph(screenPt, handles, 8.0f);
 					if (hit != Handle::None)
 					{
 						m_hoverHandle = hit;
-						return;
-					}
-					if (IsCornerRotateZone(screenPt, handles))
-					{
-						m_hoverCornerRotate = true;
 						return;
 					}
 				}
@@ -1329,7 +1492,7 @@ void SelectTool::ApplyScale(ge::Node* shape)
 			curWorld = D2D1::Point2F(cw.x, cw.y);
 		}
 	}
-	auto newXf = ge::Transformer::ScaleByHandle(static_cast<int>(m_handle), curWorld, m_initialLocalBounds, m_initialXf);
+	auto newXf = ge::Transformer::ScaleByHandle(static_cast<int>(m_handle), curWorld, m_initialLocalBounds, m_initialXf, m_scaleFromGlyph ? !m_shiftDown : m_shiftDown);
 	if (newXf)
 	{
 		// 프레임: 변환 스케일 대신 실제 프레임 크기를 바꿔 자식 제약(Constraints)/자동 배치가 반영되게 함 (4.5.11).
@@ -1377,6 +1540,104 @@ void SelectTool::ApplyScale(ge::Node* shape)
 	}
 }
 
+// ---- 회전 피봇 (Step 6.14) ----
+bool SelectTool::ResetPivotAt(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view)
+{
+	if (!pDoc) return false;
+	const std::vector<ge::Node*> sel = pDoc->GetDoc().GetSelection();
+	if (sel.empty()) return false;
+	const ge::Vec2 pw = PivotWorld(sel);
+	const D2D1_POINT_2F ps = view.WorldToScreen(D2D1::Point2F(pw.x, pw.y));
+	const float dx = screenPt.x - ps.x, dy = screenPt.y - ps.y;
+	if (dx * dx + dy * dy > 36.0f) return false;
+	m_pivotFrac = ge::Vec2{ 0.5f, 0.5f };
+	LogAppEvent(_T("[선택 도구] 회전 피봇을 중심으로 되돌림"));
+	pDoc->UpdateAllViews(nullptr);
+	return true;
+}
+
+bool SelectTool::PivotFrame(const std::vector<ge::Node*>& sel, ge::Matrix2D& xf, ge::Rect2& rect)
+{
+	if (sel.empty()) return false;
+	if (sel.size() == 1)
+	{
+		ge::Node* n = sel.front();
+		if (!n->GetLocalBounds(rect)) return false;
+		xf = n->GetWorldTransform();
+		return rect.Width() > 1e-3f || rect.Height() > 1e-3f;
+	}
+	xf = ge::Matrix2D::Identity();
+	return ge::UnionWorldBounds(sel, rect) && (rect.Width() > 1e-3f || rect.Height() > 1e-3f);
+}
+
+ge::Vec2 SelectTool::PivotWorld(const std::vector<ge::Node*>& sel)
+{
+	if (sel != m_pivotSel)   // 선택이 바뀌면 피봇은 중심으로
+	{
+		m_pivotSel = sel;
+		m_pivotFrac = ge::Vec2{ 0.5f, 0.5f };
+	}
+	ge::Matrix2D xf;
+	ge::Rect2 r;
+	if (!PivotFrame(sel, xf, r)) return ge::Vec2{ 0.0f, 0.0f };
+	return xf.TransformPoint(ge::Vec2{ r.left + m_pivotFrac.x * r.Width(), r.top + m_pivotFrac.y * r.Height() });
+}
+
+// 피봇 드래그: 자동 스냅(중심, 네 모서리, 각 변 가운데; 화면 8px 이내)이 우선, 아니면 커서 위치
+void SelectTool::UpdatePivotDrag(const ToolEvent& e)
+{
+	if (!e.pDoc) return;
+	const std::vector<ge::Node*> sel = e.pDoc->GetDoc().GetSelection();
+	ge::Matrix2D xf;
+	ge::Rect2 r;
+	if (!PivotFrame(sel, xf, r)) return;
+	m_pivotSel = sel;
+	const float w = r.Width(), h = r.Height();
+	const D2D1_POINT_2F sp = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+	bool snapped = false;
+	float bestD = 64.0f;   // 8px 의 제곱
+	for (int iy = 0; iy < 3; ++iy)
+	{
+		for (int ix = 0; ix < 3; ++ix)
+		{
+			const float fx = ix * 0.5f, fy = iy * 0.5f;
+			const ge::Vec2 wp = xf.TransformPoint(ge::Vec2{ r.left + fx * w, r.top + fy * h });
+			const D2D1_POINT_2F ps = e.view.WorldToScreen(D2D1::Point2F(wp.x, wp.y));
+			const float dx = ps.x - sp.x, dy = ps.y - sp.y;
+			if (dx * dx + dy * dy < bestD)
+			{
+				bestD = dx * dx + dy * dy;
+				m_pivotFrac = ge::Vec2{ fx, fy };
+				snapped = true;
+			}
+		}
+	}
+	if (!snapped)
+	{
+		ge::Matrix2D inv = xf;
+		if (!inv.Invert()) return;
+		const ge::Vec2 lp = inv.TransformPoint(ge::Vec2{ e.worldPt.x, e.worldPt.y });
+		if (w > 1e-3f) m_pivotFrac.x = (lp.x - r.left) / w;
+		if (h > 1e-3f) m_pivotFrac.y = (lp.y - r.top) / h;
+	}
+	e.pDoc->UpdateAllViews(nullptr);
+}
+
+// 피봇 -> 회전 핸들 점선 + 작은 빨간 사각형 피봇
+void SelectTool::DrawPivotMarker(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, D2D1_POINT_2F from, D2D1_POINT_2F to)
+{
+	brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.7f));
+	const float dx = to.x - from.x, dy = to.y - from.y;
+	const float len = std::sqrt(dx * dx + dy * dy);
+	for (float d = 0.0f; d + 3.0f <= len; d += 6.0f)
+	{
+		const float t0 = d / len, t1 = (d + 3.0f) / len;
+		rt->DrawLine(D2D1::Point2F(from.x + dx * t0, from.y + dy * t0), D2D1::Point2F(from.x + dx * t1, from.y + dy * t1), brush, 1.0f);
+	}
+	brush->SetColor(D2D1::ColorF(0.9f, 0.1f, 0.1f, 1.0f));
+	rt->FillRectangle(D2D1::RectF(from.x - 3.0f, from.y - 3.0f, from.x + 3.0f, from.y + 3.0f), brush);
+}
+
 // 엔진에 회전 변형 위임!
 void SelectTool::ApplyRotate(ge::Node* shape)
 {
@@ -1395,7 +1656,13 @@ void SelectTool::ApplyRotate(ge::Node* shape)
 			curWorld = D2D1::Point2F(cw.x, cw.y);
 		}
 	}
-	auto newXf = ge::Transformer::RotateAboutCenter(startWorld, curWorld, m_initialLocalBounds, m_initialXf);
+	ge::Vec2 pivotP{ m_rotPivot.x, m_rotPivot.y };
+	if (parent && parent->Kind() != ge::NodeKind::Layer)
+	{
+		ge::Matrix2D pInv = parent->GetWorldTransform();
+		if (pInv.Invert()) pivotP = pInv.TransformPoint(pivotP);
+	}
+	auto newXf = ge::Transformer::RotateAboutPoint(ge::Vec2{ startWorld.x, startWorld.y }, ge::Vec2{ curWorld.x, curWorld.y }, pivotP, m_initialXf);
 	shape->SetTransform(newXf);
 	if (shape->Kind() != ge::NodeKind::Text) shape->Invalidate();   // 텍스트 배치 캐시 보존
 	ge::FrameNode::ClampNode(shape, false);
@@ -1429,6 +1696,7 @@ void SelectTool::ApplySkew(ge::Node* shape)
 
 void SelectTool::OnUp(const ToolEvent& e)
 {
+	if (m_mode == Mode::PivotDrag) { m_mode = Mode::None; return; }
 	if (m_mode == Mode::Marquee && e.pDoc)
 	{
 		// 드래그한 마키 사각형 영역 계산 (월드 좌표)
@@ -1679,15 +1947,10 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 			D2D1_POINT_2F pBL = handles[6];
 
 			brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.85f));
-			rt->DrawLine(pTL, pTR, brush, 1.2f);
-			rt->DrawLine(pTR, pBR, brush, 1.2f);
-			rt->DrawLine(pBR, pBL, brush, 1.2f);
-			rt->DrawLine(pBL, pTL, brush, 1.2f);
 
 			D2D1_POINT_2F pT = handles[1];
 			D2D1_POINT_2F pRot = handles[8];
 			brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.6f));
-			rt->DrawLine(pT, pRot, brush, 1.0f);
 
 			bool isRotActive = (m_handle == Handle::Rotate);
 			brush->SetColor(isRotActive ? D2D1::ColorF(0.12f, 0.55f, 0.95f, 1.0f) : D2D1::ColorF(D2D1::ColorF::White));
@@ -1698,13 +1961,6 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 			const float hSize = 3.5f;
 			const D2D1_POINT_2F centerPt = D2D1::Point2F((pTL.x + pBR.x) * 0.5f, (pTL.y + pBR.y) * 0.5f);
 
-			// 회전 기준점(Pivot Point ⊕) 표시 (6.14.5)
-			brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.9f));
-			rt->FillEllipse(D2D1::Ellipse(centerPt, 4.0f, 4.0f), brush);
-			brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.9f));
-			rt->DrawEllipse(D2D1::Ellipse(centerPt, 4.0f, 4.0f), brush, 1.1f);
-			rt->DrawLine(D2D1::Point2F(centerPt.x - 5.5f, centerPt.y), D2D1::Point2F(centerPt.x + 5.5f, centerPt.y), brush, 1.0f);
-			rt->DrawLine(D2D1::Point2F(centerPt.x, centerPt.y - 5.5f), D2D1::Point2F(centerPt.x, centerPt.y + 5.5f), brush, 1.0f);
 
 			// 양방향 변형 화살표(Bi-directional Transform Arrow Gizmo) 드로잉 헬퍼 (6.14.1)
 			auto drawBiArrow = [&](D2D1_POINT_2F c, float ux, float uy, float halfLen, bool highlight) {
@@ -1768,10 +2024,6 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 						// 접선 방향 전단(Shear) 화살표
 						drawBiArrow(arrowCenter, -vy, vx, 7.0f, isSelectedHandle || isHoveredHandle);
 					}
-					else if (isSelectedHandle || isHoveredHandle)
-					{
-						drawBiArrow(arrowCenter, vx, vy, 7.5f, true);
-					}
 				}
 			}
 
@@ -1790,7 +2042,13 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 					prevPt = curPt;
 				}
 			}
+			// 회전 피봇: 점선과 빨간 사각형을 핸들 위에 (Step 6.14)
+			{
+				const ge::Vec2 pw = PivotWorld({ shape });
+				DrawPivotMarker(rt, brush, view.WorldToScreen(D2D1::Point2F(pw.x, pw.y)), pRot);
+			}
 		}
+		DrawBoxGlyphs(rt, brush, handles);
 
 		// 개별 정점(Anchor) 및 베이지어 핸들(Handle) 에디트 포인트 표시
 		ge::PathNode* pathShape = dynamic_cast<ge::PathNode*>(shape);
@@ -1838,11 +2096,6 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 		if (MultiHandlePositions(sel, view, hp, rc))
 		{
 			brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.95f));
-			rt->DrawLine(hp[0], hp[2], brush, 1.2f);
-			rt->DrawLine(hp[2], hp[4], brush, 1.2f);
-			rt->DrawLine(hp[4], hp[6], brush, 1.2f);
-			rt->DrawLine(hp[6], hp[0], brush, 1.2f);
-			rt->DrawLine(hp[1], hp[8], brush, 1.0f);
 			const bool rotActive = (m_mode == Mode::MultiRotate);
 			brush->SetColor(rotActive ? D2D1::ColorF(0.12f, 0.55f, 0.95f, 1.0f) : D2D1::ColorF(D2D1::ColorF::White));
 			rt->FillEllipse(D2D1::Ellipse(hp[8], 4.5f, 4.5f), brush);
@@ -1856,6 +2109,12 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 				rt->FillRectangle(r, brush);
 				brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 1.0f));
 				rt->DrawRectangle(r, brush, 1.2f);
+			}
+			DrawBoxGlyphs(rt, brush, hp);
+			// 회전 피봇 (핸들 위)
+			{
+				const ge::Vec2 pw = PivotWorld(sel);
+				DrawPivotMarker(rt, brush, view.WorldToScreen(D2D1::Point2F(pw.x, pw.y)), hp[8]);
 			}
 			// 크기 알약
 			static IDWriteFactory* s_dwM = nullptr;

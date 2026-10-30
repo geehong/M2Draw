@@ -17,6 +17,7 @@ struct ToolButtonItem
 	CRect          rect;
 	std::vector<ToolType> subTools; // 비어 있지 않으면 우하단 삼각 표시 + 플라이아웃 그룹
 	int            gapBefore = 0; // 이 버튼 위에 두는 추가 간격(px) - 도구 묶음과 동작 버튼 구분용
+	const wchar_t* profileKey = nullptr; // 플라이아웃에서 마지막으로 고른 항목을 저장하는 레지스트리 키 (그룹일 때만)
 };
 
 // 서브도구 플라이아웃 팝업 (그리기 전용, 포커스를 가져가지 않음)

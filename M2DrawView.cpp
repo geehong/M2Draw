@@ -41,6 +41,26 @@ BEGIN_MESSAGE_MAP(CM2DrawView, CView)
 	ON_COMMAND(ID_VIEW_GRID, &CM2DrawView::OnViewGrid)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_GRID, &CM2DrawView::OnUpdateViewGrid)
 	ON_COMMAND(ID_EDIT_CLEAR, &CM2DrawView::OnEditClear)
+	ON_COMMAND(ID_EDIT_SELECT_ALL, &CM2DrawView::OnEditSelectAll)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_SELECT_ALL, &CM2DrawView::OnUpdateDocCommand)
+	ON_COMMAND(ID_EDIT_DUPLICATE, &CM2DrawView::OnEditDuplicate)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_DUPLICATE, &CM2DrawView::OnUpdateDocCommand)
+	ON_COMMAND(ID_EDIT_DESELECT, &CM2DrawView::OnEditDeselect)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_DESELECT, &CM2DrawView::OnUpdateDocCommand)
+	ON_COMMAND(ID_OBJECT_ENTER_GROUP, &CM2DrawView::OnObjectEnterGroup)
+	ON_UPDATE_COMMAND_UI(ID_OBJECT_ENTER_GROUP, &CM2DrawView::OnUpdateObjectEnterGroup)
+	ON_COMMAND(ID_OBJECT_EXIT_GROUP, &CM2DrawView::OnObjectExitGroup)
+	ON_UPDATE_COMMAND_UI(ID_OBJECT_EXIT_GROUP, &CM2DrawView::OnUpdateObjectExitGroup)
+	ON_COMMAND(ID_VIEW_ACTUAL_SIZE, &CM2DrawView::OnViewActualSize)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_ACTUAL_SIZE, &CM2DrawView::OnUpdateDocCommand)
+	ON_COMMAND(ID_VIEW_FIT, &CM2DrawView::OnViewFit)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_FIT, &CM2DrawView::OnUpdateDocCommand)
+	ON_COMMAND(ID_VIEW_RULER, &CM2DrawView::OnViewRuler)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_RULER, &CM2DrawView::OnUpdateViewRuler)
+	ON_COMMAND(ID_VIEW_SMART_GUIDES, &CM2DrawView::OnViewSmartGuides)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_SMART_GUIDES, &CM2DrawView::OnUpdateViewSmartGuides)
+	ON_COMMAND(ID_VIEW_SNAP_GRID, &CM2DrawView::OnViewSnapGrid)
+	ON_UPDATE_COMMAND_UI(ID_VIEW_SNAP_GRID, &CM2DrawView::OnUpdateViewSnapGrid)
 	ON_UPDATE_COMMAND_UI(ID_EDIT_CLEAR, &CM2DrawView::OnUpdateEditClear)
 	ON_COMMAND(0x9999, &CM2DrawView::CenterOrigin)
 	ON_EN_KILLFOCUS(1099, &CM2DrawView::OnTextEditKillFocus)
@@ -506,6 +526,20 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 	CM2DrawDoc* pDoc = GetDocument();
 	ToolType activeType = GetApp()->GetToolManager().GetActiveType();
 
+	// 0-piv. 선택 도구: 회전 피봇을 더블클릭하면 중심으로 되돌림 (Step 6.14). 더블클릭 메시지는 OnLButtonDown 대신 여기로 온다
+	if (activeType == ToolType::Select && pDoc)
+	{
+		ge::Viewport vt{ m_fZoom, { m_ptPan.x, m_ptPan.y } };
+		if (SelectTool* st = GetApp()->GetToolManager().GetSelectTool())
+		{
+			if (st->ResetPivotAt(pDoc, D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y)), vt))
+			{
+				Invalidate(FALSE);
+				return;
+			}
+		}
+	}
+
 	// 0-iso. 선택 도구: 일반 그룹을 더블클릭하면 그 그룹 내부 격리 편집으로 진입, 격리 중 빈 곳을 더블클릭하면 한 단계 위로 (Step 5.3)
 	if (activeType == ToolType::Select && pDoc)
 	{
@@ -833,6 +867,15 @@ BOOL CM2DrawView::PreTranslateMessage(MSG* pMsg)
 
 void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
+	// 트림 도구 활성 중: Enter/Esc/E/A/L/U 는 트림 옵션 키 (도구 단축키 E/A/L 과 Esc 격리 해제보다 우선; Step 6.21.5)
+	if (GetApp()->GetToolManager().GetActiveType() == ToolType::Trim &&
+		(nChar == VK_RETURN || nChar == VK_ESCAPE || nChar == 'E' || nChar == 'A' || nChar == 'L' || nChar == 'U'))
+	{
+		GetApp()->GetToolManager().GetActiveTool()->OnKeyDown(nChar, GetDocument());
+		Invalidate(FALSE);
+		return;
+	}
+
 	// 격리 편집 중 Esc: 한 단계 위로 (Step 5.3)
 	if (nChar == VK_ESCAPE)
 	{
@@ -1435,4 +1478,133 @@ void CM2DrawView::OnTextEditChange()
 	m_pEditingTextNode->SetText((LPCTSTR)s);
 	ge::PathOp::MeasureText(*m_pEditingTextNode);
 	UpdateTextEditCtrlLayout();
+}
+
+// ---- 상단 메뉴 명령 (Step 6.19) ----
+void CM2DrawView::OnUpdateDocCommand(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(GetDocument() != nullptr);
+}
+
+void CM2DrawView::OnEditSelectAll()
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	if (!pDoc) return;
+	auto& d = pDoc->GetDoc();
+	// 격리 편집 중이면 그 그룹의 직속 자식, 아니면 활성 레이어의 직속 자식 (보이고 잠기지 않은 것)
+	std::vector<ge::Node*> nodes;
+	ge::GroupNode* scope = d.GetIsolationGroup();
+	if (!scope) scope = d.GetActiveLayer();
+	if (scope)
+		for (const auto& c : scope->GetChildren())
+			if (c && c->IsVisible() && !c->IsLocked()) nodes.push_back(c.get());
+	d.SetSelection(nodes);
+	UpdateShapePropertiesSelection(pDoc->GetPrimarySelection(), pDoc);
+	Invalidate(FALSE);
+}
+
+void CM2DrawView::OnEditDuplicate()
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	if (pDoc && pDoc->DuplicateSelectedObjects()) Invalidate(FALSE);
+}
+
+void CM2DrawView::OnEditDeselect()
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	if (!pDoc) return;
+	pDoc->GetDoc().ClearSelection();
+	UpdateShapePropertiesSelection(nullptr, pDoc);
+	Invalidate(FALSE);
+}
+
+void CM2DrawView::OnObjectEnterGroup()
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	if (!pDoc) return;
+	ge::Node* selN = pDoc->GetPrimarySelection();
+	if (pDoc->GetDoc().GetSelection().size() == 1 && ge::Document::CanIsolate(selN))
+	{
+		pDoc->GetDoc().EnterIsolation(static_cast<ge::GroupNode*>(selN));
+		RefreshAfterIsolationChange();
+	}
+}
+
+void CM2DrawView::OnObjectExitGroup()
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	if (!pDoc || !pDoc->GetDoc().GetIsolationGroup()) return;
+	pDoc->GetDoc().ExitIsolation();
+	RefreshAfterIsolationChange();
+}
+
+void CM2DrawView::OnUpdateObjectEnterGroup(CCmdUI* pCmdUI)
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	pCmdUI->Enable(pDoc && pDoc->GetDoc().GetSelection().size() == 1 && ge::Document::CanIsolate(pDoc->GetPrimarySelection()));
+}
+
+void CM2DrawView::OnUpdateObjectExitGroup(CCmdUI* pCmdUI)
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	pCmdUI->Enable(pDoc && pDoc->GetDoc().GetIsolationGroup() != nullptr);
+}
+
+void CM2DrawView::OnViewActualSize()
+{
+	CRect rc;
+	GetClientRect(&rc);
+	ZoomAtPoint(CPoint(rc.Width() / 2, rc.Height() / 2), 1.0f / (std::max)(m_fZoom, 0.001f));   // 화면 가운데를 고정한 채 100%
+}
+
+void CM2DrawView::OnViewFit()
+{
+	CM2DrawDoc* pDoc = GetDocument();
+	if (!pDoc) return;
+	CRect rc;
+	GetClientRect(&rc);
+	const float rulerT = GetApp()->GetRuler().enabled ? GetApp()->GetRuler().thickness : 0.0f;
+	const float availW = (std::max)(1.0f, static_cast<float>(rc.Width()) - rulerT);
+	const float availH = (std::max)(1.0f, static_cast<float>(rc.Height()) - rulerT);
+	const float docW = (std::max)(1.0f, pDoc->GetDoc().width);
+	const float docH = (std::max)(1.0f, pDoc->GetDoc().height);
+	const float target = (std::min)(availW / docW, availH / docH) * 0.9f;   // 여백 10%
+	ZoomAtPoint(CPoint(rc.Width() / 2, rc.Height() / 2), target / (std::max)(m_fZoom, 0.001f));
+}
+
+void CM2DrawView::OnViewRuler()
+{
+	GetApp()->GetRuler().enabled = !GetApp()->GetRuler().enabled;
+	Invalidate(FALSE);
+}
+
+void CM2DrawView::OnUpdateViewRuler(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(TRUE);
+	pCmdUI->SetCheck(GetApp()->GetRuler().enabled ? 1 : 0);
+}
+
+void CM2DrawView::OnViewSmartGuides()
+{
+	SnapManager& sm = GetApp()->GetSnapManager();
+	sm.SetSmartGuides(!sm.IsSmartGuidesEnabled());
+	Invalidate(FALSE);
+}
+
+void CM2DrawView::OnUpdateViewSmartGuides(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(TRUE);
+	pCmdUI->SetCheck(GetApp()->GetSnapManager().IsSmartGuidesEnabled() ? 1 : 0);
+}
+
+void CM2DrawView::OnViewSnapGrid()
+{
+	GetApp()->GetGrid().snapToGrid = !GetApp()->GetGrid().snapToGrid;
+	Invalidate(FALSE);
+}
+
+void CM2DrawView::OnUpdateViewSnapGrid(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(TRUE);
+	pCmdUI->SetCheck(GetApp()->GetGrid().snapToGrid ? 1 : 0);
 }

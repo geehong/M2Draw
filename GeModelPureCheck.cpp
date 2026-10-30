@@ -16,6 +16,8 @@
 #include "GroupTransform.h"
 #include "HtmlComponents/TableComponent.h"
 #include "HtmlComponents/UiComponents.h"
+#include "PathTrim.h"
+#include "ShapePresets.h"
 #include "UndoManager.h"
 #include "GeModelPureCheck.h"
 
@@ -2762,6 +2764,80 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(udoc.GetSelection().size() == 1 && udoc.GetSelection()[0]->GetId() == rootId &&
 			IsAtomicComponent(udoc.GetSelection()[0]),
 			L"Undo 후 원자 컴포넌트 루트가 아닌 내부 도형이 선택됨");
+	}
+
+	// ---- 45. 트림 / 끝점 연장 기하 (6.21) ------------------------------------------------------
+	{
+		using namespace Trim;
+		auto line = [](float x0, float y0, float x1, float y1) {
+			SubPath sp; BezierNode a, b; a.anchor = Vec2{ x0, y0 }; b.anchor = Vec2{ x1, y1 }; sp.nodes = { a, b }; sp.closed = false; return sp;
+		};
+		auto near = [](Vec2 p, float x, float y) { return std::fabs(p.x - x) < 0.5f && std::fabs(p.y - y) < 0.5f; };
+		const SubPath base = line(0.0f, 0.0f, 100.0f, 0.0f);
+		// (a) 가운데 절단 1개: 클릭한 오른쪽 조각을 빼면 왼쪽 조각 하나 [0,50]
+		const auto cutA = ToCubics(line(50.0f, -10.0f, 50.0f, 10.0f));
+		TrimResult r1 = TrimAtClick(base, cutA, false, Vec2{ 75.0f, 0.0f });
+		GE_CHECK(r1.ok && r1.pieces.size() == 1 && near(r1.pieces[0].nodes.back().anchor, 50.0f, 0.0f) && near(r1.pieces[0].nodes.front().anchor, 0.0f, 0.0f),
+			L"절단 오른쪽 조각 트림 결과가 틀림");
+		// (b) 왼쪽을 클릭하면 오른쪽 조각 [50,100]
+		TrimResult r2 = TrimAtClick(base, cutA, false, Vec2{ 25.0f, 0.0f });
+		GE_CHECK(r2.ok && r2.pieces.size() == 1 && near(r2.pieces[0].nodes.front().anchor, 50.0f, 0.0f) && near(r2.pieces[0].nodes.back().anchor, 100.0f, 0.0f),
+			L"절단 왼쪽 조각 트림 결과가 틀림");
+		// (c) 절단 2개: 가운데 구간을 클릭하면 양쪽 두 조각
+		const auto cutC = ToCubics(line(30.0f, -10.0f, 30.0f, 10.0f));
+		auto cutC2 = cutC; { const auto more = ToCubics(line(70.0f, -10.0f, 70.0f, 10.0f)); cutC2.insert(cutC2.end(), more.begin(), more.end()); }
+		TrimResult r3 = TrimAtClick(base, cutC2, false, Vec2{ 50.0f, 0.0f });
+		GE_CHECK(r3.ok && r3.pieces.size() == 2 && near(r3.pieces[0].nodes.back().anchor, 30.0f, 0.0f) && near(r3.pieces[1].nodes.front().anchor, 70.0f, 0.0f),
+			L"가운데 구간 트림이 두 조각을 남기지 않음");
+		// (d) 교차가 없으면 실패
+		GE_CHECK(!TrimAtClick(base, ToCubics(line(0.0f, 5.0f, 100.0f, 5.0f)), false, Vec2{ 50.0f, 0.0f }).ok, L"교차가 없는데 트림이 성공함");
+		// (e) 닫힌 사각형: 두 절단(좌우 변)으로 위쪽 변을 자르면 열린 경로 하나 (100,50)..(0,50)
+		SubPath sq; sq.closed = true;
+		for (auto p : { Vec2{ 0.0f, 0.0f }, Vec2{ 100.0f, 0.0f }, Vec2{ 100.0f, 100.0f }, Vec2{ 0.0f, 100.0f } }) { BezierNode n; n.anchor = p; sq.nodes.push_back(n); }
+		auto cutE = ToCubics(line(-10.0f, 50.0f, 110.0f, 50.0f));
+		TrimResult r4 = TrimAtClick(sq, cutE, false, Vec2{ 50.0f, 0.0f });
+		GE_CHECK(r4.ok && r4.pieces.size() == 1 && !r4.pieces[0].closed && near(r4.pieces[0].nodes.front().anchor, 100.0f, 50.0f) && near(r4.pieces[0].nodes.back().anchor, 0.0f, 50.0f),
+			L"닫힌 사각형 트림 결과가 틀림");
+		// (f) 닫힌 경로는 교차 1개로는 실패
+		GE_CHECK(!TrimAtClick(sq, ToCubics(line(-10.0f, 50.0f, 50.0f, 50.0f)), false, Vec2{ 50.0f, 0.0f }).ok, L"교차 1개인 닫힌 경로가 트림됨");
+		// (g) 절단 선 연장(E): 끝나지 않는 절단 선도 연장하면 교차가 생긴다
+		const auto cutG = ToCubics(line(50.0f, 5.0f, 50.0f, 10.0f));
+		GE_CHECK(!TrimAtClick(base, cutG, false, Vec2{ 75.0f, 0.0f }).ok, L"교차 없는 짧은 절단 선이 트림됨");
+		GE_CHECK(TrimAtClick(base, cutG, true, Vec2{ 75.0f, 0.0f }).ok, L"절단 선 연장(E)으로 교차가 생기지 않음");
+		// (h) 끝점 연장: 가상 교차(A=예)는 연장선과 만나도 되고, 아니면 실제 절단 개체 위에서만 만난다
+		const SubPath shortLine = line(0.0f, 0.0f, 40.0f, 0.0f);
+		const auto cutH = ToCubics(line(100.0f, 5.0f, 100.0f, 10.0f));
+		SubPath ext;
+		GE_CHECK(!ExtendEnd(shortLine, cutH, false, Vec2{ 40.0f, 0.0f }, 12.0f, ext), L"실제 교차가 없는데 연장됨");
+		GE_CHECK(ExtendEnd(shortLine, cutH, true, Vec2{ 40.0f, 0.0f }, 12.0f, ext) && near(ext.nodes.back().anchor, 100.0f, 0.0f),
+			L"가상 교차로 끝점이 절단 선까지 연장되지 않음");
+		GE_CHECK(!ExtendEnd(shortLine, cutH, true, Vec2{ 20.0f, 0.0f }, 12.0f, ext), L"끝점에서 먼 클릭이 연장됨");
+	}
+
+	// ---- 46. 도형 프리셋 기하 (6.13 / 6.18.3) --------------------------------------------------
+	{
+		using namespace Shapes;
+		auto near = [](Vec2 p, float x, float y) { return std::fabs(p.x - x) < 0.5f && std::fabs(p.y - y) < 0.5f; };
+		// 세 점 원: (0,0),(10,0),(0,10) 을 지나는 원의 중심은 (5,5), 반지름 sqrt(50)
+		Vec2 cc{}; float rr = 0.0f;
+		GE_CHECK(CircleThrough3(Vec2{ 0, 0 }, Vec2{ 10, 0 }, Vec2{ 0, 10 }, cc, rr) && near(cc, 5, 5) && std::fabs(rr - 7.0710678f) < 0.01f, L"3점 원의 중심/반지름이 틀림");
+		GE_CHECK(!CircleThrough3(Vec2{ 0, 0 }, Vec2{ 5, 0 }, Vec2{ 10, 0 }, cc, rr), L"일직선 세 점이 원으로 판정됨");
+		// 3점 호: 시작 (10,0), 중간 (0,10), 끝 (-10,0) -> 시작/끝이 양 끝, 중간 점을 지남
+		auto arc = ArcThrough3(Vec2{ 10, 0 }, Vec2{ 0, 10 }, Vec2{ -10, 0 });
+		GE_CHECK(arc.size() == 1 && !arc[0].closed && near(arc[0].nodes.front().anchor, 10, 0) && near(arc[0].nodes.back().anchor, -10, 0), L"3점 호의 끝점이 틀림");
+		Vec2 mid = Trim::Cubic{ arc[0].nodes[0].anchor, arc[0].nodes[0].AbsOut(), arc[0].nodes[1].AbsIn(), arc[0].nodes[1].anchor }.p0;
+		GE_CHECK(arc[0].nodes.size() >= 2 && near(mid, 10, 0), L"3점 호 시작점 계산이 틀림");
+		// 도넛: 두 부분 경로 (바깥/안쪽), 둘 다 닫힘
+		auto donut = Donut(0, 0, 50, 0.5f);
+		GE_CHECK(donut.size() == 2 && donut[0].closed && donut[1].closed, L"도넛이 두 개의 닫힌 경로가 아님");
+		// 둥근 사각형: 닫힌 경로, 모서리 포함 노드 8개 이상
+		auto rrect = RoundedRect(0, 0, 100, 60, 10);
+		GE_CHECK(rrect.size() == 1 && rrect[0].closed && rrect[0].nodes.size() >= 4, L"둥근 사각형 경로가 틀림");
+		// 마름모 / 파이
+		auto dia = Diamond(0, 0, 100, 60);
+		GE_CHECK(dia.size() == 1 && dia[0].nodes.size() == 4 && near(dia[0].nodes[0].anchor, 50, 0), L"마름모 꼭짓점이 틀림");
+		auto pie = Pie(0, 0, 50, 0.0f, 1.5707963f);
+		GE_CHECK(pie.size() == 1 && pie[0].closed && near(pie[0].nodes.front().anchor, 0, 0), L"파이가 중심에서 시작하지 않음");
 	}
 
 #undef GE_CHECK

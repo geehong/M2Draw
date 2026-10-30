@@ -3,6 +3,7 @@
 #include "M2Draw.h"
 #include "MainFrm.h"
 #include "M2DrawDoc.h"
+#include "ToolGroups.h"
 
 // 그룹/순서/불리언 등은 도구가 아니라 동작: 플라이아웃 그룹의 항목으로 ToolType::Action* 를 사용하고, 선택하면 명령을 실행한다
 static bool IsActionType(ToolType t)
@@ -67,6 +68,26 @@ BEGIN_MESSAGE_MAP(CToolFlyoutWnd, CWnd)
 	ON_WM_MOUSEACTIVATE()
 END_MESSAGE_MAP()
 
+static void ConfigureToolGroups(std::vector<ToolButtonItem>& buttons)
+{
+	for (const ToolGroupDef& def : GetToolGroups())
+	{
+		for (auto& btn : buttons)
+		{
+			if (btn.type != def.head) continue;
+			btn.subTools = def.items;
+			btn.profileKey = def.profileKey;
+			// 마지막으로 고른 항목이 대표 아이콘이 된다 (저장값이 그룹에 없으면 대표 유지)
+			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), def.profileKey, static_cast<int>(def.head));
+			for (ToolType st : def.items)
+			{
+				if (saved == static_cast<int>(st)) { btn.type = st; break; }
+			}
+			break;
+		}
+	}
+}
+
 CToolBoxPane::CToolBoxPane() noexcept
 	: m_pD2DFactory(nullptr)
 	, m_pRenderTarget(nullptr)
@@ -75,19 +96,19 @@ CToolBoxPane::CToolBoxPane() noexcept
 	, m_hoverIndex(-1)
 	, m_bTrackingMouse(false)
 {
+	// 사이드바 배치 (Step 6.18.3): 선택·탐색 -> 그리기 -> 사각형 -> 원 -> 다각형·특수 -> 텍스트 -> HTML 요소 -> 채우기 -> 보기 -> 동작
 	m_buttons = {
 		{ ToolType::Select,      L"선택 (V)",        L'V', CRect() },
 		{ ToolType::Pan,         L"손도구 (H)",      L'H', CRect() },
-		{ ToolType::Frame,       L"프레임 (F)",      L'F', CRect() },
-		{ ToolType::Pen,         L"펜도구 (P)",      L'P', CRect() },
-		{ ToolType::Line,        L"직선 (L)",        L'L', CRect() },
-		{ ToolType::Rect,        L"사각형 (M)",      L'M', CRect() },
+		{ ToolType::Pen,         L"펜도구 (P)",      L'P', CRect() },   // 그리기 그룹: 펜 / 폴리라인 / 직선
+		{ ToolType::Rect,        L"사각형 (M)",      L'M', CRect() },   // 사각형 그룹: 사각형 / 삼각형
 		{ ToolType::Ellipse,     L"타원 (E)",        L'E', CRect() },
-		{ ToolType::Polygon,     L"다각형 (G)",      L'G', CRect() },
+		{ ToolType::Polygon,     L"다각형 (G)",      L'G', CRect() },   // 다각형·특수 그룹
 		{ ToolType::Text,        L"텍스트 (T)",      L'T', CRect() },
-		{ ToolType::PaintBucket, L"페인트 통 (K)",   L'K', CRect() },
-		{ ToolType::Gradient,    L"그라디언트 (D)",  L'D', CRect() },
-		{ ToolType::ZoomIn,      L"돋보기 (확대 Z / 축소 X)", L'Z', CRect() },   // 확대/축소 플라이아웃 그룹
+		{ ToolType::Frame,       L"프레임 (F)",      L'F', CRect() },   // HTML 요소 그룹
+		{ ToolType::PaintBucket, L"페인트 통 (K)",   L'K', CRect() },   // 채우기 그룹: 페인트 통 / 그라디언트
+		{ ToolType::Trim,        L"트림 (R)",      L'R', CRect() },   // 편집 도구: 절단 개체 선택 후 조각 클릭 (라이노식)
+		{ ToolType::ZoomIn,      L"돋보기 (확대 Z / 축소 X)", L'Z', CRect() },
 		// 동작 버튼 그룹 (도구가 아님): 그룹화 / 그룹 해제. 도구 묶음과 간격을 둠
 		{ ToolType::ActionGroup,        L"그룹 / 그룹 해제",          0, CRect(), {}, 12 },
 		// 순서(Z-order) 동작 그룹: 맨 앞으로 / 앞으로 / 뒤로 / 맨 뒤로
@@ -97,74 +118,7 @@ CToolBoxPane::CToolBoxPane() noexcept
 		// 클리핑 마스크 그룹: 만들기 / 해제
 		{ ToolType::ActionClipMask,     L"클리핑 마스크",              0, CRect(), {}, 0 }
 	};
-
-	// 사각형 그룹: 사각형 / 삼각형 (마지막 선택은 앱 설정에 저장)
-	for (auto& btn : m_buttons)
-	{
-		if (btn.type == ToolType::Rect)
-		{
-			btn.subTools = { ToolType::Rect, ToolType::Triangle };
-			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("RectGroupTool"), static_cast<int>(ToolType::Rect));
-			if (saved == static_cast<int>(ToolType::Triangle))
-				btn.type = ToolType::Triangle;
-		}
-		else if (btn.type == ToolType::Polygon)
-		{
-			// 다각형 & 특수 도형 그룹: 정다각형, 별, 기어, 스파이럴, 하트
-			btn.subTools = { ToolType::Polygon, ToolType::Polyline, ToolType::Star, ToolType::Gear, ToolType::Spiral, ToolType::Heart };
-			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("PolygonGroupTool"), static_cast<int>(ToolType::Polygon));
-			for (ToolType st : btn.subTools)
-			{
-				if (saved == static_cast<int>(st))
-				{
-					btn.type = st;
-					break;
-				}
-			}
-		}
-		else if (btn.type == ToolType::ZoomIn)
-		{
-			// 돋보기 그룹: 확대 / 축소
-			btn.subTools = { ToolType::ZoomIn, ToolType::ZoomOut };
-			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("ZoomGroupTool"), static_cast<int>(ToolType::ZoomIn));
-			if (saved == static_cast<int>(ToolType::ZoomOut))
-				btn.type = ToolType::ZoomOut;
-		}
-		else if (btn.type == ToolType::ActionGroup)
-		{
-			// 그룹 동작 그룹: 그룹화 / 그룹 해제 / 프레임으로 감싸기 (마지막에 쓴 동작이 대표)
-			btn.subTools = { ToolType::ActionGroup, ToolType::ActionUngroup, ToolType::ActionWrapFrame };
-			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("GroupActionTool"), static_cast<int>(ToolType::ActionGroup));
-			if (saved == static_cast<int>(ToolType::ActionUngroup))
-				btn.type = ToolType::ActionUngroup;
-			else if (saved == static_cast<int>(ToolType::ActionWrapFrame))
-				btn.type = ToolType::ActionWrapFrame;
-		}
-		else if (btn.type == ToolType::ActionToFront)
-		{
-			// 순서 동작 그룹 (마지막에 쓴 동작이 대표)
-			btn.subTools = { ToolType::ActionToFront, ToolType::ActionForward, ToolType::ActionBackward, ToolType::ActionToBack };
-			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("ArrangeActionTool"), static_cast<int>(ToolType::ActionToFront));
-			for (ToolType st : btn.subTools)
-				if (saved == static_cast<int>(st)) { btn.type = st; break; }
-		}
-		else if (btn.type == ToolType::ActionBooleanUnion)
-		{
-			// 불리언 동작 그룹: 합치기 / 빼기 / 교차 / 제외 / 트림
-			btn.subTools = { ToolType::ActionBooleanUnion, ToolType::ActionBooleanSubtract, ToolType::ActionBooleanIntersect, ToolType::ActionBooleanExclude, ToolType::ActionBooleanTrim };
-			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("BooleanActionTool"), static_cast<int>(ToolType::ActionBooleanUnion));
-			for (ToolType st : btn.subTools)
-				if (saved == static_cast<int>(st)) { btn.type = st; break; }
-		}
-		else if (btn.type == ToolType::ActionClipMask)
-		{
-			// 클리핑 마스크 그룹: 만들기 / 해제
-			btn.subTools = { ToolType::ActionClipMask, ToolType::ActionReleaseMask };
-			const int saved = AfxGetApp()->GetProfileInt(_T("ToolBox"), _T("ClipMaskActionTool"), static_cast<int>(ToolType::ActionClipMask));
-			if (saved == static_cast<int>(ToolType::ActionReleaseMask))
-				btn.type = ToolType::ActionReleaseMask;
-		}
-	}
+	ConfigureToolGroups(m_buttons);
 }
 
 CToolBoxPane::~CToolBoxPane()
@@ -652,6 +606,54 @@ void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 7.5f, 6.0f), brush, 1.8f);
 		break;
 	}
+	case ToolType::Trim: // 트림: 가위 (두 날과 손잡이 원)
+	{
+		rt->DrawLine(D2D1::Point2F(cx - 6.0f, cy - 6.0f), D2D1::Point2F(cx + 5.0f, cy + 5.0f), brush, 1.6f);
+		rt->DrawLine(D2D1::Point2F(cx + 6.0f, cy - 6.0f), D2D1::Point2F(cx - 5.0f, cy + 5.0f), brush, 1.6f);
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx - 6.5f, cy + 6.0f), 2.5f, 2.5f), brush, 1.4f);
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx + 6.5f, cy + 6.0f), 2.5f, 2.5f), brush, 1.4f);
+		break;
+	}
+	case ToolType::RoundRect: // 둥근 사각형
+		rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(cx - 7.0f, cy - 5.5f, cx + 7.0f, cy + 6.5f), 4.0f, 4.0f), brush, 1.6f);
+		break;
+	case ToolType::Square: // 정사각형
+		rt->DrawRectangle(D2D1::RectF(cx - 6.0f, cy - 6.0f, cx + 6.0f, cy + 6.0f), brush, 1.6f);
+		break;
+	case ToolType::Diamond: // 마름모
+	{
+		rt->DrawLine(D2D1::Point2F(cx, cy - 7.0f), D2D1::Point2F(cx + 7.0f, cy), brush, 1.6f);
+		rt->DrawLine(D2D1::Point2F(cx + 7.0f, cy), D2D1::Point2F(cx, cy + 7.0f), brush, 1.6f);
+		rt->DrawLine(D2D1::Point2F(cx, cy + 7.0f), D2D1::Point2F(cx - 7.0f, cy), brush, 1.6f);
+		rt->DrawLine(D2D1::Point2F(cx - 7.0f, cy), D2D1::Point2F(cx, cy - 7.0f), brush, 1.6f);
+		break;
+	}
+	case ToolType::CircleCenter: // 중심에서 원: 원과 중심 점, 반지름 선
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 7.0f, 7.0f), brush, 1.6f);
+		rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 1.5f, 1.5f), brush);
+		rt->DrawLine(D2D1::Point2F(cx, cy), D2D1::Point2F(cx + 7.0f, cy), brush, 1.2f);
+		break;
+	case ToolType::Circle3Pt: // 3점 원: 원 위의 세 점
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 7.0f, 7.0f), brush, 1.6f);
+		rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx - 7.0f, cy), 1.8f, 1.8f), brush);
+		rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx + 2.0f, cy - 6.5f), 1.8f, 1.8f), brush);
+		rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx + 5.0f, cy + 4.5f), 1.8f, 1.8f), brush);
+		break;
+	case ToolType::Arc3Pt: // 3점 호: 호와 두 끝점
+		rt->DrawLine(D2D1::Point2F(cx - 7.0f, cy + 3.0f), D2D1::Point2F(cx, cy - 6.0f), brush, 1.6f);
+		rt->DrawLine(D2D1::Point2F(cx, cy - 6.0f), D2D1::Point2F(cx + 7.0f, cy + 3.0f), brush, 1.6f);
+		rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx - 7.0f, cy + 3.0f), 1.6f, 1.6f), brush);
+		rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(cx + 7.0f, cy + 3.0f), 1.6f, 1.6f), brush);
+		break;
+	case ToolType::Pie: // 파이: 부채꼴 (왼쪽 위 사분면 제외)
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 7.0f, 7.0f), brush, 1.4f);
+		rt->DrawLine(D2D1::Point2F(cx, cy), D2D1::Point2F(cx, cy - 7.0f), brush, 1.6f);
+		rt->DrawLine(D2D1::Point2F(cx, cy), D2D1::Point2F(cx + 7.0f, cy), brush, 1.6f);
+		break;
+	case ToolType::Donut: // 도넛: 두 동심원
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 7.0f, 7.0f), brush, 1.6f);
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 3.0f, 3.0f), brush, 1.6f);
+		break;
 	case ToolType::Frame: // 프레임
 	{
 		rt->DrawRectangle(D2D1::RectF(cx - 6.0f, cy - 6.0f, cx + 6.0f, cy + 6.0f), brush, 1.6f);
@@ -1006,20 +1008,8 @@ void CToolBoxPane::OnLButtonUp(UINT nFlags, CPoint point)
 	if (selected)
 	{
 		m_buttons[idx].type = chosen;
-		if (m_buttons[idx].subTools.size() > 1 && m_buttons[idx].subTools[0] == ToolType::Rect)
-			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("RectGroupTool"), static_cast<int>(chosen));
-		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::Polygon)
-			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("PolygonGroupTool"), static_cast<int>(chosen));
-		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ZoomIn)
-			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("ZoomGroupTool"), static_cast<int>(chosen));
-		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionGroup)
-			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("GroupActionTool"), static_cast<int>(chosen));
-		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionToFront)
-			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("ArrangeActionTool"), static_cast<int>(chosen));
-		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionBooleanUnion)
-			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("BooleanActionTool"), static_cast<int>(chosen));
-		else if (!m_buttons[idx].subTools.empty() && m_buttons[idx].subTools[0] == ToolType::ActionClipMask)
-			AfxGetApp()->WriteProfileInt(_T("ToolBox"), _T("ClipMaskActionTool"), static_cast<int>(chosen));
+		if (m_buttons[idx].profileKey)
+			AfxGetApp()->WriteProfileInt(_T("ToolBox"), m_buttons[idx].profileKey, static_cast<int>(chosen));
 
 		if (IsActionType(chosen))
 		{
@@ -1370,6 +1360,24 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	case ToolType::Polygon:  return L"정다각형 (G)";
 	case ToolType::Polyline: return L"열린 다각형 (폴리라인)";
 	case ToolType::Frame:    return L"프레임 (F)";
+	case ToolType::RoundRect:    return L"둥근 사각형";
+	case ToolType::Square:       return L"정사각형";
+	case ToolType::Diamond:      return L"마름모";
+	case ToolType::Ellipse:      return L"타원 (E)";
+	case ToolType::Pen:          return L"펜 (P)";
+	case ToolType::Line:         return L"직선 (L)";
+	case ToolType::PaintBucket:  return L"페인트 통 (K)";
+	case ToolType::CircleCenter: return L"중심에서 원";
+	case ToolType::Circle3Pt:    return L"3점 원";
+	case ToolType::Arc3Pt:       return L"3점 호";
+	case ToolType::Pie:          return L"파이 (부채꼴)";
+	case ToolType::Donut:        return L"도넛";
+	case ToolType::Table:    return L"테이블 (HTML)";
+	case ToolType::ComponentHeading:  return L"헤딩 (HTML)";
+	case ToolType::ComponentButton:   return L"버튼 (HTML)";
+	case ToolType::ComponentDivider:  return L"구분선 (HTML)";
+	case ToolType::ComponentSpacer:   return L"간격 (HTML)";
+	case ToolType::Gradient:          return L"그라디언트 (D)";
 	case ToolType::Star:     return L"별 (Star)";
 	case ToolType::Gear:     return L"기어 (Gear)";
 	case ToolType::Spiral:   return L"스파이럴 (Spiral)";
@@ -1522,6 +1530,67 @@ static void DrawFlyoutGlyph(CDC& dc, ToolType t, CRect box, COLORREF color, bool
 	{
 	case ToolType::Rect:
 		dc.Rectangle(c.x - 7, c.y - 6, c.x + 8, c.y + 7);
+		break;
+	case ToolType::Pen: // 펜: 대각선 펜촉
+		dc.MoveTo(c.x - 8, c.y + 7); dc.LineTo(c.x + 7, c.y - 8);
+		dc.MoveTo(c.x - 8, c.y + 7); dc.LineTo(c.x - 4, c.y + 4);
+		break;
+	case ToolType::Line: // 직선: 양 끝점
+		dc.MoveTo(c.x - 8, c.y + 6); dc.LineTo(c.x + 8, c.y - 6);
+		dc.Ellipse(c.x - 10, c.y + 4, c.x - 6, c.y + 8);
+		dc.Ellipse(c.x + 6, c.y - 8, c.x + 10, c.y - 4);
+		break;
+	case ToolType::Table: // 표: 3x2 격자
+		dc.Rectangle(c.x - 8, c.y - 6, c.x + 9, c.y + 7);
+		dc.MoveTo(c.x - 8, c.y - 1); dc.LineTo(c.x + 9, c.y - 1);
+		dc.MoveTo(c.x - 3, c.y - 6); dc.LineTo(c.x - 3, c.y + 7);
+		dc.MoveTo(c.x + 3, c.y - 6); dc.LineTo(c.x + 3, c.y + 7);
+		break;
+	case ToolType::ComponentHeading: // 헤딩: 굵은 두 줄
+		dc.MoveTo(c.x - 8, c.y - 4); dc.LineTo(c.x + 9, c.y - 4);
+		dc.MoveTo(c.x - 8, c.y - 3); dc.LineTo(c.x + 9, c.y - 3);
+		dc.MoveTo(c.x - 8, c.y + 4); dc.LineTo(c.x + 2, c.y + 4);
+		dc.MoveTo(c.x - 8, c.y + 5); dc.LineTo(c.x + 2, c.y + 5);
+		break;
+	case ToolType::ComponentButton: // 버튼: 둥근 느낌의 알약 상자
+		dc.RoundRect(c.x - 9, c.y - 5, c.x + 10, c.y + 6, 10, 10);
+		break;
+	case ToolType::ComponentDivider: // 구분선
+		dc.MoveTo(c.x - 9, c.y); dc.LineTo(c.x + 10, c.y);
+		break;
+	case ToolType::ComponentSpacer: // 간격: 점선 상자
+		for (int k = -8; k < 9; k += 4) { dc.MoveTo(c.x + k, c.y - 7); dc.LineTo(c.x + k + 2, c.y - 7); dc.MoveTo(c.x + k, c.y + 7); dc.LineTo(c.x + k + 2, c.y + 7); }
+		break;
+	case ToolType::RoundRect: // 둥근 사각형
+		dc.RoundRect(c.x - 8, c.y - 6, c.x + 9, c.y + 7, 8, 8);
+		break;
+	case ToolType::Square: // 정사각형
+		dc.Rectangle(c.x - 7, c.y - 7, c.x + 8, c.y + 8);
+		break;
+	case ToolType::Diamond: // 마름모
+		{ POINT d[4] = { { c.x, c.y - 8 }, { c.x + 9, c.y }, { c.x, c.y + 8 }, { c.x - 9, c.y } }; dc.Polygon(d, 4); }
+		break;
+	case ToolType::Ellipse: // 타원
+		dc.Ellipse(c.x - 9, c.y - 6, c.x + 10, c.y + 7);
+		break;
+	case ToolType::CircleCenter: // 중심에서 원: 중심점과 반지름 선
+		dc.Ellipse(c.x - 8, c.y - 8, c.x + 9, c.y + 9);
+		dc.MoveTo(c.x, c.y); dc.LineTo(c.x + 8, c.y);
+		break;
+	case ToolType::Circle3Pt: // 3점 원: 원 위 세 점
+		dc.Ellipse(c.x - 8, c.y - 8, c.x + 9, c.y + 9);
+		dc.Ellipse(c.x - 9, c.y - 9, c.x - 7, c.y - 7);
+		dc.Ellipse(c.x + 7, c.y - 9, c.x + 9, c.y - 7);
+		break;
+	case ToolType::Arc3Pt: // 3점 호: 열린 호와 끝점
+		dc.Arc(c.x - 9, c.y - 9, c.x + 9, c.y + 9, c.x + 9, c.y, c.x - 9, c.y);
+		break;
+	case ToolType::Pie: // 파이: 90도 부채꼴
+		dc.Pie(c.x - 9, c.y - 9, c.x + 9, c.y + 9, c.x + 9, c.y, c.x, c.y - 9);
+		break;
+	case ToolType::Donut: // 도넛
+		dc.Ellipse(c.x - 9, c.y - 9, c.x + 10, c.y + 10);
+		dc.Ellipse(c.x - 4, c.y - 4, c.x + 5, c.y + 5);
 		break;
 	case ToolType::ActionGroup: // 그룹: 실선 상자 안에 겹친 두 사각형
 		dc.Rectangle(c.x - 9, c.y - 8, c.x + 10, c.y + 9);
