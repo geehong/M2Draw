@@ -6,10 +6,34 @@
 
 namespace ge {
 
+namespace {
+// 원자 컴포넌트(Button / 표준 UI 컴포넌트) 내부 자식이 선택 목록에 들어온 경우 컴포넌트 루트로 승격
+const Node* PromoteToAtomicRootConst(const Node* n) {
+	if (!n) return nullptr;
+	const Node* res = n;
+	for (const GroupNode* p = n->GetParent(); p; p = p->GetParent()) {
+		if (IsAtomicComponent(p)) res = p;
+	}
+	return res;
+}
+
+Node* PromoteToAtomicRoot(Node* n) {
+	if (!n) return nullptr;
+	Node* res = n;
+	for (GroupNode* p = n->GetParent(); p; p = p->GetParent()) {
+		if (IsAtomicComponent(p)) res = p;
+	}
+	return res;
+}
+} // anonymous namespace
+
 std::vector<uint64_t> UndoManager::SelectionIds(const Document& doc) {
 	std::vector<uint64_t> ids;
 	for (const auto* node : doc.GetSelection()) {
-		if (node) ids.push_back(node->GetId());
+		const Node* target = PromoteToAtomicRootConst(node);
+		if (target && std::find(ids.begin(), ids.end(), target->GetId()) == ids.end()) {
+			ids.push_back(target->GetId());
+		}
 	}
 	return ids;
 }
@@ -56,7 +80,9 @@ bool UndoManager::RestoreSnapshot(const DocumentSnapshot& snapshot, Document& do
 	if (!reader.ReadFromString(snapshot.svgData, restored)) {
 		return false;
 	}
+	const NodeId prevMaxId = doc.PeekMaxId();
 	doc = std::move(restored);
+	doc.AdvanceMaxId(prevMaxId);   // Undo/Redo 이후에도 ID 카운터는 단조 증가 유지 (재빌드된 내부 자식과 이전 ID 충돌 방지)
 	ChangeTracker::Bump();   // 문서가 통째로 교체됨
 
 	const int layerCount = static_cast<int>(doc.GetLayers().size());
@@ -65,7 +91,10 @@ bool UndoManager::RestoreSnapshot(const DocumentSnapshot& snapshot, Document& do
 	std::vector<Node*> restoredSel;
 	for (uint64_t id : snapshot.selectionIds) {
 		if (Node* n = doc.FindById(id)) {
-			restoredSel.push_back(n);
+			Node* target = PromoteToAtomicRoot(n);
+			if (target && std::find(restoredSel.begin(), restoredSel.end(), target) == restoredSel.end()) {
+				restoredSel.push_back(target);
+			}
 		}
 	}
 	doc.SetSelection(restoredSel);

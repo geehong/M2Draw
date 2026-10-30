@@ -101,7 +101,10 @@ enum class ToolType
 	ComponentButton,        // 버튼 도구: 드래그 상자 + 가운데 라벨
 	ComponentDivider,       // 구분선 도구: 가로 선
 	ComponentSpacer,       // 간격 도구: 빈 간격 상자(점선)
-	UiComponent            // 표준 HTML UI 컴포넌트 도구 (4.5.17): 어떤 종류인지는 UiComponentTool::SetPending 으로 지정
+	UiComponent,           // 표준 HTML UI 컴포넌트 도구 (4.5.17): 어떤 종류인지는 UiComponentTool::SetPending 으로 지정
+	Arc,                   // 원호/파이/도넛 아크 도구 (6.13.1)
+	BlockArrow,            // 블록 화살표 도구 (6.13.2)
+	Callout                // 말풍선(콜아웃) 도구 (6.13.2)
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)
@@ -122,6 +125,10 @@ struct ToolCreationSetting
 	float gearHoleRatio = 0.3f;  // 기어 중앙 구멍 비율
 	float spiralTurns = 3.0f;    // 나선 회전 바퀴 수
 	float heartRound = 1.0f;     // 하트 곡률 계수
+	ge::ArcMode arcMode = ge::ArcMode::Pie; // 원호 모드 (Open, Pie, Chord, Donut)
+	float arcStartDeg = 0.0f;    // 원호 시작 각도 (도)
+	float arcSweepDeg = 270.0f;  // 원호 스윕 각도 (도)
+	float arcInnerRatio = 0.5f;  // 도넛 아크 내경 비율
 	bool  bDrawFromCenter = false; // 중심 => 바깥쪽 그리기 모드
 
 	ge::Style ToGeStyle() const { return style; }
@@ -170,7 +177,7 @@ public:
 	ToolType GetType() const override { return ToolType::Select; }
 	const wchar_t* GetName() const override { return L"선택 도구 (Select)"; }
 	wchar_t GetShortcut() const override { return L'V'; }
-	enum class Mode { None, Moving, Scaling, Rotating, EditNode, Marquee, GradientHandle, TableResize, MultiScale, MultiRotate, MultiSkew };
+	enum class Mode { None, Moving, Scaling, Rotating, Skewing, EditNode, Marquee, GradientHandle, TableResize, MultiScale, MultiRotate, MultiSkew };
 	enum class Handle { None, TL, T, TR, R, BR, B, BL, L, Rotate };
 
 	HCURSOR GetCursor() const override;
@@ -186,7 +193,7 @@ public:
 	// 문서 선택만 해제 (패널 갱신은 호출 측 책임)
 	void ClearSelection(CM2DrawDoc* pDoc);
 	// 진행 중인 드래그/편집 상태 폐기 (문서가 교체되어 노드 포인터가 무효가 된 경우)
-	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; m_gradShape = nullptr; m_gradHandle = GradHandle::None; m_tbl = nullptr; m_hoverTbl = 0; m_guides.clear(); m_gaps.clear(); m_multiNodes.clear(); m_multiInitial.clear(); }
+	void ResetInteraction() { m_mode = Mode::None; m_handle = Handle::None; m_editShape = nullptr; m_xfTarget = nullptr; m_initialXfs.clear(); m_hoverIsNode = false; m_hoverOnShape = false; m_hoverCornerRotate = false; m_hoverAngleDeg = 0.0f; m_gradShape = nullptr; m_gradHandle = GradHandle::None; m_tbl = nullptr; m_hoverTbl = 0; m_guides.clear(); m_gaps.clear(); m_multiNodes.clear(); m_multiInitial.clear(); }
 
 	Handle GetActiveHandle() const { return m_handle; }
 	void SetActiveHandle(Handle h) { m_handle = h; }
@@ -195,6 +202,9 @@ private:
 	Mode   m_mode = Mode::None;
 	Handle m_handle = Handle::None;
 	Handle m_hoverHandle = Handle::None;
+	bool   m_hoverCornerRotate = false; // 코너 바깥 근접 영역 호버 시 회전 전환 (6.14.3)
+	float  m_hoverAngleDeg = 0.0f;      // 호버된 도형의 월드 회전각 (도 단위, 동적 커서용 6.14.2)
+	bool   m_ctrlDown = false;          // 전단(Skew) 기즈모 표시용 Ctrl 상태
 
 	D2D1_POINT_2F m_dragStartWorld = { 0.0f, 0.0f };
 	D2D1_POINT_2F m_dragCurrentWorld = { 0.0f, 0.0f };
@@ -209,10 +219,10 @@ private:
 	bool           m_hoverIsNode = false;
 	bool           m_hoverOnShape = false; // 스트로크/면 위에 마우스가 올라가 있는지
 
-	// 그라디언트 기즈모 (선택된 단일 도형의 그라디언트 시작/끝/중심/초점/반지름 핸들) — 드래그 동안만 유효
+	// 그라디언트 기즈모 (선택된 단일 도형/프레임의 그라디언트 시작/끝/중심/초점/반지름 핸들) — 드래그 동안만 유효
 	enum class GradHandle { None, Start, End, Radius };   // 방사형: Start=중심, End=초점
 	GradHandle        m_gradHandle = GradHandle::None;
-	ge::PathNode*     m_gradShape = nullptr;
+	ge::Node*         m_gradShape = nullptr;
 	ge::Rect2         m_gradBounds{};                      // 드래그 시작 시점의 지오메트리 경계 (드래그 중 변하지 않음)
 	void ApplyGradientDrag(const ToolEvent& e);
 
@@ -247,6 +257,7 @@ private:
 	void ApplyMove(const std::vector<ge::Node*>& selection);
 	void ApplyScale(ge::Node* shape);
 	void ApplyRotate(ge::Node* shape);
+	void ApplySkew(ge::Node* shape);
 };
 
 // ============================================================================
@@ -305,7 +316,6 @@ protected:
 	D2D1_POINT_2F                  m_hoverPt{ 0.0f, 0.0f };
 	bool                           m_hasHover = false;
 	std::unique_ptr<ge::PathNode>     m_previewShape; // 구형 미리보기 도형
-	std::unique_ptr<ge::PathNode>  m_previewNode;  // 신엔진 미리보기 노드
 	ge::NodeId                     m_lastCommittedId = 0;     // 방금 완료된 도형 NodeId (대기 상태에서 앵커 표시)
 
 public:
@@ -317,7 +327,7 @@ public:
 	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
 
 	// 현재 도형 작성 중인지 여부 (미리보기 도형 또는 점 목록 존재 여부)
-	virtual bool HasActiveShape() const { return m_previewShape != nullptr || m_previewNode != nullptr; }
+	virtual bool HasActiveShape() const { return m_previewShape != nullptr; }
 
 	// 도형 확정 및 문서 등록
 	bool CommitShape(CM2DrawDoc* pDoc);
@@ -357,7 +367,10 @@ public:
 		Gear,
 		Spiral,
 		Heart,
-		RegularPoly
+		RegularPoly,
+		Arc,
+		BlockArrow,
+		Callout
 	};
 
 protected:

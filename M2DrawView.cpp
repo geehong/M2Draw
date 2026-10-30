@@ -413,7 +413,15 @@ void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 	D2D1_POINT_2F rawWorld = ScreenToWorld(point);
 
 	const ge::Document* pGeDoc = pDoc ? &pDoc->GetDoc() : nullptr;
-	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc);
+	ITool* pActiveTool = GetApp()->GetToolManager().GetActiveTool();
+	const ToolType activeToolType = pActiveTool ? pActiveTool->GetType() : ToolType::Select;
+	const bool isIdleNoSnapTool = (activeToolType == ToolType::Pan || activeToolType == ToolType::ZoomIn || activeToolType == ToolType::ZoomOut ||
+	                              (activeToolType == ToolType::Select && (nFlags & MK_LBUTTON) == 0));
+	if (isIdleNoSnapTool) { m_lastSnap = SnapResult{}; m_lastSnap.pt = rawWorld; }
+	else {
+		const std::vector<ge::Node*>* excludeSel = (activeToolType == ToolType::Select && pGeDoc) ? &pGeDoc->GetSelection() : nullptr;
+		m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc, nullptr, excludeSel);
+	}
 	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
 
 	float unitScale = GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit);
@@ -451,7 +459,15 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 	D2D1_POINT_2F rawWorld = ScreenToWorld(point);
 
 	const ge::Document* pGeDoc = pDoc ? &pDoc->GetDoc() : nullptr;
-	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc);
+	ITool* pActiveTool = GetApp()->GetToolManager().GetActiveTool();
+	const ToolType activeToolType = pActiveTool ? pActiveTool->GetType() : ToolType::Select;
+	const bool isIdleNoSnapTool = (activeToolType == ToolType::Pan || activeToolType == ToolType::ZoomIn || activeToolType == ToolType::ZoomOut ||
+	                              (activeToolType == ToolType::Select && (nFlags & MK_LBUTTON) == 0));
+	if (isIdleNoSnapTool) { m_lastSnap = SnapResult{}; m_lastSnap.pt = rawWorld; }
+	else {
+		const std::vector<ge::Node*>* excludeSel = (activeToolType == ToolType::Select && pGeDoc) ? &pGeDoc->GetSelection() : nullptr;
+		m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc, nullptr, excludeSel);
+	}
 	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
 
 	float unitScale = GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit);
@@ -721,7 +737,15 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 	D2D1_POINT_2F rawWorld = ScreenToWorld(point);
 
 	const ge::Document* pGeDoc = pDoc ? &pDoc->GetDoc() : nullptr;
-	m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc);
+	ITool* pActiveTool = GetApp()->GetToolManager().GetActiveTool();
+	const ToolType activeToolType = pActiveTool ? pActiveTool->GetType() : ToolType::Select;
+	const bool isIdleNoSnapTool = (activeToolType == ToolType::Pan || activeToolType == ToolType::ZoomIn || activeToolType == ToolType::ZoomOut ||
+	                              (activeToolType == ToolType::Select && (nFlags & MK_LBUTTON) == 0));
+	if (isIdleNoSnapTool) { m_lastSnap = SnapResult{}; m_lastSnap.pt = rawWorld; }
+	else {
+		const std::vector<ge::Node*>* excludeSel = (activeToolType == ToolType::Select && pGeDoc) ? &pGeDoc->GetSelection() : nullptr;
+		m_lastSnap = GetApp()->GetSnapManager().FindSnapPoint(rawWorld, m_fZoom, GetApp()->GetGrid(), pGeDoc, nullptr, excludeSel);
+	}
 	D2D1_POINT_2F worldPt = m_lastSnap.snapped ? m_lastSnap.pt : rawWorld;
 
 	float unitScale = GetPixelsPerCanvasUnit(GetApp()->GetGrid().unit);
@@ -871,6 +895,28 @@ void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		return;
 	}
 
+	// 0-4. 방향키: 선택 오브젝트 미세 이동 (1px, Shift 10px). 선택 도구일 때만, 키를 뗄 때 한 번만 Undo 기록 (Step 6.11.3)
+	if ((nChar == VK_LEFT || nChar == VK_RIGHT || nChar == VK_UP || nChar == VK_DOWN) &&
+		!(::GetKeyState(VK_CONTROL) & 0x8000) && !(::GetKeyState(VK_MENU) & 0x8000) && !IsTextInlineEditing() &&
+		GetApp()->GetToolManager().GetActiveType() == ToolType::Select)
+	{
+		CM2DrawDoc* pDoc = GetDocument();
+		if (pDoc && pDoc->HasSelectedObjects())
+		{
+			const float step = (::GetKeyState(VK_SHIFT) & 0x8000) ? 10.0f : 1.0f;
+			const float dx = (nChar == VK_LEFT) ? -step : (nChar == VK_RIGHT) ? step : 0.0f;
+			const float dy = (nChar == VK_UP) ? -step : (nChar == VK_DOWN) ? step : 0.0f;
+			if (pDoc->NudgeSelection(dx, dy))
+			{
+				m_nudgePending = true;
+				pDoc->UpdateAllViews(nullptr);
+				Invalidate(FALSE);
+				UpdateShapePropertiesSelection(pDoc->GetPrimarySelection(), pDoc);
+			}
+			return;
+		}
+	}
+
 	// 1. Space 키 누르고 있는 동안 임시 패닝(Pan) 모드 활성화
 	if (nChar == VK_SPACE && (nRepCnt == 1))
 	{
@@ -919,6 +965,12 @@ void CM2DrawView::OnUpdateEditClear(CCmdUI* pCmdUI)
 
 void CM2DrawView::OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
+	if (m_nudgePending && (nChar == VK_LEFT || nChar == VK_RIGHT || nChar == VK_UP || nChar == VK_DOWN))
+	{
+		m_nudgePending = false;
+		if (CM2DrawDoc* pDoc = GetDocument()) { pDoc->SetModifiedFlag(TRUE); pDoc->CommitUndoPoint(L"방향키 이동"); }
+		return;
+	}
 	// Space 키를 떼면 이전 도구로 복귀
 	if (nChar == VK_SPACE)
 	{

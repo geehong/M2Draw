@@ -66,6 +66,7 @@ public:
 
 	// 캔버스 위 텍스트 직접 인라인 편집 (Step 3.2.2 ~ 3.2.4)
 	bool IsTextInlineEditing() const { return m_pEditingTextNode != nullptr; }
+	bool m_nudgePending = false;   // 방향키로 이동한 뒤 아직 Undo 기록을 남기지 않음 (키를 뗄 때 한 번만 기록)
 	bool BeginTextInlineEdit(ge::TextNode* pNode);
 	void CommitTextInlineEdit();
 	void CancelTextInlineEdit();

@@ -666,6 +666,7 @@ void ComponentTool::OnUp(const ToolEvent& e)
 		ps.stroke.width = 2.0f;
 		ps.stroke.color = ge::Color(0.6f, 0.6f, 0.65f, 1.0f);
 		pn->SetStyle(ps);
+		pn->SetHtmlTag("hr");
 		pn->SetName(L"구분선");
 		pn->SetTransform(ge::Matrix2D::Translation(x0, y0));
 		added = pDoc->GetDoc().AddShapeAt(std::move(pn), ge::Vec2{ m_startW.x, m_startW.y });
@@ -790,6 +791,9 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Heart, ToolType::Heart, L"하트 도구 (Heart)", 0));
 	// BoxShapeTool 정다각형 (Regular Polygon) 도구 주입
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::RegularPoly, ToolType::Polygon, L"정다각형 도구 (Polygon)", L'G'));
+	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Arc, ToolType::Arc, L"원호/파이 도구 (Arc)", 0));
+	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::BlockArrow, ToolType::BlockArrow, L"블록 화살표 도구 (Block Arrow)", 0));
+	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Callout, ToolType::Callout, L"말풍선 도구 (Callout)", 0));
 	m_tools.push_back(std::make_unique<TextTool>());
 	m_tools.push_back(std::make_unique<PaintBucketTool>());
 	m_tools.push_back(std::make_unique<FrameTool>());

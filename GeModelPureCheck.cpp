@@ -399,14 +399,32 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(approx(p->GetWorldTransform().TransformPoint(Vec2{ 1.0f, 1.0f }), 101.0f, 51.0f), L"중첩 그룹의 월드 변환이 조상 변환을 합치지 않음");
 		GE_CHECK(std::abs(p->GetEffectiveOpacity() - 0.25f) < 0.0001f, L"중첩 그룹의 최종 불투명도가 조상 곱이 아님");
 
-		// 10-2. 가시성/잠금은 임의 깊이의 조상에서 상속
+		// 10-2. 가시성/잠금 상속 규칙:
+		// - 가시성(IsEffectivelyVisible): 임의 깊이의 조상에서 상속
+		// - 잠금(IsEffectivelyLocked): 일반 그룹(Ctrl+G)과 단일 UI 컴포넌트(IsAtomicComponent)는 조상 잠금을 상속하지만,
+		//   일반 프레임(FrameNode)이나 레이어(LayerNode)를 잠근 경우에는 컨테이너 자체만 고정되고 잠기지 않은 내부 자식은 편집 가능!
 		GE_CHECK(p->IsEffectivelyVisible() && !p->IsEffectivelyLocked(), L"초기 상태의 유효 가시성/잠금이 틀림");
 		g1->SetVisible(false);
 		GE_CHECK(!p->IsEffectivelyVisible() && p->IsVisible(), L"조상이 숨겨졌는데 후손이 보이는 것으로 판정됨");
 		g1->SetVisible(true);
 		g2->SetLocked(true);
-		GE_CHECK(p->IsEffectivelyLocked() && !p->IsLocked() && !g1->IsEffectivelyLocked(), L"조상 잠금이 후손에만 전파되어야 함");
+		GE_CHECK(p->IsEffectivelyLocked() && !p->IsLocked() && !g1->IsEffectivelyLocked(), L"일반 그룹 잠금은 후손에만 전파되어야 함");
 		g2->SetLocked(false);
+
+		// 레이어 및 일반 프레임(FrameNode) 잠금 시 하위 노드는 잠기지 않아야 함 (방식 A 검증)
+		d.GetActiveLayer()->SetLocked(true);
+		GE_CHECK(d.GetActiveLayer()->IsLocked() && !p->IsEffectivelyLocked() && !g1->IsEffectivelyLocked(),
+			L"레이어를 잠가도 잠기지 않은 하위 노드는 편집 가능해야 함");
+		d.GetActiveLayer()->SetLocked(false);
+
+		auto frm = std::make_unique<FrameNode>();
+		frm->ResizeFrame(200.0f, 120.0f);
+		PathNode* fcPtr = static_cast<PathNode*>(frm->AddChild(MakePath(L"frmChild", 10.0f, 10.0f)));
+		FrameNode* frmPtr = static_cast<FrameNode*>(d.AddShape(std::move(frm)));
+		frmPtr->SetLocked(true);
+		GE_CHECK(frmPtr->IsEffectivelyLocked() && !fcPtr->IsEffectivelyLocked(),
+			L"부모 프레임을 잠가도 잠기지 않은 자식 도형은 잠기지 않아야 함");
+		d.GetActiveLayer()->RemoveChild(frmPtr);
 
 		// 10-3. 임의 깊이 노드를 ID 로 검색
 		GE_CHECK(d.FindById(p->GetId()) == p && d.FindById(g2->GetId()) == g2, L"중첩 노드를 ID 로 찾지 못함");
@@ -760,6 +778,26 @@ bool RunPureModelVerification(std::wstring* failure)
 		const Style& e1 = static_cast<PathNode*>(ek[1].get())->GetStyle();
 		GE_CHECK(e1.fill.type == PaintType::Solid && near(e1.fill.color.g, 1.0f), L"userSpaceOnUse 그라디언트가 첫 스톱 단색으로 대체되지 않음");
 		GE_CHECK(static_cast<PathNode*>(ek[2].get())->GetStyle().fill.type == PaintType::None, L"알 수 없는 fill 참조가 채움 없음으로 처리되지 않음");
+
+		// 14-5. 프레임(FrameNode) 그라디언트 SVG 왕복 및 HTML/CSS linear-gradient 내보내기 검증
+		Document fdoc;
+		auto gFrame = std::make_unique<FrameNode>();
+		gFrame->ResizeFrame(240.0f, 120.0f);
+		Style gfSt = gFrame->GetStyle();
+		gfSt.fill.type = PaintType::Gradient;
+		gfSt.fill.gradient = Gradient::Make(Gradient::Kind::Linear, Color(1.0f, 0.0f, 0.0f, 1.0f), Color(0.0f, 0.0f, 1.0f, 1.0f));
+		gFrame->SetStyle(gfSt);
+		FrameNode* gfPtr = static_cast<FrameNode*>(fdoc.AddShape(std::move(gFrame)));
+		const NodeId gfId = gfPtr->GetId();
+		const std::string gfSvg = w.WriteString(fdoc);
+		Document fdocBack;
+		GE_CHECK(reader.ReadFromString(gfSvg, fdocBack), L"그라디언트 프레임 SVG 읽기 실패");
+		const auto* gfBack = dynamic_cast<const FrameNode*>(fdocBack.FindById(gfId));
+		GE_CHECK(gfBack && gfBack->GetStyle().fill.type == PaintType::Gradient && gfBack->GetStyle().fill.gradient.stops.size() == 2,
+			L"프레임 그라디언트가 SVG 왕복 후 보존되지 않음");
+		HtmlExporter hexp;
+		const std::string gfHtml = hexp.ExportToString(fdoc);
+		GE_CHECK(gfHtml.find("linear-gradient(") != std::string::npos, L"프레임 그라디언트가 HTML linear-gradient 로 출력되지 않음");
 	}
 
 	// ---- 15. 그룹화 / 그룹 해제 (2.7.1) -----------------------------------------------------------
@@ -2504,6 +2542,226 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(d.GetArtboards().empty(), L"UI 컴포넌트가 아트보드 목록에 들어감");
 		GE_CHECK(Create(Kind::TextBox, 0.0f, 0.0f)->GetStyle().fill.color.a == 1.0f, L"컴포넌트 채우기 알파가 1 이 아님");
 		(void)inner;
+	}
+
+	// ---- 43. 반전 / 90도 회전 / 이동 (6.11.3) ----------------------------------------------------------
+	{
+		// +90도가 화면에서 시계 방향인지 (y 아래 방향 좌표계: (1,0) -> (0,1))
+		const Vec2 r = MakeWorldRotation(90.0f, Vec2{ 0.0f, 0.0f }).TransformPoint(Vec2{ 1.0f, 0.0f });
+		GE_CHECK(std::fabs(r.x) < 1e-4f && std::fabs(r.y - 1.0f) < 1e-4f, L"+90도 회전이 시계 방향이 아님");
+		Document d;
+		Node* a = d.AddShape(MakePath(L"f", 0.0f, 0.0f));   // 삼각형 (0,0),(90,180),(90,0)
+		Rect2 b0; UnionWorldBounds({ a }, b0);
+		const Vec2 c{ (b0.left + b0.right) * 0.5f, (b0.top + b0.bottom) * 0.5f };
+		std::vector<Node*> v{ a };
+		std::vector<Matrix2D> init{ a->GetTransform() };
+		ApplyWorldTransform(v, init, MakeWorldScale(-1.0f, 1.0f, c));
+		Rect2 b1; UnionWorldBounds(v, b1);
+		GE_CHECK(std::fabs(b1.left - b0.left) < 0.05f && std::fabs(b1.right - b0.right) < 0.05f, L"좌우 반전 후 경계가 달라짐");
+		Rect2 lb; a->GetLocalBounds(lb);
+		const Vec2 p = a->GetTransform().TransformPoint(Vec2{ 0.0f, 0.0f });   // 원래 왼쪽 위 꼭짓점이 오른쪽으로 이동
+		GE_CHECK(p.x > c.x, L"좌우 반전으로 꼭짓점이 반대편으로 가지 않음");
+		ApplyWorldTransform(v, { a->GetTransform() }, Matrix2D::Translation(5.0f, -3.0f));
+		Rect2 b2; UnionWorldBounds(v, b2);
+		GE_CHECK(std::fabs(b2.left - (b1.left + 5.0f)) < 0.05f && std::fabs(b2.top - (b1.top - 3.0f)) < 0.05f, L"이동량이 틀림");
+	}
+
+	// ---- 44. 컴포넌트 판별 정책 (6.2) ------------------------------------------------------------------
+	{
+		Document d;
+		auto mkBtn = [&](const wchar_t* name) {
+			auto f = std::make_unique<FrameNode>();
+			f->SetFrameSize(100.0f, 40.0f);
+			f->SetHtmlTag("button");
+			f->SetName(name);
+			return static_cast<FrameNode*>(d.AddShape(std::move(f)));
+		};
+		FrameNode* b1 = mkBtn(L"버튼");
+		FrameNode* b2 = mkBtn(L"내 이름");   // 이름을 바꿔도 버튼
+		auto pf = std::make_unique<FrameNode>(); pf->SetFrameSize(50.0f, 50.0f); pf->SetName(L"버튼");   // 이름만 '버튼' 인 일반 프레임
+		FrameNode* plain = static_cast<FrameNode*>(d.AddShape(std::move(pf)));
+		TableNode* tb = static_cast<TableNode*>(d.AddShape(TableComponent::Create(2, 2, 100.0f, 40.0f)));
+		d.AssignIds(*d.GetLayers()[0]);
+		GE_CHECK(GetComponentKind(b1) == ComponentKind::Button && GetComponentKind(b2) == ComponentKind::Button, L"버튼 종류 판별 실패");
+		GE_CHECK(GetComponentKind(plain) == ComponentKind::Frame && !IsAtomicComponent(plain) && AllowsChildSelection(plain), L"이름만 버튼인 프레임이 버튼으로 판별됨");
+		GE_CHECK(GetComponentKind(tb) == ComponentKind::Table && !AllowsChildSelection(tb) && !IsAtomicComponent(tb), L"표 종류 판별 실패");
+		GE_CHECK(GetComponentKind(UiComp::Create(UiComp::Kind::Card, 0.0f, 0.0f).get()) == ComponentKind::UiComponent, L"UI 컴포넌트 종류 판별 실패");
+		GE_CHECK(GetComponentKind(nullptr) == ComponentKind::None, L"null 노드 판별 실패");
+		// 버튼 정체성은 SVG 왕복에서도 유지 (이름을 바꿔도)
+		SvgWriter w;
+		const std::string svg = w.WriteString(d, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(svg.find("m2:component=\"button\"") != std::string::npos, L"SVG 에 버튼 컴포넌트 표시가 없음");
+		Document back;
+		GE_CHECK(reader.ReadFromString(svg, back), L"버튼 SVG 읽기 실패");
+		int buttons = 0;
+		for (const auto& ch : back.GetLayers()[0]->GetChildren()) if (IsButtonComponent(ch.get())) ++buttons;
+		GE_CHECK(buttons == 2, L"SVG 왕복 후 버튼 개수가 달라짐");
+	}
+
+	// ---- 45. 정밀 베지어 경계(6.8), 단일 도형 전단(6.14), 2D 벡터 도형(6.13), ListBox/<hr>, Undo 원자성 ----
+	{
+		// (a) 3차 베지어 정밀 경계(B'(t)=0): 제어점이 y=100 까지 뻗어 있어도 실제 곡선 최고점은 y=75
+		PathNode curve;
+		SubPath sp;
+		BezierNode n0; n0.anchor = Vec2{ 0.0f, 0.0f }; n0.hOut = Vec2{ 0.0f, 100.0f };
+		BezierNode n1; n1.anchor = Vec2{ 100.0f, 0.0f }; n1.hIn = Vec2{ 0.0f, 100.0f };
+		sp.nodes = { n0, n1 };
+		sp.closed = false;
+		curve.SetPaths({ sp });
+		Rect2 cb{};
+		GE_CHECK(curve.GetLocalBounds(cb), L"3차 베지어 로컬 경계 계산 실패");
+		GE_CHECK(std::fabs(cb.left - 0.0f) < 1e-3f && std::fabs(cb.right - 100.0f) < 1e-3f &&
+			std::fabs(cb.top - 0.0f) < 1e-3f && std::fabs(cb.bottom - 75.0f) < 0.05f,
+			L"3차 베지어 정밀 경계(B'(t)=0)가 부정확함 (제어점 헐이 아닌 실제 극값 75여야 함)");
+		// 캐시 히트 후 Invalidate 시 갱신 확인
+		Rect2 cbCached{};
+		GE_CHECK(curve.GetLocalBounds(cbCached) && std::fabs(cbCached.bottom - cb.bottom) < 1e-5f, L"경계 캐시 재호출 불일치");
+		curve.GetPathsRef()[0].nodes[0].hOut.y = 200.0f;
+		curve.GetPathsRef()[0].nodes[1].hIn.y = 200.0f;
+		curve.Invalidate();
+		Rect2 cbUpdated{};
+		GE_CHECK(curve.GetLocalBounds(cbUpdated) && std::fabs(cbUpdated.bottom - 150.0f) < 0.1f, L"Invalidate 후 경계 캐시가 갱신되지 않음");
+
+		// GetVisualWorldBounds: 스트로크 두께의 절반만큼 외곽 확장
+		Style st = curve.GetStyle();
+		st.stroke.width = 10.0f;
+		st.stroke.color = Color(0.0f, 0.0f, 0.0f, 1.0f);
+		curve.SetStyle(st);
+		Rect2 vb{};
+		GE_CHECK(Document::GetVisualWorldBounds(curve, vb) &&
+			std::fabs(vb.left - (-5.0f)) < 0.05f && std::fabs(vb.bottom - 155.0f) < 0.1f,
+			L"GetVisualWorldBounds 스트로크 확장 계산 오류");
+
+		// (b) 단일 도형 변 핸들 전단(Transformer::SkewByEdgeHandle, 6.14.4)
+		const Rect2 initBox{ 0.0f, 0.0f, 100.0f, 50.0f };
+		// 상단 변(handleIdx=2)을 오른쪽으로 +25px 드래그: 하단(y=50)은 고정, 상단(y=0)은 +25px 이동
+		auto skTop = Transformer::SkewByEdgeHandle(2, Vec2{ 50.0f, 0.0f }, Vec2{ 75.0f, 0.0f }, initBox, Matrix2D::Identity());
+		GE_CHECK(skTop.has_value(), L"상단 변 전단 행렬 계산 실패");
+		const Vec2 topMoved = skTop->TransformPoint(Vec2{ 50.0f, 0.0f });
+		const Vec2 botFixed = skTop->TransformPoint(Vec2{ 50.0f, 50.0f });
+		GE_CHECK(std::fabs(topMoved.x - 75.0f) < 0.05f && std::fabs(botFixed.x - 50.0f) < 0.05f,
+			L"상단 변 전단 시 반대편 변 고정 또는 이동량 오류");
+
+		// 우측 변(handleIdx=4)을 아래로 +20px 드래그: 좌측(x=0)은 고정, 우측(x=100)은 y가 +20px 이동
+		auto skRight = Transformer::SkewByEdgeHandle(4, Vec2{ 100.0f, 25.0f }, Vec2{ 100.0f, 45.0f }, initBox, Matrix2D::Identity());
+		GE_CHECK(skRight.has_value(), L"우측 변 전단 행렬 계산 실패");
+		const Vec2 rightMoved = skRight->TransformPoint(Vec2{ 100.0f, 25.0f });
+		const Vec2 leftFixed = skRight->TransformPoint(Vec2{ 0.0f, 25.0f });
+		GE_CHECK(std::fabs(rightMoved.y - 45.0f) < 0.05f && std::fabs(leftFixed.y - 25.0f) < 0.05f,
+			L"우측 변 전단 시 반대편 변 고정 또는 이동량 오류");
+
+		// (c) 2D 파라메트릭 벡터 도형 생성 및 SVG 왕복 (Arc 4모드, BlockArrow, Callout - 6.13)
+		Document vecDoc;
+		const Rect2 shapeBox{ 40.0f, 40.0f, 160.0f, 120.0f };
+		for (ArcMode m : { ArcMode::Open, ArcMode::Pie, ArcMode::Chord, ArcMode::Donut }) {
+			ArcParams ap;
+			ap.cx = 100.0f; ap.cy = 80.0f; ap.rx = 60.0f; ap.ry = 40.0f;
+			ap.startAngle = 15.0f; ap.sweepAngle = 240.0f; ap.innerRatio = 0.45f;
+			ap.mode = m;
+			auto pn = std::make_unique<PathNode>();
+			pn->SetKind(ShapeKind::Arc);
+			pn->SetParams(ap);
+			PathNode::BuildArcSubPaths(shapeBox, ap, pn->GetPathsRef());
+			pn->SetName(vecDoc.GenerateNodeName(ShapeKind::Arc));
+			GE_CHECK(!pn->GetPaths().empty() && pn->GetPaths()[0].closed == (m != ArcMode::Open), L"Arc 서브패스 생성 오류");
+			vecDoc.AddShape(std::move(pn));
+		}
+		{
+			BlockArrowParams bp;
+			bp.headLengthRatio = 0.35f; bp.shaftWidthRatio = 0.45f;
+			auto pn = std::make_unique<PathNode>();
+			pn->SetKind(ShapeKind::BlockArrow);
+			pn->SetParams(bp);
+			PathNode::BuildBlockArrowSubPaths(shapeBox, bp, pn->GetPathsRef());
+			pn->SetName(vecDoc.GenerateNodeName(ShapeKind::BlockArrow));
+			GE_CHECK(pn->GetPaths().size() == 1 && pn->GetPaths()[0].nodes.size() == 7, L"BlockArrow 정점 수 오류");
+			vecDoc.AddShape(std::move(pn));
+		}
+		{
+			CalloutParams cp;
+			cp.cornerRadius = 12.0f; cp.tailPosRatio = 0.3f; cp.tailWidthRatio = 0.18f; cp.tailHeightRatio = 0.25f;
+			auto pn = std::make_unique<PathNode>();
+			pn->SetKind(ShapeKind::Callout);
+			pn->SetParams(cp);
+			PathNode::BuildCalloutSubPaths(shapeBox, cp, pn->GetPathsRef());
+			pn->SetName(vecDoc.GenerateNodeName(ShapeKind::Callout));
+			GE_CHECK(pn->GetPaths().size() == 1 && pn->GetPaths()[0].closed, L"Callout 서브패스 생성 오류");
+			vecDoc.AddShape(std::move(pn));
+		}
+		vecDoc.AssignIds(*vecDoc.GetLayers()[0]);
+
+		SvgWriter vw;
+		const std::string vsvg = vw.WriteString(vecDoc, SvgWriteOptions(SvgWriteMode::File));
+		GE_CHECK(vsvg.find("m2:shape=\"arc\"") != std::string::npos &&
+			vsvg.find("m2:shape=\"arrow\"") != std::string::npos &&
+			vsvg.find("m2:shape=\"callout\"") != std::string::npos,
+			L"2D 파라메트릭 도형의 SVG 메타데이터 출력 누락");
+		Document vecBack;
+		GE_CHECK(reader.ReadFromString(vsvg, vecBack), L"2D 파라메트릭 도형 SVG 읽기 실패");
+		int arcCnt = 0, arrowCnt = 0, calloutCnt = 0;
+		for (const auto& ch : vecBack.GetLayers()[0]->GetChildren()) {
+			auto* pn = dynamic_cast<PathNode*>(ch.get());
+			if (!pn) continue;
+			if (pn->GetShapeKind() == ShapeKind::Arc) {
+				const ArcParams* ap = pn->GetParam<ArcParams>();
+				GE_CHECK(ap && std::fabs(ap->sweepAngle - 240.0f) < 0.05f && std::fabs(ap->innerRatio - 0.45f) < 0.01f, L"Arc 파라미터 복원 불일치");
+				++arcCnt;
+			} else if (pn->GetShapeKind() == ShapeKind::BlockArrow) {
+				const BlockArrowParams* bp = pn->GetParam<BlockArrowParams>();
+				GE_CHECK(bp && std::fabs(bp->headLengthRatio - 0.35f) < 0.01f && std::fabs(bp->shaftWidthRatio - 0.45f) < 0.01f, L"BlockArrow 파라미터 복원 불일치");
+				++arrowCnt;
+			} else if (pn->GetShapeKind() == ShapeKind::Callout) {
+				const CalloutParams* cp = pn->GetParam<CalloutParams>();
+				GE_CHECK(cp && std::fabs(cp->tailPosRatio - 0.3f) < 0.01f && std::fabs(cp->tailHeightRatio - 0.25f) < 0.01f, L"Callout 파라미터 복원 불일치");
+				++calloutCnt;
+			}
+		}
+		GE_CHECK(arcCnt == 4 && arrowCnt == 1 && calloutCnt == 1, L"2D 파라메트릭 도형 SVG 왕복 개수 불일치");
+
+		// (d) ListBox (<select size="N" multiple>) 및 구분선 PathNode(<hr>) HTML 내보내기 검증
+		Document htmlDoc;
+		auto lb = UiComp::Create(UiComp::Kind::Combo, 10.0f, 10.0f, 180.0f, 110.0f);
+		UiComp::SetProperty(*lb, "kind", "listbox");
+		UiComp::SetProperty(*lb, "rows", "5");
+		UiComp::SetProperty(*lb, "multiple", "1");
+		UiComp::SetProperty(*lb, "selected", "0");
+		htmlDoc.AddShape(std::move(lb));
+
+		auto hrPath = std::make_unique<PathNode>();
+		SubPath hrSp;
+		BezierNode ha, hb; ha.anchor = Vec2{ 0.0f, 0.0f }; hb.anchor = Vec2{ 200.0f, 0.0f };
+		hrSp.nodes = { ha, hb }; hrSp.closed = false;
+		hrPath->SetPaths({ hrSp });
+		hrPath->SetHtmlTag("hr");
+		htmlDoc.AddShape(std::move(hrPath));
+		htmlDoc.AssignIds(*htmlDoc.GetLayers()[0]);
+
+		HtmlExporter hex;
+		HtmlExportOptions hopt; hopt.singleFile = true;
+		const std::string hout = hex.Export(htmlDoc, hopt).html;
+		GE_CHECK(hout.find("<select size=\"5\" multiple") != std::string::npos, L"ListBox <select size=5 multiple> 출력 누락");
+		GE_CHECK(hout.find("<hr") != std::string::npos, L"PathNode(htmlTag=hr)의 시맨틱 <hr> 출력 누락");
+
+		// (e) Undo 시 원자 컴포넌트 내부 자식이 선택되지 않고 루트 FrameNode가 유지되는지 검증
+		Document udoc;
+		UndoManager um;
+		auto comp = UiComp::Create(UiComp::Kind::Combo, 20.0f, 20.0f);
+		FrameNode* cf = static_cast<FrameNode*>(udoc.AddShape(std::move(comp)));
+		udoc.AssignIds(*cf);
+		const NodeId rootId = cf->GetId();
+		// 실수로 내부 자식이 선택 목록에 들어간 상태로 기준점을 잡더라도 루트 ID로 승격되어야 함
+		GE_CHECK(!cf->GetChildren().empty(), L"Combo 자식이 없음");
+		udoc.SetSelection({ cf->GetChildren()[0].get() });
+		um.Reset(udoc);
+		cf->ResizeFrame(260.0f, 120.0f);
+		udoc.AssignIds(*cf);
+		GE_CHECK(um.CommitChange(L"컴포넌트 크기 조절", udoc), L"컴포넌트 변경 커밋 실패");
+		const NodeId maxBeforeUndo = udoc.PeekMaxId();
+		GE_CHECK(um.Undo(udoc), L"컴포넌트 Undo 실패");
+		GE_CHECK(udoc.PeekMaxId() >= maxBeforeUndo, L"Undo 후 단조 증가 ID 카운터가 후퇴함");
+		GE_CHECK(udoc.GetSelection().size() == 1 && udoc.GetSelection()[0]->GetId() == rootId &&
+			IsAtomicComponent(udoc.GetSelection()[0]),
+			L"Undo 후 원자 컴포넌트 루트가 아닌 내부 도형이 선택됨");
 	}
 
 #undef GE_CHECK

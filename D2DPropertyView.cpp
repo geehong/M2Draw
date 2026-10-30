@@ -177,8 +177,9 @@ bool CD2DPropertyView::IsGradientMode() const
 {
 	if (m_colorTarget != 0) return false;
 	if (m_fillMode != FILL_LINEAR_GRAD && m_fillMode != FILL_RADIAL_GRAD) return false;
-	const ge::PathNode* ps = dynamic_cast<const ge::PathNode*>(GetSelectedShape());
-	return ps && ps->GetStyle().fill.type == ge::PaintType::Gradient;
+	const ge::Node* n = GetSelectedShape();
+	if (!n || (n->Kind() != ge::NodeKind::Path && dynamic_cast<const ge::FrameNode*>(n) == nullptr)) return false;
+	return n->GetStyle().fill.type == ge::PaintType::Gradient;
 }
 
 void CD2DPropertyView::SetFillMode(FillMode mode)
@@ -594,8 +595,7 @@ bool CD2DPropertyView::IsButtonSelected() const
 {
 	ge::Node* n = GetSelectedShape();
 	if (!n) return false;
-	if (n->GetHtmlTag() == "button" || n->GetName() == L"버튼") return true;
-	return false;
+	return ge::IsButtonComponent(n);
 }
 
 ge::TextNode* CD2DPropertyView::GetButtonTextNode() const
@@ -634,7 +634,7 @@ void CD2DPropertyView::ApplyTextProps(const std::function<void(ge::TextNode&)>& 
 	if (auto* fr = dynamic_cast<ge::FrameNode*>(tn->GetParent()))
 	{
 		// 버튼 내부 텍스트인 경우 프레임 중심에 정렬 유지
-		if (fr->GetHtmlTag() == "button" || fr->GetName() == L"버튼")
+		if (ge::IsButtonComponent(fr))
 		{
 			float fw = fr->GetWidth(), fh = fr->GetHeight();
 			tn->SetTransform(ge::Matrix2D::Translation(fw * 0.5f, (fh - tn->MeasuredHeight()) * 0.5f));
@@ -2483,7 +2483,7 @@ void CD2DPropertyView::SyncControlsFromData()
 		}
 
 		// 그라디언트 편집 컨트롤: 모델 값으로 채움 (콜백 없이)
-		if (ge::PathNode* gps = dynamic_cast<ge::PathNode*>(GetSelectedShape()))
+		if (ge::Node* gps = GetSelectedShape(); gps && (gps->Kind() == ge::NodeKind::Path || dynamic_cast<ge::FrameNode*>(gps) != nullptr))
 		{
 			if (gps->GetStyle().fill.type == ge::PaintType::Gradient)
 			{
@@ -2554,7 +2554,7 @@ void CD2DPropertyView::SyncControlsFromData()
 			float safeVal = max(0.1f, m_fStrokeWidth);
 			float targetMax = max(defaultMax, safeVal * 1.5f);
 			m_sliderStrokeWidth->SetRange(0.1f, targetMax);
-			m_sliderStrokeWidth->SetValue(safeVal);
+			m_sliderStrokeWidth->SetValue(safeVal, false);
 		}
 
 		if (m_spinStrokeWidth)
@@ -2562,7 +2562,7 @@ void CD2DPropertyView::SyncControlsFromData()
 			m_spinStrokeWidth->SetSuffix(unitSuffix);
 			m_spinStrokeWidth->SetStep(stepVal);
 			m_spinStrokeWidth->SetRange(0.01, 1000000.0);
-			m_spinStrokeWidth->SetValue(m_fStrokeWidth);
+			m_spinStrokeWidth->SetValue(m_fStrokeWidth, false);
 		}
 
 		for (int i = 0; i < static_cast<int>(m_btnDashStyles.size()); ++i)
@@ -2975,7 +2975,6 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 		// 표준 UI 컴포넌트 속성 (4.5.17): 종류별 슬롯을 Transform 바로 위에 배치
 		{
 			ge::FrameNode* uiComp = GetSelectedUiComponent();
-			if (uiComp) SyncUiComponentControls();
 			if (m_lblUi) m_lblUi->SetVisible(uiComp != nullptr);
 			if (m_lblUi && uiComp) { m_lblUi->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
 			for (int i = 0; i < kUiSlots; ++i)

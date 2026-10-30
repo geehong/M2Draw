@@ -7,6 +7,7 @@
 namespace ge {
 
 class Document;
+class Node;
 class PathNode;
 class GroupNode;
 class LayerNode;
@@ -59,9 +60,9 @@ private:
 	void WriteGradientDefs(Document& doc);
 	void WriteClipPathDefs(Document& doc);
 
-	// 같은 내용의 그라디언트는 <defs> 에 한 번만 정의하고 여러 도형이 참조 (도형 -> 사용할 id)
-	std::unordered_map<const PathNode*, std::string> m_gradIds;
-	std::string GradientIdFor(const PathNode& p) const;
+	// 같은 내용의 그라디언트는 <defs> 에 한 번만 정의하고 여러 도형/프레임이 참조 (노드 -> 사용할 id)
+	std::unordered_map<const Node*, std::string> m_gradIds;
+	std::string GradientIdFor(const Node& p) const;
 
 	std::string m_output;
 	int         m_indent = 0;

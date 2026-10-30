@@ -10,33 +10,34 @@
 // SelectTool 구현 (도형 선택, 이동, 스케일, 회전, 에디트 포인트 편집)
 // ============================================================================
 
-// 레이어 상호작용 가능 여부 (숨김/잠금 레이어 제외)
+// 레이어 가시성 확인 (레이어 자체가 잠겨 있어도 잠기지 않은 하위 노드는 개별 선택/편집 가능)
 static bool IsLayerInteractive(const ge::LayerNode* pLayer)
 {
-	return pLayer && pLayer->IsVisible() && !pLayer->IsLocked();
+	return pLayer && pLayer->IsVisible();
 }
 
-// 노드 상호작용 가능 여부 (자신 + 조상 그룹/레이어 체인의 가시성/잠금)
+// 노드 상호작용 가능 여부 (자신의 잠금 + 단일 컴포넌트/일반 그룹 잠금 및 가시성 체인)
 static bool IsInteractive(const ge::Node* n)
 {
 	return n && n->IsEffectivelyVisible() && !n->IsEffectivelyLocked();
 }
 
-// 선택 가능한 최상위 도형을 위에서 아래로 순회 (위 레이어 -> 아래 레이어, 레이어 안에서도 위 -> 아래).
-// fn 이 true 를 반환하면 순회 중단. 그룹 단위/그룹 내부 선택은 그룹 UI 연결(Step 2.7)에서 확장.
+// 선택 가능한 최상위 후보를 위에서 아래로 순회 (위 레이어 -> 아래 레이어, 레이어 안에서도 위 -> 아래).
+// 부모(레이어/일반 프레임)가 잠겨 있어도 그 안의 잠기지 않은 자식을 탐색할 수 있도록 컨테이너는 통과한다.
 template <typename Fn>
 static void ForEachSelectableTopDown(CM2DrawDoc* pDoc, Fn fn)
 {
 	// 격리 편집(5.3) 중에는 격리 그룹의 직속 자식만 선택 단위가 되고, 나머지는 선택/히트되지 않는다
 	if (ge::GroupNode* iso = pDoc->GetDoc().GetIsolationGroup())
 	{
-		if (iso->IsEffectivelyVisible() && !iso->IsEffectivelyLocked())
+		if (iso->IsEffectivelyVisible())
 		{
 			const auto& kids = iso->GetChildren();
 			for (int i = static_cast<int>(kids.size()) - 1; i >= 0; --i)
 			{
 				ge::Node* n = kids[i].get();
-				if (!n || !n->IsVisible() || n->IsLocked()) continue;
+				if (!n || !n->IsVisible()) continue;
+				if (n->IsLocked() && !ge::AllowsChildSelection(n)) continue;
 				if (fn(n)) return;
 			}
 		}
@@ -51,7 +52,8 @@ static void ForEachSelectableTopDown(CM2DrawDoc* pDoc, Fn fn)
 		for (int i = static_cast<int>(children.size()) - 1; i >= 0; --i)
 		{
 			ge::Node* n = children[i].get();
-			if (!n || !n->IsVisible() || n->IsLocked()) continue;
+			if (!n || !n->IsVisible()) continue;
+			if (n->IsLocked() && !ge::AllowsChildSelection(n)) continue;
 			if (fn(n)) return;
 		}
 	}
@@ -104,9 +106,11 @@ static bool HitTestSingleNode(ge::Node* n, D2D1_POINT_2F screenPt, const Viewpor
 }
 
 // 씬 그래프 깊은 탐색: 가장 안쪽의 히트된 말단 노드 반환 (위 -> 아래)
+// 일반 프레임(AllowsChildSelection)은 자기 자신이 잠겨 있어도 내부의 잠기지 않은 자식을 탐색할 수 있다.
 static ge::Node* HitTestDeepNode(ge::Node* n, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
 {
-	if (!n || !n->IsVisible() || n->IsLocked()) return nullptr;
+	if (!n || !n->IsVisible()) return nullptr;
+	if (n->IsLocked() && !ge::AllowsChildSelection(n)) return nullptr;
 
 	if (auto* group = dynamic_cast<ge::GroupNode*>(n))
 	{
@@ -156,19 +160,22 @@ static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const
 			if (dynamic_cast<ge::FrameNode*>(parent) != nullptr)
 			{
 				// FrameNode의 직속 자식이면 이 curr 노드를 개별 선택 대상으로 확정!
-				hitTarget = curr;
-				return true;
+				if (!curr->IsEffectivelyLocked())
+					hitTarget = curr;
+				return hitTarget != nullptr;
 			}
 			if (parent->Kind() == ge::NodeKind::Layer || parent == isoGroup)   // 격리 중에는 격리 그룹의 직속 자식 단위
 			{
-				hitTarget = curr;
-				return true;
+				if (!curr->IsEffectivelyLocked())
+					hitTarget = curr;
+				return hitTarget != nullptr;
 			}
 			curr = parent;
 		}
 
-		hitTarget = topNode;
-		return true;
+		if (!topNode->IsEffectivelyLocked())
+			hitTarget = topNode;
+		return hitTarget != nullptr;
 	});
 
 	return hitTarget;
@@ -195,20 +202,23 @@ struct GradientGizmo
 	}
 };
 
-// 단일 도형의 그라디언트 기즈모 계산. 그라디언트 채우기가 아니거나 박스를 만들 수 없으면 false
-bool ComputeGradientGizmo(ge::Node* n, const ViewportTransform& view, ID2D1Factory* f, GradientGizmo& out)
+// 도형 또는 프레임이 그라디언트 채우기를 지원하는지 확인
+bool SupportsGradientFill(const ge::Node* n)
 {
-	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
-	if (!ps || !f || ps->GetStyle().fill.type != ge::PaintType::Gradient) return false;
-	const ge::Gradient& g = ps->GetStyle().fill.gradient;
+	return n && (n->Kind() == ge::NodeKind::Path || dynamic_cast<const ge::FrameNode*>(n) != nullptr);
+}
+
+// 단일 도형/프레임의 그라디언트 기즈모 계산. 그라디언트 채우기가 아니거나 박스를 만들 수 없으면 false
+bool ComputeGradientGizmo(ge::Node* n, const ViewportTransform& view, ID2D1Factory* /*f*/, GradientGizmo& out)
+{
+	if (!SupportsGradientFill(n) || n->GetStyle().fill.type != ge::PaintType::Gradient) return false;
+	const ge::Gradient& g = n->GetStyle().fill.gradient;
 	if (!g.IsRenderable()) return false;
 
-	ge::D2DRenderer renderer;
-	renderer.Initialize(nullptr, f);   // 지오메트리 경계만 필요 (렌더 타깃 없이 팩터리만 사용)
-	if (!renderer.GetFillBounds(*ps, out.bounds)) return false;
+	if (!n->GetLocalBounds(out.bounds)) return false;
 	if (out.bounds.right - out.bounds.left < 1e-4f || out.bounds.bottom - out.bounds.top < 1e-4f) return false;
 
-	out.worldXf = ps->GetWorldTransform();
+	out.worldXf = n->GetWorldTransform();
 	out.radial = (g.kind == ge::Gradient::Kind::Radial);
 	out.start = out.ToScreen(g.start.x, g.start.y, view);
 	out.end = out.ToScreen(g.end.x, g.end.y, view);
@@ -228,8 +238,8 @@ namespace {
 // 기즈모 핸들 종류 (SelectTool::GradHandle 과 같은 값)
 enum GradPartId { kGradNone = 0, kGradStart = 1, kGradEnd = 2, kGradRadius = 3 };
 
-// 화면 좌표 -> 도형 지오메트리 박스 비율 좌표. 박스를 만들 수 없거나 변환이 불가능하면 false
-bool ScreenToGradRatio(ge::PathNode* ps, const ge::Rect2& b, D2D1_POINT_2F screenPt, const ViewportTransform& view, float& rx, float& ry)
+// 화면 좌표 -> 도형/프레임 지오메트리 박스 비율 좌표. 박스를 만들 수 없거나 변환이 불가능하면 false
+bool ScreenToGradRatio(ge::Node* ps, const ge::Rect2& b, D2D1_POINT_2F screenPt, const ViewportTransform& view, float& rx, float& ry)
 {
 	const float w = b.right - b.left;
 	const float h = b.bottom - b.top;
@@ -242,7 +252,7 @@ bool ScreenToGradRatio(ge::PathNode* ps, const ge::Rect2& b, D2D1_POINT_2F scree
 }
 
 // 기즈모 핸들 드래그를 그라디언트 필드에 반영
-void ApplyGradPartDrag(ge::PathNode* ps, const ge::Rect2& b, int part, D2D1_POINT_2F screenPt, const ViewportTransform& view)
+void ApplyGradPartDrag(ge::Node* ps, const ge::Rect2& b, int part, D2D1_POINT_2F screenPt, const ViewportTransform& view)
 {
 	float rx = 0.0f, ry = 0.0f;
 	if (!ScreenToGradRatio(ps, b, screenPt, view, rx, ry)) return;
@@ -270,7 +280,7 @@ void ApplyGradPartDrag(ge::PathNode* ps, const ge::Rect2& b, int part, D2D1_POIN
 }
 
 // 그라디언트가 없으면 현재 채움 색 -> 같은 색의 투명으로 새로 만들고, 있으면 그대로 둔다
-void EnsureGradient(ge::PathNode* ps, ge::Gradient::Kind kind)
+void EnsureGradient(ge::Node* ps, ge::Gradient::Kind kind)
 {
 	const ge::Style& cur = ps->GetStyle();
 	if (cur.fill.type == ge::PaintType::Gradient && cur.fill.gradient.stops.size() >= 2) return;
@@ -284,13 +294,11 @@ void EnsureGradient(ge::PathNode* ps, ge::Gradient::Kind kind)
 	st.fill.type = ge::PaintType::Gradient;
 }
 
-// 도형의 기하 경계 (그라디언트 박스) - 채움 종류와 무관하게 계산
-bool ComputePathBounds(ge::PathNode* ps, ID2D1Factory* f, ge::Rect2& out)
+// 도형/프레임의 기하 경계 (그라디언트 박스) - 채움 종류와 무관하게 계산
+bool ComputePathBounds(ge::Node* ps, ID2D1Factory* /*f*/, ge::Rect2& out)
 {
-	if (!ps || !f) return false;
-	ge::D2DRenderer renderer;
-	renderer.Initialize(nullptr, f);
-	return renderer.GetFillBounds(*ps, out) && (out.right - out.left) > 1e-4f && (out.bottom - out.top) > 1e-4f;
+	if (!SupportsGradientFill(ps)) return false;
+	return ps->GetLocalBounds(out) && (out.right - out.left) > 1e-4f && (out.bottom - out.top) > 1e-4f;
 }
 
 // 축(선형: 시작->끝, 방사형: 중심->반지름 지점) 위 한 점의 매개변수 t (0~1 로 제한)와 축까지의 거리 제곱
@@ -305,26 +313,32 @@ float ProjectOnAxis(D2D1_POINT_2F a, D2D1_POINT_2F b, D2D1_POINT_2F p, float& di
 	return t;
 }
 
-// 마우스 아래의 최상단 PathNode (그룹 안쪽 포함, 숨김/잠금 제외)
-ge::PathNode* HitTestPathInNode(ge::Node* n, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
+// 마우스 아래의 최상단 그라디언트 대상 노드(PathNode 또는 FrameNode, 그룹/프레임 안쪽 포함, 숨김/잠금 제외)
+ge::Node* HitTestGradNodeInNode(ge::Node* n, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
 {
-	if (!n || !n->IsVisible() || n->IsLocked()) return nullptr;
+	if (!n || !n->IsVisible()) return nullptr;
+	if (n->IsLocked() && !ge::AllowsChildSelection(n)) return nullptr;
 	if (auto* group = dynamic_cast<ge::GroupNode*>(n))
 	{
 		const auto& children = group->GetChildren();
 		for (int i = static_cast<int>(children.size()) - 1; i >= 0; --i)
-			if (ge::PathNode* hit = HitTestPathInNode(children[i].get(), screenPt, view, f)) return hit;
+			if (ge::Node* hit = HitTestGradNodeInNode(children[i].get(), screenPt, view, f)) return hit;
+		if (auto* fr = dynamic_cast<ge::FrameNode*>(n))
+		{
+			if (!fr->IsLocked() && HitTestSingleNode(fr, screenPt, view, f)) return fr;
+		}
 		return nullptr;
 	}
+	if (n->IsLocked()) return nullptr;
 	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
 	return (ps && ps->HitTestScreenSpace(screenPt, 8.0f, view, f).part != HitResult::Part::None) ? ps : nullptr;
 }
 
-ge::PathNode* HitTestPathDeep(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
+ge::Node* HitTestGradNodeDeep(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
 {
-	ge::PathNode* hit = nullptr;
+	ge::Node* hit = nullptr;
 	ForEachSelectableTopDown(pDoc, [&](ge::Node* n) {
-		hit = HitTestPathInNode(n, screenPt, view, f);
+		hit = HitTestGradNodeInNode(n, screenPt, view, f);
 		return hit != nullptr;
 	});
 	return hit;
@@ -333,7 +347,7 @@ ge::PathNode* HitTestPathDeep(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const Vi
 // 그라디언트 기즈모 그리기: 축/반지름 타원, 컬러 스톱 점, 핸들(시작 ■ / 끝·초점 ● / 반지름 ◆)
 // activePart: 강조할 핸들(GradPartId), activeStop: 강조할 스톱 인덱스(-1 = 없음)
 void DrawGradientGizmo(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, const ViewportTransform& view, ID2D1Factory* f,
-                       ge::PathNode* ps, int activePart, int activeStop)
+                       ge::Node* ps, int activePart, int activeStop)
 {
 	GradientGizmo gz;
 	if (!ComputeGradientGizmo(ps, view, f, gz)) return;
@@ -435,6 +449,31 @@ bool SelectTool::IsOpenPath(ge::Node* shape)
 	return true;
 }
 
+static bool IsCornerRotateZone(D2D1_POINT_2F screenPt, const D2D1_POINT_2F handles[9])
+{
+	const D2D1_POINT_2F center = D2D1::Point2F(
+		(handles[0].x + handles[4].x) * 0.5f,
+		(handles[0].y + handles[4].y) * 0.5f);
+	const int cornerIndices[4] = { 0, 2, 4, 6 };
+	const float minSq = 8.0f * 8.0f;
+	const float maxSq = 18.0f * 18.0f;
+	for (int idx : cornerIndices)
+	{
+		const D2D1_POINT_2F c = handles[idx];
+		const float dx = screenPt.x - c.x;
+		const float dy = screenPt.y - c.y;
+		const float dSq = dx * dx + dy * dy;
+		if (dSq > minSq && dSq <= maxSq)
+		{
+			const float vx = c.x - center.x;
+			const float vy = c.y - center.y;
+			if (dx * vx + dy * vy > 0.0f)
+				return true;
+		}
+	}
+	return false;
+}
+
 HCURSOR SelectTool::GetCursor() const
 {
 	if (m_mode == Mode::Moving || (m_mode == Mode::None && m_hoverOnShape))
@@ -449,29 +488,51 @@ HCURSOR SelectTool::GetCursor() const
 
 	if (m_mode == Mode::TableResize)
 		return ::LoadCursor(nullptr, m_tblCol ? IDC_SIZEWE : IDC_SIZENS);
-	if (m_mode == Mode::MultiRotate)
+	if (m_mode == Mode::Rotating || m_mode == Mode::MultiRotate || m_hoverCornerRotate)
 		return ::LoadCursor(nullptr, IDC_CROSS);
+	if (m_mode == Mode::Skewing || m_mode == Mode::MultiSkew)
+	{
+		const bool horizEdge = (m_handle == Handle::T || m_handle == Handle::B);
+		return ::LoadCursor(nullptr, horizEdge ? IDC_SIZEWE : IDC_SIZENS);
+	}
 	if (m_mode == Mode::None && m_hoverTbl != 0)
 		return ::LoadCursor(nullptr, m_hoverTbl == 1 ? IDC_SIZEWE : IDC_SIZENS);
 
-	switch (m_hoverHandle)
-	{
-	case Handle::TL:
-	case Handle::BR:
-		return ::LoadCursor(nullptr, IDC_SIZENWSE);
-	case Handle::TR:
-	case Handle::BL:
-		return ::LoadCursor(nullptr, IDC_SIZENESW);
-	case Handle::T:
-	case Handle::B:
-		return ::LoadCursor(nullptr, IDC_SIZENS);
-	case Handle::L:
-	case Handle::R:
-		return ::LoadCursor(nullptr, IDC_SIZEWE);
-	case Handle::Rotate:
+	Handle activeH = (m_mode == Mode::Scaling || m_mode == Mode::MultiScale) ? m_handle : m_hoverHandle;
+	if (activeH == Handle::Rotate)
 		return ::LoadCursor(nullptr, IDC_CROSS);
-	default:
+	if (activeH == Handle::None)
 		return ::LoadCursor(nullptr, IDC_ARROW);
+
+	if (m_ctrlDown && (activeH == Handle::T || activeH == Handle::B || activeH == Handle::L || activeH == Handle::R))
+	{
+		const bool horizEdge = (activeH == Handle::T || activeH == Handle::B);
+		return ::LoadCursor(nullptr, horizEdge ? IDC_SIZEWE : IDC_SIZENS);
+	}
+
+	// 도형 회전각(m_hoverAngleDeg)을 반영한 8방향 동적 크기 조절 커서 매핑 (6.14.2)
+	float baseDeg = 0.0f;
+	switch (activeH)
+	{
+	case Handle::L:
+	case Handle::R:  baseDeg = 0.0f; break;
+	case Handle::TL:
+	case Handle::BR: baseDeg = 45.0f; break;
+	case Handle::T:
+	case Handle::B:  baseDeg = 90.0f; break;
+	case Handle::TR:
+	case Handle::BL: baseDeg = 135.0f; break;
+	default: return ::LoadCursor(nullptr, IDC_ARROW);
+	}
+	float totalDeg = std::fmod(baseDeg + m_hoverAngleDeg, 180.0f);
+	if (totalDeg < 0.0f) totalDeg += 180.0f;
+	const int sector = static_cast<int>(std::floor((totalDeg + 22.5f) / 45.0f)) % 4;
+	switch (sector)
+	{
+	case 0: return ::LoadCursor(nullptr, IDC_SIZEWE);
+	case 1: return ::LoadCursor(nullptr, IDC_SIZENWSE);
+	case 2: return ::LoadCursor(nullptr, IDC_SIZENS);
+	default: return ::LoadCursor(nullptr, IDC_SIZENESW);
 	}
 }
 
@@ -698,7 +759,7 @@ void SelectTool::OnDown(const ToolEvent& e)
 			if (hit != GradHandle::None)
 			{
 				m_mode = Mode::GradientHandle;
-				m_gradShape = static_cast<ge::PathNode*>(sel[0]);
+				m_gradShape = sel[0];
 				m_gradHandle = hit;
 				m_gradBounds = gz.bounds;
 				m_handle = Handle::None;
@@ -768,17 +829,24 @@ void SelectTool::OnDown(const ToolEvent& e)
 		if (!GetHandleScreenPositions(n, e.view, e.pD2DFactory, handles, &localBounds)) continue;
 
 		Handle hitH = HitHandle(screenPt, handles, 8.0f);
-		if (hitH != Handle::None)
+		const bool cornerRot = (hitH == Handle::None) && IsCornerRotateZone(screenPt, handles);
+		if (hitH != Handle::None || cornerRot)
 		{
-			m_handle = hitH;
+			m_handle = cornerRot ? Handle::Rotate : hitH;
 			m_xfTarget = n;
 			m_initialXf = n->GetTransform();
 			m_initialLocalBounds = localBounds;
 
-			if (hitH == Handle::Rotate)
+			const bool isEdge = (hitH == Handle::T || hitH == Handle::R || hitH == Handle::B || hitH == Handle::L);
+			if (cornerRot || hitH == Handle::Rotate)
 			{
 				m_mode = Mode::Rotating;
 				LogAppEvent(_T("[선택 도구] 회전 핸들 드래그 시작"));
+			}
+			else if (e.ctrlDown && isEdge)
+			{
+				m_mode = Mode::Skewing;
+				LogAppEvent(_T("[선택 도구] 변 핸들 전단(Skew) 드래그 시작"));
 			}
 			else
 			{
@@ -846,14 +914,19 @@ void SelectTool::OnDown(const ToolEvent& e)
 void SelectTool::SelectNode(ge::Node* node, CM2DrawDoc* pDoc)
 {
 	if (!pDoc) return;
-	if (node)
+	if (node && !node->IsEffectivelyLocked() && node->IsEffectivelyVisible())
 	{
 		pDoc->GetDoc().SetSelection({ node });
 		ActivateLayerOf(pDoc, node);
 	}
-	else
+	else if (!node)
 	{
 		pDoc->GetDoc().ClearSelection();
+	}
+	else
+	{
+		// 잠기거나 숨겨진 노드는 선택하지 않음
+		return;
 	}
 	UpdateShapePropertiesSelection(node, pDoc);
 }
@@ -869,6 +942,7 @@ void SelectTool::OnMove(const ToolEvent& e)
 
 	const std::vector<ge::Node*> sel = e.pDoc->GetDoc().GetSelection();
 	m_viewZoom = e.view.zoom;
+	m_ctrlDown = e.ctrlDown;
 	m_dragCurrentWorld = e.worldPt;
 	D2D1_POINT_2F screenPt = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
 
@@ -876,6 +950,8 @@ void SelectTool::OnMove(const ToolEvent& e)
 	{
 		m_hoverIsNode = false;
 		m_hoverHandle = Handle::None;
+		m_hoverCornerRotate = false;
+		m_hoverAngleDeg = 0.0f;
 		m_hoverOnShape = false;
 		m_hoverTbl = 0;
 		if (sel.size() == 1)
@@ -934,10 +1010,17 @@ void SelectTool::OnMove(const ToolEvent& e)
 				D2D1_POINT_2F handles[9];
 				if (GetHandleScreenPositions(n, e.view, e.pD2DFactory, handles))
 				{
+					const ge::Matrix2D wxf = n->GetWorldTransform();
+					m_hoverAngleDeg = std::atan2(wxf.m12, wxf.m11) * (180.0f / 3.14159265358979323846f);
 					Handle hit = HitHandle(screenPt, handles, 8.0f);
 					if (hit != Handle::None)
 					{
 						m_hoverHandle = hit;
+						return;
+					}
+					if (IsCornerRotateZone(screenPt, handles))
+					{
+						m_hoverCornerRotate = true;
 						return;
 					}
 				}
@@ -1017,12 +1100,15 @@ void SelectTool::OnMove(const ToolEvent& e)
 	case Mode::Rotating:
 		ApplyRotate(m_xfTarget);
 		break;
+	case Mode::Skewing:
+		ApplySkew(m_xfTarget);
+		break;
 	default:
 		break;
 	}
 
-	// 변형(이동, 크기 조절, 회전) 중 상단 옵션바 수치 실시간 동기화 (30ms 쓰로틀링으로 메시지 큐 지연 차단)
-	if (m_mode == Mode::Moving || m_mode == Mode::Scaling || m_mode == Mode::Rotating)
+	// 변형(이동, 크기 조절, 회전, 전단) 중 상단 옵션바 수치 실시간 동기화 (30ms 쓰로틀링으로 메시지 큐 지연 차단)
+	if (m_mode == Mode::Moving || m_mode == Mode::Scaling || m_mode == Mode::Rotating || m_mode == Mode::Skewing)
 	{
 		static DWORD s_lastDragTick = 0;
 		DWORD curTick = ::GetTickCount();
@@ -1175,6 +1261,29 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 	}
 }
 
+// 둥근 사각형 경로 (원점 기준 w x h, 모서리 반경 rx/ry 는 변의 절반으로 제한). 크기를 바꿔도 반경이 찌그러지지 않게 새로 만든다 (Step 6.10.1)
+static std::vector<ge::SubPath> BuildRoundedRectPaths(float w, float h, float rx, float ry)
+{
+	const float crx = (std::min)((std::max)(0.0f, rx), w * 0.5f);
+	const float cry = (std::min)((std::max)(0.0f, ry), h * 0.5f);
+	ge::SubPath sp;
+	sp.closed = true;
+	auto add = [&](float ax, float ay, float ix, float iy, float ox, float oy) {
+		ge::BezierNode b; b.anchor = ge::Vec2{ ax, ay }; b.hIn = ge::Vec2{ ix, iy }; b.hOut = ge::Vec2{ ox, oy };
+		sp.nodes.push_back(b);
+	};
+	if (crx > 0.001f || cry > 0.001f) {
+		const float kx = crx * 0.55228475f, ky = cry * 0.55228475f;
+		add(crx, 0.0f, -kx, 0.0f, 0.0f, 0.0f);       add(w - crx, 0.0f, 0.0f, 0.0f, kx, 0.0f);
+		add(w, cry, 0.0f, -ky, 0.0f, 0.0f);          add(w, h - cry, 0.0f, 0.0f, 0.0f, ky);
+		add(w - crx, h, kx, 0.0f, 0.0f, 0.0f);       add(crx, h, 0.0f, 0.0f, -kx, 0.0f);
+		add(0.0f, h - cry, 0.0f, ky, 0.0f, 0.0f);   add(0.0f, cry, 0.0f, 0.0f, 0.0f, -ky);
+	} else {
+		add(0.0f, 0.0f, 0, 0, 0, 0); add(w, 0.0f, 0, 0, 0, 0); add(w, h, 0, 0, 0, 0); add(0.0f, h, 0, 0, 0, 0);
+	}
+	return { sp };
+}
+
 // 엔진에 스케일 변형 위임!
 void SelectTool::ApplyScale(ge::Node* shape)
 {
@@ -1240,6 +1349,27 @@ void SelectTool::ApplyScale(ge::Node* shape)
 				return;
 			}
 		}
+		// 파라메트릭 사각형: 변환 스케일 대신 경로를 새 크기로 다시 만들어 모서리 반경이 찌그러지지 않게 함 (6.10.1).
+		// 이동/스케일만 있는(회전·전단·반전 없는) 경우에만 적용하고 그 외에는 기존처럼 변환으로 처리
+		if (auto* rps = dynamic_cast<ge::PathNode*>(shape))
+		{
+			const ge::RectParams* rp = rps->GetParam<ge::RectParams>();
+			const bool plainStart = std::fabs(m_initialXf._12) < 1e-4f && std::fabs(m_initialXf._21) < 1e-4f && m_initialXf._11 > 1e-4f && m_initialXf._22 > 1e-4f;
+			const bool plainEnd = std::fabs(newXf->m12) < 1e-4f && std::fabs(newXf->m21) < 1e-4f && newXf->m11 > 1e-4f && newXf->m22 > 1e-4f;
+			if (rps->GetShapeKind() == ge::ShapeKind::Rect && rp && plainStart && plainEnd)
+			{
+				const ge::Rect2 nb = newXf->TransformRect(ge::Rect2{ m_initialLocalBounds.left, m_initialLocalBounds.top, m_initialLocalBounds.right, m_initialLocalBounds.bottom });
+				const float nw = nb.right - nb.left, nh = nb.bottom - nb.top;
+				if (nw >= 1.0f && nh >= 1.0f)
+				{
+					rps->SetPaths(BuildRoundedRectPaths(nw, nh, rp->rx, rp->ry));
+					rps->SetTransform(ge::Matrix2D::Translation(nb.left, nb.top));
+					rps->Invalidate();
+					ge::FrameNode::ClampNode(shape, true);
+					return;
+				}
+			}
+		}
 		shape->SetTransform(*newXf);
 		// 텍스트는 변환만 바뀌므로 Invalidate 하면 안 됨: 버전이 매 프레임 바뀌어 글자 배치 캐시가 계속 무효화됨 (크기 조절이 버벅거림)
 		if (shape->Kind() != ge::NodeKind::Text) shape->Invalidate();
@@ -1271,6 +1401,32 @@ void SelectTool::ApplyRotate(ge::Node* shape)
 	ge::FrameNode::ClampNode(shape, false);
 }
 
+// 엔진에 전단(Skew/Shear) 변형 위임! (6.14.4)
+void SelectTool::ApplySkew(ge::Node* shape)
+{
+	if (!shape) return;
+	ge::Vec2 startWorld{ m_dragStartWorld.x, m_dragStartWorld.y };
+	ge::Vec2 curWorld{ m_dragCurrentWorld.x, m_dragCurrentWorld.y };
+	ge::GroupNode* parent = shape->GetParent();
+	if (parent && parent->Kind() != ge::NodeKind::Layer)
+	{
+		ge::Matrix2D pInv = parent->GetWorldTransform();
+		if (pInv.Invert())
+		{
+			startWorld = pInv.TransformPoint(startWorld);
+			curWorld = pInv.TransformPoint(curWorld);
+		}
+	}
+	const ge::Rect2 initBounds{ m_initialLocalBounds.left, m_initialLocalBounds.top, m_initialLocalBounds.right, m_initialLocalBounds.bottom };
+	auto newXf = ge::Transformer::SkewByEdgeHandle(static_cast<int>(m_handle), startWorld, curWorld, initBounds, ge::Matrix2D(m_initialXf));
+	if (newXf)
+	{
+		shape->SetTransform(*newXf);
+		if (shape->Kind() != ge::NodeKind::Text) shape->Invalidate();
+		ge::FrameNode::ClampNode(shape, false);
+	}
+}
+
 void SelectTool::OnUp(const ToolEvent& e)
 {
 	if (m_mode == Mode::Marquee && e.pDoc)
@@ -1289,12 +1445,23 @@ void SelectTool::OnUp(const ToolEvent& e)
 			if (e.ctrlDown) newSel = doc.GetSelection();
 
 			ID2D1Factory* f = e.pD2DFactory;
-			ForEachSelectableTopDown(e.pDoc, [&](ge::Node* n) {
-				D2D1_RECT_F localB{};
-				if (!n->GetLocalBounds(f, localB)) return false;
+			std::function<void(ge::Node*)> testMarqueeNode = [&](ge::Node* n) {
+				if (!n || !n->IsVisible()) return;
+				// 일반 프레임(AllowsChildSelection)이 잠겨 있는 경우: 프레임 자체는 선택하지 않고 내부의 잠기지 않은 자식만 검사!
+				if (ge::AllowsChildSelection(n) && n->IsLocked())
+				{
+					auto* grp = static_cast<ge::GroupNode*>(n);
+					for (const auto& c : grp->GetChildren())
+						testMarqueeNode(c.get());
+					return;
+				}
+				if (n->IsEffectivelyLocked()) return;
 
-				// 도형의 4개 코너를 월드 변환하여 AABB 산출
-				const ge::Matrix2D& xf = n->GetTransform();
+				D2D1_RECT_F localB{};
+				if (!n->GetLocalBounds(f, localB)) return;
+
+				// 도형의 4개 코너를 월드 변환하여 AABB 산출 (중첩 프레임 내 자식도 정확하도록 GetWorldTransform 사용)
+				const ge::Matrix2D xf = n->GetWorldTransform();
 				D2D1_POINT_2F pts[4] = {
 					xf.TransformPoint(D2D1::Point2F(localB.left, localB.top)),
 					xf.TransformPoint(D2D1::Point2F(localB.right, localB.top)),
@@ -1318,6 +1485,10 @@ void SelectTool::OnUp(const ToolEvent& e)
 				{
 					newSel.push_back(n);
 				}
+			};
+
+			ForEachSelectableTopDown(e.pDoc, [&](ge::Node* n) {
+				testMarqueeNode(n);
 				return false;
 			});
 
@@ -1525,17 +1696,45 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 			rt->DrawEllipse(D2D1::Ellipse(pRot, 4.5f, 4.5f), brush, 1.5f);
 
 			const float hSize = 3.5f;
+			const D2D1_POINT_2F centerPt = D2D1::Point2F((pTL.x + pBR.x) * 0.5f, (pTL.y + pBR.y) * 0.5f);
+
+			// 회전 기준점(Pivot Point ⊕) 표시 (6.14.5)
+			brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.9f));
+			rt->FillEllipse(D2D1::Ellipse(centerPt, 4.0f, 4.0f), brush);
+			brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.9f));
+			rt->DrawEllipse(D2D1::Ellipse(centerPt, 4.0f, 4.0f), brush, 1.1f);
+			rt->DrawLine(D2D1::Point2F(centerPt.x - 5.5f, centerPt.y), D2D1::Point2F(centerPt.x + 5.5f, centerPt.y), brush, 1.0f);
+			rt->DrawLine(D2D1::Point2F(centerPt.x, centerPt.y - 5.5f), D2D1::Point2F(centerPt.x, centerPt.y + 5.5f), brush, 1.0f);
+
+			// 양방향 변형 화살표(Bi-directional Transform Arrow Gizmo) 드로잉 헬퍼 (6.14.1)
+			auto drawBiArrow = [&](D2D1_POINT_2F c, float ux, float uy, float halfLen, bool highlight) {
+				const float px = -uy, py = ux;
+				const D2D1_POINT_2F a = D2D1::Point2F(c.x - ux * halfLen, c.y - uy * halfLen);
+				const D2D1_POINT_2F b = D2D1::Point2F(c.x + ux * halfLen, c.y + uy * halfLen);
+				const float head = highlight ? 3.8f : 3.0f;
+				brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, highlight ? 0.95f : 0.75f));
+				rt->DrawLine(a, b, brush, highlight ? 2.6f : 2.0f);
+				brush->SetColor(highlight ? D2D1::ColorF(0.06f, 0.36f, 0.90f, 1.0f) : D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.85f));
+				rt->DrawLine(a, b, brush, highlight ? 1.5f : 1.1f);
+				// 양끝 화살촉
+				rt->DrawLine(a, D2D1::Point2F(a.x + ux * head + px * head * 0.7f, a.y + uy * head + py * head * 0.7f), brush, 1.3f);
+				rt->DrawLine(a, D2D1::Point2F(a.x + ux * head - px * head * 0.7f, a.y + uy * head - py * head * 0.7f), brush, 1.3f);
+				rt->DrawLine(b, D2D1::Point2F(b.x - ux * head + px * head * 0.7f, b.y - uy * head + py * head * 0.7f), brush, 1.3f);
+				rt->DrawLine(b, D2D1::Point2F(b.x - ux * head - px * head * 0.7f, b.y - uy * head - py * head * 0.7f), brush, 1.3f);
+			};
+
 			for (int i = 0; i < 8; ++i)
 			{
 				Handle hType = static_cast<Handle>(i + 1);
 				bool isSelectedHandle = (m_handle == hType);
+				bool isHoveredHandle = (m_hoverHandle == hType);
 
 				D2D1_RECT_F r = D2D1::RectF(
 					handles[i].x - hSize, handles[i].y - hSize,
 					handles[i].x + hSize, handles[i].y + hSize
 				);
 
-				if (isSelectedHandle)
+				if (isSelectedHandle || isHoveredHandle)
 				{
 					brush->SetColor(D2D1::ColorF(0.10f, 0.50f, 0.95f, 1.0f));
 					rt->FillRectangle(r, brush);
@@ -1553,6 +1752,43 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 					brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 1.0f));
 					rt->DrawRectangle(r, brush, 1.2f);
 				}
+
+				// 모서리/변 핸들 바깥쪽에 양방향 스케일 또는 전단(Skew) 화살표 표시 (6.14.1)
+				float vx = handles[i].x - centerPt.x;
+				float vy = handles[i].y - centerPt.y;
+				const float vLen = std::hypot(vx, vy);
+				if (vLen > 8.0f)
+				{
+					vx /= vLen; vy /= vLen;
+					const bool isEdge = (i % 2 == 1);
+					const bool showSkew = isEdge && (m_ctrlDown || m_mode == Mode::Skewing);
+					const D2D1_POINT_2F arrowCenter = D2D1::Point2F(handles[i].x + vx * 11.0f, handles[i].y + vy * 11.0f);
+					if (showSkew)
+					{
+						// 접선 방향 전단(Shear) 화살표
+						drawBiArrow(arrowCenter, -vy, vx, 7.0f, isSelectedHandle || isHoveredHandle);
+					}
+					else if (isSelectedHandle || isHoveredHandle)
+					{
+						drawBiArrow(arrowCenter, vx, vy, 7.5f, true);
+					}
+				}
+			}
+
+			// 회전 핸들 호버/드래그 또는 코너 회전 근접 시 곡선 회전 화살표 기즈모 표시
+			if (isRotActive || m_hoverHandle == Handle::Rotate || m_hoverCornerRotate)
+			{
+				const float rArc = 8.5f;
+				const int kArcSeg = 12;
+				D2D1_POINT_2F prevPt{};
+				brush->SetColor(D2D1::ColorF(0.06f, 0.36f, 0.90f, 0.95f));
+				for (int s = 0; s <= kArcSeg; ++s)
+				{
+					const float a = -2.35f + (1.7f * static_cast<float>(s) / kArcSeg);
+					const D2D1_POINT_2F curPt = D2D1::Point2F(pRot.x + rArc * std::cos(a), pRot.y + rArc * std::sin(a));
+					if (s > 0) rt->DrawLine(prevPt, curPt, brush, 1.4f);
+					prevPt = curPt;
+				}
 			}
 		}
 
@@ -1564,11 +1800,11 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 			{
 				for (const auto& node : sp.nodes)
 				{
-					D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, pathShape->GetTransform(), view);
+					D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, pathShape->GetWorldTransform(), view);
 
 					if (node.HasIn())
 					{
-						D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), pathShape->GetTransform(), view);
+						D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), pathShape->GetWorldTransform(), view);
 						brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
 						rt->DrawLine(aScreen, inScreen, brush, 1.0f);
 						brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
@@ -1577,7 +1813,7 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 
 					if (node.HasOut())
 					{
-						D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), pathShape->GetTransform(), view);
+						D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), pathShape->GetWorldTransform(), view);
 						brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
 						rt->DrawLine(aScreen, outScreen, brush, 1.0f);
 						brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
@@ -1681,8 +1917,23 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 			}
 			if (s_fmt)
 			{
-				wchar_t buf[48];
-				swprintf_s(buf, L"%d \u00D7 %d", static_cast<int>(std::round(wb.Width())), static_cast<int>(std::round(wb.Height())));
+				wchar_t buf[64];
+				if (m_mode == Mode::Rotating)
+				{
+					const ge::Matrix2D wxf = sel[0]->GetWorldTransform();
+					const float deg = std::atan2(wxf.m12, wxf.m11) * (180.0f / 3.14159265358979323846f);
+					swprintf_s(buf, L"%.1f\u00B0", deg);
+				}
+				else if (m_mode == Mode::Skewing)
+				{
+					const ge::Matrix2D& lxf = sel[0]->GetTransform();
+					const float skDeg = std::atan2((m_handle == Handle::T || m_handle == Handle::B) ? lxf.m21 : lxf.m12, 1.0f) * (180.0f / 3.14159265358979323846f);
+					swprintf_s(buf, L"Skew %.1f\u00B0", skDeg);
+				}
+				else
+				{
+					swprintf_s(buf, L"%d \u00D7 %d", static_cast<int>(std::round(wb.Width())), static_cast<int>(std::round(wb.Height())));
+				}
 				const D2D1_POINT_2F p = view.WorldToScreen(D2D1::Point2F((wb.left + wb.right) * 0.5f, wb.bottom));
 				const float tw = static_cast<float>(wcslen(buf)) * 6.8f + 14.0f;
 				const D2D1_RECT_F pill = D2D1::RectF(p.x - tw * 0.5f, p.y + 10.0f, p.x + tw * 0.5f, p.y + 28.0f);
@@ -1694,11 +1945,10 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 		}
 	}
 
-	// 그라디언트 기즈모: 단일 선택된 그라디언트 도형의 시작/끝(방사형: 중심/초점/반지름) 핸들과 컬러 스톱 위치
-	if (sel.size() == 1)
+	// 그라디언트 기즈모: 단일 선택된 그라디언트 도형/프레임의 시작/끝(방사형: 중심/초점/반지름) 핸들과 컬러 스톱 위치
+	if (sel.size() == 1 && SupportsGradientFill(sel[0]))
 	{
-		if (auto* gradShape = dynamic_cast<ge::PathNode*>(sel[0]))
-			DrawGradientGizmo(rt, brush, view, f, gradShape, static_cast<int>(m_gradHandle), -1);
+		DrawGradientGizmo(rt, brush, view, f, sel[0], static_cast<int>(m_gradHandle), -1);
 	}
 
 	f->Release();
@@ -1755,7 +2005,6 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 	if (!pDoc || !m_previewShape) return false;
 
 	// 미리보기 도형(ge::PathNode)을 그대로 문서 활성 레이어에 등록 (단일 모델)
-	m_previewNode = nullptr;
 	m_previewShape->SetStyle(m_setting.ToGeStyle());
 	const std::wstring name = m_previewShape->GetName();
 	ge::Node* pAdded = pDoc->GetDoc().AddShapeAuto(std::move(m_previewShape));   // 프레임 안에서 그렸으면 그 프레임의 자식
@@ -1787,7 +2036,6 @@ bool BaseShapeTool::CommitShape(CM2DrawDoc* pDoc)
 void BaseShapeTool::CancelShape()
 {
 	m_previewShape = nullptr;
-	m_previewNode = nullptr;
 }
 
 bool BaseShapeTool::OnDoubleClicked(CM2DrawDoc* pDoc)
@@ -1828,11 +2076,11 @@ void BaseShapeTool::DrawCommittedShapeAnchors(ID2D1RenderTarget* rt, ID2D1SolidC
 	{
 		for (const auto& node : sp.nodes)
 		{
-			D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, ps->GetTransform(), view);
+			D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, ps->GetWorldTransform(), view);
 
 			if (node.HasIn())
 			{
-				D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), ps->GetTransform(), view);
+				D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), ps->GetWorldTransform(), view);
 				brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.6f));
 				rt->DrawLine(aScreen, inScreen, brush, 1.0f);
 				brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.8f));
@@ -1841,7 +2089,7 @@ void BaseShapeTool::DrawCommittedShapeAnchors(ID2D1RenderTarget* rt, ID2D1SolidC
 
 			if (node.HasOut())
 			{
-				D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), ps->GetTransform(), view);
+				D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), ps->GetWorldTransform(), view);
 				brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.6f));
 				rt->DrawLine(aScreen, outScreen, brush, 1.0f);
 				brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.8f));
@@ -1986,25 +2234,6 @@ void BoxShapeTool::OnDown(const ToolEvent& e)
 		m_previewShape->Invalidate();
 	}
 
-	// [신형 엔진 테스트] 사각형(Rect) 도구인 경우 신형 ge::PathNode 인스턴스도 직접 동시 생성
-	if (m_kind == ShapeKind::Rect)
-	{
-		m_previewNode = std::make_unique<ge::PathNode>();
-		if (m_previewShape)
-			m_previewNode->SetName(m_previewShape->GetName());
-		else if (e.pDoc)
-			m_previewNode->SetName(e.pDoc->GetDoc().GenerateNodeName(ge::ShapeKind::Rect));
-		else
-			m_previewNode->SetName(L"rect1");
-		m_previewNode->SetKind(ge::ShapeKind::Rect);
-		ge::RectParams rp;
-		rp.rx = m_setting.cornerRx;
-		rp.ry = m_setting.cornerRy;
-		rp.linkRxRy = m_setting.bLinkRxRy;
-		m_previewNode->SetParams(rp);
-		m_previewNode->SetStyle(m_setting.ToGeStyle());
-		m_previewNode->Invalidate();
-	}
 }
 
 void BoxShapeTool::OnMove(const ToolEvent& e)
@@ -2020,48 +2249,6 @@ void BoxShapeTool::OnMove(const ToolEvent& e)
 		if (m_previewShape)
 		{
 			UpdateGeometry(m_previewShape.get(), p0, p1);
-		}
-
-		// [신형 엔진 테스트] 사각형(Rect) 신엔진 노드 기하학 직접 갱신
-		if (m_previewNode && m_kind == ShapeKind::Rect)
-		{
-			float left = min(p0.x, p1.x);
-			float top = min(p0.y, p1.y);
-			float right = max(p0.x, p1.x);
-			float bottom = max(p0.y, p1.y);
-			float rx = (right - left) * 0.5f;
-			float ry = (bottom - top) * 0.5f;
-			float crx = (std::min)(rx, (std::max)(0.0f, m_setting.cornerRx));
-			float cry = (std::min)(ry, (std::max)(0.0f, m_setting.cornerRy));
-
-			ge::SubPath sp;
-			sp.closed = true;
-			if (crx > 0.001f || cry > 0.001f)
-			{
-				const float kx = crx * 0.55228475f;
-				const float ky = cry * 0.55228475f;
-				ge::BezierNode n[8];
-				n[0].anchor = { left + crx, top };      n[0].hIn = { -kx, 0.0f }; n[0].hOut = { 0, 0 };
-				n[1].anchor = { right - crx, top };     n[1].hIn = { 0, 0 };      n[1].hOut = { kx, 0.0f };
-				n[2].anchor = { right, top + cry };     n[2].hIn = { 0.0f, -ky }; n[2].hOut = { 0, 0 };
-				n[3].anchor = { right, bottom - cry };  n[3].hIn = { 0, 0 };      n[3].hOut = { 0.0f, ky };
-				n[4].anchor = { right - crx, bottom };  n[4].hIn = { kx, 0.0f };  n[4].hOut = { 0, 0 };
-				n[5].anchor = { left + crx, bottom };   n[5].hIn = { 0, 0 };      n[5].hOut = { -kx, 0.0f };
-				n[6].anchor = { left, bottom - cry };   n[6].hIn = { 0.0f, ky };  n[6].hOut = { 0, 0 };
-				n[7].anchor = { left, top + cry };      n[7].hIn = { 0, 0 };      n[7].hOut = { 0.0f, -ky };
-				for (int i = 0; i < 8; ++i) sp.nodes.push_back(n[i]);
-			}
-			else
-			{
-				ge::BezierNode n[4];
-				n[0].anchor = { left, top };
-				n[1].anchor = { right, top };
-				n[2].anchor = { right, bottom };
-				n[3].anchor = { left, bottom };
-				for (int i = 0; i < 4; ++i) sp.nodes.push_back(n[i]);
-			}
-			m_previewNode->SetPaths({ sp });
-			m_previewNode->Invalidate();
 		}
 
 		float left = (std::min)(p0.x, p1.x);
@@ -2126,22 +2313,12 @@ void BoxShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brus
 	ViewportTransform view = { zoom, { pan.x, pan.y } };
 
 	// 1. 첫 번째 포인트가 찍혀서 미리보기가 생성된 상태 (드래그 중이거나 클릭-이동 대기 중)
-	if ((m_previewShape || m_previewNode) && (m_isDragging || m_waitingSecondClick))
+	if (m_previewShape && (m_isDragging || m_waitingSecondClick))
 	{
 		ID2D1Factory* pFactory = nullptr;
 		rt->GetFactory(&pFactory);
 
-		// [신형 엔진 테스트] 사각형인 경우 신형 D2DRenderer로 직접 렌더링 검증!
-		if (m_previewNode && m_kind == ShapeKind::Rect)
-		{
-			ge::D2DRenderer renderer;
-			if (renderer.Initialize(rt, pFactory))
-			{
-				ge::Viewport geView = { zoom, { pan.x, pan.y } };
-				renderer.DrawNode(*m_previewNode, ge::Matrix2D::Identity(), geView);
-			}
-		}
-		else if (m_previewShape)
+		if (m_previewShape)
 		{
 			// (1) 도형 본체 미리보기 렌더링 (엔진 기하학)
 			ge::D2DRenderer renderer;
@@ -2351,6 +2528,34 @@ std::unique_ptr<ge::PathNode> BoxShapeTool::CreateShapeInstance(D2D1_POINT_2F p0
 		}
 		sp.closed = true;
 		shape->GetPathsRef().push_back(sp);
+	}
+	else if (m_kind == ShapeKind::Arc)
+	{
+		shape->SetName(getAutoName(ge::ShapeKind::Arc, _T("arc1")));
+		shape->SetKind(ge::ShapeKind::Arc);
+		ge::ArcParams ap;
+		ap.mode = m_setting.arcMode;
+		ap.startAngle = m_setting.arcStartDeg;
+		ap.sweepAngle = m_setting.arcSweepDeg;
+		ap.innerRatio = m_setting.arcInnerRatio;
+		shape->SetParams(ap);
+		ge::PathNode::BuildArcSubPaths(ge::Rect2{ p0.x, p0.y, p1.x, p1.y }, ap, shape->GetPathsRef());
+	}
+	else if (m_kind == ShapeKind::BlockArrow)
+	{
+		shape->SetName(getAutoName(ge::ShapeKind::BlockArrow, _T("arrow1")));
+		shape->SetKind(ge::ShapeKind::BlockArrow);
+		ge::BlockArrowParams bp;
+		shape->SetParams(bp);
+		ge::PathNode::BuildBlockArrowSubPaths(ge::Rect2{ p0.x, p0.y, p1.x, p1.y }, bp, shape->GetPathsRef());
+	}
+	else if (m_kind == ShapeKind::Callout)
+	{
+		shape->SetName(getAutoName(ge::ShapeKind::Callout, _T("callout1")));
+		shape->SetKind(ge::ShapeKind::Callout);
+		ge::CalloutParams cp;
+		shape->SetParams(cp);
+		ge::PathNode::BuildCalloutSubPaths(ge::Rect2{ p0.x, p0.y, p1.x, p1.y }, cp, shape->GetPathsRef());
 	}
 
 	UpdateGeometry(shape.get(), p0, p1);
@@ -2647,6 +2852,26 @@ void BoxShapeTool::UpdateGeometry(ge::PathNode* pShape, D2D1_POINT_2F p0, D2D1_P
 		nodes[3].anchor = D2D1::Point2F(left, top + h * 0.42f);
 		nodes[3].hIn = D2D1::Point2F(0, h * 0.25f);
 		nodes[3].hOut = D2D1::Point2F(0, -h * 0.2f);
+	}
+	else if (m_kind == ShapeKind::Arc)
+	{
+		ge::ArcParams* ap = pShape->GetParamRef<ge::ArcParams>();
+		ge::ArcParams cur = ap ? *ap : ge::ArcParams{};
+		cur.cx = cx; cur.cy = cy; cur.rx = rx; cur.ry = ry;
+		if (ap) *ap = cur;
+		ge::PathNode::BuildArcSubPaths(ge::Rect2{ left, top, right, bottom }, cur, pShape->GetPathsRef());
+	}
+	else if (m_kind == ShapeKind::BlockArrow)
+	{
+		ge::BlockArrowParams* bp = pShape->GetParamRef<ge::BlockArrowParams>();
+		ge::BlockArrowParams cur = bp ? *bp : ge::BlockArrowParams{};
+		ge::PathNode::BuildBlockArrowSubPaths(ge::Rect2{ left, top, right, bottom }, cur, pShape->GetPathsRef());
+	}
+	else if (m_kind == ShapeKind::Callout)
+	{
+		ge::CalloutParams* cp = pShape->GetParamRef<ge::CalloutParams>();
+		ge::CalloutParams cur = cp ? *cp : ge::CalloutParams{};
+		ge::PathNode::BuildCalloutSubPaths(ge::Rect2{ left, top, right, bottom }, cur, pShape->GetPathsRef());
 	}
 
 	pShape->Invalidate();
@@ -3154,10 +3379,10 @@ void GradientTool::OnDown(const ToolEvent& e)
 	m_downScreen = m_curScreen = screenPt;
 
 	const std::vector<ge::Node*> sel = doc.GetSelection();
-	ge::PathNode* cur = (sel.size() == 1) ? dynamic_cast<ge::PathNode*>(sel[0]) : nullptr;
+	ge::Node* cur = (sel.size() == 1 && SupportsGradientFill(sel[0])) ? sel[0] : nullptr;
 	if (cur && !IsInteractive(cur)) cur = nullptr;
 
-	// 1~3. 선택된 그라디언트 도형의 기즈모: 핸들 -> 컬러 스톱 점 -> 축 클릭(스톱 추가) 순으로 우선 처리
+	// 1~3. 선택된 그라디언트 도형/프레임의 기즈모: 핸들 -> 컬러 스톱 점 -> 축 클릭(스톱 추가) 순으로 우선 처리
 	GradientGizmo gz;
 	if (cur && cur->GetStyle().fill.type == ge::PaintType::Gradient && ComputeGradientGizmo(cur, e.view, e.pD2DFactory, gz))
 	{
@@ -3239,9 +3464,9 @@ void GradientTool::OnDown(const ToolEvent& e)
 		}
 	}
 
-	// 4. 도형 집기 + 드래그로 그라디언트 만들기: 클릭한 도형(그룹 안쪽 포함)을 선택하거나, 선택된 도형에 대해 어디서든 드래그
-	ge::PathNode* hit = HitTestPathDeep(e.pDoc, screenPt, e.view, e.pD2DFactory);
-	ge::PathNode* target = hit ? hit : cur;
+	// 4. 도형/프레임 집기 + 드래그로 그라디언트 만들기: 클릭한 도형/프레임을 선택하거나, 선택된 대상에 대해 어디서든 드래그
+	ge::Node* hit = HitTestGradNodeDeep(e.pDoc, screenPt, e.view, e.pD2DFactory);
+	ge::Node* target = hit ? hit : cur;
 	if (hit && hit != cur)
 	{
 		if (SelectTool* pSelect = GetApp()->GetToolManager().GetSelectTool())
@@ -3264,8 +3489,8 @@ void GradientTool::OnMove(const ToolEvent& e)
 	m_curScreen = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
 	if (m_drag == Drag::None || !e.pDoc) return;
 
-	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(e.pDoc->GetDoc().FindById(m_shapeId));
-	if (!ps) { m_drag = Drag::None; return; }
+	ge::Node* ps = e.pDoc->GetDoc().FindById(m_shapeId);
+	if (!SupportsGradientFill(ps)) { m_drag = Drag::None; return; }
 
 	if (DistSq(m_downScreen, m_curScreen) > 3.0f * 3.0f) m_moved = true;
 
@@ -3308,8 +3533,8 @@ void GradientTool::OnUp(const ToolEvent& e)
 	m_drag = Drag::None;
 	if (drag == Drag::None || !e.pDoc) return;
 
-	ge::PathNode* ps = dynamic_cast<ge::PathNode*>(e.pDoc->GetDoc().FindById(m_shapeId));
-	if (!ps) return;
+	ge::Node* ps = e.pDoc->GetDoc().FindById(m_shapeId);
+	if (!SupportsGradientFill(ps)) return;
 
 	if (drag == Drag::Create)
 	{
@@ -3357,7 +3582,7 @@ bool GradientTool::OnDoubleClicked(CM2DrawDoc* pDoc)
 {
 	if (!pDoc) return false;
 	const std::vector<ge::Node*>& sel = pDoc->GetDoc().GetSelection();
-	ge::PathNode* ps = (sel.size() == 1) ? dynamic_cast<ge::PathNode*>(sel[0]) : nullptr;
+	ge::Node* ps = (sel.size() == 1 && SupportsGradientFill(sel[0])) ? sel[0] : nullptr;
 	if (!ps || !IsInteractive(ps)) return false;
 
 	// 기본 그라디언트: 없으면 만들고, 있으면 방향/반지름만 종류별 기본값으로 되돌림
@@ -3380,10 +3605,10 @@ void GradientTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brus
 	if (!f) return;
 
 	const std::vector<ge::Node*>& sel = pDoc->GetDoc().GetSelection();
-	ge::PathNode* ps = (sel.size() == 1) ? dynamic_cast<ge::PathNode*>(sel[0]) : nullptr;
+	ge::Node* ps = (sel.size() == 1 && SupportsGradientFill(sel[0])) ? sel[0] : nullptr;
 	if (ps && IsInteractive(ps))
 	{
-		// 선택된 도형의 경계 상자 (그라디언트 박스 = 비율 좌표의 기준) 를 얇게 표시
+		// 선택된 도형/프레임의 경계 상자 (그라디언트 박스 = 비율 좌표의 기준) 를 얇게 표시
 		ge::Rect2 b{};
 		if (ComputePathBounds(ps, f, b))
 		{

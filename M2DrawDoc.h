@@ -25,11 +25,9 @@ protected:
 public:
 	// --- 신형 그래픽 엔진 (D2DGraphicEngine) Scene 루트 ---
 	ge::Document                    m_doc;
-	std::unique_ptr<ge::PathNode>   m_currentPathNode;
 
 	ge::Document&                   GetDoc()             { return m_doc; }
 	const ge::Document&             GetDoc() const       { return m_doc; }
-	std::unique_ptr<ge::PathNode>&  GetCurrentPathNode() { return m_currentPathNode; }
 
 	// 선택의 단일 출처는 ge::Document::GetSelection(). 대표(첫 번째) 선택 노드, 없으면 nullptr
 	ge::Node* GetPrimarySelection() const;
@@ -120,6 +118,11 @@ public:
 	afx_msg void OnUpdateObjectWrapFrame(CCmdUI* pCmdUI);
 	afx_msg void OnTextToPath();
 	afx_msg void OnUpdateTextToPath(CCmdUI* pCmdUI);
+	// 선택에 월드 변환 적용 (결합 경계 상자 중심 기준 반전/90도 회전, 평행 이동). 잠긴 노드와 선택된 조상이 있는 노드는 제외. Undo 기록은 호출자 (Step 6.11.3)
+	bool ApplySelectionTransform(int op);                 // 0 좌우반전, 1 상하반전, 2 시계 90, 3 반시계 90
+	bool NudgeSelection(float dx, float dy);
+	afx_msg void OnObjectTransform(UINT nID);
+	afx_msg void OnUpdateObjectTransform(CCmdUI* pCmdUI);
 	afx_msg void OnObjectArrange(UINT nID);
 	afx_msg void OnAlignCommand(UINT nID);
 	afx_msg void OnUpdateAlignCommand(CCmdUI* pCmdUI);

@@ -835,8 +835,24 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 				if (auto* fr = dynamic_cast<FrameNode*>(groupStack.back())) {
 					Style st = fr->GetStyle();
 					const std::wstring fillV = attrs.count(L"fill") ? attrs[L"fill"] : L"none";
-					if (fillV == L"none") st.fill.type = PaintType::None;
-					else { st.fill.type = PaintType::Solid; st.fill.color = ParseColorHex(fillV); }
+					const std::wstring gradRef = ParseUrlRef(fillV);
+					if (fillV == L"none") {
+						st.fill.type = PaintType::None;
+					} else if (!gradRef.empty()) {
+						auto git = gradients.find(gradRef);
+						if (git == gradients.end() || git->second.stops.empty()) {
+							st.fill.type = PaintType::None;
+						} else if (userSpaceGradients.count(gradRef) || !git->second.IsRenderable()) {
+							st.fill.type = PaintType::Solid;
+							st.fill.color = git->second.FallbackColor();
+						} else {
+							st.fill.type = PaintType::Gradient;
+							st.fill.gradient = git->second;
+						}
+					} else {
+						st.fill.type = PaintType::Solid;
+						st.fill.color = ParseColorHex(fillV);
+					}
 					if (attrs.count(L"fill-opacity")) st.fill.color.a = std::wcstof(attrs[L"fill-opacity"].c_str(), nullptr);
 					const std::wstring strokeV = attrs.count(L"stroke") ? attrs[L"stroke"] : L"none";
 					if (strokeV == L"none") st.stroke.width = 0.0f;
@@ -1078,6 +1094,7 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 						auto fn = std::make_unique<FrameNode>();
 						fn->SetFrameSize(attrs.count(L"m2:w") ? ParseLength(attrs[L"m2:w"], 100.0f) : 100.0f, attrs.count(L"m2:h") ? ParseLength(attrs[L"m2:h"], 100.0f) : 100.0f);
 						fn->SetClip(!(attrs.count(L"m2:clip") && attrs[L"m2:clip"] == L"false"));
+							if (attrs.count(L"m2:component") && attrs[L"m2:component"] == L"button") fn->SetHtmlTag("button");
 							if (attrs.count(L"m2:ui")) {
 								fn->SetUiKind(UiComp::WideToUtf8(attrs[L"m2:ui"]));
 								if (attrs.count(L"m2:uiProps")) fn->SetUiProps(UiComp::DecodeProps(UiComp::WideToUtf8(attrs[L"m2:uiProps"])));
@@ -1338,6 +1355,35 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 					} else if (sk == L"heart") {
 						pathNode->SetShapeKind(ShapeKind::Heart);
 						pathNode->SetParams(HeartParams{});
+					} else if (sk == L"arc") {
+						ArcParams p;
+						if (attrs.count(L"m2:startAngle")) p.startAngle = std::wcstof(attrs[L"m2:startAngle"].c_str(), nullptr);
+						if (attrs.count(L"m2:sweepAngle")) p.sweepAngle = std::wcstof(attrs[L"m2:sweepAngle"].c_str(), nullptr);
+						if (attrs.count(L"m2:innerRatio")) p.innerRatio = std::wcstof(attrs[L"m2:innerRatio"].c_str(), nullptr);
+						if (attrs.count(L"m2:arcMode")) {
+							int m = std::wcstol(attrs[L"m2:arcMode"].c_str(), nullptr, 10);
+							if (m >= 0 && m <= 3) p.mode = static_cast<ArcMode>(m);
+						}
+						if (attrs.count(L"m2:cx")) p.cx = std::wcstof(attrs[L"m2:cx"].c_str(), nullptr);
+						if (attrs.count(L"m2:cy")) p.cy = std::wcstof(attrs[L"m2:cy"].c_str(), nullptr);
+						if (attrs.count(L"m2:rx")) p.rx = std::wcstof(attrs[L"m2:rx"].c_str(), nullptr);
+						if (attrs.count(L"m2:ry")) p.ry = std::wcstof(attrs[L"m2:ry"].c_str(), nullptr);
+						pathNode->SetShapeKind(ShapeKind::Arc);
+						pathNode->SetParams(p);
+					} else if (sk == L"arrow") {
+						BlockArrowParams p;
+						if (attrs.count(L"m2:headLengthRatio")) p.headLengthRatio = std::wcstof(attrs[L"m2:headLengthRatio"].c_str(), nullptr);
+						if (attrs.count(L"m2:shaftWidthRatio")) p.shaftWidthRatio = std::wcstof(attrs[L"m2:shaftWidthRatio"].c_str(), nullptr);
+						pathNode->SetShapeKind(ShapeKind::BlockArrow);
+						pathNode->SetParams(p);
+					} else if (sk == L"callout") {
+						CalloutParams p;
+						if (attrs.count(L"m2:tailPosRatio"))    p.tailPosRatio    = std::wcstof(attrs[L"m2:tailPosRatio"].c_str(), nullptr);
+						if (attrs.count(L"m2:tailWidthRatio"))  p.tailWidthRatio  = std::wcstof(attrs[L"m2:tailWidthRatio"].c_str(), nullptr);
+						if (attrs.count(L"m2:tailHeightRatio")) p.tailHeightRatio = std::wcstof(attrs[L"m2:tailHeightRatio"].c_str(), nullptr);
+						if (attrs.count(L"m2:cornerRadius"))    p.cornerRadius    = std::wcstof(attrs[L"m2:cornerRadius"].c_str(), nullptr);
+						pathNode->SetShapeKind(ShapeKind::Callout);
+						pathNode->SetParams(p);
 					}
 				}
 

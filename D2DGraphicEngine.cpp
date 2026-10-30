@@ -205,6 +205,12 @@ std::unique_ptr<Node> PathNode::Clone() const
 
 bool PathNode::GetLocalBounds(Rect2& out)
 {
+	if (m_paths.empty()) return false;
+	if (m_boundsValid && m_boundsVersion == m_version) {
+		out = m_cachedBounds;
+		return true;
+	}
+
 	bool any = false;
 	Rect2 box{ 1e9f, 1e9f, -1e9f, -1e9f };
 	auto add = [&](Vec2 p) {
@@ -212,15 +218,52 @@ bool PathNode::GetLocalBounds(Rect2& out)
 		box.top  = (std::min)(box.top, p.y);    box.bottom = (std::max)(box.bottom, p.y);
 		any = true;
 	};
-	for (const auto& sp : m_paths)
-		for (const auto& n : sp.nodes) {
-			add(n.anchor);
-			if (n.HasIn())  add(n.AbsIn());
-			if (n.HasOut()) add(n.AbsOut());
+
+	// 1차원 3차 베지어 도함수 B'(t) = 3(a*t^2 + 2*b*t + c) = 0 의 해 t in (0, 1) 를 찾아 극값 포함 (Step 6.8)
+	auto addCubicExtrema = [&](const BezierNode& n0, const BezierNode& n1) {
+		if (!n0.HasOut() && !n1.HasIn()) return;
+		const Vec2 p0 = n0.anchor, p1 = n0.AbsOut(), p2 = n1.AbsIn(), p3 = n1.anchor;
+		auto solveAxis = [&](float v0, float v1, float v2, float v3) {
+			const float a = -v0 + 3.0f * v1 - 3.0f * v2 + v3;
+			const float b = v0 - 2.0f * v1 + v2;
+			const float c = v1 - v0;
+			if (std::fabs(a) < 1e-6f) {
+				if (std::fabs(b) > 1e-6f) {
+					const float t = -c / (2.0f * b);
+					if (t > 0.0f && t < 1.0f) add(EvalSegment(n0, n1, t));
+				}
+				return;
+			}
+			const float disc = b * b - a * c;
+			if (disc < 0.0f) return;
+			const float sq = std::sqrt(disc);
+			const float t1 = (-b - sq) / a;
+			const float t2 = (-b + sq) / a;
+			if (t1 > 0.0f && t1 < 1.0f) add(EvalSegment(n0, n1, t1));
+			if (t2 > 0.0f && t2 < 1.0f) add(EvalSegment(n0, n1, t2));
+		};
+		solveAxis(p0.x, p1.x, p2.x, p3.x);
+		solveAxis(p0.y, p1.y, p2.y, p3.y);
+	};
+
+	for (const auto& sp : m_paths) {
+		const size_t cnt = sp.nodes.size();
+		for (size_t i = 0; i < cnt; ++i) {
+			add(sp.nodes[i].anchor);
+			if (i + 1 < cnt) {
+				addCubicExtrema(sp.nodes[i], sp.nodes[i + 1]);
+			} else if (sp.closed && cnt > 1) {
+				addCubicExtrema(sp.nodes[i], sp.nodes[0]);
+			}
 		}
+	}
 	if (any) {
-		if (box.right - box.left < 2.0f) { box.left -= 1.0f; box.right += 1.0f; }
-		if (box.bottom - box.top < 2.0f) { box.top -= 1.0f; box.bottom += 1.0f; }
+		// 1D 수평/수직 직선이나 단일 점인 경우에만 최소 두께(2px)를 부여하고, 일반 도형은 정확한 타이트 경계를 유지
+		if (box.right - box.left < 1e-3f) { box.left -= 1.0f; box.right += 1.0f; }
+		if (box.bottom - box.top < 1e-3f) { box.top -= 1.0f; box.bottom += 1.0f; }
+		m_cachedBounds = box;
+		m_boundsVersion = m_version;
+		m_boundsValid = true;
 		out = box;
 	}
 	return any;
@@ -243,6 +286,171 @@ Vec2 PathNode::EvalSegment(const BezierNode& a, const BezierNode& b, float t)
 	const Vec2 p0 = a.anchor, p1 = a.AbsOut(), p2 = b.AbsIn(), p3 = b.anchor;
 	const Vec2 q0 = Lerp2(p0, p1, t), q1 = Lerp2(p1, p2, t), q2 = Lerp2(p2, p3, t);
 	return Lerp2(Lerp2(q0, q1, t), Lerp2(q1, q2, t), t);
+}
+
+void PathNode::BuildArcSubPaths(const Rect2& box, const ArcParams& p, std::vector<SubPath>& out)
+{
+	out.clear();
+	const float PI = 3.14159265358979323846f;
+	const float cx = (p.rx > 0.0f) ? p.cx : box.MidX();
+	const float cy = (p.ry > 0.0f) ? p.cy : box.MidY();
+	const float rx = (p.rx > 0.0f) ? p.rx : (std::max)(0.5f, box.Width() * 0.5f);
+	const float ry = (p.ry > 0.0f) ? p.ry : (std::max)(0.5f, box.Height() * 0.5f);
+
+	float sweepDeg = p.sweepAngle;
+	if (std::fabs(sweepDeg) < 0.1f) sweepDeg = 270.0f;
+	sweepDeg = (std::max)(-360.0f, (std::min)(360.0f, sweepDeg));
+	const bool fullCircle = std::fabs(sweepDeg) >= 359.9f;
+
+	auto buildEllipticalArcNodes = [&](float radX, float radY, float startDeg, float deltaDeg, std::vector<BezierNode>& nodes) {
+		nodes.clear();
+		const float totalRad = deltaDeg * (PI / 180.0f);
+		const int segs = (std::max)(1, static_cast<int>(std::ceil(std::fabs(totalRad) / (PI * 0.5f))));
+		const float dTheta = totalRad / static_cast<float>(segs);
+		const float k = (4.0f / 3.0f) * std::tan(dTheta * 0.25f);
+		const float startRad = startDeg * (PI / 180.0f);
+
+		for (int i = 0; i <= segs; ++i) {
+			const float th = startRad + static_cast<float>(i) * dTheta;
+			const float cs = std::cos(th), sn = std::sin(th);
+			BezierNode bn;
+			bn.type = BezierNode::Type::Smooth;
+			bn.anchor = { cx + radX * cs, cy + radY * sn };
+			const Vec2 tanVec{ -radX * sn * k, radY * cs * k };
+			bn.hIn  = (i == 0)    ? Vec2{ 0.0f, 0.0f } : Vec2{ -tanVec.x, -tanVec.y };
+			bn.hOut = (i == segs) ? Vec2{ 0.0f, 0.0f } : tanVec;
+			nodes.push_back(bn);
+		}
+	};
+
+	if (p.mode == ArcMode::Donut) {
+		const float ir = (std::max)(0.05f, (std::min)(0.95f, p.innerRatio));
+		if (fullCircle) {
+			SubPath outerSp;
+			buildEllipticalArcNodes(rx, ry, p.startAngle, 360.0f, outerSp.nodes);
+			if (outerSp.nodes.size() > 1) {
+				outerSp.nodes.front().hIn = outerSp.nodes.back().hIn;
+				outerSp.nodes.pop_back();
+			}
+			outerSp.closed = true;
+			out.push_back(std::move(outerSp));
+
+			SubPath innerSp;
+			buildEllipticalArcNodes(rx * ir, ry * ir, p.startAngle + 360.0f, -360.0f, innerSp.nodes);
+			if (innerSp.nodes.size() > 1) {
+				innerSp.nodes.front().hIn = innerSp.nodes.back().hIn;
+				innerSp.nodes.pop_back();
+			}
+			innerSp.closed = true;
+			out.push_back(std::move(innerSp));
+			return;
+		}
+		SubPath sp;
+		std::vector<BezierNode> outerNodes, innerNodes;
+		buildEllipticalArcNodes(rx, ry, p.startAngle, sweepDeg, outerNodes);
+		buildEllipticalArcNodes(rx * ir, ry * ir, p.startAngle + sweepDeg, -sweepDeg, innerNodes);
+		if (!outerNodes.empty()) { outerNodes.front().type = BezierNode::Type::Corner; outerNodes.back().type = BezierNode::Type::Corner; }
+		if (!innerNodes.empty()) { innerNodes.front().type = BezierNode::Type::Corner; innerNodes.back().type = BezierNode::Type::Corner; }
+		sp.nodes.insert(sp.nodes.end(), outerNodes.begin(), outerNodes.end());
+		sp.nodes.insert(sp.nodes.end(), innerNodes.begin(), innerNodes.end());
+		sp.closed = true;
+		out.push_back(std::move(sp));
+		return;
+	}
+
+	SubPath sp;
+	buildEllipticalArcNodes(rx, ry, p.startAngle, sweepDeg, sp.nodes);
+	if (p.mode == ArcMode::Open) {
+		sp.closed = false;
+	} else if (p.mode == ArcMode::Chord || fullCircle) {
+		if (fullCircle && sp.nodes.size() > 1) {
+			sp.nodes.front().hIn = sp.nodes.back().hIn;
+			sp.nodes.pop_back();
+		} else if (!sp.nodes.empty()) {
+			sp.nodes.front().type = BezierNode::Type::Corner;
+			sp.nodes.back().type = BezierNode::Type::Corner;
+		}
+		sp.closed = true;
+	} else {
+		// ArcMode::Pie (부채꼴)
+		if (!sp.nodes.empty()) {
+			sp.nodes.front().type = BezierNode::Type::Corner;
+			sp.nodes.back().type = BezierNode::Type::Corner;
+		}
+		BezierNode centerNode;
+		centerNode.type = BezierNode::Type::Corner;
+		centerNode.anchor = { cx, cy };
+		sp.nodes.push_back(centerNode);
+		sp.closed = true;
+	}
+	out.push_back(std::move(sp));
+}
+
+void PathNode::BuildBlockArrowSubPaths(const Rect2& box, const BlockArrowParams& p, std::vector<SubPath>& out)
+{
+	out.clear();
+	const float left = box.left, top = box.top, right = box.right, bottom = box.bottom;
+	const float w = (std::max)(1.0f, right - left);
+	const float h = (std::max)(1.0f, bottom - top);
+	const float cy = top + h * 0.5f;
+	const float headLen = w * (std::max)(0.1f, (std::min)(0.85f, p.headLengthRatio));
+	const float shaftHalfH = (h * 0.5f) * (std::max)(0.1f, (std::min)(0.9f, p.shaftWidthRatio));
+	const float headX = right - headLen;
+
+	SubPath sp;
+	sp.closed = true;
+	const Vec2 pts[7] = {
+		{ left,  cy - shaftHalfH },
+		{ headX, cy - shaftHalfH },
+		{ headX, top },
+		{ right, cy },
+		{ headX, bottom },
+		{ headX, cy + shaftHalfH },
+		{ left,  cy + shaftHalfH }
+	};
+	for (const Vec2& pt : pts) {
+		BezierNode bn;
+		bn.type = BezierNode::Type::Corner;
+		bn.anchor = pt;
+		sp.nodes.push_back(bn);
+	}
+	out.push_back(std::move(sp));
+}
+
+void PathNode::BuildCalloutSubPaths(const Rect2& box, const CalloutParams& p, std::vector<SubPath>& out)
+{
+	out.clear();
+	const float left = box.left, top = box.top, right = box.right, bottom = box.bottom;
+	const float w = (std::max)(1.0f, right - left);
+	const float h = (std::max)(1.0f, bottom - top);
+	const float tailH = h * (std::max)(0.08f, (std::min)(0.5f, p.tailHeightRatio));
+	const float bodyBottom = bottom - tailH;
+	const float bodyH = (std::max)(1.0f, bodyBottom - top);
+	const float tailW = w * (std::max)(0.06f, (std::min)(0.4f, p.tailWidthRatio));
+	const float tailCenter = left + w * (std::max)(0.15f, (std::min)(0.85f, p.tailPosRatio));
+	const float tailL = (std::max)(left + 2.0f, tailCenter - tailW * 0.5f);
+	const float tailR = (std::min)(right - 2.0f, tailCenter + tailW * 0.5f);
+	const float tipX  = left + w * (std::max)(0.05f, (std::min)(0.95f, p.tailPosRatio - 0.08f));
+	(void)bodyH;
+
+	SubPath sp;
+	sp.closed = true;
+	const Vec2 pts[7] = {
+		{ left,  top },
+		{ right, top },
+		{ right, bodyBottom },
+		{ tailR, bodyBottom },
+		{ tipX,  bottom },
+		{ tailL, bodyBottom },
+		{ left,  bodyBottom }
+	};
+	for (const Vec2& pt : pts) {
+		BezierNode bn;
+		bn.type = BezierNode::Type::Corner;
+		bn.anchor = pt;
+		sp.nodes.push_back(bn);
+	}
+	out.push_back(std::move(sp));
 }
 
 void PathNode::MoveNodeOrHandle(HitPart part, int sp, int ni, Vec2 worldPt, bool breakTangent)
@@ -357,7 +565,19 @@ bool Node::IsEffectivelyLocked() const
 {
 	if (m_locked) return true;
 	for (const GroupNode* p = m_parent; p; p = p->GetParent())
-		if (p->IsLocked()) return true;
+	{
+		// 단일 부품(버튼/표준 UI 컴포넌트)이 잠겨 있으면 그 내부 자식 요소도 함께 잠김
+		if (IsAtomicComponent(p) && p->IsLocked())
+			return true;
+		// 일반 그룹(Ctrl+G, FrameNode·TableNode·LayerNode 제외)이 잠겨 있으면 그룹 단위 선택이므로 함께 잠김
+		if (p->Kind() == NodeKind::Group &&
+		    dynamic_cast<const FrameNode*>(p) == nullptr &&
+		    dynamic_cast<const TableNode*>(p) == nullptr &&
+		    p->IsLocked())
+		{
+			return true;
+		}
+	}
 	return false;
 }
 
@@ -837,6 +1057,13 @@ void FrameNode::ResizeFrame(float w, float h)
 {
 	w = (std::max)(1.0f, w);
 	h = (std::max)(1.0f, h);
+	if (IsUiComponent() && s_uiRebuildHook) {
+		m_w = w;
+		m_h = h;
+		s_uiRebuildHook(*this);
+		Invalidate();
+		return;   // 표준 UI 컴포넌트는 새 크기에 맞춰 내부 자식을 통째로 재빌드하므로 자유 배치 자식 스케일을 건너뜀
+	}
 	const float dw = w - m_w, dh = h - m_h;
 	const bool free = (m_layoutMode == FrameLayoutMode::None);
 	if (free && (std::fabs(dw) > 1e-4f || std::fabs(dh) > 1e-4f)) {
@@ -882,7 +1109,6 @@ void FrameNode::ResizeFrame(float w, float h)
 	}
 	m_w = w;
 	m_h = h;
-	if (IsUiComponent() && s_uiRebuildHook) { s_uiRebuildHook(*this); Invalidate(); return; }   // 컴포넌트는 새 크기에 맞춰 자식을 다시 만든다
 	if (free) ClampChildren();   // 부모가 줄어들면 자식도 범위 안으로
 	Invalidate();
 	ApplyLayout();
@@ -1202,7 +1428,7 @@ static FrameNode* DeepestFrameAt(const GroupNode& g, Vec2 w, const Node* exclude
 	const auto& kids = g.GetChildren();
 	for (size_t i = kids.size(); i-- > 0;) {
 		Node* c = kids[i].get();
-		if (!c || c == exclude || !c->IsVisible() || c->IsLocked()) continue;
+		if (!c || c == exclude || !c->IsVisible()) continue;
 		auto* gc = dynamic_cast<GroupNode*>(c);
 		if (!gc || dynamic_cast<TableNode*>(c) || gc->IsClippingMask()) continue;
 		if (IsAtomicComponent(c)) continue;   // 버튼/UI 컴포넌트는 컨테이너가 아님 (안으로 흡수되면 재구성 때 사라짐)
@@ -1223,7 +1449,7 @@ FrameNode* Document::FindFrameAt(Vec2 worldPt, const Node* exclude) const
 {
 	for (size_t i = m_layers.size(); i-- > 0;) {
 		const LayerNode* layer = m_layers[i].get();
-		if (!layer || !layer->IsVisible() || layer->IsLocked()) continue;
+		if (!layer || !layer->IsVisible()) continue;
 		if (FrameNode* f = DeepestFrameAt(*layer, worldPt, exclude)) return f;
 	}
 	return nullptr;
@@ -1298,9 +1524,12 @@ std::wstring Document::GenerateNodeName(ShapeKind kind) const
 	case ShapeKind::Triangle: prefix = L"triangle"; break;
 	case ShapeKind::Polygon:  prefix = L"polygon"; break;
 	case ShapeKind::Star:     prefix = L"star"; break;
-	case ShapeKind::Gear:     prefix = L"gear"; break;
-	case ShapeKind::Spiral:   prefix = L"spiral"; break;
-	case ShapeKind::Heart:    prefix = L"heart"; break;
+	case ShapeKind::Gear:       prefix = L"gear"; break;
+	case ShapeKind::Spiral:     prefix = L"spiral"; break;
+	case ShapeKind::Heart:      prefix = L"heart"; break;
+	case ShapeKind::Arc:        prefix = L"arc"; break;
+	case ShapeKind::BlockArrow: prefix = L"arrow"; break;
+	case ShapeKind::Callout:    prefix = L"callout"; break;
 	case ShapeKind::Path:
 	default:
 		prefix = L"path";
@@ -1514,6 +1743,23 @@ bool Document::GetWorldBounds(Node& node, Rect2& out)
 	Rect2 b;
 	if (!node.GetLocalBounds(b)) return false;
 	out = node.GetWorldTransform().TransformRect(b);
+	return true;
+}
+
+bool Document::GetVisualWorldBounds(Node& node, Rect2& out)
+{
+	if (!GetWorldBounds(node, out)) return false;
+	const Style& st = node.GetStyle();
+	if (st.stroke.width > 0.0f && st.stroke.color.a > 0.0f) {
+		const Matrix2D wxf = node.GetWorldTransform();
+		const float sx = std::sqrt(wxf.m11 * wxf.m11 + wxf.m12 * wxf.m12);
+		const float sy = std::sqrt(wxf.m21 * wxf.m21 + wxf.m22 * wxf.m22);
+		const float halfStroke = st.stroke.width * 0.5f * (std::max)(sx, sy);
+		out.left   -= halfStroke;
+		out.top    -= halfStroke;
+		out.right  += halfStroke;
+		out.bottom += halfStroke;
+	}
 	return true;
 }
 
@@ -2300,9 +2546,72 @@ void Transformer::GetLocalHandlePoints(const Rect2& b, Vec2 out[9])
     out[8] = { mx,      b.top - 20.0f }; // Rotate
 }
 
+std::optional<Matrix2D> Transformer::SkewByEdgeHandle(int handleIdx, Vec2 startWorld, Vec2 curWorld,
+                                                      const Rect2& b, const Matrix2D& initialXf)
+{
+    Matrix2D inv = initialXf;
+    if (!inv.Invert()) return std::nullopt;
+    const Vec2 s = inv.TransformPoint(startWorld);
+    const Vec2 c = inv.TransformPoint(curWorld);
+    const float w = b.Width(), h = b.Height();
+    if (w <= 0.001f || h <= 0.001f) return std::nullopt;
+
+    Vec2 anchor{};
+    float shx = 0.0f, shy = 0.0f;
+    switch (handleIdx) {
+    case 2: // T (하단 고정, 수평 전단)
+        anchor = { b.MidX(), b.bottom };
+        shx = (c.x - s.x) / (-h);
+        break;
+    case 6: // B (상단 고정, 수평 전단)
+        anchor = { b.MidX(), b.top };
+        shx = (c.x - s.x) / h;
+        break;
+    case 4: // R (좌측 고정, 수직 전단)
+        anchor = { b.left, b.MidY() };
+        shy = (c.y - s.y) / w;
+        break;
+    case 8: // L (우측 고정, 수직 전단)
+        anchor = { b.right, b.MidY() };
+        shy = (c.y - s.y) / (-w);
+        break;
+    default:
+        return std::nullopt;
+    }
+    shx = (std::max)(-4.0f, (std::min)(4.0f, shx));
+    shy = (std::max)(-4.0f, (std::min)(4.0f, shy));
+    const Matrix2D shear{ 1.0f, shy, shx, 1.0f, 0.0f, 0.0f };
+    return Matrix2D::Translation(-anchor.x, -anchor.y) * shear * Matrix2D::Translation(anchor.x, anchor.y) * initialXf;
+}
+
 // ============================================================================
 // 2.6 Path Operations / Pathfinder (불린 연산 뼈대 구현)
 // ============================================================================
+ComPtr<ID2D1PathGeometry> PathOp::GetCachedGeometry(const PathNode& node, ID2D1Factory* factory)
+{
+	if (!factory) return nullptr;
+	struct CacheEntry {
+		uint32_t version = 0;
+		ID2D1Factory* factory = nullptr;
+		ComPtr<ID2D1PathGeometry> geo;
+	};
+	static std::unordered_map<uint64_t, CacheEntry> s_cache;
+	// ID 가 발급된 노드는 NodeId 기반, 미리보기 등 ID==0 노드는 포인터 기반 상위 비트 키 사용
+	const uint64_t key = (node.GetId() != 0)
+		? node.GetId()
+		: (0x8000000000000000ULL | (reinterpret_cast<uintptr_t>(&node) & 0x7FFFFFFFFFFFFFFFULL));
+	auto it = s_cache.find(key);
+	if (it != s_cache.end() && it->second.version == node.GetVersion() && it->second.factory == factory && it->second.geo) {
+		return it->second.geo;
+	}
+	if (s_cache.size() > 2048) s_cache.clear();
+	ComPtr<ID2D1PathGeometry> built = BuildGeometry(node, factory);
+	if (built) {
+		s_cache[key] = CacheEntry{ node.GetVersion(), factory, built };
+	}
+	return built;
+}
+
 ComPtr<ID2D1PathGeometry> PathOp::BuildGeometry(const PathNode& node, ID2D1Factory* factory)
 {
 	if (!factory) return nullptr;
@@ -3176,6 +3485,20 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 			m_brush->SetColor(D2D1::ColorF(fst.fill.color.r, fst.fill.color.g, fst.fill.color.b, fst.fill.color.a));
 			if (frameGeo) m_rt->FillGeometry(frameGeo.Get(), m_brush.Get());
 			else m_rt->FillRectangle(rc, m_brush.Get());
+		} else if (fst.fill.type == PaintType::Gradient) {
+			const Rect2 fbounds{ 0.0f, 0.0f, fw, fh };
+			ID2D1Brush* gb = GetGradientBrush(*frame, fbounds);
+			if (gb) {
+				if (frameGeo) m_rt->FillGeometry(frameGeo.Get(), gb);
+				else m_rt->FillRectangle(rc, gb);
+			} else {
+				const Color fc = fst.fill.gradient.FallbackColor();
+				if (fc.a > 0.0f) {
+					m_brush->SetColor(D2D1::ColorF(fc.r, fc.g, fc.b, fc.a));
+					if (frameGeo) m_rt->FillGeometry(frameGeo.Get(), m_brush.Get());
+					else m_rt->FillRectangle(rc, m_brush.Get());
+				}
+			}
 		}
 		if (fst.stroke.width > 0.0f && fst.stroke.color.a > 0.0f && sides != 0) {
 			m_brush->SetColor(D2D1::ColorF(fst.stroke.color.r, fst.stroke.color.g, fst.stroke.color.b, fst.stroke.color.a));
@@ -3429,7 +3752,7 @@ bool D2DRenderer::GetFillBounds(PathNode& node, Rect2& out)
 	return true;
 }
 
-ID2D1Brush* D2DRenderer::GetGradientBrush(PathNode& node, const Rect2& bounds)
+ID2D1Brush* D2DRenderer::GetGradientBrush(const Node& node, const Rect2& bounds)
 {
 	const Gradient& g = node.GetStyle().fill.gradient;
 	const float w = bounds.right - bounds.left;
@@ -3521,7 +3844,7 @@ ID2D1Geometry* D2DRenderer::GetGeometry(PathNode& node)
 	if (!m_factory) return nullptr;
 	GeoCache& c = m_geoCache[node.GetId()];
 	if (!c.geo || c.version != node.GetVersion()) {
-		c.geo = BuildGeometry(node);
+		c.geo = PathOp::GetCachedGeometry(node, m_factory);
 		c.version = node.GetVersion();
 	}
 	return c.geo.Get();
@@ -3529,118 +3852,37 @@ ID2D1Geometry* D2DRenderer::GetGeometry(PathNode& node)
 
 ComPtr<ID2D1PathGeometry> D2DRenderer::BuildGeometry(const PathNode& node)
 {
-	return PathOp::BuildGeometry(node, m_factory);
-}
-
-// ============================================================================
-// 4. HitTester
-// ============================================================================
-static bool HitNode(Node& n, Vec2 sp, float tol, const Viewport& view, D2DRenderer& r, HitResult& out)
-{
-	if (!n.IsVisible() || n.IsLocked()) return false;
-	if (n.Kind() == NodeKind::Text || n.Kind() == NodeKind::Image) return false;   // 텍스트/이미지 히트는 선택 도구가 상자로 처리
-	if (n.Kind() != NodeKind::Path) {
-		const auto& ch = static_cast<GroupNode&>(n).GetChildren();
-		for (int i = (int)ch.size() - 1; i >= 0; --i)
-			if (HitNode(*ch[i], sp, tol, view, r, out)) return true;
-		return false;
-	}
-	PathNode& p = static_cast<PathNode&>(n);
-	ID2D1PathGeometry* geo = static_cast<ID2D1PathGeometry*>(r.GetGeometry(p));
-	if (!geo) return false;
-	const D2D1_MATRIX_3X2_F m = ToD2D(p.GetWorldTransform() * view.ToMatrix());
-	const D2D1_POINT_2F pt = D2D1::Point2F(sp.x, sp.y);
-	const Style& st = p.GetStyle();
-	BOOL hit = FALSE;
-	const float w = (std::max)(st.stroke.width * view.zoom, 1.0f) + tol * 2.0f;
-	// 스트로크: 화면 좌표에서 검사하도록 변환 적용한 지오메트리 대신 로컈 폭으로 환산
-	const float lw = w / (std::max)(view.zoom, 0.0001f);
-	if (SUCCEEDED(geo->StrokeContainsPoint(pt, lw, nullptr, &m, &hit)) && hit) {
-		out.part = HitPart::Stroke; out.node = &p; return true;
-	}
-	if (st.fill.type != PaintType::None && SUCCEEDED(geo->FillContainsPoint(pt, &m, &hit)) && hit) {
-		out.part = HitPart::Fill; out.node = &p; return true;
-	}
-	return false;
-}
-
-HitResult HitTester::HitTest(Document& doc, Vec2 screenPt, float tolPx,
-							 const Viewport& view, D2DRenderer& renderer)
-{
-	HitResult res;
-	// 1) 선택된 패스의 앵커/핸들
-	auto isNear = [&](Vec2 world) {
-		const Vec2 s = view.WorldToScreen(world);
-		const float dx = s.x - screenPt.x, dy = s.y - screenPt.y;
-		return dx * dx + dy * dy <= tolPx * tolPx;
-	};
-	for (Node* sel : doc.GetSelection()) {
-		if (!sel || sel->Kind() != NodeKind::Path || sel->IsEffectivelyLocked() || !sel->IsEffectivelyVisible()) continue;
-		PathNode& p = static_cast<PathNode&>(*sel);
-		const Matrix2D w = p.GetWorldTransform();
-		const auto& paths = p.GetPaths();
-		for (int si = 0; si < (int)paths.size(); ++si)
-			for (int ni = (int)paths[si].nodes.size() - 1; ni >= 0; --ni) {
-				const BezierNode& b = paths[si].nodes[ni];
-				auto set = [&](HitPart part) { res.part = part; res.node = &p; res.subPath = si; res.nodeIdx = ni; };
-				if (b.HasOut() && isNear(w.TransformPoint(b.AbsOut()))) { set(HitPart::HandleOut); return res; }
-				if (b.HasIn()  && isNear(w.TransformPoint(b.AbsIn())))  { set(HitPart::HandleIn);  return res; }
-				if (isNear(w.TransformPoint(b.anchor)))                 { set(HitPart::Anchor);    return res; }
-			}
-	}
-	// 2) 위 레이어부터 역순
-	const auto& layers = doc.GetLayers();
-	for (int i = (int)layers.size() - 1; i >= 0; --i)
-		if (HitNode(*layers[i], screenPt, tolPx, view, renderer, res)) return res;
-	return {};
-}
-
-Node* HitTester::FindSelectable(Node* hit)
-{
-	while (hit && hit->GetParent() && hit->GetParent()->Kind() != NodeKind::Layer)
-		hit = hit->GetParent();
-	return hit;
-}
-
-// ============================================================================
-// 5. Command
-// ============================================================================
-void CommandStack::Execute(std::unique_ptr<ICommand> cmd, Document& doc)
-{
-	if (!cmd) return;
-	cmd->Execute(doc);
-	m_undo.push_back(std::move(cmd));
-	m_redo.clear();
-}
-
-void CommandStack::Undo(Document& doc)
-{
-	if (m_undo.empty()) return;
-	auto cmd = std::move(m_undo.back());
-	m_undo.pop_back();
-	cmd->Undo(doc);
-	m_redo.push_back(std::move(cmd));
-}
-
-void CommandStack::Redo(Document& doc)
-{
-	if (m_redo.empty()) return;
-	auto cmd = std::move(m_redo.back());
-	m_redo.pop_back();
-	cmd->Execute(doc);
-	m_undo.push_back(std::move(cmd));
-}
-
-void CommandStack::Clear()
-{
-	m_undo.clear();
-	m_redo.clear();
+	return PathOp::GetCachedGeometry(node, m_factory);
 }
 
 HitResult PathNode::HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, const Viewport& view, ID2D1Factory* f)
 {
 	const float tolSq = tolPx * tolPx;
 	const Matrix2D worldXf = GetWorldTransform();   // 그룹 안쪽 도형도 정확히 판정
+
+	// Step 6.6: 월드 AABB 사전 기각 (Early-Out) — 화면 점을 월드 좌표로 바꾼 뒤 도형 월드 경계 밖이면 즉시 반환
+	Rect2 lb{};
+	if (GetLocalBounds(lb)) {
+		const Rect2 wb = worldXf.TransformRect(lb);
+		const Vec2 worldPt = view.ScreenToWorld(Vec2{ screenPt.x, screenPt.y });
+		const float sx = std::sqrt(worldXf.m11 * worldXf.m11 + worldXf.m12 * worldXf.m12);
+		const float sy = std::sqrt(worldXf.m21 * worldXf.m21 + worldXf.m22 * worldXf.m22);
+		const float halfStrokeWorld = (m_style.stroke.width * 0.5f) * (std::max)(sx, sy);
+		// 컨트롤 핸들이 밖으로 뻗어 있을 수 있으므로 핸들 여유분을 고려해 넉넉히 기각
+		const float tolWorld = (tolPx + 12.0f) / (std::max)(view.zoom, 0.0001f) + halfStrokeWorld + 4.0f;
+		if (worldPt.x < wb.left - tolWorld || worldPt.x > wb.right + tolWorld ||
+		    worldPt.y < wb.top  - tolWorld || worldPt.y > wb.bottom + tolWorld) {
+			// 단, 열린 핸들이 박스 밖으로 멀리 나가 있는 경우를 위해 앵커/핸들만 빠르게 확인
+			bool nearHandle = false;
+			for (const auto& sp : m_paths) {
+				for (const auto& n : sp.nodes) {
+					if (n.HasIn() || n.HasOut()) { nearHandle = true; break; }
+				}
+				if (nearHandle) break;
+			}
+			if (!nearHandle) return {};
+		}
+	}
 
 	// 1순위: 앵커 및 핸들
 	for (int spIdx = 0; spIdx < static_cast<int>(m_paths.size()); ++spIdx) {
@@ -3665,47 +3907,41 @@ HitResult PathNode::HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, cons
 		}
 	}
 
-	// 2순위: 스트로크 및 채우기
-	// D2D 변환 행렬(월드 Transform * 뷰포트 행렬)을 StrokeContainsPoint / FillContainsPoint에 직접 전달하여 정확한 화면 판정 수행
-	D2DRenderer renderer;
-	renderer.Initialize(nullptr, f);   // 렌더 타깃 없이 팩터리만 사용 (반환값 false 는 정상)
-	{
-		auto* g = renderer.GetGeometry(*this);
-		if (g) {
-			const D2D1_MATRIX_3X2_F m = ToD2D(GetWorldTransform() * view.ToMatrix());
-			const float w = (std::max)(m_style.stroke.width * view.zoom, 1.0f) + tolPx * 2.0f;
-			const float lw = w / (std::max)(view.zoom, 0.0001f);
+	// 2순위: 스트로크 및 채우기 (Step 6.6: 임시 D2DRenderer 생성 없이 프로세스 공용 지오메트리 캐시 직접 조회)
+	ComPtr<ID2D1PathGeometry> g = PathOp::GetCachedGeometry(*this, f);
+	if (g) {
+		const D2D1_MATRIX_3X2_F m = ToD2D(worldXf * view.ToMatrix());
+		const float w = (std::max)(m_style.stroke.width * view.zoom, 1.0f) + tolPx * 2.0f;
+		const float lw = w / (std::max)(view.zoom, 0.0001f);
 
-			BOOL hit = FALSE;
-			if (SUCCEEDED(g->StrokeContainsPoint(screenPt, lw, nullptr, &m, 0.25f, &hit)) && hit) {
-				return { HitPart::Stroke, -1, -1, this };
-			}
+		BOOL hit = FALSE;
+		if (SUCCEEDED(g->StrokeContainsPoint(screenPt, lw, nullptr, &m, 0.25f, &hit)) && hit) {
+			return { HitPart::Stroke, -1, -1, this };
+		}
 
-			// 닫힌 도형이거나 채우기 스타일이 지정된 경우 내부 클릭 히트 허용
-			bool isClosed = false;
-			for (const auto& sp : m_paths) {
-				if (sp.closed) { isClosed = true; break; }
-			}
-			const bool checkFill = (m_style.fill.type != PaintType::None) || (m_style.fill.color.a > 0.0f) || isClosed;
-			if (checkFill) {
-				hit = FALSE;
-				if (SUCCEEDED(g->FillContainsPoint(screenPt, &m, 0.25f, &hit)) && hit) {
-					return { HitPart::Fill, -1, -1, this };
-				}
+		// 닫힌 도형이거나 채우기 스타일이 지정된 경우 내부 클릭 히트 허용
+		bool isClosed = false;
+		for (const auto& sp : m_paths) {
+			if (sp.closed) { isClosed = true; break; }
+		}
+		const bool checkFill = (m_style.fill.type != PaintType::None) || (m_style.fill.color.a > 0.0f) || isClosed;
+		if (checkFill) {
+			hit = FALSE;
+			if (SUCCEEDED(g->FillContainsPoint(screenPt, &m, 0.25f, &hit)) && hit) {
+				return { HitPart::Fill, -1, -1, this };
 			}
 		}
+		return {};
 	}
 
-	// 3순위: Direct2D 기하 판정 실패 시 수학적 선분/곡선 거리 계산 (100% 신뢰성 보장)
-	// 화면상의 점을 월드 및 로컬 좌표계로 역변환하여 패스의 모든 베이지어/직선 선분과의 최근접 거리를 직접 검사
-	Matrix2D invWorld = GetWorldTransform();
+	// 3순위: D2D 팩터리가 없는 순수 CPU 환경 폴백 (g == nullptr 일 때만 수행)
+	Matrix2D invWorld = worldXf;
 	if (invWorld.Invert()) {
 		Vec2 worldPt = view.ScreenToWorld(Vec2{ screenPt.x, screenPt.y });
 		Vec2 localPt = invWorld.TransformPoint(worldPt);
 		int spIdx = -1, segIdx = -1;
 		float tVal = 0.0f, distSq = 1e30f;
 		if (FindClosestSegment(localPt, spIdx, segIdx, tVal, distSq)) {
-			// 로컬 거리를 화면 픽셀 거리로 환산
 			float distScreen = std::sqrt(distSq) * view.zoom;
 			float halfStrokePx = (m_style.stroke.width * 0.5f) * view.zoom;
 			if (distScreen <= (halfStrokePx + tolPx)) {

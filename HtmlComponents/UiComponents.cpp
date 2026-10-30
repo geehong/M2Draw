@@ -228,8 +228,27 @@ void BuildCheck(FrameNode& f, float w, float h)
 
 void BuildCombo(FrameNode& f, float w, float h)
 {
+	const std::string kind = Prop(f, "kind", "dropdown");
 	const auto opts = WideList(f, "options");
 	int sel = static_cast<int>(PropNum(f, "selected", -1.0f));
+	if (kind == "listbox") {
+		AddRRect(f, 0.5f, 0.5f, w - 1.0f, h - 1.0f, 6.0f, kWhite, kBorder, 1.0f, L"리스트 상자");
+		const int rows = (std::max)(2, static_cast<int>(PropNum(f, "rows", 4.0f)));
+		const float rowH = (std::max)(22.0f, (h - 8.0f) / static_cast<float>(rows));
+		const float size = 14.0f;
+		const size_t maxVis = (std::min)(opts.size(), static_cast<size_t>(rows));
+		for (size_t i = 0; i < maxVis; ++i) {
+			const float ry = 4.0f + static_cast<float>(i) * rowH;
+			const bool isSel = (static_cast<int>(i) == sel);
+			if (isSel) {
+				AddRRect(f, 4.0f, ry + 1.0f, (std::max)(8.0f, w - 8.0f), rowH - 2.0f, 4.0f,
+					Color(0.12f, 0.56f, 1.0f, 0.14f), kClear, 0.0f, L"선택 배경");
+			}
+			AddText(f, opts[i], 12.0f, ry + MidY(rowH, size), size, isSel,
+				isSel ? kAccent : kInk, TextAlign::Left, 0.0f, L"항목 글자");
+		}
+		return;
+	}
 	std::wstring shown;
 	bool ph = true;
 	if (sel >= 0 && sel < static_cast<int>(opts.size())) { shown = opts[sel]; ph = false; }
@@ -409,7 +428,7 @@ FrameNode::UiProps Defaults(Kind k)
 	case Kind::TextBox: return P{ {"tag","p"}, {"text","텍스트를 입력하세요."}, {"align","left"}, {"lineHeight","1.5"}, {"size","16"}, {"bold","0"}, {"autoPreset","1"} };
 	case Kind::Input:   return P{ {"type","text"}, {"placeholder","내용을 입력하세요"}, {"value",""}, {"disabled","0"} };
 	case Kind::Check:   return P{ {"kind","checkbox"}, {"checked","1"}, {"label","동의합니다"}, {"accent","#1f8fff"} };
-	case Kind::Combo:   return P{ {"options","옵션 1|옵션 2|옵션 3"}, {"selected","-1"}, {"placeholder","선택하세요"} };
+	case Kind::Combo:   return P{ {"kind","dropdown"}, {"options","옵션 1|옵션 2|옵션 3"}, {"selected","-1"}, {"placeholder","선택하세요"}, {"rows","4"}, {"multiple","0"} };
 	case Kind::List:    return P{ {"kind","ul"}, {"marker","disc"}, {"items","첫 번째 항목|두 번째 항목|세 번째 항목"}, {"gap","6"}, {"size","15"} };
 	case Kind::Bar:     return P{ {"kind","progress"}, {"value","40"}, {"min","0"}, {"max","100"}, {"showLabel","1"}, {"trackColor","#dde1e7"}, {"fillColor","#1f8fff"}, {"thickness","8"} };
 	case Kind::Tabs:    return P{ {"tabs","홈|소개|연락처"}, {"active","0"}, {"color","#1f8fff"} };
@@ -563,9 +582,12 @@ std::vector<PropDesc> Describe(const FrameNode& f)
 		color("accent", L"강조 색");
 		break;
 	case Kind::Combo:
+		choice("kind", L"표시 방식", { {"dropdown", L"드롭다운 (콤보)"}, {"listbox", L"리스트박스 (다중 행)"} });
 		multi("options", L"옵션(| 로 구분)");
 		num("selected", L"선택 번호(-1=없음)", -1.0f, 99.0f, 1.0f);
 		text("placeholder", L"안내 문구");
+		num("rows", L"표시 행 수", 2.0f, 12.0f, 1.0f);
+		flag("multiple", L"다중 선택");
 		break;
 	case Kind::List:
 		choice("kind", L"종류", { {"ul", L"글머리 (ul)"}, {"ol", L"번호 (ol)"}, {"box", L"상자 목록"} });

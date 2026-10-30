@@ -277,6 +277,14 @@ BEGIN
             MENUITEM "해제(&R)\tCtrl+Alt+7",             ID_OBJECT_RELEASE_MASK
         END
         MENUITEM SEPARATOR
+        POPUP "변형(&T)"
+        BEGIN
+            MENUITEM "좌우 반전(&H)",                    ID_OBJECT_FLIP_H
+            MENUITEM "상하 반전(&V)",                    ID_OBJECT_FLIP_V
+            MENUITEM "시계 방향 90° 회전(&R)",           ID_OBJECT_ROT_CW
+            MENUITEM "반시계 방향 90° 회전(&L)",         ID_OBJECT_ROT_CCW
+        END
+        MENUITEM SEPARATOR
         POPUP "패스(&P)"
         BEGIN
             MENUITEM "윤곽선 만들기 (외곽선 확장)(&O)",  ID_PATH_OUTLINE
@@ -535,6 +543,10 @@ BEGIN
 확대"
     ID_TOOL_ZOOMOUT          "축소 도구로 전환합니다.
 축소"
+    ID_OBJECT_FLIP_H         "선택한 오브젝트를 좌우로 뒤집습니다.\n좌우 반전"
+    ID_OBJECT_FLIP_V         "선택한 오브젝트를 상하로 뒤집습니다.\n상하 반전"
+    ID_OBJECT_ROT_CW         "선택한 오브젝트를 시계 방향으로 90도 회전합니다.\n시계 90도"
+    ID_OBJECT_ROT_CCW        "선택한 오브젝트를 반시계 방향으로 90도 회전합니다.\n반시계 90도"
     ID_OBJECT_GROUP          "선택한 오브젝트를 그룹으로 묶습니다.
 그룹"
     ID_OBJECT_UNGROUP        "선택한 그룹을 해제합니다.

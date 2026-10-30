@@ -12,7 +12,7 @@ int ShadowLayerCount(float blur)
 	return (std::max)(0, (std::min)(12, static_cast<int>(std::ceil(blur * 0.5f))));
 }
 
-// 노드 윤곽(로컬 좌표). 경로는 자신의 선 굵기와 채움 여부도 돌려준다
+// 노드 윤곽(로컬 좌표). 경로는 자신의 선 굵기와 채움 여부도 돌려준다 (Step 6.6: 지오메트리 캐시 및 4모서리 비균일 반경 반영)
 ComPtr<ID2D1Geometry> BuildShadowGeometry(ID2D1Factory* factory, Node& node, float& baseStroke, bool& fillShape)
 {
 	ComPtr<ID2D1Geometry> geo;
@@ -20,19 +20,43 @@ ComPtr<ID2D1Geometry> BuildShadowGeometry(ID2D1Factory* factory, Node& node, flo
 	fillShape = true;
 	if (!factory) return geo;
 	if (auto* pn = dynamic_cast<PathNode*>(&node)) {
-		geo = PathOp::BuildGeometry(*pn, factory);
+		geo = PathOp::GetCachedGeometry(*pn, factory);
 		const Style& st = pn->GetStyle();
 		baseStroke = (st.stroke.width > 0.0f && st.stroke.color.a > 0.0f) ? st.stroke.width : 0.0f;
 		fillShape = st.fill.type != PaintType::None;
 	} else if (auto* fr = dynamic_cast<FrameNode*>(&node)) {
-		const D2D1_RECT_F rc = D2D1::RectF(0.0f, 0.0f, fr->GetWidth(), fr->GetHeight());
+		const float W = fr->GetWidth(), H = fr->GetHeight();
+		const D2D1_RECT_F rc = D2D1::RectF(0.0f, 0.0f, W, H);
 		const CornerRadii cr = fr->ClampedRadii();
-		if (cr.IsUniform() && cr.tl > 0.0f) {
+		if (cr.IsZero()) {
+			ComPtr<ID2D1RectangleGeometry> g;
+			if (SUCCEEDED(factory->CreateRectangleGeometry(rc, &g))) geo = g;
+		} else if (cr.IsUniform()) {
 			ComPtr<ID2D1RoundedRectangleGeometry> g;
 			if (SUCCEEDED(factory->CreateRoundedRectangleGeometry(D2D1::RoundedRect(rc, cr.tl, cr.tl), &g))) geo = g;
 		} else {
-			ComPtr<ID2D1RectangleGeometry> g;
-			if (SUCCEEDED(factory->CreateRectangleGeometry(rc, &g))) geo = g;
+			// 4모서리 개별 반경(Step 6.6.7): PathGeometry 로 정확한 모서리 윤곽 생성
+			ComPtr<ID2D1PathGeometry> pg;
+			if (SUCCEEDED(factory->CreatePathGeometry(&pg))) {
+				ComPtr<ID2D1GeometrySink> sink;
+				if (SUCCEEDED(pg->Open(&sink))) {
+					auto arc = [&](float x, float y, float r) {
+						if (r > 0.0f)
+							sink->AddArc(D2D1::ArcSegment(D2D1::Point2F(x, y), D2D1::SizeF(r, r), 0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+					};
+					sink->BeginFigure(D2D1::Point2F(cr.tl, 0.0f), D2D1_FIGURE_BEGIN_FILLED);
+					sink->AddLine(D2D1::Point2F(W - cr.tr, 0.0f));
+					arc(W, cr.tr, cr.tr);
+					sink->AddLine(D2D1::Point2F(W, H - cr.br));
+					arc(W - cr.br, H, cr.br);
+					sink->AddLine(D2D1::Point2F(cr.bl, H));
+					arc(0.0f, H - cr.bl, cr.bl);
+					sink->AddLine(D2D1::Point2F(0.0f, cr.tl));
+					arc(cr.tl, 0.0f, cr.tl);
+					sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+					if (SUCCEEDED(sink->Close())) geo = pg;
+				}
+			}
 		}
 	} else {
 		Rect2 lb;

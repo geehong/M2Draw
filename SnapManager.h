@@ -99,7 +99,8 @@ public:
 		float zoom,
 		const GridRenderer& grid,
 		const ge::Document* pDoc = nullptr,
-		const ge::Node* excludeNode = nullptr
+		const ge::Node* excludeNode = nullptr,
+		const std::vector<ge::Node*>* excludeNodes = nullptr
 	) const;
 
 	// 스냅이 걸렸을 때 시각적 피드백(자석 원형 링, 자석 다이아몬드, 스냅 가이드) 렌더링

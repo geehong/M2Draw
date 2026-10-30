@@ -947,7 +947,7 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 		if (GradientTool* pGrad = dynamic_cast<GradientTool*>(GetApp()->GetToolManager().GetActiveTool()))
 			pGrad->SetKind(kind);
 
-		if (ge::PathNode* ps = dynamic_cast<ge::PathNode*>(GetSelectedShape()))
+		if (ge::Node* ps = GetSelectedShape(); ps && (ps->Kind() == ge::NodeKind::Path || dynamic_cast<ge::FrameNode*>(ps) != nullptr))
 		{
 			if (ps->GetStyle().fill.type == ge::PaintType::Gradient && ps->GetStyle().fill.gradient.kind != kind)
 			{

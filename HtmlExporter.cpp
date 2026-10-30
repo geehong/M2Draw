@@ -377,6 +377,26 @@ void HtmlExporter::Visit(GroupNode& node) {
 		const Style& st = frame->GetStyle();
 		if (st.fill.type == PaintType::Solid && st.fill.color.a > 0.001f) {
 			style << "background-color: " << ColorToCss(st.fill.color) << "; ";
+		} else if (st.fill.type == PaintType::Gradient && st.fill.gradient.IsRenderable()) {
+			Gradient g = st.fill.gradient;
+			g.NormalizeStops();
+			std::ostringstream gs;
+			if (g.kind == Gradient::Kind::Linear) {
+				const float dx = (g.end.x - g.start.x) * frame->GetWidth();
+				const float dy = (g.end.y - g.start.y) * frame->GetHeight();
+				float cssAngle = std::atan2(dx, -dy) * (180.0f / 3.14159265358979323846f);
+				if (cssAngle < 0.0f) cssAngle += 360.0f;
+				gs << "linear-gradient(" << static_cast<int>(std::round(cssAngle)) << "deg";
+			} else {
+				gs << "radial-gradient(circle at "
+				   << static_cast<int>(std::round(g.start.x * 100.0f)) << "% "
+				   << static_cast<int>(std::round(g.start.y * 100.0f)) << "%";
+			}
+			for (const auto& sp : g.stops) {
+				gs << ", " << ColorToCss(sp.color) << " " << static_cast<int>(std::round(sp.offset * 100.0f)) << "%";
+			}
+			gs << ")";
+			style << "background: " << gs.str() << "; ";
 		}
 		if (st.stroke.width > 0.001f && st.stroke.color.a > 0.001f && frame->GetBorderSides() != 0) {
 			const std::string bdr = FormatUnit(st.stroke.width) + " " + CssBorderStyleName(st.stroke) + " " + ColorToCss(st.stroke.color) + "; ";
@@ -569,14 +589,21 @@ void HtmlExporter::ExportUiComponent(FrameNode& f)
 		return;
 	}
 	if (kind == "combo") {
+		const std::string ck = f.GetUiProp("kind", "dropdown");
+		const bool isListbox = (ck == "listbox");
+		const int rows = (std::max)(2, static_cast<int>(num("rows", 4.0f)));
+		const bool isMulti = flag("multiple", false);
 		const auto opts = UiComp::PropList(f, "options");
 		const int sel = static_cast<int>(num("selected", -1.0f));
 		std::ostringstream d;
-		d << font << "font-size: 15px; padding: 0 12px; border: 1px solid " << border << "; border-radius: 6px; background: #ffffff; color: " << ink << "; ";
-		line("<select" + attr(outer(true, d.str())) + ">");
+		d << font << "font-size: 15px; padding: " << (isListbox ? "4px 6px" : "0 12px") << "; border: 1px solid " << border << "; border-radius: 6px; background: #ffffff; color: " << ink << "; ";
+		std::string extraAttr;
+		if (isListbox) extraAttr += " size=\"" + std::to_string(rows) + "\"";
+		if (isMulti) extraAttr += " multiple";
+		line("<select" + extraAttr + attr(outer(true, d.str())) + ">");
 		++m_indent;
 		const std::string ph = f.GetUiProp("placeholder");
-		if (!ph.empty()) line(std::string("<option value=\"\" disabled hidden") + (sel < 0 || sel >= static_cast<int>(opts.size()) ? " selected" : "") + ">" + UiEsc(ph) + "</option>");
+		if (!isListbox && !ph.empty()) line(std::string("<option value=\"\" disabled hidden") + (sel < 0 || sel >= static_cast<int>(opts.size()) ? " selected" : "") + ">" + UiEsc(ph) + "</option>");
 		for (size_t i = 0; i < opts.size(); ++i)
 			line("<option value=\"" + EscapeHtml(opts[i]) + "\"" + (static_cast<int>(i) == sel ? " selected" : "") + ">" + UiEsc(opts[i]) + "</option>");
 		--m_indent;
@@ -903,6 +930,29 @@ void HtmlExporter::Visit(ImageNode& node) {
 void HtmlExporter::Visit(PathNode& node) {
 	if (!node.IsVisible()) return;
 
+	if (node.GetHtmlTag() == "hr") {
+		Rect2 b{};
+		node.GetLocalBounds(b);
+		const float w = (std::max)(1.0f, b.Width());
+		const Style& st = node.GetStyle();
+		const float sw = (std::max)(1.0f, st.stroke.width);
+		std::ostringstream style;
+		style << BuildCommonStyleDecls(node);
+		bool omitW = false, omitH = false;
+		style << PositionDecls(node, omitW, omitH);
+		if (!omitW) style << "width: " << FormatUnit(w) << "; ";
+		style << "height: 0; margin: 0; border: 0; border-top: " << FormatUnit(sw) << " "
+		      << CssBorderStyleName(st.stroke) << " " << ColorToCss(st.stroke.color) << "; ";
+		std::string cls = RegisterCssRule("hr", style.str(), &node);
+		AppendIndent();
+		m_htmlStream << "<hr";
+		if (!cls.empty()) m_htmlStream << " class=\"" << cls << "\"";
+		else if (!style.str().empty()) m_htmlStream << " style=\"" << style.str() << "\"";
+		if (!node.GetAriaLabel().empty()) m_htmlStream << " aria-label=\"" << EscapeHtml(node.GetAriaLabel()) << "\"";
+		m_htmlStream << ">\n";
+		return;
+	}
+
 	// 사각형(Rect) 및 타원(Ellipse)인 경우 깔끔한 CSS <div> 로 변환
 	ShapeKind sk = node.GetShapeKind();
 	if (sk == ShapeKind::Rect || sk == ShapeKind::Ellipse) {
@@ -922,6 +972,26 @@ void HtmlExporter::Visit(PathNode& node) {
 			const Style& st = node.GetStyle();
 			if (st.fill.type == PaintType::Solid && st.fill.color.a > 0.001f) {
 				style << "background-color: " << ColorToCss(st.fill.color) << "; ";
+			} else if (st.fill.type == PaintType::Gradient && st.fill.gradient.IsRenderable()) {
+				Gradient g = st.fill.gradient;
+				g.NormalizeStops();
+				std::ostringstream gs;
+				if (g.kind == Gradient::Kind::Linear) {
+					const float dx = (g.end.x - g.start.x) * w;
+					const float dy = (g.end.y - g.start.y) * h;
+					float cssAngle = std::atan2(dx, -dy) * (180.0f / 3.14159265358979323846f);
+					if (cssAngle < 0.0f) cssAngle += 360.0f;
+					gs << "linear-gradient(" << static_cast<int>(std::round(cssAngle)) << "deg";
+				} else {
+					gs << "radial-gradient(circle at "
+					   << static_cast<int>(std::round(g.start.x * 100.0f)) << "% "
+					   << static_cast<int>(std::round(g.start.y * 100.0f)) << "%";
+				}
+				for (const auto& sp : g.stops) {
+					gs << ", " << ColorToCss(sp.color) << " " << static_cast<int>(std::round(sp.offset * 100.0f)) << "%";
+				}
+				gs << ")";
+				style << "background: " << gs.str() << "; ";
 			}
 			if (st.stroke.width > 0.001f && st.stroke.color.a > 0.001f) {
 				style << "border: " << FormatUnit(st.stroke.width) << " " << CssBorderStyleName(st.stroke) << " " << ColorToCss(st.stroke.color) << "; ";

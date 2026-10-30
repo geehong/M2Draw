@@ -507,7 +507,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 				break;
 			}
 			const std::wstring& name = n->GetName();
-			if (name == L"버튼" || name == L"버튼 텍스트" || name == L"헤딩" || name == L"구분선" || name == L"간격" || name == L"테이블")
+			if (name == L"헤딩" || name == L"구분선" || name == L"간격")   // 프레임/표/버튼은 위에서 종류로 판별되므로 이름 비교는 프레임이 아닌 간단 요소만
 			{
 				bHtmlContextSelected = true;
 				break;

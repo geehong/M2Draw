@@ -7,7 +7,8 @@ SnapResult SnapManager::FindSnapPoint(
 	float zoom,
 	const GridRenderer& grid,
 	const ge::Document* pDoc,
-	const ge::Node* excludeNode) const
+	const ge::Node* excludeNode,
+	const std::vector<ge::Node*>* excludeNodes) const
 {
 	SnapResult result;
 	result.snapped = false;
@@ -44,11 +45,19 @@ SnapResult SnapManager::FindSnapPoint(
 	// 1. 오브젝트 스냅 (Anchor, Midpoint, Center) - ge::Document 노드 순회
 	if (pDoc)
 	{
+		auto isExcluded = [&](const ge::Node* n) {
+			if (n == excludeNode) return true;
+			if (excludeNodes && std::find(excludeNodes->begin(), excludeNodes->end(), n) != excludeNodes->end()) return true;
+			return false;
+		};
+
 		std::function<void(const ge::Node*)> checkNode = [&](const ge::Node* node) {
-			if (!node || !node->IsVisible() || node == excludeNode) return;
+			if (!node || !node->IsVisible() || isExcluded(node)) return;
 
 			if (node->Kind() == ge::NodeKind::Group || node->Kind() == ge::NodeKind::Layer)
 			{
+				if (node->IsLocked() && !ge::AllowsChildSelection(node) && node->Kind() != ge::NodeKind::Layer)
+					return;
 				const auto* g = static_cast<const ge::GroupNode*>(node);
 				for (const auto& child : g->GetChildren())
 				{
@@ -56,11 +65,26 @@ SnapResult SnapManager::FindSnapPoint(
 				}
 				return;
 			}
+			if (node->IsLocked()) return;
 
 			if (node->Kind() == ge::NodeKind::Path)
 			{
 				const auto* pn = static_cast<const ge::PathNode*>(node);
 				ge::Matrix2D worldXf = pn->GetWorldTransform();
+
+				// Step 6.6: 캐시된 타이트 로컬 바운즈로 월드 AABB 사전 기각 — 마우스 반경 밖의 도형은 정점/곡선 분할 생략
+				ge::Rect2 lb{};
+				const bool hasLb = const_cast<ge::PathNode*>(pn)->GetLocalBounds(lb);
+				if (hasLb)
+				{
+					const ge::Rect2 wb = worldXf.TransformRect(lb);
+					const float margin = tolWorld * 2.5f;
+					if (mouseWorld.x < wb.left - margin || mouseWorld.x > wb.right + margin ||
+					    mouseWorld.y < wb.top  - margin || mouseWorld.y > wb.bottom + margin)
+					{
+						return;
+					}
+				}
 
 				for (const auto& sp : pn->GetPaths())
 				{

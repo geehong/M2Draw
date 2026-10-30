@@ -6,7 +6,7 @@
 //   1. Math      : Vec2 / Rect2 / Matrix2D
 //   2. Model     : Node -> PathNode / GroupNode -> LayerNode, Document (Scene Graph)
 //   3. Command   : Undo / Redo
-//   4. D2D 백엔드: PathOp, D2DRenderer, HitTester   (Direct2D 의존은 여기에만)
+//   4. D2D 백엔드: PathOp, D2DRenderer   (Direct2D 의존은 여기에만)
 //
 //  [D2D 비의존 모델]
 //   - 1~3 은 Direct2D 없이 컴파일된다. GE_NO_D2D 를 정의하고 포함하면 D2D 상호 변환
@@ -498,20 +498,34 @@ enum class ShapeKind {
 	Star,
 	Gear,
 	Spiral,
-	Heart
+	Heart,
+	Arc,        // Step 6.13: 원호 / 부채꼴(Pie) / 활꼴(Chord) / 도넛 호(Donut)
+	BlockArrow, // Step 6.13: 블록 화살표
+	Callout     // Step 6.13: 말풍선 (콜아웃)
 };
 
-struct RectParams     { float rx = 0.0f; float ry = 0.0f; bool linkRxRy = true; };
-struct TriangleParams { bool equilateral = false; };
-struct EllipseParams  { bool linkRxRy = true; };
-struct PolygonParams  { int sides = 5; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
-struct StarParams     { int points = 5; float innerRatio = 0.5f; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
-struct GearParams     { int teeth = 12; float depthRatio = 0.2f; float boreRatio = 0.3f; float toothWidthRatio = 0.5f; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
-struct SpiralParams   { float turns = 3.0f; float innerRatio = 0.1f; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
-struct HeartParams    { };
+enum class ArcMode : uint8_t {
+	Open  = 0,  // 열린 원호 (Open Arc)
+	Pie   = 1,  // 부채꼴 (Pie / Sector)
+	Chord = 2,  // 활꼴 (Chord)
+	Donut = 3   // 도넛 / 링 부채꼴 (Donut / Ring Arc)
+};
+
+struct RectParams       { float rx = 0.0f; float ry = 0.0f; bool linkRxRy = true; };
+struct TriangleParams   { bool equilateral = false; };
+struct EllipseParams    { bool linkRxRy = true; };
+struct PolygonParams    { int sides = 5; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
+struct StarParams       { int points = 5; float innerRatio = 0.5f; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
+struct GearParams       { int teeth = 12; float depthRatio = 0.2f; float boreRatio = 0.3f; float toothWidthRatio = 0.5f; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
+struct SpiralParams     { float turns = 3.0f; float innerRatio = 0.1f; float radius = 0.0f; float cx = 0.0f; float cy = 0.0f; };
+struct HeartParams      { };
+struct ArcParams        { float startAngle = 0.0f; float sweepAngle = 270.0f; float innerRatio = 0.5f; ArcMode mode = ArcMode::Pie; float cx = 0.0f; float cy = 0.0f; float rx = 0.0f; float ry = 0.0f; };
+struct BlockArrowParams { float headLengthRatio = 0.35f; float shaftWidthRatio = 0.5f; };
+struct CalloutParams    { float tailPosRatio = 0.3f; float tailWidthRatio = 0.16f; float tailHeightRatio = 0.25f; float cornerRadius = 8.0f; };
 
 using ShapeParams = std::variant<std::monostate, RectParams, TriangleParams, EllipseParams,
-                                 PolygonParams, StarParams, GearParams, SpiralParams, HeartParams>;
+                                 PolygonParams, StarParams, GearParams, SpiralParams, HeartParams,
+                                 ArcParams, BlockArrowParams, CalloutParams>;
 
 using NodeId = uint64_t;
 
@@ -618,6 +632,10 @@ public:
 	void SetBlendMode(LayerBlendMode m)      { m_blendMode = m; ChangeTracker::Bump(); }
 
 	// 자신 + 조상(그룹/레이어) 체인까지 고려한 최종 가시성/잠금
+	// - 가시성(IsEffectivelyVisible): 부모가 숨김이면 자식도 화면에서 숨김
+	// - 잠금(IsEffectivelyLocked): 잠금은 해당 객체 자체의 변형/선택만 고정함.
+	//   단, 버튼/UI 컴포넌트(IsAtomicComponent)와 일반 그룹(Ctrl+G)은 하나의 덩어리로 동작하므로 조상 중 해당 단위가 잠겨 있으면 함께 잠김.
+	//   반면 레이어(LayerNode)나 일반 프레임(FrameNode)이 잠겨 있어도 잠기지 않은 내부 자식은 자유롭게 선택/편집 가능.
 	bool IsEffectivelyVisible() const;
 	bool IsEffectivelyLocked() const;
 
@@ -850,10 +868,19 @@ public:
 	// 세그먼트 위의 t 지점 좌표
 	static Vec2 EvalSegment(const BezierNode& a, const BezierNode& b, float t);
 
+	// Step 6.13: 파라메트릭 2D 벡터 도형 서브패스 빌더 (순수 CPU 기하학)
+	static void BuildArcSubPaths(const Rect2& box, const ArcParams& p, std::vector<SubPath>& out);
+	static void BuildBlockArrowSubPaths(const Rect2& box, const BlockArrowParams& p, std::vector<SubPath>& out);
+	static void BuildCalloutSubPaths(const Rect2& box, const CalloutParams& p, std::vector<SubPath>& out);
+
 private:
 	std::vector<SubPath> m_paths;
 	ShapeKind            m_kind = ShapeKind::Path;
 	ShapeParams          m_params;
+	// Step 6.8: 로컬 타이트 바운딩 박스 캐시 (m_version 과 동기화, ABI 호환을 위해 항상 포함)
+	mutable Rect2        m_cachedBounds{};
+	mutable uint32_t     m_boundsVersion = 0;
+	mutable bool         m_boundsValid = false;
 };
 
 // ---- 그룹 (컴포지트) --------------------------------------------------------
@@ -939,7 +966,7 @@ public:
 	bool GetLocalBounds(Rect2& out) override { out = Rect2{ 0.0f, 0.0f, m_w, m_h }; return true; }
 	using Node::GetLocalBounds;
 	const wchar_t* GetShapeTypeName() const override {
-		if (GetHtmlTag() == "button" || GetName() == L"버튼") return L"버튼";
+		if (GetHtmlTag() == "button") return L"버튼";
 		return L"프레임";
 	}
 
@@ -1036,13 +1063,6 @@ private:
 	UiProps m_uiProps;
 };
 
-// 하나의 오브젝트로 선택/이동/크기 조절되는 컴포넌트인가 (버튼, 표준 UI 컴포넌트). 자식은 따로 선택되지 않는다.
-inline bool IsAtomicComponent(const Node* n) {
-	if (!n) return false;
-	if (n->GetName() == L"버튼" || n->GetHtmlTag() == "button") return true;
-	const auto* f = dynamic_cast<const FrameNode*>(n);
-	return f && f->IsUiComponent();
-}
 
 // ---- HTML 컴포넌트: 테이블 (Step 4.5.7.1) ----------------------------------------
 // GroupNode 상속 (FrameNode 가 아님: 프레임은 자동 배치 컨테이너라 표의 행/열 의미와 맞지 않음).
@@ -1128,6 +1148,35 @@ private:
 	Color m_borderColor = Color(0.35f, 0.38f, 0.45f, 1.0f);
 };
 
+// ---- 컴포넌트 판별 정책 (Step 6.2) ---------------------------------------------
+// 컴포넌트의 정체성은 이름(사용자가 바꿀 수 있음)이 아니라 역할 태그/종류 속성으로 정한다.
+// 선택·히트·스마트 가이드·레이어 패널·속성창은 이 쿼리만 사용한다 (이름/태그 문자열 비교를 흩뿌리지 않음).
+enum class ComponentKind : uint8_t { None, Frame, Button, Table, UiComponent };
+
+inline ComponentKind GetComponentKind(const Node* n)
+{
+	if (!n) return ComponentKind::None;
+	if (dynamic_cast<const TableNode*>(n)) return ComponentKind::Table;
+	if (const auto* f = dynamic_cast<const FrameNode*>(n)) {
+		if (f->IsUiComponent()) return ComponentKind::UiComponent;
+		if (f->GetHtmlTag() == "button") return ComponentKind::Button;
+		return ComponentKind::Frame;
+	}
+	return ComponentKind::None;
+}
+
+inline bool IsButtonComponent(const Node* n) { return GetComponentKind(n) == ComponentKind::Button; }
+
+// 하나의 오브젝트로 선택/이동/크기 조절되는 컴포넌트인가 (버튼, 표준 UI 컴포넌트). 자식은 따로 선택되지 않는다.
+inline bool IsAtomicComponent(const Node* n)
+{
+	const ComponentKind k = GetComponentKind(n);
+	return k == ComponentKind::Button || k == ComponentKind::UiComponent;
+}
+
+// 자식을 개별 선택할 수 있는 컨테이너인가 (일반 프레임). 표는 칸 편집용이라 제외
+inline bool AllowsChildSelection(const Node* n) { return GetComponentKind(n) == ComponentKind::Frame; }
+
 } // namespace ge
 
 #include "D2DLayer.h"
@@ -1174,9 +1223,20 @@ public:
 	// 자동 배치 프레임 체인을 다시 배치 (자식 프레임 -> 조상 순)
 	static void RelayoutFrameChain(GroupNode* from);
 
-	// 선택 (인덱스가 아닌 포인터/ID 기반)
+	// 선택 (인덱스가 아닌 포인터/ID 기반). 원자 컴포넌트(버튼/UI 컴포넌트) 내부 자식은 항상 루트 컴포넌트로 승격하여 자식 재구성 시 댕글링 포인터 원천 차단
 	const std::vector<Node*>& GetSelection() const { return m_selection; }
-	void SetSelection(const std::vector<Node*>& nodes) { m_selection = nodes; }
+	void SetSelection(const std::vector<Node*>& nodes) {
+		m_selection.clear();
+		for (Node* n : nodes) {
+			if (!n) continue;
+			Node* cur = n;
+			for (GroupNode* p = n->GetParent(); p; p = p->GetParent()) {
+				if (IsAtomicComponent(p)) cur = p;
+			}
+			if (std::find(m_selection.begin(), m_selection.end(), cur) == m_selection.end())
+				m_selection.push_back(cur);
+		}
+	}
 	void ClearSelection()                               { m_selection.clear(); }
 
 	// ---- 그룹 격리 편집 (Isolation Mode, Step 5.3) ----
@@ -1248,8 +1308,9 @@ public:
 		enum class ZOrder { Front, Back, Forward, Backward };
 		void ArrangeSelection(ZOrder order);
 
-		// 월드 좌표 바운딩 박스
+		// 월드 좌표 바운딩 박스 (Step 6.8: 기하학 경계 vs 스트로크 두께가 반영된 시각적 경계 분리)
 		static bool GetWorldBounds(Node& node, Rect2& out);
+		static bool GetVisualWorldBounds(Node& node, Rect2& out);
 		bool GetSelectionBounds(Rect2& out) const;
 
 	// 정렬 / 분배 (선택 기준)
@@ -1265,6 +1326,8 @@ public:
 	CanvasOriginMode originMode = CanvasOriginMode::TopLeft;
 
 	NodeId IssueId() { return ++m_nextId; }
+	NodeId PeekMaxId() const { return m_nextId; }
+	void   AdvanceMaxId(NodeId minMax) { if (minMax > m_nextId) m_nextId = minMax; }
 		void   AssignIds(Node& node);   // id==0 인 노드(하위 포함)에 ID 발급
 	// 파일/스냅샷 복원용: 노드 ID 를 지정하고 발급 카운터가 그 값보다 커지도록 보장 (이후 새 ID 와 충돌 방지)
 	void   RestoreNodeId(Node& node, NodeId id);
@@ -1362,6 +1425,11 @@ public:
         for (int i = 0; i < 9; ++i) outHandles[i] = handles[i].ToD2D();
     }
 #endif
+
+    // 5. 단일 도형 가장자리 핸들(2=T, 6=B: 수평 전단 / 4=R, 8=L: 수직 전단) 기준 전단(Skew/Shear) 변형 (Step 6.14)
+    static std::optional<Matrix2D> SkewByEdgeHandle(int handleIdx, Vec2 startWorld, Vec2 curWorld,
+                                                    const Rect2& initialLocalBounds,
+                                                    const Matrix2D& initialXf);
 };
 
 #ifndef GE_NO_D2D
@@ -1373,6 +1441,9 @@ public:
 
 	// PathNode 로부터 D2D PathGeometry 생성 (로컬 좌표계)
 	static ComPtr<ID2D1PathGeometry> BuildGeometry(const PathNode& node, ID2D1Factory* factory);
+
+	// Step 6.6: 프로세스 공용 지오메트리 캐시 조회 (NodeId + Version + Factory 일치 시 재사용)
+	static ComPtr<ID2D1PathGeometry> GetCachedGeometry(const PathNode& node, ID2D1Factory* factory);
 
 	// PathNode 로부터 월드 변환이 적용된 ID2D1Geometry 생성 (ID2D1TransformedGeometry)
 	static ComPtr<ID2D1Geometry> BuildWorldGeometry(const PathNode& node, ID2D1Factory* factory);
@@ -1470,7 +1541,7 @@ private:
 	// 기본값(Butt/Miter/실선)이면 nullptr, 아니면 캐시된 스트로크 스타일
 	ID2D1StrokeStyle* GetStrokeStyle(const Stroke& stroke);
 	// 그라디언트 채우기 브러시 (노드 버전이 같으면 캐시 재사용). 만들 수 없으면 nullptr
-	ID2D1Brush* GetGradientBrush(PathNode& node, const Rect2& bounds);
+	ID2D1Brush* GetGradientBrush(const Node& node, const Rect2& bounds);
 
 	ID2D1RenderTarget*             m_rt      = nullptr;   // 비소유
 	ID2D1Factory*                  m_factory = nullptr;   // 비소유
@@ -1485,44 +1556,6 @@ private:
 	std::unordered_map<NodeId, GeoCache> m_geoCache;
 };
 
-// ============================================================================
-// 4. HitTester
-// ============================================================================
-
-class HitTester {
-public:
-	// 최상단 -> 최하단 역순으로 순회, 숨김/잠금 레이어 제외
-	static HitResult HitTest(Document& doc, Vec2 screenPt, float tolPx,
-							 const Viewport& view, D2DRenderer& renderer);
-
-								 // 히트된 노드가 속한 '레이어 바로 아래' 최상위 노드 (그룹 단위 선택용)
-								 static Node* FindSelectable(Node* hit);
-};
 #endif
-
-// ============================================================================
-// 5. Command (Undo / Redo)
-// ============================================================================
-class ICommand {
-public:
-	virtual ~ICommand() = default;
-	virtual void Execute(Document& doc) = 0;
-	virtual void Undo(Document& doc) = 0;
-	virtual const wchar_t* GetName() const { return L"Command"; }
-};
-
-class CommandStack {
-public:
-	void Execute(std::unique_ptr<ICommand> cmd, Document& doc);
-	bool CanUndo() const { return !m_undo.empty(); }
-	bool CanRedo() const { return !m_redo.empty(); }
-	void Undo(Document& doc);
-	void Redo(Document& doc);
-	void Clear();
-
-private:
-	std::vector<std::unique_ptr<ICommand>> m_undo;
-	std::vector<std::unique_ptr<ICommand>> m_redo;
-};
 
 } // namespace ge

@@ -11,6 +11,7 @@
 #endif
 
 #include "M2DrawDoc.h"
+#include "GroupTransform.h"
 #include "M2DrawView.h"
 #include "MainFrm.h"
 #include "ITool.h"
@@ -43,6 +44,8 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_UNGROUP, &CM2DrawDoc::OnUpdateObjectUngroup)
 	ON_COMMAND(ID_OBJECT_WRAP_FRAME, &CM2DrawDoc::OnObjectWrapFrame)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_WRAP_FRAME, &CM2DrawDoc::OnUpdateObjectWrapFrame)
+	ON_COMMAND_RANGE(ID_OBJECT_FLIP_H, ID_OBJECT_ROT_CCW, &CM2DrawDoc::OnObjectTransform)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_OBJECT_FLIP_H, ID_OBJECT_ROT_CCW, &CM2DrawDoc::OnUpdateObjectTransform)
 	ON_COMMAND_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnObjectArrange)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnUpdateObjectArrange)
 	ON_COMMAND_RANGE(ID_BOOLEAN_UNION, ID_BOOLEAN_TRIM, &CM2DrawDoc::OnBooleanOperation)
@@ -103,7 +106,6 @@ BOOL CM2DrawDoc::OnNewDocument()
 
 	m_currentPath.reset();
 	m_doc = ge::Document();
-	m_currentPathNode.reset();
 	m_undoMgr.Reset(m_doc);
 	ResetToolInteraction();
 	SetModifiedFlag(FALSE);
@@ -180,7 +182,6 @@ BOOL CM2DrawDoc::OnOpenDocument(LPCTSTR lpszPathName)
 	}
 
 	m_currentPath.reset();
-	m_currentPathNode.reset();
 	m_doc = std::move(loaded);
 	ResetToolInteraction();
 
@@ -636,6 +637,67 @@ bool CM2DrawDoc::WrapSelectedInFrame()
 
 void CM2DrawDoc::OnObjectWrapFrame()               { WrapSelectedInFrame(); }
 void CM2DrawDoc::OnUpdateObjectWrapFrame(CCmdUI* pCmdUI) { pCmdUI->Enable(m_doc.CanWrapInFrame()); }
+
+// ---------------------------------------------------------------------------
+// 변형: 반전 / 90도 회전 / 방향키 이동 (Step 6.11.3)
+// ---------------------------------------------------------------------------
+static std::vector<ge::Node*> TransformableSelection(const ge::Document& d)
+{
+	std::vector<ge::Node*> out;
+	const auto& sel = d.GetSelection();
+	for (ge::Node* n : sel) {
+		if (!n || n->IsEffectivelyLocked()) continue;
+		bool ancestorSelected = false;
+		for (ge::GroupNode* p = n->GetParent(); p; p = p->GetParent())
+			if (std::find(sel.begin(), sel.end(), static_cast<ge::Node*>(p)) != sel.end()) { ancestorSelected = true; break; }
+		if (!ancestorSelected) out.push_back(n);
+	}
+	return out;
+}
+
+static bool ApplyWorldToSelection(const std::vector<ge::Node*>& nodes, const ge::Matrix2D& T)
+{
+	if (nodes.empty()) return false;
+	std::vector<ge::Matrix2D> init;
+	for (ge::Node* n : nodes) init.push_back(n->GetTransform());
+	ge::ApplyWorldTransform(nodes, init, T);
+	return true;
+}
+
+bool CM2DrawDoc::ApplySelectionTransform(int op)
+{
+	const auto nodes = TransformableSelection(m_doc);
+	ge::Rect2 u;
+	if (nodes.empty() || !ge::UnionWorldBounds(nodes, u)) return false;
+	const ge::Vec2 c{ (u.left + u.right) * 0.5f, (u.top + u.bottom) * 0.5f };
+	ge::Matrix2D T;
+	switch (op) {
+	case 0: T = ge::MakeWorldScale(-1.0f, 1.0f, c); break;
+	case 1: T = ge::MakeWorldScale(1.0f, -1.0f, c); break;
+	case 2: T = ge::MakeWorldRotation(90.0f, c); break;
+	case 3: T = ge::MakeWorldRotation(-90.0f, c); break;
+	default: return false;
+	}
+	return ApplyWorldToSelection(nodes, T);
+}
+
+bool CM2DrawDoc::NudgeSelection(float dx, float dy)
+{
+	return ApplyWorldToSelection(TransformableSelection(m_doc), ge::Matrix2D::Translation(dx, dy));
+}
+
+void CM2DrawDoc::OnObjectTransform(UINT nID)
+{
+	const int op = static_cast<int>(nID - ID_OBJECT_FLIP_H);
+	if (!ApplySelectionTransform(op)) return;
+	static const wchar_t* kLabels[] = { L"좌우 반전", L"상하 반전", L"시계 방향 90도 회전", L"반시계 방향 90도 회전" };
+	SetModifiedFlag(TRUE);
+	CommitUndoPoint(kLabels[(std::max)(0, (std::min)(3, op))]);
+	UpdateAllViews(nullptr);
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+}
+
+void CM2DrawDoc::OnUpdateObjectTransform(CCmdUI* pCmdUI) { pCmdUI->Enable(HasSelectedObjects()); }
 
 // ---------------------------------------------------------------------------
 // 순서(Z-order) 변경

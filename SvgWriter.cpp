@@ -90,15 +90,18 @@ bool IsIdentity(const Matrix2D& m) {
 // ShapeKind 열거형 -> 문자열 변환
 std::string ShapeKindToString(ShapeKind k) {
 	switch (k) {
-	case ShapeKind::Rect:     return "rect";
-	case ShapeKind::Triangle: return "triangle";
-	case ShapeKind::Ellipse:  return "ellipse";
-	case ShapeKind::Polygon:  return "polygon";
-	case ShapeKind::Star:     return "star";
-	case ShapeKind::Gear:     return "gear";
-	case ShapeKind::Spiral:   return "spiral";
-	case ShapeKind::Heart:    return "heart";
-	default:                  return "";
+	case ShapeKind::Rect:       return "rect";
+	case ShapeKind::Triangle:   return "triangle";
+	case ShapeKind::Ellipse:    return "ellipse";
+	case ShapeKind::Polygon:    return "polygon";
+	case ShapeKind::Star:       return "star";
+	case ShapeKind::Gear:       return "gear";
+	case ShapeKind::Spiral:     return "spiral";
+	case ShapeKind::Heart:      return "heart";
+	case ShapeKind::Arc:        return "arc";
+	case ShapeKind::BlockArrow: return "arrow";
+	case ShapeKind::Callout:    return "callout";
+	default:                    return "";
 	}
 }
 
@@ -209,11 +212,12 @@ std::string BuildCssStyle(const Node& n) {
 	return css.empty() ? std::string() : " style=\"" + css + "\"";
 }
 
-// 그라디언트 정의 id: 도형마다 자기 정의를 가짐 (동일 그라디언트 통합은 Step 2.8.2)
-std::string GradientId(const PathNode& p) { return "grad_" + std::to_string(p.GetId()); }
+// 그라디언트 정의 id: 도형/프레임마다 자기 정의를 가짐 (동일 그라디언트 통합은 Step 2.8.2)
+std::string GradientId(const Node& p) { return "grad_" + std::to_string(p.GetId()); }
 
-// 이 도형이 <defs> 의 그라디언트를 참조해야 하는지 (렌더링 가능한 그라디언트 채우기)
-bool UsesGradientDef(const PathNode& p) {
+// 이 노드(PathNode 또는 FrameNode)가 <defs> 의 그라디언트를 참조해야 하는지 (렌더링 가능한 그라디언트 채우기)
+bool UsesGradientDef(const Node& p) {
+	if (p.Kind() != NodeKind::Path && dynamic_cast<const FrameNode*>(&p) == nullptr) return false;
 	return p.GetStyle().fill.type == PaintType::Gradient && p.GetStyle().fill.gradient.IsRenderable();
 }
 
@@ -227,21 +231,19 @@ void SvgWriter::AppendIndent() {
 	}
 }
 
-// 렌더링 가능한 그라디언트 채우기를 가진 모든 도형의 <linearGradient>/<radialGradient> 정의를 <defs> 로 출력.
-// 좌표는 objectBoundingBox(도형 박스 기준 비율, SVG 기본 gradientUnits)
-std::string SvgWriter::GradientIdFor(const PathNode& p) const {
+// 렌더링 가능한 그라디언트 채우기를 가진 모든 도형/프레임의 <linearGradient>/<radialGradient> 정의를 <defs> 로 출력.
+// 좌표는 objectBoundingBox(도형/프레임 박스 기준 비율, SVG 기본 gradientUnits)
+std::string SvgWriter::GradientIdFor(const Node& p) const {
 	auto it = m_gradIds.find(&p);
 	return it != m_gradIds.end() ? it->second : GradientId(p);
 }
 
 void SvgWriter::WriteGradientDefs(Document& doc) {
 	m_gradIds.clear();
-	std::vector<const PathNode*> users;
+	std::vector<const Node*> users;
 	std::function<void(const Node&)> collect = [&](const Node& n) {
-		if (n.Kind() == NodeKind::Path) {
-			const PathNode& p = static_cast<const PathNode&>(n);
-			if (UsesGradientDef(p)) users.push_back(&p);
-		} else if (n.Kind() == NodeKind::Group || n.Kind() == NodeKind::Layer) {
+		if (UsesGradientDef(n)) users.push_back(&n);
+		if (n.Kind() == NodeKind::Group || n.Kind() == NodeKind::Layer) {
 			for (const auto& c : static_cast<const GroupNode&>(n).GetChildren())
 				if (c) collect(*c);
 		}
@@ -250,7 +252,7 @@ void SvgWriter::WriteGradientDefs(Document& doc) {
 	if (users.empty()) return;
 
 	std::unordered_map<std::string, std::string> byContent;   // 그라디언트 내용 -> id (중복 제거)
-	for (const PathNode* p : users) {
+	for (const Node* p : users) {
 		Gradient g = p->GetStyle().fill.gradient;
 		g.NormalizeStops();   // SVG 는 stop offset 이 오름차순이어야 함 (편집 중 모델은 정렬되지 않았을 수 있음)
 
@@ -359,21 +361,15 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 	}
 
 	// defs 블록 출력: 그라디언트 정의 및 클리핑 마스크 정의
-	std::vector<const PathNode*> gradUsers;
+	std::vector<const Node*> gradUsers;
 	std::vector<const GroupNode*> maskGroups;
 	std::function<void(const Node&)> collect = [&](const Node& n) {
-		if (n.Kind() == NodeKind::Path) {
-			const PathNode& p = static_cast<const PathNode&>(n);
-			if (UsesGradientDef(p)) gradUsers.push_back(&p);
-		} else {
-			// GroupNode 또는 LayerNode (LayerNode는 GroupNode를 상속)
-			const auto* g = dynamic_cast<const GroupNode*>(&n);
-			if (g) {
-				if (g->IsClippingMask() && g->GetMaskNode() != nullptr) {
-					maskGroups.push_back(g);
-				}
-				for (const auto& c : g->GetChildren()) if (c) collect(*c);
+		if (UsesGradientDef(n)) gradUsers.push_back(&n);
+		if (const auto* g = dynamic_cast<const GroupNode*>(&n)) {
+			if (g->IsClippingMask() && g->GetMaskNode() != nullptr) {
+				maskGroups.push_back(g);
 			}
+			for (const auto& c : g->GetChildren()) if (c) collect(*c);
 		}
 	};
 	for (const auto& layer : doc.GetLayers()) if (layer) collect(*layer);
@@ -494,6 +490,7 @@ void SvgWriter::Visit(GroupNode& node) {
 		if (Meta()) {
 			m_output += " m2:frame=\"true\" m2:w=\"" + FormatFloat(frame->GetWidth()) + "\" m2:h=\"" + FormatFloat(frame->GetHeight()) +
 				"\" m2:clip=\"" + std::string(frame->IsClip() ? "true" : "false") + "\" m2:radius=\"" + FormatFloat(frame->GetCornerRadius()) + "\"";
+				if (ge::IsButtonComponent(frame)) m_output += " m2:component=\"button\"";   // 이름과 무관한 컴포넌트 정체성
 				if (frame->IsUiComponent())
 					m_output += " m2:ui=\"" + frame->GetUiKind() + "\" m2:uiProps=\"" + ge::UiComp::EncodeProps(frame->GetUiProps()) + "\"";
 				if (!frame->GetCornerRadii().IsUniform()) {
@@ -588,12 +585,23 @@ void SvgWriter::Visit(GroupNode& node) {
 			m_output += "<clipPath id=\"frame_clip_" + std::to_string(node.GetId()) + "\">" + shapeOpen("") + " /></clipPath>\n";
 		}
 		const Style& fs = frame->GetStyle();
-		const bool hasFill = fs.fill.type == PaintType::Solid && fs.fill.color.a > 0.0f;
+		const bool hasSolidFill = fs.fill.type == PaintType::Solid && fs.fill.color.a > 0.0f;
+		const bool hasGradFill = fs.fill.type == PaintType::Gradient;
+		const bool hasFill = hasSolidFill || hasGradFill;
 		const bool hasStroke = fs.stroke.width > 0.0f && fs.stroke.color.a > 0.0f && frame->GetBorderSides() != 0;
 		if (hasFill || hasStroke || Meta()) {
 			AppendIndent();
 			m_output += shapeOpen(Meta() ? " m2:frameBg=\"true\"" : "");
-			m_output += hasFill ? " fill=\"" + ColorToHex(fs.fill.color) + "\"" + (fs.fill.color.a < 0.999f ? " fill-opacity=\"" + FormatFloat(fs.fill.color.a) + "\"" : std::string()) : std::string(" fill=\"none\"");
+			if (UsesGradientDef(*frame)) {
+				m_output += " fill=\"url(#" + GradientIdFor(*frame) + ")\"";
+			} else if (hasGradFill) {
+				const Color fc = fs.fill.gradient.FallbackColor();
+				m_output += " fill=\"" + ColorToHex(fc) + "\"" + (fc.a < 0.999f ? " fill-opacity=\"" + FormatFloat(fc.a) + "\"" : std::string());
+			} else if (hasSolidFill) {
+				m_output += " fill=\"" + ColorToHex(fs.fill.color) + "\"" + (fs.fill.color.a < 0.999f ? " fill-opacity=\"" + FormatFloat(fs.fill.color.a) + "\"" : std::string());
+			} else {
+				m_output += " fill=\"none\"";
+			}
 			if (hasStroke && !partial) m_output += " stroke=\"" + ColorToHex(fs.stroke.color) + "\" stroke-width=\"" + FormatFloat(fs.stroke.width) + "\"";
 			else m_output += " stroke=\"none\"";
 			if (Meta() && partial && fs.stroke.width > 0.0f) m_output += " m2:bstroke=\"" + ColorToHex(fs.stroke.color) + "\" m2:bwidth=\"" + FormatFloat(fs.stroke.width) + "\"";
@@ -930,6 +938,23 @@ void SvgWriter::Visit(PathNode& node) {
 				m_output += " m2:radius=\"" + FormatFloat(p.radius) + "\"";
 				m_output += " m2:cx=\"" + FormatFloat(p.cx) + "\"";
 				m_output += " m2:cy=\"" + FormatFloat(p.cy) + "\"";
+			} else if constexpr (std::is_same_v<T, ArcParams>) {
+				m_output += " m2:startAngle=\"" + FormatFloat(p.startAngle) + "\"";
+				m_output += " m2:sweepAngle=\"" + FormatFloat(p.sweepAngle) + "\"";
+				m_output += " m2:innerRatio=\"" + FormatFloat(p.innerRatio) + "\"";
+				m_output += " m2:arcMode=\"" + std::to_string(static_cast<int>(p.mode)) + "\"";
+				m_output += " m2:cx=\"" + FormatFloat(p.cx) + "\"";
+				m_output += " m2:cy=\"" + FormatFloat(p.cy) + "\"";
+				m_output += " m2:rx=\"" + FormatFloat(p.rx) + "\"";
+				m_output += " m2:ry=\"" + FormatFloat(p.ry) + "\"";
+			} else if constexpr (std::is_same_v<T, BlockArrowParams>) {
+				m_output += " m2:headLengthRatio=\"" + FormatFloat(p.headLengthRatio) + "\"";
+				m_output += " m2:shaftWidthRatio=\"" + FormatFloat(p.shaftWidthRatio) + "\"";
+			} else if constexpr (std::is_same_v<T, CalloutParams>) {
+				m_output += " m2:tailPosRatio=\"" + FormatFloat(p.tailPosRatio) + "\"";
+				m_output += " m2:tailWidthRatio=\"" + FormatFloat(p.tailWidthRatio) + "\"";
+				m_output += " m2:tailHeightRatio=\"" + FormatFloat(p.tailHeightRatio) + "\"";
+				m_output += " m2:cornerRadius=\"" + FormatFloat(p.cornerRadius) + "\"";
 			}
 		}, node.GetParams());
 	}
