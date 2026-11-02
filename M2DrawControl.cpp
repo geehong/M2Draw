@@ -1693,7 +1693,8 @@ M2DrawColorPalette::M2DrawColorPalette()
 
 D2D1_RECT_F M2DrawColorPalette::GetBoxRect(int index) const
 {
-	if (index < 0 || index >= 16) return D2D1::RectF(0, 0, 0, 0);
+	int count = static_cast<int>(m_colors.size());
+	if (index < 0 || index >= count) return D2D1::RectF(0, 0, 0, 0);
 
 	int row = index / 8; // 0 또는 1
 	int col = index % 8; // 0 ~ 7
@@ -1716,7 +1717,8 @@ void M2DrawColorPalette::Draw(
 {
 	if (!m_bVisible || !pRT || !pBrush) return;
 
-	for (int i = 0; i < 16; ++i)
+	int count = static_cast<int>(m_colors.size());
+	for (int i = 0; i < count; ++i)
 	{
 		D2D1_RECT_F rBox = GetBoxRect(i);
 		D2D1_COLOR_F clr = m_colors[i];
@@ -1757,7 +1759,8 @@ bool M2DrawColorPalette::OnLButtonDown(D2D1_POINT_2F pt)
 {
 	if (!m_bVisible || !m_bEnabled) return false;
 
-	for (int i = 0; i < 16; ++i)
+	int count = static_cast<int>(m_colors.size());
+	for (int i = 0; i < count; ++i)
 	{
 		D2D1_RECT_F rBox = GetBoxRect(i);
 		if (pt.x >= rBox.left && pt.x <= rBox.right && pt.y >= rBox.top && pt.y <= rBox.bottom)
@@ -1779,7 +1782,8 @@ bool M2DrawColorPalette::OnMouseMove(D2D1_POINT_2F pt)
 	int oldHover = m_hoverIndex;
 	m_hoverIndex = -1;
 
-	for (int i = 0; i < 16; ++i)
+	int count = static_cast<int>(m_colors.size());
+	for (int i = 0; i < count; ++i)
 	{
 		D2D1_RECT_F rBox = GetBoxRect(i);
 		if (pt.x >= rBox.left && pt.x <= rBox.right && pt.y >= rBox.top && pt.y <= rBox.bottom)

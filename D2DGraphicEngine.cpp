@@ -1335,8 +1335,33 @@ void Document::Clear(bool addDefaultLayer)
 	m_layers.clear();
 	m_activeLayer = 0;
 	m_nextId = 0;
+	m_guides.clear();
 	if (addDefaultLayer) {
 		AddLayer(L"Layer 1");
+	}
+}
+
+void Document::AddGuide(bool isHorizontal, float worldPos, bool locked)
+{
+	ChangeTracker::Bump();
+	m_guides.push_back(RulerGuide{ isHorizontal, worldPos, locked });
+}
+
+bool Document::RemoveGuide(size_t index)
+{
+	if (index < m_guides.size()) {
+		ChangeTracker::Bump();
+		m_guides.erase(m_guides.begin() + index);
+		return true;
+	}
+	return false;
+}
+
+void Document::ClearGuides()
+{
+	if (!m_guides.empty()) {
+		ChangeTracker::Bump();
+		m_guides.clear();
 	}
 }
 

@@ -449,6 +449,8 @@ public:
 	M2DrawColorPalette();
 
 	void SetSelectedColor(D2D1_COLOR_F clr) { m_selectedColor = clr; }
+	void SetColors(const std::vector<D2D1_COLOR_F>& clrs) { m_colors = clrs; }
+	const std::vector<D2D1_COLOR_F>& GetColors() const { return m_colors; }
 	D2D1_COLOR_F GetSelectedColor() const { return m_selectedColor; }
 
 	void SetOnColorSelected(ColorSelectCallback cb) { m_onColorSelected = cb; }

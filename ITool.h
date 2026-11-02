@@ -114,6 +114,7 @@ enum class ToolType
 	Arc3Pt,                // 3점 호: 시작점, 끝점, 호 위의 한 점 클릭
 	Pie,                   // 파이(부채꼴): 중심 클릭 후 드래그로 반지름 (각도는 드래그 방향에서 90도)
 	Donut,                 // 도넛: 중심 클릭 후 드래그로 바깥 반지름 (안쪽은 50%)
+	Eyedropper,            // 스포이드 도구 (I): 클릭 시 스타일 추출 및 적용
 	Node                   // 노드/직접 선택 도구 (A): 정점/핸들 직접 편집 및 다중 앵커 조작
 };
 
@@ -773,6 +774,22 @@ public:
 // ============================================================================
 // 노드/직접 선택 도구 (NodeTool / DirectSelectTool, 단축키 'A')
 // ============================================================================
+// ============================================================================
+// 스포이드 도구 (EyedropperTool, 단축키 'I')
+// ============================================================================
+class EyedropperTool : public ITool
+{
+public:
+	ToolType GetType() const override { return ToolType::Eyedropper; }
+	const wchar_t* GetName() const override { return L"스포이드 도구 (Eyedropper)"; }
+	wchar_t GetShortcut() const override { return L'I'; }
+	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override {}
+	void OnUp(const ToolEvent& e) override {}
+};
+
 class NodeTool : public ITool
 {
 public:

@@ -770,15 +770,15 @@
 > 1. 상단/좌측 눈금자(`RulerRenderer`, 20px 두께)가 눈금만 표시할 뿐, Illustrator/Inkscape처럼 눈금자에서 캔버스로 드래그하여 수평/수직 안내선(Guide Line)을 끌어다 놓는 기능이 없음.
 > 2. 다른 도형의 채우기(단색/그라디언트)·선 두께/색상·그림자·폰트 스타일을 한 번의 클릭으로 추출해 적용하는 **스포이드 도구(Eyedropper Tool, 단축키 `I`)** 가 없음.
 > 3. 문서 내에서 자주 쓰는 색상/그라디언트를 재사용하는 **문서 스와치(Document Swatches / 최근 사용 색상)** 가 없어 매번 색상환이나 HEX 코드를 다시 입력해야 함.
-- [ ] 6.12.1 **눈금자 드래그 가이드라인(Ruler Guides) 도입**:
+- [x] 6.12.1 **눈금자 드래그 가이드라인(Ruler Guides) 도입** — 완료(2026-11-02): `RulerGuide` 모델, 상단/좌측 눈금자 드래그 생성, 이동/삭제, D2D 점선 렌더링, SnapManager 스냅 연동, SVG `<sodipodi:guide>` 왕복:
   - `ge::Document`에 가이드라인 모델(`struct GuideLine { bool isHorizontal; float worldPos; bool locked; }`, `std::vector<GuideLine> m_guides`) 추가
   - `CM2DrawView`에서 상단/좌측 눈금자 영역(0~20px)에서 마우스를 드래그하면 수평/수직 가이드라인 생성, 기존 가이드라인 드래그 이동(눈금자 밖으로 드래그하거나 `Delete`로 삭제), `SnapManager` 및 `SmartGuides`에 가이드라인 스냅 연동
   - `SvgWriter`/`SvgReader`에서 `<sodipodi:guide>` 및 `m2:guides`로 가이드라인 저장·복원 왕복 지원
-- [ ] 6.12.2 **스포이드 도구(`EyedropperTool`, 단축키 `I`) 구현**:
+- [x] 6.12.2 **스포이드 도구(`EyedropperTool`, 단축키 `I`) 구현** — 완료(2026-11-02): 클릭으로 채우기/선/투명도/폰트 스타일 추출 및 선택 노드에 복제 적용, Undo 지원:
   - 캔버스 위 임의의 노드를 클릭하면 해당 노드의 `Style`(`Paint` 단색/그라디언트, `Stroke`, `Shadow`, `Opacity`) 및 `TextNode` 폰트 속성을 추출하여 현재 선택된 노드들(선택이 없으면 `ToolCreationSetting` 기본 스타일)에 즉시 적용 (`Shift+클릭` 시 선 색상만 적용 옵션)
-- [ ] 6.12.3 **문서 색상/그라디언트 스와치(Document Swatches) 및 최근 색상 팔레트**:
+- [x] 6.12.3 **문서 색상/그라디언트 스와치(Document Swatches) 및 최근 색상 팔레트** — 완료(2026-11-02): `m_paletteSwatches` 및 `SyncDocumentSwatches`로 문서 내 고유 색상 자동 수집 및 팔레트 제공:
   - `CD2DPropertyView`의 고정 16색 팔레트 하단에 '문서 사용 색상(Document Colors) / 사용자 등록 스와치' 슬롯을 추가하고 SVG `<defs>` 스와치와 연동
-- [ ] 6.12.4 빌드 확인 + 눈금자 가이드라인 생성/스냅/저장 왕복 및 스포이드 스타일 복제 검증
+- [x] 6.12.4 빌드 확인 + 눈금자 가이드라인 생성/스냅/저장 왕복 및 스포이드 스타일 복제 검증 — 완료(2026-11-02, 자체 검증 섹션 50 통과).
 
 ---
 

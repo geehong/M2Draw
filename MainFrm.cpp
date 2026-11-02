@@ -30,8 +30,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_COMMAND(ID_WINDOW_MANAGER, &CMainFrame::OnWindowManager)
 	ON_COMMAND(ID_VIEW_CUSTOMIZE, &CMainFrame::OnViewCustomize)
 	ON_COMMAND(ID_FILE_PREVIEW_HTML, &CMainFrame::OnFilePreviewHtml)
-	ON_COMMAND_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_DONUT, &CMainFrame::OnToolMenuCommand)
-	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_DONUT, &CMainFrame::OnUpdateToolMenuCommand)
+	ON_COMMAND_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_DIRECTSELECT, &CMainFrame::OnToolMenuCommand)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_DIRECTSELECT, &CMainFrame::OnUpdateToolMenuCommand)
 	ON_COMMAND(ID_HELP_SHORTCUTS, &CMainFrame::OnHelpShortcuts)
 	ON_REGISTERED_MESSAGE(AFX_WM_CREATETOOLBAR, &CMainFrame::OnToolbarCreateNew)
 	ON_WM_SETTINGCHANGE()
@@ -498,6 +498,7 @@ static UINT ToolMenuIdOf(ToolType t)
 	case ToolType::ZoomIn: return ID_TOOLMENU_ZOOMIN;
 	case ToolType::ZoomOut: return ID_TOOLMENU_ZOOMOUT;
 	case ToolType::Trim: return ID_TOOLMENU_TRIM;
+	case ToolType::Eyedropper: return ID_TOOLMENU_EYEDROPPER;
 	default: return 0;
 	}
 }
@@ -695,6 +696,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_TOOLMENU_PAINTBUCKET: imgIdx = 60; break;
 		case ID_TOOLMENU_GRADIENT: imgIdx = 61; break;
 		case ID_TOOLMENU_TRIM: imgIdx = 62; break;
+		case ID_TOOLMENU_EYEDROPPER: imgIdx = 60; break;
 		case ID_TOOL_RECT:          imgIdx = 0; break;
 		case ID_TOOL_TRIANGLE:      imgIdx = 1; break;
 		case ID_TOOL_POLYGON:       imgIdx = 2; break;
@@ -785,6 +787,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_TOOLMENU_PAINTBUCKET: tip = L"페인트 통"; break;
 		case ID_TOOLMENU_GRADIENT: tip = L"그라디언트"; break;
 		case ID_TOOLMENU_TRIM: tip = L"트림"; break;
+		case ID_TOOLMENU_EYEDROPPER: tip = L"스포이드 (I)"; break;
 		case ID_TOOL_RECT: tip = L"사각형"; break;
 		case ID_TOOL_TRIANGLE: tip = L"삼각형"; break;
 		case ID_TOOL_POLYGON: tip = L"정다각형"; break;
@@ -999,6 +1002,7 @@ static const ToolMenuEntry kToolMenu[] = {
 	{ ID_TOOLMENU_ARC3PT, ToolType::Arc3Pt, -1 },
 	{ ID_TOOLMENU_PIE, ToolType::Pie, -1 },
 	{ ID_TOOLMENU_DONUT, ToolType::Donut, -1 },
+	{ ID_TOOLMENU_EYEDROPPER, ToolType::Eyedropper, -1 },
 };
 
 static const ToolMenuEntry* FindToolMenu(UINT nID)

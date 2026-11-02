@@ -22,7 +22,8 @@ enum class SnapTargets : uint32_t
 	Midpoint   = 1 << 3, // 선분/에지의 중간점 스냅
 	Center     = 1 << 4, // 도형 바운딩 중심점 스냅
 	Edge       = 1 << 5, // 선(선분/곡선) 위의 가장 가까운 점 스냅 (5.1.0)
-	Intersection = 1 << 6, // 두 선이 만나는 교차점 스냅 (5.1.0)
+	Intersection = 1 << 6, // 교차점 스냅
+	GuideLine    = 1 << 7, // 가이드라인(Ruler Guides) 스냅
 	All        = 0xFFFFFFFF
 };
 
@@ -58,7 +59,7 @@ class SnapManager
 public:
 	SnapManager()
 		: m_enabled(true)
-		, m_targets(SnapTargets::Grid | SnapTargets::OriginAxis | SnapTargets::Anchor)
+		, m_targets(SnapTargets::Grid | SnapTargets::OriginAxis | SnapTargets::Anchor | SnapTargets::GuideLine)
 		, m_tolerancePx(8.0f) // 마우스 기준 8px 이내 근접 시 자석 스냅
 	{
 	}

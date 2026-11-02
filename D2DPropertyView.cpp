@@ -405,6 +405,48 @@ void CD2DPropertyView::ApplyLineProps(const std::function<void(ge::Node&)>& fn)
 	SafeInvalidate(FALSE);
 }
 
+void CD2DPropertyView::SyncDocumentSwatches()
+{
+	if (!m_paletteSwatches || !m_pActiveDoc) return;
+
+	std::vector<D2D1_COLOR_F> swatches;
+	auto addColor = [&](D2D1_COLOR_F c) {
+		if (c.a <= 0.001f) return;
+		for (const auto& exist : swatches) {
+			if (std::abs(exist.r - c.r) < 0.02f &&
+			    std::abs(exist.g - c.g) < 0.02f &&
+			    std::abs(exist.b - c.b) < 0.02f)
+				return;
+		}
+		if (swatches.size() < 16) {
+			swatches.push_back(D2D1::ColorF(c.r, c.g, c.b, 1.0f));
+		}
+	};
+
+	std::function<void(const ge::Node&)> collectColors = [&](const ge::Node& node) {
+		const auto& st = node.GetStyle();
+		if (st.fill.type == ge::PaintType::Solid) {
+			addColor(D2D1::ColorF(st.fill.color.r, st.fill.color.g, st.fill.color.b, 1.0f));
+		}
+		if (st.stroke.width > 0.0f) {
+			addColor(D2D1::ColorF(st.stroke.color.r, st.stroke.color.g, st.stroke.color.b, 1.0f));
+		}
+		if (const auto* grp = dynamic_cast<const ge::GroupNode*>(&node)) {
+			for (const auto& child : grp->GetChildren()) {
+				if (child) collectColors(*child);
+			}
+		}
+	};
+
+	for (const auto& layer : m_pActiveDoc->GetDoc().GetLayers()) {
+		if (layer) collectColors(*layer);
+	}
+
+	if (!swatches.empty()) {
+		m_paletteSwatches->SetColors(swatches);
+	}
+}
+
 void CD2DPropertyView::SyncAppearanceControls()
 {
 	ge::Node* n = GetSelectedShape();
@@ -1268,6 +1310,26 @@ void CD2DPropertyView::InitControls()
 			SafeInvalidate(FALSE);
 		});
 		m_pCurrentPanel->AddChild(m_palette16);
+		// 4.5. Document Swatches Palette (최근/문서 사용 색상)
+		m_paletteSwatches = std::make_shared<M2DrawColorPalette>();
+		m_paletteSwatches->SetOnColorSelected([this](M2DrawColorPalette* /*pPal*/, D2D1_COLOR_F clr) {
+			if (m_colorTarget == 0) // Fill
+			{
+				m_fillColor = D2D1::ColorF(clr.r, clr.g, clr.b, m_fOpacity / 100.0f);
+				RGBtoHSL(m_fillColor, m_fFillHue, m_fFillSat, m_fFillLight);
+				if (m_shapeWheel) m_shapeWheel->SetColorHSL(m_fFillHue, m_fFillSat, m_fFillLight);
+			}
+			else // Stroke
+			{
+				m_strokeColor = D2D1::ColorF(clr.r, clr.g, clr.b, m_fOpacity / 100.0f);
+				RGBtoHSL(m_strokeColor, m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
+				if (m_shapeWheel) m_shapeWheel->SetColorHSL(m_fStrokeHue, m_fStrokeSat, m_fStrokeLight);
+			}
+			ApplyToShape();
+			SafeInvalidate(FALSE);
+		});
+		m_pCurrentPanel->AddChild(m_paletteSwatches);
+
 
 		// 5. Color Wheel Expander
 		m_expShapeWheel = std::make_shared<M2DrawExpander>(L"Color Wheel", true);
@@ -2597,6 +2659,7 @@ void CD2DPropertyView::SyncControlsFromData()
 			}
 			m_chkCloseShape->SetChecked(isClosed);
 		}
+		SyncDocumentSwatches();
 	}
 	else if (m_paneMode == MODE_GRID)
 	{

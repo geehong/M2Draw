@@ -43,6 +43,14 @@ protected:
 	void DrawIsolationBar(float width, float top);
 	bool HandleIsolationBarClick(CPoint point);
 	void RefreshAfterIsolationChange();
+	// 눈금자 가이드라인(Ruler Guides) 드래그/조작 상태
+	enum class GuideDragMode { None, CreateH, CreateV, MoveGuide };
+	GuideDragMode m_guideDragMode = GuideDragMode::None;
+	int           m_dragGuideIndex = -1;
+	float         m_dragGuideWorldPos = 0.0f;
+	bool          m_hoverGuideIsH = false;
+	int           m_hoverGuideIndex = -1;
+
 	SnapResult    m_lastSnap;                      // 마우스 포인터의 최신 스냅 결과 (인디케이터 표시용)
 
 public:

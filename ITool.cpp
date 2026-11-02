@@ -4021,6 +4021,65 @@ void NodeTool::SelectAnchor(ge::PathNode* p, int sp, int ni, bool addToSelection
 	}
 }
 
+// ============================================================================
+// EyedropperTool 구현
+// ============================================================================
+void EyedropperTool::OnDown(const ToolEvent& e)
+{
+	if (!e.pDoc) return;
+
+	D2D1_POINT_2F sp = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+	ge::Node* targetNode = HitTestTopShape(e.pDoc, sp, e.view, e.pD2DFactory);
+	if (!targetNode) return;
+
+	ge::PathNode* srcPath = dynamic_cast<ge::PathNode*>(targetNode);
+	ge::TextNode* srcText = dynamic_cast<ge::TextNode*>(targetNode);
+	if (!srcPath && !srcText) return;
+
+	const ge::Style& srcStyle = targetNode->GetStyle();
+	const float srcOpacity = targetNode->GetOpacity();
+
+	auto& sel = e.pDoc->GetDoc().GetSelection();
+	if (!sel.empty())
+	{
+		bool applied = false;
+		for (ge::Node* selNode : sel)
+		{
+			if (selNode == targetNode) continue;
+			selNode->SetStyle(srcStyle);
+			selNode->SetOpacity(srcOpacity);
+
+			if (srcText && selNode->Kind() == ge::NodeKind::Text)
+			{
+				ge::TextNode* dstText = static_cast<ge::TextNode*>(selNode);
+				dstText->SetFontFamily(srcText->GetFontFamily());
+				dstText->SetFontSize(srcText->GetFontSize());
+				dstText->SetBold(srcText->IsBold());
+				dstText->SetItalic(srcText->IsItalic());
+				dstText->SetAlign(srcText->GetAlign());
+			}
+			applied = true;
+		}
+
+		if (applied)
+		{
+			e.pDoc->CommitUndoPoint(L"Apply Eyedropper Style");
+			LogAppEvent(L"[스포이드 도구] 선택된 도형에 스타일을 복제 적용했습니다.");
+		}
+	}
+	else
+	{
+		LogAppEvent(L"[스포이드 도구] 도형 스타일을 확인했습니다.");
+	}
+
+	CMainFrame* pMainFrame = dynamic_cast<CMainFrame*>(AfxGetMainWnd());
+	if (pMainFrame)
+	{
+		ge::Node* selNode = (!sel.empty()) ? sel.front() : nullptr;
+		pMainFrame->GetPropertiesWnd().SetSelectedShape(selNode, e.pDoc);
+	}
+}
+
 void NodeTool::OnDown(const ToolEvent& e)
 {
 	if (!e.pDoc) return;

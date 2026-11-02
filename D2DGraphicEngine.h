@@ -1196,10 +1196,24 @@ enum class CanvasOriginMode : uint8_t {
 };
 
 // ---- 문서 (Scene 루트) ------------------------------------------------------
+
+// 가이드라인 구조체 (수평/수직 눈금자 안내선)
+struct RulerGuide {
+	bool  isHorizontal = true;  // true: 수평선(worldPos = Y), false: 수직선(worldPos = X)
+	float worldPos = 0.0f;      // 월드 좌표계 상의 위치 (Y or X)
+	bool  locked = false;       // 이동/삭제 잠금 여부
+};
 class Document {
 public:
 	Document();
 	void Clear(bool addDefaultLayer = false);
+	// 눈금자 가이드라인 (Ruler Guides)
+	const std::vector<RulerGuide>& GetGuides() const { return m_guides; }
+	std::vector<RulerGuide>&       GetGuidesRef() { return m_guides; }
+	void                          AddGuide(bool isHorizontal, float worldPos, bool locked = false);
+	bool                          RemoveGuide(size_t index);
+	void                          ClearGuides();
+
 
 	// 레이어
 	const std::vector<std::unique_ptr<LayerNode>>& GetLayers() const { return m_layers; }
@@ -1355,6 +1369,8 @@ private:
 	std::vector<Node*>                       m_selection;
 	NodeId                                   m_isolationId = 0;
 	NodeId                                   m_nextId = 0;
+	std::vector<RulerGuide>                   m_guides;
+
 };
 
 // ============================================================================

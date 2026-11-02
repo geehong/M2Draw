@@ -228,6 +228,30 @@ SnapResult SnapManager::FindSnapPoint(
 		}
 	}
 
+		// 1.5 가이드라인(Ruler Guides) 스냅
+	if (pDoc && HasSnapTarget(m_targets, SnapTargets::GuideLine))
+	{
+		for (const auto& g : pDoc->GetGuides())
+		{
+			if (g.isHorizontal)
+			{
+				float dy = std::abs(mouseWorld.y - g.worldPos);
+				if (dy <= tolWorld)
+				{
+					tryCandidate(D2D1::Point2F(mouseWorld.x, g.worldPos), SnapTargets::GuideLine, L"Guide Line (H)");
+				}
+			}
+			else
+			{
+				float dx = std::abs(mouseWorld.x - g.worldPos);
+				if (dx <= tolWorld)
+				{
+					tryCandidate(D2D1::Point2F(g.worldPos, mouseWorld.y), SnapTargets::GuideLine, L"Guide Line (V)");
+				}
+			}
+		}
+	}
+
 	// 2. 기준 좌표축 (Origin Axis) 스냅
 	bool isBottomLeft = (pDoc && pDoc->originMode == ge::CanvasOriginMode::BottomLeft);
 	float originWorldY = (isBottomLeft && pDoc) ? pDoc->height : grid.originWorld.y;
@@ -251,7 +275,8 @@ SnapResult SnapManager::FindSnapPoint(
 	}
 
 	// 3. 월드 그리드 (Grid) 격자점 스냅 (그리드 표시 및 스냅 활성화 여부 동시 검사)
-	if (HasSnapTarget(m_targets, SnapTargets::Grid) && grid.enabled && grid.snapToGrid)
+	// 자(가이드라인)에 걸린 상태면 그리드는 무시: 가이드라인 스냅이 그리드보다 우선
+	if (HasSnapTarget(m_targets, SnapTargets::Grid) && grid.enabled && grid.snapToGrid && result.targetType != SnapTargets::GuideLine)
 	{
 		float step = grid.GetStepPx();
 		if (step > 0.001f)
@@ -327,6 +352,15 @@ void SnapManager::DrawSnapIndicator(
 			brush->SetColor(D2D1::ColorF(0.95f, 0.20f, 0.80f, 0.95f));
 			rt->DrawLine(D2D1::Point2F(sp.x - 5.0f, sp.y - 5.0f), D2D1::Point2F(sp.x + 5.0f, sp.y + 5.0f), brush, 2.0f);
 			rt->DrawLine(D2D1::Point2F(sp.x - 5.0f, sp.y + 5.0f), D2D1::Point2F(sp.x + 5.0f, sp.y - 5.0f), brush, 2.0f);
+		}
+		break;
+
+	case SnapTargets::GuideLine:
+		// 가이드라인 스냅: 마젠타/사이언 십자 마커
+		{
+			brush->SetColor(D2D1::ColorF(0.0f, 0.85f, 1.0f, 0.95f));
+			rt->DrawLine(D2D1::Point2F(sp.x - 8.0f, sp.y), D2D1::Point2F(sp.x + 8.0f, sp.y), brush, 1.8f);
+			rt->DrawLine(D2D1::Point2F(sp.x, sp.y - 8.0f), D2D1::Point2F(sp.x, sp.y + 8.0f), brush, 1.8f);
 		}
 		break;
 

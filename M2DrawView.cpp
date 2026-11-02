@@ -462,6 +462,67 @@ void CM2DrawView::OnLButtonDown(UINT nFlags, CPoint point)
 	e.pD2DFactory = m_pD2DFactory;
 
 	// 활성 도구에 이벤트 전달
+	// --- 눈금자 가이드라인(Ruler Guides) 생성 및 이동 감지 ---
+	const float rulerT = GetApp()->GetRuler().enabled ? GetApp()->GetRuler().thickness : 0.0f;
+	if (rulerT > 0.0f)
+	{
+		// 1) 상단 눈금자에서 드래그 시작 -> 새 수평 가이드라인 생성
+		if (point.y <= rulerT && point.x > rulerT)
+		{
+			m_guideDragMode = GuideDragMode::CreateH;
+			m_dragGuideWorldPos = rawWorld.y;
+			SetCapture();
+			Invalidate(FALSE);
+			return;
+		}
+		// 2) 좌측 눈금자에서 드래그 시작 -> 새 수직 가이드라인 생성
+		if (point.x <= rulerT && point.y > rulerT)
+		{
+			m_guideDragMode = GuideDragMode::CreateV;
+			m_dragGuideWorldPos = rawWorld.x;
+			SetCapture();
+			Invalidate(FALSE);
+			return;
+		}
+	}
+
+	// 3) 캔버스 상의 기존 가이드라인 선택/이동 클릭 (선택 도구에서만: 그릴 때 가이드 위 클릭이 도형 점을 가로채지 않도록)
+	if (pDoc && GetApp()->GetToolManager().GetActiveType() == ToolType::Select)
+	{
+		const auto& guides = pDoc->GetDoc().GetGuides();
+		for (size_t i = 0; i < guides.size(); ++i)
+		{
+			const auto& g = guides[i];
+			if (g.locked) continue;
+			if (g.isHorizontal)
+			{
+				float sy = g.worldPos * m_fZoom + m_ptPan.y;
+				if (std::abs(point.y - sy) <= 5.0f)
+				{
+					m_guideDragMode = GuideDragMode::MoveGuide;
+					m_dragGuideIndex = static_cast<int>(i);
+					m_dragGuideWorldPos = g.worldPos;
+					SetCapture();
+					Invalidate(FALSE);
+					return;
+				}
+			}
+			else
+			{
+				float sx = g.worldPos * m_fZoom + m_ptPan.x;
+				if (std::abs(point.x - sx) <= 5.0f)
+				{
+					m_guideDragMode = GuideDragMode::MoveGuide;
+					m_dragGuideIndex = static_cast<int>(i);
+					m_dragGuideWorldPos = g.worldPos;
+					SetCapture();
+					Invalidate(FALSE);
+					return;
+				}
+			}
+		}
+	}
+
 	ITool* pTool = GetApp()->GetToolManager().GetActiveTool();
 	if (pTool)
 	{
@@ -505,6 +566,61 @@ void CM2DrawView::OnLButtonUp(UINT nFlags, CPoint point)
 	e.pDoc = pDoc;
 	e.pView = this;
 	e.pD2DFactory = m_pD2DFactory;
+
+	// --- 눈금자 가이드라인 드래그 완료 처리 ---
+	if (m_guideDragMode != GuideDragMode::None)
+	{
+		ReleaseCapture();
+		const float rulerThickness = GetApp()->GetRuler().enabled ? GetApp()->GetRuler().thickness : 0.0f;
+		if (pDoc)
+		{
+			if (m_guideDragMode == GuideDragMode::CreateH)
+			{
+				// 눈금자 바깥으로 충분히 끌고 나왔을 때만 추가
+				if (point.y > rulerThickness)
+				{
+					pDoc->GetDoc().AddGuide(true, m_dragGuideWorldPos);
+					pDoc->CommitUndoPoint(L"Add Horizontal Guide");
+				}
+			}
+			else if (m_guideDragMode == GuideDragMode::CreateV)
+			{
+				if (point.x > rulerThickness)
+				{
+					pDoc->GetDoc().AddGuide(false, m_dragGuideWorldPos);
+					pDoc->CommitUndoPoint(L"Add Vertical Guide");
+				}
+			}
+			else if (m_guideDragMode == GuideDragMode::MoveGuide && m_dragGuideIndex >= 0)
+			{
+				// 눈금자 영역으로 다시 끌고 들어가면 삭제
+				bool deleteGuide = false;
+				const auto& guides = pDoc->GetDoc().GetGuides();
+				if (static_cast<size_t>(m_dragGuideIndex) < guides.size())
+				{
+					if (guides[m_dragGuideIndex].isHorizontal && point.y <= rulerThickness)
+						deleteGuide = true;
+					else if (!guides[m_dragGuideIndex].isHorizontal && point.x <= rulerThickness)
+						deleteGuide = true;
+
+					if (deleteGuide)
+					{
+						pDoc->GetDoc().RemoveGuide(static_cast<size_t>(m_dragGuideIndex));
+						pDoc->CommitUndoPoint(L"Delete Guide");
+					}
+					else
+					{
+						pDoc->GetDoc().GetGuidesRef()[m_dragGuideIndex].worldPos = m_dragGuideWorldPos;
+						pDoc->CommitUndoPoint(L"Move Guide");
+					}
+				}
+			}
+		}
+		m_guideDragMode = GuideDragMode::None;
+		m_dragGuideIndex = -1;
+		Invalidate(FALSE);
+		return;
+	}
 
 	ITool* pTool = GetApp()->GetToolManager().GetActiveTool();
 	if (pTool)
@@ -763,6 +879,55 @@ void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 			point.x, point.y, worldPt.x, dispY, worldPt.x / unitScale, dispUnitY, suffix, m_fZoom * 100.0f);
 	}
 	SetAppStatusText(strStatus);
+	// --- 눈금자 가이드라인 드래그 처리 ---
+	if (m_guideDragMode != GuideDragMode::None)
+	{
+		if (m_guideDragMode == GuideDragMode::CreateH ||
+		    (m_guideDragMode == GuideDragMode::MoveGuide && m_dragGuideIndex >= 0 &&
+		     pDoc && static_cast<size_t>(m_dragGuideIndex) < pDoc->GetDoc().GetGuides().size() &&
+		     pDoc->GetDoc().GetGuides()[m_dragGuideIndex].isHorizontal))
+		{
+			m_dragGuideWorldPos = worldPt.y;
+		}
+		else
+		{
+			m_dragGuideWorldPos = worldPt.x;
+		}
+		Invalidate(FALSE);
+		return;
+	}
+
+	// 가이드라인 호버 감지 (마우스 커서 갱신용, 선택 도구에서만)
+	m_hoverGuideIndex = -1;
+	if (pDoc && GetApp()->GetToolManager().GetActiveType() == ToolType::Select)
+	{
+		const auto& guides = pDoc->GetDoc().GetGuides();
+		for (size_t i = 0; i < guides.size(); ++i)
+		{
+			const auto& g = guides[i];
+			if (g.isHorizontal)
+			{
+				float sy = g.worldPos * m_fZoom + m_ptPan.y;
+				if (std::abs(point.y - sy) <= 5.0f)
+				{
+					m_hoverGuideIndex = static_cast<int>(i);
+					m_hoverGuideIsH = true;
+					break;
+				}
+			}
+			else
+			{
+				float sx = g.worldPos * m_fZoom + m_ptPan.x;
+				if (std::abs(point.x - sx) <= 5.0f)
+				{
+					m_hoverGuideIndex = static_cast<int>(i);
+					m_hoverGuideIsH = false;
+					break;
+				}
+			}
+		}
+	}
+
 
 	// 활성 도구에 이동 이벤트 전달
 	ToolEvent e;
@@ -853,6 +1018,19 @@ void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	}
 
 	// 0. Delete / Backspace 키: 선택된 오브젝트 삭제
+	// 가이드라인 호버 상태에서 Delete 키 입력 시 해당 가이드라인 삭제
+	if ((nChar == VK_DELETE || nChar == VK_BACK) && m_hoverGuideIndex >= 0)
+	{
+		CM2DrawDoc* pDoc = GetDocument();
+		if (pDoc && pDoc->GetDoc().RemoveGuide(static_cast<size_t>(m_hoverGuideIndex)))
+		{
+			m_hoverGuideIndex = -1;
+			pDoc->CommitUndoPoint(L"Delete Guide");
+			Invalidate(FALSE);
+			return;
+		}
+	}
+
 	if (nChar == VK_DELETE || nChar == VK_BACK)
 	{
 		CM2DrawDoc* pDoc = GetDocument();
@@ -991,6 +1169,18 @@ BOOL CM2DrawView::OnSetCursor(CWnd* pWnd, UINT nHitTest, UINT message)
 {
 	if (nHitTest == HTCLIENT)
 	{
+		CM2DrawDoc* pDoc = GetDocument();
+		if (m_guideDragMode == GuideDragMode::CreateH || (m_guideDragMode == GuideDragMode::MoveGuide && m_dragGuideIndex >= 0 && pDoc && static_cast<size_t>(m_dragGuideIndex) < pDoc->GetDoc().GetGuides().size() && pDoc->GetDoc().GetGuides()[m_dragGuideIndex].isHorizontal) || (m_hoverGuideIndex >= 0 && m_hoverGuideIsH))
+		{
+			::SetCursor(::LoadCursor(nullptr, IDC_SIZENS));
+			return TRUE;
+		}
+		if (m_guideDragMode == GuideDragMode::CreateV || (m_guideDragMode == GuideDragMode::MoveGuide && m_dragGuideIndex >= 0 && pDoc && static_cast<size_t>(m_dragGuideIndex) < pDoc->GetDoc().GetGuides().size() && !pDoc->GetDoc().GetGuides()[m_dragGuideIndex].isHorizontal) || (m_hoverGuideIndex >= 0 && !m_hoverGuideIsH))
+		{
+			::SetCursor(::LoadCursor(nullptr, IDC_SIZEWE));
+			return TRUE;
+		}
+
 		ITool* pTool = GetApp()->GetToolManager().GetActiveTool();
 		if (pTool)
 		{
@@ -1162,6 +1352,64 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 	}
 
 	// 4. 스냅 인디케이터(자석 원형/다이아몬드/삼각형/십자선) 렌더링
+	// --- 눈금자 가이드라인(Ruler Guides) 렌더링 ---
+	{
+		ID2D1StrokeStyle* pGuideStroke = nullptr;
+		D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(
+			D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+			D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_DASH, 0.0f
+		);
+		m_pD2DFactory->CreateStrokeStyle(&sp, nullptr, 0, &pGuideStroke);
+
+		// 기존 등록된 가이드라인 렌더링
+		const auto& guides = pDoc->GetDoc().GetGuides();
+		for (size_t i = 0; i < guides.size(); ++i)
+		{
+			// 현재 드래그 중인 가이드라인은 임시 위치로 그림
+			if (m_guideDragMode == GuideDragMode::MoveGuide && static_cast<int>(i) == m_dragGuideIndex)
+				continue;
+
+			const auto& g = guides[i];
+			const bool isHovered = (static_cast<int>(i) == m_hoverGuideIndex);
+			// 기본 Cyan (0.0, 0.75, 1.0), 호버/선택 시 Magenta (1.0, 0.2, 0.7)
+			if (isHovered)
+				m_pSolidBrush->SetColor(D2D1::ColorF(1.0f, 0.2f, 0.7f, 0.95f));
+			else
+				m_pSolidBrush->SetColor(D2D1::ColorF(0.0f, 0.75f, 1.0f, 0.85f));
+
+			if (g.isHorizontal)
+			{
+				float sy = g.worldPos * m_fZoom + m_ptPan.y;
+				m_pRenderTarget->DrawLine(D2D1::Point2F(0.0f, sy), D2D1::Point2F(width, sy), m_pSolidBrush, 1.2f, pGuideStroke);
+			}
+			else
+			{
+				float sx = g.worldPos * m_fZoom + m_ptPan.x;
+				m_pRenderTarget->DrawLine(D2D1::Point2F(sx, 0.0f), D2D1::Point2F(sx, height), m_pSolidBrush, 1.2f, pGuideStroke);
+			}
+		}
+
+		// 드래그 중인 가이드라인 실시간 렌더링
+		if (m_guideDragMode != GuideDragMode::None)
+		{
+			m_pSolidBrush->SetColor(D2D1::ColorF(1.0f, 0.3f, 0.2f, 0.95f)); // 드래그 중에는 주황/붉은색
+			if (m_guideDragMode == GuideDragMode::CreateH ||
+			    (m_guideDragMode == GuideDragMode::MoveGuide && m_dragGuideIndex >= 0 &&
+			     static_cast<size_t>(m_dragGuideIndex) < guides.size() && guides[m_dragGuideIndex].isHorizontal))
+			{
+				float sy = m_dragGuideWorldPos * m_fZoom + m_ptPan.y;
+				m_pRenderTarget->DrawLine(D2D1::Point2F(0.0f, sy), D2D1::Point2F(width, sy), m_pSolidBrush, 1.5f, pGuideStroke);
+			}
+			else
+			{
+				float sx = m_dragGuideWorldPos * m_fZoom + m_ptPan.x;
+				m_pRenderTarget->DrawLine(D2D1::Point2F(sx, 0.0f), D2D1::Point2F(sx, height), m_pSolidBrush, 1.5f, pGuideStroke);
+			}
+		}
+
+		if (pGuideStroke) pGuideStroke->Release();
+	}
+
 	if (m_lastSnap.snapped)
 	{
 		GetApp()->GetSnapManager().DrawSnapIndicator(m_pRenderTarget, m_pSolidBrush, m_lastSnap, m_fZoom, m_ptPan);

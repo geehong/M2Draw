@@ -2931,6 +2931,29 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(doc.CanOffsetPath(), L"패스 이동 대상 감지 실패");
 	}
 
+	// ------------------------------------------------------------------------
+	// [Section 50] Ruler Guides & Document Swatches
+	// ------------------------------------------------------------------------
+	{
+		Document doc;
+		GE_CHECK(doc.GetGuides().empty(), L"초기 가이드라인 비어있음");
+
+		doc.AddGuide(true, 150.0f, false);
+		doc.AddGuide(false, 300.0f, false);
+		GE_CHECK(doc.GetGuides().size() == 2, L"수평/수직 가이드라인 추가");
+		GE_CHECK(doc.GetGuides()[0].isHorizontal == true, L"첫 번째 가이드 수평선");
+		GE_CHECK(doc.GetGuides()[0].worldPos == 150.0f, L"수평 가이드 Y 위치");
+		GE_CHECK(doc.GetGuides()[1].isHorizontal == false, L"두 번째 가이드 수직선");
+		GE_CHECK(doc.GetGuides()[1].worldPos == 300.0f, L"수직 가이드 X 위치");
+
+		bool removed = doc.RemoveGuide(0);
+		GE_CHECK(removed && doc.GetGuides().size() == 1, L"가이드라인 삭제");
+		GE_CHECK(doc.GetGuides()[0].isHorizontal == false, L"남은 가이드 수직선 유지");
+
+		doc.ClearGuides();
+		GE_CHECK(doc.GetGuides().empty(), L"가이드라인 전체 초기화");
+	}
+
 #undef GE_CHECK
 
 	return true;

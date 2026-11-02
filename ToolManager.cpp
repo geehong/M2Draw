@@ -1356,6 +1356,7 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<BoxShapeTool>(BoxShapeTool::ShapeKind::Callout, ToolType::Callout, L"말풍선 도구 (Callout)", 0));
 	m_tools.push_back(std::make_unique<TextTool>());
 	m_tools.push_back(std::make_unique<PaintBucketTool>());
+	m_tools.push_back(std::make_unique<EyedropperTool>());
 	m_tools.push_back(std::make_unique<FrameTool>());
 	m_tools.push_back(std::make_unique<TableTool>());
 	m_tools.push_back(std::make_unique<ComponentTool>(ComponentKind::Heading));

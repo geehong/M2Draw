@@ -132,7 +132,8 @@ protected:
 	std::shared_ptr<M2DrawButton>       m_btnTabFill;
 	std::shared_ptr<M2DrawButton>       m_btnTabStroke;
 	std::vector<std::shared_ptr<M2DrawButton>> m_btnFillModes; // 5 modes
-	std::shared_ptr<M2DrawColorPalette> m_palette16;          // 16 color palette
+	std::shared_ptr<M2DrawColorPalette> m_palette16;
+	std::shared_ptr<M2DrawColorPalette> m_paletteSwatches;   // 문서 사용 색상 스와치          // 16 color palette
 	std::shared_ptr<M2DrawExpander>     m_expShapeWheel;       // Color Wheel expander
 	std::shared_ptr<M2DrawColorWheel>   m_shapeWheel;          // Color Wheel
 	std::shared_ptr<M2DrawLabel>        m_lblOpacity;          // "Opacity"
@@ -221,6 +222,7 @@ protected:
 	void ApplyLineProps(const std::function<void(ge::Node&)>& fn);
 	void ApplyShadowProps(const std::function<void(ge::Shadow&)>& fn);
 	void SyncAppearanceControls();
+	void SyncDocumentSwatches();
 
 	// 테이블 전용 (Step 4.5.7.7) — 값 변경은 TableComponent 함수를 거친다
 	std::shared_ptr<M2DrawLabel>        m_lblTable;

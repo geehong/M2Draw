@@ -358,6 +358,12 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 	if (Meta()) {
 		AppendIndent();
 		m_output += "<sodipodi:namedview id=\"namedview_canvas\" pagecolor=\"" + ColorToHex(doc.backgroundColor) + "\" />\n";
+		for (const auto& g : doc.GetGuides()) {
+			AppendIndent();
+			m_output += "<sodipodi:guide orientation=\"" + std::string(g.isHorizontal ? "horizontal" : "vertical") +
+				"\" position=\"" + FormatFloat(g.worldPos) +
+				"\" m2:locked=\"" + std::string(g.locked ? "true" : "false") + "\" />\n";
+		}
 	}
 
 	// defs 블록 출력: 그라디언트 정의 및 클리핑 마스크 정의

@@ -1034,6 +1034,21 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 					fileVersion = attrs[L"m2:version"];
 				}
 			}
+			else if (elemName == L"sodipodi:guide") {
+				bool isH = true;
+				if (attrs.count(L"orientation")) {
+					isH = (attrs[L"orientation"] == L"horizontal");
+				}
+				float pos = 0.0f;
+				if (attrs.count(L"position")) {
+					pos = std::wcstof(attrs[L"position"].c_str(), nullptr);
+				}
+				bool locked = false;
+				if (attrs.count(L"m2:locked")) {
+					locked = (attrs[L"m2:locked"] == L"true" || attrs[L"m2:locked"] == L"1");
+				}
+				outDoc.AddGuide(isH, pos, locked);
+			}
 			else if (elemName == L"sodipodi:namedview") {
 				if (attrs.count(L"pagecolor")) {
 					outDoc.backgroundColor = ParseColorHex(attrs[L"pagecolor"]);
