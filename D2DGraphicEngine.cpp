@@ -522,6 +522,79 @@ bool PathNode::RemoveNode(int sp, int ni)
 	return true;
 }
 
+bool PathNode::SetNodeType(int sp, int ni, BezierNode::Type newType)
+{
+	if (sp < 0 || sp >= (int)m_paths.size()) return false;
+	auto& nodes = m_paths[sp].nodes;
+	if (ni < 0 || ni >= (int)nodes.size()) return false;
+	BezierNode& n = nodes[ni];
+	n.type = newType;
+	if (newType == BezierNode::Type::Smooth)
+	{
+		if (n.HasOut()) n.SetHandleOut(n.hOut);
+		else if (n.HasIn()) n.SetHandleIn(n.hIn);
+	}
+	else if (newType == BezierNode::Type::Symmetric)
+	{
+		if (n.HasOut()) n.SetHandleOut(n.hOut);
+		else if (n.HasIn()) n.SetHandleIn(n.hIn);
+	}
+	m_kind = ShapeKind::Path;
+	m_params = std::monostate{};
+	Invalidate();
+	return true;
+}
+
+bool PathNode::BreakAtNode(int sp, int ni)
+{
+	if (sp < 0 || sp >= (int)m_paths.size()) return false;
+	SubPath& s = m_paths[sp];
+	const int count = (int)s.nodes.size();
+	if (count < 2 || ni < 0 || ni >= count) return false;
+
+	if (s.closed)
+	{
+		// 닫힌 패스를 ni 지점에서 열어 시작점/끝점으로 순환 재배치
+		std::vector<BezierNode> reordered;
+		reordered.reserve(count + 1);
+		for (int i = 0; i < count; ++i)
+		{
+			reordered.push_back(s.nodes[(ni + i) % count]);
+		}
+		// 끝점에 분할된 앵커 복제본 추가
+		BezierNode endNode = s.nodes[ni];
+		endNode.hOut = Vec2{ 0.0f, 0.0f }; // 끝점이므로 외향 핸들 제거
+		reordered[0].hIn = Vec2{ 0.0f, 0.0f }; // 시작점이므로 내향 핸들 제거
+		reordered.push_back(endNode);
+
+		s.nodes = std::move(reordered);
+		s.closed = false;
+	}
+	else
+	{
+		// 열린 패스의 중간 앵커(0 < ni < count-1)에서 두 개의 열린 SubPath로 분할
+		if (ni <= 0 || ni >= count - 1) return false; // 이미 끝점이면 분할할 수 없음
+
+		SubPath firstPart;
+		firstPart.closed = false;
+		firstPart.nodes.assign(s.nodes.begin(), s.nodes.begin() + ni + 1);
+		firstPart.nodes.back().hOut = Vec2{ 0.0f, 0.0f };
+
+		SubPath secondPart;
+		secondPart.closed = false;
+		secondPart.nodes.assign(s.nodes.begin() + ni, s.nodes.end());
+		secondPart.nodes.front().hIn = Vec2{ 0.0f, 0.0f };
+
+		s = std::move(firstPart);
+		m_paths.insert(m_paths.begin() + sp + 1, std::move(secondPart));
+	}
+
+	m_kind = ShapeKind::Path;
+	m_params = std::monostate{};
+	Invalidate();
+	return true;
+}
+
 bool PathNode::FindClosestSegment(Vec2 lp, int& spIdx, int& segIdx, float& t, float& distSq) const
 {
 	bool found = false;
@@ -2161,6 +2234,14 @@ bool Document::CanOutlineStroke() const
 	return false;
 }
 
+bool Document::CanOffsetPath() const
+{
+	for (const Node* n : m_selection) {
+		if (n && n->Kind() == NodeKind::Path && n->GetParent()) return true;
+	}
+	return false;
+}
+
 bool Document::CanSimplify() const
 {
 	for (const Node* n : m_selection) {
@@ -2186,6 +2267,33 @@ bool Document::CanJoinPaths() const
 		}
 	}
 	return pathCount >= 2;
+}
+
+std::vector<PathNode*> Document::OffsetPathSelection(float distance, ID2D1Factory* factory)
+{
+	if (!factory || !CanOffsetPath() || std::abs(distance) < 0.001f) return {};
+	std::vector<PathNode*> targets;
+	for (Node* n : m_selection) {
+		if (n && n->Kind() == NodeKind::Path && n->GetParent()) targets.push_back(static_cast<PathNode*>(n));
+	}
+	std::vector<PathNode*> results;
+	for (PathNode* src : targets) {
+		GroupNode* parent = src->GetParent();
+		if (!parent) continue;
+		int idx = parent->IndexOf(src);
+		auto offsetted = PathOp::OffsetPath(*src, distance, factory);
+		if (!offsetted) continue;
+		offsetted->m_id = IssueId();
+		offsetted->SetName(src->GetName() + L" Offset");
+		Node* inserted = parent->AddChild(std::move(offsetted), idx + 1);
+		results.push_back(static_cast<PathNode*>(inserted));
+	}
+	if (!results.empty()) {
+		m_selection.clear();
+		for (PathNode* p : results) m_selection.push_back(p);
+		ChangeTracker::Bump();
+	}
+	return results;
 }
 
 #ifndef GE_NO_D2D
@@ -2357,6 +2465,142 @@ PathNode* Document::JoinSelection()
 	return resultPath;
 }
 #endif
+
+bool Document::CanMakeCompoundPath() const
+{
+	int pathCount = 0;
+	for (const Node* n : m_selection) {
+		if (n && n->Kind() == NodeKind::Path && n->GetParent()) {
+			++pathCount;
+		}
+	}
+	return pathCount >= 2;
+}
+
+bool Document::CanReleaseCompoundPath() const
+{
+	for (const Node* n : m_selection) {
+		if (n && n->Kind() == NodeKind::Path && n->GetParent()) {
+			const PathNode* pn = static_cast<const PathNode*>(n);
+			if (pn->GetPaths().size() >= 2) return true;
+		}
+	}
+	return false;
+}
+
+PathNode* Document::MakeCompoundPath()
+{
+	if (!CanMakeCompoundPath()) return nullptr;
+
+	std::vector<PathNode*> paths;
+	for (Node* n : m_selection) {
+		if (n && n->Kind() == NodeKind::Path && n->GetParent()) {
+			paths.push_back(static_cast<PathNode*>(n));
+		}
+	}
+	if (paths.size() < 2) return nullptr;
+
+	// 최상단 노드(paths.back())를 기준으로 삼아 로컬 좌표계 통일
+	PathNode* topNode = paths.back();
+	Matrix2D topWorld = topNode->GetWorldTransform();
+	Matrix2D topWorldInv = topWorld;
+	if (!topWorldInv.Invert()) return nullptr;
+
+	auto compound = std::make_unique<PathNode>();
+	compound->SetName(GenerateNodeName(ShapeKind::Path));
+	compound->SetStyle(topNode->GetStyle());
+	compound->GetStyleRef().fillMode = FillMode::Alternate; // 짝홀수 규칙으로 안쪽 구멍 자동 뚫림
+
+	std::vector<SubPath> allSubPaths;
+	for (PathNode* src : paths) {
+		Matrix2D srcToTop = src->GetWorldTransform() * topWorldInv;
+		for (const auto& sp : src->GetPaths()) {
+			SubPath spCopy = sp;
+			for (auto& bn : spCopy.nodes) {
+				const Vec2 oldAnchor = bn.anchor;
+				const Vec2 newAnchor = srcToTop.TransformPoint(oldAnchor);
+				const Vec2 absIn = srcToTop.TransformPoint(oldAnchor + bn.hIn);
+				const Vec2 absOut = srcToTop.TransformPoint(oldAnchor + bn.hOut);
+				bn.anchor = newAnchor;
+				bn.hIn = absIn - newAnchor;
+				bn.hOut = absOut - newAnchor;
+			}
+			allSubPaths.push_back(std::move(spCopy));
+		}
+	}
+	compound->SetPaths(std::move(allSubPaths));
+
+	GroupNode* parent = topNode->GetParent();
+	int insertIdx = parent->IndexOf(topNode);
+	// 원본 제거 시 topNode 가 해제되므로 변환은 미리 복사해 둔다 (해제된 노드 접근 방지)
+	const Matrix2D topXf = topNode->GetTransform();
+
+	// 원본 노드들 제거 (RemoveChild 가 소유권을 돌려주므로 여기서 즉시 해제됨)
+	for (PathNode* p : paths) {
+		GroupNode* pParent = p->GetParent();
+		if (pParent) pParent->RemoveChild(p);
+	}
+
+	compound->m_id = IssueId();
+	compound->SetTransform(topXf);
+
+	if (insertIdx < 0 || insertIdx > static_cast<int>(parent->GetChildren().size())) {
+		insertIdx = static_cast<int>(parent->GetChildren().size());
+	}
+	Node* inserted = parent->AddChild(std::move(compound), insertIdx);
+	PathNode* resultPath = static_cast<PathNode*>(inserted);
+
+	m_selection = { resultPath };
+	ChangeTracker::Bump();
+	return resultPath;
+}
+
+std::vector<PathNode*> Document::ReleaseCompoundPath()
+{
+	if (!CanReleaseCompoundPath()) return {};
+
+	std::vector<PathNode*> targets;
+	for (Node* n : m_selection) {
+		if (n && n->Kind() == NodeKind::Path && n->GetParent()) {
+			PathNode* pn = static_cast<PathNode*>(n);
+			if (pn->GetPaths().size() >= 2) targets.push_back(pn);
+		}
+	}
+	if (targets.empty()) return {};
+
+	std::vector<PathNode*> releasedAll;
+	for (PathNode* src : targets) {
+		GroupNode* parent = src->GetParent();
+		int insertIdx = parent->IndexOf(src);
+		const auto& subPaths = src->GetPaths();
+		Matrix2D srcXf = src->GetTransform();
+		Style srcStyle = src->GetStyle();
+
+		std::vector<std::unique_ptr<PathNode>> newNodes;
+		for (size_t i = 0; i < subPaths.size(); ++i) {
+			auto pn = std::make_unique<PathNode>();
+			pn->m_id = IssueId();
+			pn->SetName(GenerateNodeName(ShapeKind::Path));
+			pn->SetStyle(srcStyle);
+			pn->SetTransform(srcXf);
+			pn->SetPaths({ subPaths[i] });
+			newNodes.push_back(std::move(pn));
+		}
+
+		parent->RemoveChild(src);
+
+		for (auto& newNode : newNodes) {
+			PathNode* raw = newNode.get();
+			parent->AddChild(std::move(newNode), insertIdx++);
+			releasedAll.push_back(raw);
+		}
+	}
+
+	m_selection.clear();
+	for (PathNode* p : releasedAll) m_selection.push_back(p);
+	ChangeTracker::Bump();
+	return releasedAll;
+}
 
 std::vector<Node*> Document::DuplicateSelection()
 {
@@ -2833,6 +3077,57 @@ std::unique_ptr<PathNode> PathOp::Combine(const PathNode& a, const PathNode& b,
 }
 
 // 1) 외곽선 확장: 선(Stroke)을 닫힌 면(Fill) 패스로 변환 (Widen)
+std::unique_ptr<PathNode> PathOp::OffsetPath(const PathNode& node, float distance, ID2D1Factory* factory, float flatteningTolerance)
+{
+	if (!factory || std::abs(distance) < 0.001f) return nullptr;
+
+	ComPtr<ID2D1PathGeometry> localGeo = BuildGeometry(node, factory);
+	if (!localGeo) return nullptr;
+
+	D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(
+		D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
+		D2D1_LINE_JOIN_ROUND, 10.0f, D2D1_DASH_STYLE_SOLID, 0.0f);
+	ComPtr<ID2D1StrokeStyle> strokeStyle;
+	if (FAILED(factory->CreateStrokeStyle(&sp, nullptr, 0, &strokeStyle))) return nullptr;
+
+	float strokeWidth = std::abs(distance) * 2.0f;
+	ComPtr<ID2D1PathGeometry> widenedGeo;
+	if (FAILED(factory->CreatePathGeometry(&widenedGeo))) return nullptr;
+
+	ComPtr<ID2D1GeometrySink> sink;
+	if (FAILED(widenedGeo->Open(&sink))) return nullptr;
+
+	HRESULT hr = localGeo->Widen(strokeWidth, strokeStyle.Get(), nullptr, flatteningTolerance, sink.Get());
+	sink->Close();
+	if (FAILED(hr)) return nullptr;
+
+	ComPtr<ID2D1PathGeometry> resultGeo;
+	if (FAILED(factory->CreatePathGeometry(&resultGeo))) return nullptr;
+
+	ComPtr<ID2D1GeometrySink> resultSink;
+	if (FAILED(resultGeo->Open(&resultSink))) return nullptr;
+
+	D2D1_COMBINE_MODE combineMode = (distance > 0.0f) ? D2D1_COMBINE_MODE_UNION : D2D1_COMBINE_MODE_EXCLUDE;
+	hr = localGeo->CombineWithGeometry(widenedGeo.Get(), combineMode, nullptr, flatteningTolerance, resultSink.Get());
+	resultSink->Close();
+	if (FAILED(hr)) return nullptr;
+
+	std::vector<SubPath> subPaths;
+	D2D1_FILL_MODE d2dFillMode = D2D1_FILL_MODE_WINDING;
+	if (!ExtractSubPaths(resultGeo.Get(), subPaths, &d2dFillMode, flatteningTolerance) || subPaths.empty()) {
+		return nullptr;
+	}
+
+	auto result = std::make_unique<PathNode>();
+	result->SetName(node.GetName() + L" Offset");
+	Style offsetStyle = node.GetStyle();
+	offsetStyle.fillMode = (d2dFillMode == D2D1_FILL_MODE_WINDING) ? FillMode::Winding : FillMode::Alternate;
+	result->SetStyle(offsetStyle);
+	result->SetPaths(std::move(subPaths));
+	result->SetTransform(node.GetTransform());
+	return result;
+}
+
 std::unique_ptr<PathNode> PathOp::OutlineStroke(const PathNode& node, ID2D1Factory* factory, float flatteningTolerance, float widthOverride)
 {
 	if (!factory) return nullptr;
@@ -3280,6 +3575,47 @@ void D2DRenderer::DrawNode(Node& node, const Matrix2D& parentXf, const Viewport&
 {
 	if (!node.IsVisible()) return;
 	const Matrix2D worldXf = node.GetTransform() * parentXf;
+
+	// Viewport Frustum Culling (Step 6.5.2 / 6.23.3):
+	// 레이어가 아닌 개별 노드/그룹에 대해, 렌더 타깃이 존재하고 뷰포트 크기가 유효할 때 화면 밖 노드의 D2D 드로우콜을 건너뜁니다.
+	if (m_rt && node.Kind() != NodeKind::Layer && view.zoom > 1e-4f) {
+		const D2D1_SIZE_F rtSz = m_rt->GetSize();
+		if (rtSz.width > 0.0f && rtSz.height > 0.0f) {
+			const Vec2 vTopLeft = view.ScreenToWorld(Vec2{ 0.0f, 0.0f });
+			const Vec2 vBottomRight = view.ScreenToWorld(Vec2{ rtSz.width, rtSz.height });
+			const Rect2 viewWorld{ (std::min)(vTopLeft.x, vBottomRight.x),
+			                       (std::min)(vTopLeft.y, vBottomRight.y),
+			                       (std::max)(vTopLeft.x, vBottomRight.x),
+			                       (std::max)(vTopLeft.y, vBottomRight.y) };
+
+			Rect2 localB;
+			if (node.GetLocalBounds(localB)) {
+				Rect2 worldB = worldXf.TransformRect(localB);
+				const Style& st = node.GetStyle();
+				if (st.stroke.width > 0.0f && st.stroke.color.a > 0.0f) {
+					const float sx = std::sqrt(worldXf.m11 * worldXf.m11 + worldXf.m12 * worldXf.m12);
+					const float sy = std::sqrt(worldXf.m21 * worldXf.m21 + worldXf.m22 * worldXf.m22);
+					const float halfStroke = st.stroke.width * 0.5f * (std::max)(sx, sy);
+					worldB.left -= halfStroke;
+					worldB.top -= halfStroke;
+					worldB.right += halfStroke;
+					worldB.bottom += halfStroke;
+				}
+				const Shadow& sh = node.GetShadow();
+				if (sh.enabled && !sh.inset) {
+					const float blurExtent = (sh.blur + sh.spread) * 1.5f;
+					worldB.left += (std::min)(0.0f, sh.x - blurExtent);
+					worldB.top += (std::min)(0.0f, sh.y - blurExtent);
+					worldB.right += (std::max)(0.0f, sh.x + blurExtent);
+					worldB.bottom += (std::max)(0.0f, sh.y + blurExtent);
+				}
+				// 뷰포트 월드 영역과 교차하지 않으면 렌더링 생략
+				if (!worldB.IntersectsWith(viewWorld)) {
+					return;
+				}
+			}
+		}
+	}
 
 	// SVG opacity 의미: 도형(채움+선) / 그룹(모든 자식)을 먼저 하나로 합성한 뒤 불투명도를 한 번만 적용.
 	// 자식마다 알파를 곱하면 겹친 부분이 진해지는 문제가 생김. 레이어는 DrawDocument 가 같은 방식으로 처리.

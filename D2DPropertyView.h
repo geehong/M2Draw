@@ -50,6 +50,7 @@ public:
 
 protected:
 	PaneMode    m_paneMode = MODE_SHAPE;
+	bool        m_bInitialized = false;
 	CM2DrawDoc* m_pActiveDoc = nullptr;
 	uint64_t    m_selectedNodeId = 0;      // 대상 도형 NodeId (0 = 없음). 포인터 대신 ID 로 보관해 삭제/새 문서 시 dangling 방지
 	bool        m_bUpdating = false;

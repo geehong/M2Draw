@@ -651,52 +651,15 @@ void CM2DrawView::OnLButtonDblClk(UINT nFlags, CPoint point)
 		}
 	}
 
-	// 0. 선택 도구: 선택된 패스 위 더블클릭 = 앵커 삭제(앵커 위) / 앵커 추가(선분 위)
+	// 0. 선택 도구에서 패스 도형 더블클릭 시 노드 도구(A)로 전환하여 정점 편집 진입
 	if (activeType == ToolType::Select && pDoc && pDoc->GetDoc().GetSelection().size() == 1)
 	{
 		auto* ps = dynamic_cast<ge::PathNode*>(pDoc->GetPrimarySelection());
-		if (ps && m_pD2DFactory)
+		if (ps)
 		{
-			const ge::Viewport view{ m_fZoom, { m_ptPan.x, m_ptPan.y } };
-			const D2D1_POINT_2F sp = D2D1::Point2F(static_cast<float>(point.x), static_cast<float>(point.y));
-			const ge::HitResult hr = ps->HitTestScreenSpace(sp, 8.0f, view, m_pD2DFactory);
-			bool edited = false;
-			const wchar_t* label = nullptr;
-			if (hr.part == ge::HitPart::Anchor)
-			{
-				// 점이 2개 미만이 되는 삭제는 막음 (선/면이 사라지지 않게)
-				if (ps->GetPaths()[hr.subPath].nodes.size() > 2 && ps->RemoveNode(hr.subPath, hr.nodeIdx))
-				{
-					edited = true;
-					label = L"앵커 삭제";
-				}
-			}
-			else if (hr.part == ge::HitPart::Stroke)
-			{
-				ge::Matrix2D inv = ps->GetWorldTransform();
-				if (inv.Invert())
-				{
-					const D2D1_POINT_2F w = ScreenToWorld(point);
-					const ge::Vec2 local = inv.TransformPoint(ge::Vec2{ w.x, w.y });
-					int spi = -1, seg = -1; float t = 0.0f, d2 = 0.0f;
-					if (ps->FindClosestSegment(local, spi, seg, t, d2) && ps->InsertNodeOnSegment(spi, seg, t) >= 0)
-					{
-						edited = true;
-						label = L"앵커 추가";
-					}
-				}
-			}
-			if (edited)
-			{
-				ps->SetShapeKind(ge::ShapeKind::Path);   // 노드를 편집한 도형은 더 이상 파라메트릭이 아님
-				ps->Invalidate();
-				CString str; str.Format(_T("[선택 도구] %s (더블클릭)"), label);
-				LogAppEvent(str);
-				pDoc->CommitUndoPoint(label);
-				UpdateShapePropertiesSelection(ps, pDoc);
-				pDoc->UpdateAllViews(nullptr);
-				return;
-			}
+			GetApp()->GetToolManager().SetActiveTool(ToolType::Node);
+			Invalidate(FALSE);
+			return;
 		}
 	}
 
@@ -1189,10 +1152,11 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 		pActiveTool->DrawOverlay(m_pRenderTarget, m_pSolidBrush, m_fZoom, m_ptPan, pDoc);
 	}
 
-	// 3. 작업 중인 선택 도형의 에디트 포인트(변형 핸들) 상시 렌더링 (활성 도구가 SelectTool이 아닐 때도 표시)
-	// (그라디언트 도구는 자체 기즈모만 표시하므로 선택 핸들/기즈모가 겹쳐 그려지지 않게 제외)
+	// 3. 작업 중인 선택 도형의 에디트 포인트(변형 핸들) 상시 렌더링 (활성 도구가 SelectTool/NodeTool/Gradient가 아닐 때만 표시)
 	SelectTool* pSelectTool = GetApp()->GetToolManager().GetSelectTool();
-	if (pSelectTool && pActiveTool != pSelectTool && !(pActiveTool && pActiveTool->GetType() == ToolType::Gradient))
+	const bool skipSelectOverlay = (pActiveTool == pSelectTool) ||
+	                               (pActiveTool && (pActiveTool->GetType() == ToolType::Node || pActiveTool->GetType() == ToolType::Gradient));
+	if (pSelectTool && !skipSelectOverlay)
 	{
 		pSelectTool->DrawOverlay(m_pRenderTarget, m_pSolidBrush, m_fZoom, m_ptPan, pDoc);
 	}

@@ -251,6 +251,9 @@
     <ClInclude Include="GroupTransform.h" />
     <ClInclude Include="ClipboardSvg.h" />
     <ClInclude Include="RasterExport.h" />
+    <ClInclude Include="SceneJsonWriter.h" />
+    <ClInclude Include="AgentHandoff.h" />
+    <ClInclude Include="ReferenceImport.h" />
     <ClInclude Include="HtmlComponents\TableComponent.h" />
     <ClInclude Include="HtmlComponents\UiComponents.h" />
     <ClInclude Include="HtmlPreview.h" />
@@ -268,6 +271,9 @@
     <ClCompile Include="GroupTransform.cpp" />
     <ClCompile Include="ClipboardSvg.cpp" />
     <ClCompile Include="RasterExport.cpp" />
+    <ClCompile Include="SceneJsonWriter.cpp" />
+    <ClCompile Include="AgentHandoff.cpp" />
+    <ClCompile Include="ReferenceImport.cpp" />
     <ClCompile Include="RuntimeVerification.cpp" />
     <ClCompile Include="D2DShadowRender.cpp" />
     <ClCompile Include="HtmlComponents\TableComponent.cpp" />

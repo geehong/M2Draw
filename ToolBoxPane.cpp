@@ -99,6 +99,7 @@ CToolBoxPane::CToolBoxPane() noexcept
 	// 사이드바 배치 (Step 6.18.3): 선택·탐색 -> 그리기 -> 사각형 -> 원 -> 다각형·특수 -> 텍스트 -> HTML 요소 -> 채우기 -> 보기 -> 동작
 	m_buttons = {
 		{ ToolType::Select,      L"선택 (V)",        L'V', CRect() },
+		{ ToolType::Node,        L"직접 선택 (A)",   L'A', CRect() },
 		{ ToolType::Pan,         L"손도구 (H)",      L'H', CRect() },
 		{ ToolType::Pen,         L"펜도구 (P)",      L'P', CRect() },   // 그리기 그룹: 펜 / 폴리라인 / 직선
 		{ ToolType::Rect,        L"사각형 (M)",      L'M', CRect() },   // 사각형 그룹: 사각형 / 삼각형
@@ -554,6 +555,32 @@ void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 				pSink->Release();
 			}
 			rt->FillGeometry(pGeo, brush);
+			pGeo->Release();
+		}
+		break;
+	}
+	case ToolType::Node: // 직접 선택 (속이 빈 흰색 화살표 커서 모양)
+	{
+		ID2D1PathGeometry* pGeo = nullptr;
+		m_pD2DFactory->CreatePathGeometry(&pGeo);
+		if (pGeo)
+		{
+			ID2D1GeometrySink* pSink = nullptr;
+			pGeo->Open(&pSink);
+			if (pSink)
+			{
+				pSink->BeginFigure(D2D1::Point2F(cx - 6.0f, cy - 8.0f), D2D1_FIGURE_BEGIN_HOLLOW);
+				pSink->AddLine(D2D1::Point2F(cx - 6.0f, cy + 7.0f));
+				pSink->AddLine(D2D1::Point2F(cx - 2.0f, cy + 3.0f));
+				pSink->AddLine(D2D1::Point2F(cx + 4.0f, cy + 8.0f));
+				pSink->AddLine(D2D1::Point2F(cx + 6.0f, cy + 6.0f));
+				pSink->AddLine(D2D1::Point2F(cx + 0.5f, cy + 1.0f));
+				pSink->AddLine(D2D1::Point2F(cx + 5.0f, cy + 0.5f));
+				pSink->EndFigure(D2D1_FIGURE_END_CLOSED);
+				pSink->Close();
+				pSink->Release();
+			}
+			rt->DrawGeometry(pGeo, brush, 1.6f);
 			pGeo->Release();
 		}
 		break;

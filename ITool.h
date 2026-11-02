@@ -113,7 +113,8 @@ enum class ToolType
 	Circle3Pt,             // 3점 원: 세 점 클릭
 	Arc3Pt,                // 3점 호: 시작점, 끝점, 호 위의 한 점 클릭
 	Pie,                   // 파이(부채꼴): 중심 클릭 후 드래그로 반지름 (각도는 드래그 방향에서 90도)
-	Donut                  // 도넛: 중심 클릭 후 드래그로 바깥 반지름 (안쪽은 50%)
+	Donut,                 // 도넛: 중심 클릭 후 드래그로 바깥 반지름 (안쪽은 50%)
+	Node                   // 노드/직접 선택 도구 (A): 정점/핸들 직접 편집 및 다중 앵커 조작
 };
 
 // 도구 생성 설정값 (속성창 및 문서와 연동되는 공통 스타일/도형 설정)
@@ -186,8 +187,8 @@ public:
 	ToolType GetType() const override { return ToolType::Select; }
 	const wchar_t* GetName() const override { return L"선택 도구 (Select)"; }
 	wchar_t GetShortcut() const override { return L'V'; }
-	enum class Mode { None, Moving, Scaling, Rotating, Skewing, EditNode, Marquee, GradientHandle, TableResize, MultiScale, MultiRotate, MultiSkew, PivotDrag };
-	enum class Handle { None, TL, T, TR, R, BR, B, BL, L, Rotate };
+	enum class Mode { None, Moving, Scaling, Rotating, Skewing, EditNode, Marquee, GradientHandle, TableResize, MultiScale, MultiRotate, MultiSkew, PivotDrag, LiveCornerDrag };
+	enum class Handle { None, TL, T, TR, R, BR, B, BL, L, Rotate, LiveCorner };
 
 	HCURSOR GetCursor() const override;
 
@@ -232,6 +233,9 @@ private:
 
 	// 그라디언트 기즈모 (선택된 단일 도형/프레임의 그라디언트 시작/끝/중심/초점/반지름 핸들) — 드래그 동안만 유효
 	enum class GradHandle { None, Start, End, Radius };   // 방사형: Start=중심, End=초점
+
+	// 라이브 도형 코너 핸들 드래그 (6.10.2)
+	float m_liveCornerStartVal = 0.0f;
 	GradHandle        m_gradHandle = GradHandle::None;
 	ge::Node*         m_gradShape = nullptr;
 	ge::Rect2         m_gradBounds{};                      // 드래그 시작 시점의 지오메트리 경계 (드래그 중 변하지 않음)
@@ -764,6 +768,67 @@ public:
 	void OnDown(const ToolEvent& e) override;
 	void OnMove(const ToolEvent& e) override;
 	void OnUp(const ToolEvent& e) override;
+};
+
+// ============================================================================
+// 노드/직접 선택 도구 (NodeTool / DirectSelectTool, 단축키 'A')
+// ============================================================================
+class NodeTool : public ITool
+{
+public:
+	ToolType GetType() const override { return ToolType::Node; }
+	const wchar_t* GetName() const override { return L"직접 선택 / 노드 도구 (Direct Select)"; }
+	wchar_t GetShortcut() const override { return L'A'; }
+	HCURSOR GetCursor() const override;
+
+	void OnDown(const ToolEvent& e) override;
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	void OnKeyDown(UINT nChar, CM2DrawDoc* pDoc) override;
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+	struct AnchorRef {
+		ge::PathNode* path = nullptr;
+		int subPath = -1;
+		int nodeIdx = -1;
+		bool operator==(const AnchorRef& o) const {
+			return path == o.path && subPath == o.subPath && nodeIdx == o.nodeIdx;
+		}
+	};
+
+	const std::vector<AnchorRef>& GetSelectedAnchors() const { return m_selectedAnchors; }
+	void ClearAnchorSelection() { m_selectedAnchors.clear(); }
+
+	// 앵커 속성 조작
+	bool ConvertSelectedNodes(CM2DrawDoc* pDoc, ge::BezierNode::Type type);
+	bool BreakSelectedNodes(CM2DrawDoc* pDoc);
+	bool JoinSelectedNodes(CM2DrawDoc* pDoc);
+	bool DeleteSelectedNodes(CM2DrawDoc* pDoc);
+
+private:
+	enum class Mode { None, MovingAnchor, MovingHandle, Marquee };
+	Mode m_mode = Mode::None;
+
+	std::vector<AnchorRef> m_selectedAnchors;
+	AnchorRef              m_activeAnchor;
+	HitResult::Part        m_activePart = HitResult::Part::None;
+
+	// 단일/다중 앵커 이동 시 초기 로컬 앵커 위치
+	struct DragInitInfo {
+		AnchorRef ref;
+		ge::Vec2 initAnchor;
+	};
+	std::vector<DragInitInfo> m_dragInits;
+
+	D2D1_POINT_2F m_dragStartWorld = { 0.0f, 0.0f };
+	D2D1_POINT_2F m_dragCurrentWorld = { 0.0f, 0.0f };
+	CPoint        m_marqueeStartScreen = { 0, 0 };
+	CPoint        m_marqueeCurScreen = { 0, 0 };
+	bool          m_hoverIsEditPart = false;
+
+	bool IsAnchorSelected(ge::PathNode* p, int sp, int ni) const;
+	void SelectAnchor(ge::PathNode* p, int sp, int ni, bool addToSelection);
 };
 
 

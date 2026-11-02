@@ -4,4 +4,14 @@
     <Platform Name="x86" />
   </Configurations>
   <Project Path="M2Draw.vcxproj" />
+  <Folder Name="/docs/">
+    <File Path="docs\Layer_System_Plan.md" />
+    <File Path="docs\Master_Plan_SVG_HTML.md" />
+    <File Path="docs\Migration_Plan_D2DGraphicEngine.md" />
+    <File Path="docs\Object_Architecture_and_Future_Plans.md" />
+    <File Path="docs\TODO_Layer_System.md" />
+    <File Path="docs\TODO_Master_Plan.md" />
+    <File Path="docs\ToolOptionBar_and_Shape_Extension_Plan.md" />
+    <File Path="docs\USER_MANUAL.md" />
+  </Folder>
 </Solution>

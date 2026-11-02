@@ -956,6 +956,7 @@ struct ToolMenuEntry
 
 static const ToolMenuEntry kToolMenu[] = {
 	{ ID_TOOLMENU_SELECT, ToolType::Select },
+	{ ID_TOOLMENU_DIRECTSELECT, ToolType::Node },
 	{ ID_TOOLMENU_PAN, ToolType::Pan },
 	{ ID_TOOLMENU_PEN, ToolType::Pen },
 	{ ID_TOOLMENU_LINE, ToolType::Line },

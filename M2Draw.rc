@@ -313,9 +313,13 @@ BEGIN
         POPUP "패스(&N)"
         BEGIN
             MENUITEM "윤곽선 만들기 (외곽선 확장)(&O)",  ID_PATH_OUTLINE
+            MENUITEM "패스 이동(Offset)...",        ID_PATH_OFFSET
             MENUITEM "단순화(&S)...",                  ID_PATH_SIMPLIFY
             MENUITEM "방향 반전(&R)",                  ID_PATH_REVERSE
             MENUITEM "연결(Join)(&J)\tCtrl+J",        ID_PATH_JOIN
+            MENUITEM SEPARATOR
+            MENUITEM "복합 패스 만들기(&M)\tCtrl+8",  ID_OBJECT_MAKE_COMPOUND
+            MENUITEM "복합 패스 풀기(&U)\tCtrl+Alt+8", ID_OBJECT_RELEASE_COMPOUND
             MENUITEM SEPARATOR
             MENUITEM "텍스트를 윤곽선으로 변환(&C)",   ID_TEXT_TO_PATH
         END
@@ -507,6 +511,8 @@ BEGIN
     "7",            ID_OBJECT_CLIP_MASK,    VIRTKEY,CONTROL
     "7",            ID_OBJECT_RELEASE_MASK, VIRTKEY,CONTROL,ALT
     "J",            ID_PATH_JOIN,           VIRTKEY,CONTROL
+    "8",            ID_OBJECT_MAKE_COMPOUND, VIRTKEY,CONTROL
+    "8",            ID_OBJECT_RELEASE_COMPOUND, VIRTKEY,CONTROL,ALT
 END
 
 
@@ -669,12 +675,15 @@ BEGIN
 클리핑 마스크 해제"
     ID_PATH_OUTLINE          "선을 면(닫힌 패스)으로 변환합니다.
 외곽선 확장"
+    ID_PATH_OFFSET          "선택한 패스를 지정 거리만큼 확장하거나 축소합니다.\n패스 이동"
     ID_PATH_SIMPLIFY         "정점을 줄여 패스를 단순화합니다.
 단순화"
     ID_PATH_REVERSE          "패스의 방향을 뒤집습니다.
 방향 반전"
     ID_PATH_JOIN             "끝점이 가까운 패스를 하나로 결합합니다.
 패스 결합"
+    ID_OBJECT_MAKE_COMPOUND  "선택한 패스들을 하나의 복합 패스로 결합합니다.\n복합 패스 만들기"
+    ID_OBJECT_RELEASE_COMPOUND "복합 패스를 개별 패스들로 분리합니다.\n복합 패스 풀기"
     ID_SUB_OUTLINE           "선을 면(닫힌 패스)으로 변환합니다. 두께를 입력한 뒤 적용하세요.
 외곽선 확장"
     ID_SUB_SMOOTH            "각진 점을 지나는 부드러운 곡선으로 바꿉니다. 허용 오차를 입력한 뒤 적용하세요.\n부드럽게 (곡선화)"

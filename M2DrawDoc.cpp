@@ -44,6 +44,10 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_UNGROUP, &CM2DrawDoc::OnUpdateObjectUngroup)
 	ON_COMMAND(ID_OBJECT_WRAP_FRAME, &CM2DrawDoc::OnObjectWrapFrame)
 	ON_UPDATE_COMMAND_UI(ID_OBJECT_WRAP_FRAME, &CM2DrawDoc::OnUpdateObjectWrapFrame)
+	ON_COMMAND(ID_OBJECT_MAKE_COMPOUND, &CM2DrawDoc::OnObjectMakeCompound)
+	ON_UPDATE_COMMAND_UI(ID_OBJECT_MAKE_COMPOUND, &CM2DrawDoc::OnUpdateObjectMakeCompound)
+	ON_COMMAND(ID_OBJECT_RELEASE_COMPOUND, &CM2DrawDoc::OnObjectReleaseCompound)
+	ON_UPDATE_COMMAND_UI(ID_OBJECT_RELEASE_COMPOUND, &CM2DrawDoc::OnUpdateObjectReleaseCompound)
 	ON_COMMAND_RANGE(ID_OBJECT_FLIP_H, ID_OBJECT_ROT_CCW, &CM2DrawDoc::OnObjectTransform)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_OBJECT_FLIP_H, ID_OBJECT_ROT_CCW, &CM2DrawDoc::OnUpdateObjectTransform)
 	ON_COMMAND_RANGE(ID_OBJECT_FRONT, ID_OBJECT_BACK, &CM2DrawDoc::OnObjectArrange)
@@ -70,6 +74,8 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_UPDATE_COMMAND_UI(ID_TEXT_TO_PATH, &CM2DrawDoc::OnUpdateTextToPath)
 	ON_COMMAND(ID_PATH_OUTLINE, &CM2DrawDoc::OnPathOutline)
 	ON_UPDATE_COMMAND_UI(ID_PATH_OUTLINE, &CM2DrawDoc::OnUpdatePathOutline)
+	ON_COMMAND(ID_PATH_OFFSET, &CM2DrawDoc::OnPathOffset)
+	ON_UPDATE_COMMAND_UI(ID_PATH_OFFSET, &CM2DrawDoc::OnUpdatePathOffset)
 	ON_COMMAND(ID_PATH_SIMPLIFY, &CM2DrawDoc::OnPathSimplify)
 	ON_UPDATE_COMMAND_UI(ID_PATH_SIMPLIFY, &CM2DrawDoc::OnUpdatePathSimplify)
 	ON_COMMAND(ID_PATH_REVERSE, &CM2DrawDoc::OnPathReverse)
@@ -638,6 +644,53 @@ bool CM2DrawDoc::WrapSelectedInFrame()
 void CM2DrawDoc::OnObjectWrapFrame()               { WrapSelectedInFrame(); }
 void CM2DrawDoc::OnUpdateObjectWrapFrame(CCmdUI* pCmdUI) { pCmdUI->Enable(m_doc.CanWrapInFrame()); }
 
+bool CM2DrawDoc::MakeCompoundPath()
+{
+	ge::PathNode* compound = m_doc.MakeCompoundPath();
+	if (!compound) return false;
+
+	UpdateShapePropertiesSelection(compound, this);
+
+	CString strLog;
+	strLog.Format(_T("[복합 패스] '%s' 생성 (서브패스 %d개)"), compound->GetName().c_str(), static_cast<int>(compound->GetPaths().size()));
+	LogAppEvent(strLog);
+	SetAppStatusText(strLog);
+
+	CommitUndoPoint(L"복합 패스 만들기");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+bool CM2DrawDoc::ReleaseCompoundPath()
+{
+	std::vector<ge::PathNode*> released = m_doc.ReleaseCompoundPath();
+	if (released.empty()) return false;
+
+	UpdateShapePropertiesSelection(released.empty() ? nullptr : released.front(), this);
+
+	CString strLog;
+	strLog.Format(_T("[복합 패스 풀기] 도형 %d개로 분리"), static_cast<int>(released.size()));
+	LogAppEvent(strLog);
+	SetAppStatusText(strLog);
+
+	CommitUndoPoint(L"복합 패스 풀기");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+void CM2DrawDoc::OnObjectMakeCompound() { MakeCompoundPath(); }
+void CM2DrawDoc::OnUpdateObjectMakeCompound(CCmdUI* pCmdUI) { pCmdUI->Enable(m_doc.CanMakeCompoundPath()); }
+void CM2DrawDoc::OnObjectReleaseCompound() { ReleaseCompoundPath(); }
+void CM2DrawDoc::OnUpdateObjectReleaseCompound(CCmdUI* pCmdUI) { pCmdUI->Enable(m_doc.CanReleaseCompoundPath()); }
+
 // ---------------------------------------------------------------------------
 // 변형: 반전 / 90도 회전 / 방향키 이동 (Step 6.11.3)
 // ---------------------------------------------------------------------------
@@ -863,6 +916,35 @@ void CM2DrawDoc::OnObjectReleaseMask()
 void CM2DrawDoc::OnUpdateObjectReleaseMask(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(CanReleaseClipMask());
+}
+
+bool CM2DrawDoc::OffsetPath(float distance)
+{
+	if (!CanOffsetPath()) return false;
+
+	ID2D1Factory* pFactory = nullptr;
+	POSITION pos = GetFirstViewPosition();
+	if (pos) {
+		CView* pView = GetNextView(pos);
+		if (pView && pView->IsKindOf(RUNTIME_CLASS(CM2DrawView))) {
+			pFactory = static_cast<CM2DrawView*>(pView)->GetD2DFactory();
+		}
+	}
+	if (!pFactory) return false;
+
+	auto results = m_doc.OffsetPathSelection(distance, pFactory);
+	if (results.empty()) return false;
+
+	UpdateShapePropertiesSelection(GetPrimarySelection(), this);
+	CommitUndoPoint(L"Path Offset");
+	UpdateAllViews(nullptr);
+
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame))) {
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+		static_cast<CMainFrame*>(pMainWnd)->UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+	}
+	return true;
 }
 
 bool CM2DrawDoc::OutlineStroke(float widthOverride)
@@ -1512,6 +1594,16 @@ void CM2DrawDoc::OnPathOutline()
 void CM2DrawDoc::OnUpdatePathOutline(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(CanOutlineStroke());
+}
+
+void CM2DrawDoc::OnPathOffset()
+{
+	OffsetPath(10.0f);
+}
+
+void CM2DrawDoc::OnUpdatePathOffset(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(CanOffsetPath());
 }
 
 void CM2DrawDoc::OnPathSimplify()

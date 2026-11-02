@@ -74,6 +74,9 @@ struct Rect2 {
 	float MidX()   const { return (left + right) * 0.5f; }
 	float MidY()   const { return (top + bottom) * 0.5f; }
 	bool  IsEmpty() const { return right <= left || bottom <= top; }
+	bool  IntersectsWith(const Rect2& o) const {
+		return !(right < o.left || left > o.right || bottom < o.top || top > o.bottom);
+	}
 	void  Union(const Rect2& o);                 // 두 박스 합집합
 
 	Rect2() = default;
@@ -863,6 +866,10 @@ public:
 	int  InsertNodeOnSegment(int subPathIdx, int segIdx, float t);
 	// 노드 삭제 (서브패스가 비면 서브패스도 삭제)
 	bool RemoveNode(int subPathIdx, int nodeIdx);
+	// 노드 타입(Corner, Smooth, Symmetric) 변경
+	bool SetNodeType(int subPathIdx, int nodeIdx, BezierNode::Type newType);
+	// 지정 앵커에서 패스 끊기 (열린 패스로 분할)
+	bool BreakAtNode(int subPathIdx, int nodeIdx);
 	// 로컬 좌표에서 가장 가까운 세그먼트 검색 (노드 추가 툴용)
 	bool FindClosestSegment(Vec2 localPt, int& spIdx, int& segIdx, float& t, float& distSq) const;
 	// 세그먼트 위의 t 지점 좌표
@@ -1268,11 +1275,13 @@ public:
 
 	// 패스 연산 (Step 2.6: Outline, Simplify, Reverse, Join)
 	bool       CanOutlineStroke() const;
+	bool       CanOffsetPath() const;
 	bool       CanSimplify() const;
 	bool       CanReversePath() const;
 	bool       CanJoinPaths() const;
 #ifndef GE_NO_D2D
-	std::vector<PathNode*> OutlineStrokeSelection(ID2D1Factory* factory, float widthOverride = -1.0f);   // widthOverride > 0: 선 두께를 이 값으로 확장
+	std::vector<PathNode*> OutlineStrokeSelection(ID2D1Factory* factory, float widthOverride = -1.0f);
+	std::vector<PathNode*> OffsetPathSelection(float distance, ID2D1Factory* factory);   // widthOverride > 0: 선 두께를 이 값으로 확장
 	std::vector<PathNode*> SmoothSelection(float tolerance);
 	bool CanConvertTextToPath() const;
 	std::vector<PathNode*> TextToPathSelection(ID2D1Factory* factory);   // 선택된 텍스트를 같은 위치의 PathNode 로 교체
@@ -1280,6 +1289,12 @@ public:
 	std::vector<PathNode*> ReversePathSelection();
 	PathNode*              JoinSelection();
 #endif
+
+	// 복합 패스 (Ctrl+8 만들기, Ctrl+Alt+8 풀기)
+	bool       CanMakeCompoundPath() const;
+	bool       CanReleaseCompoundPath() const;
+	PathNode*  MakeCompoundPath();
+	std::vector<PathNode*> ReleaseCompoundPath();
 
 	// 복제 (Ctrl+D): 선택 항목을 같은 부모의 원본 바로 위에 복제, 새 ID/이름 발급 후 복제본을 선택
 	std::vector<Node*> DuplicateSelection();
@@ -1463,6 +1478,10 @@ public:
 
 	// 패스 연산 (Step 2.6)
 	// 1) 외곽선 확장: 선(Stroke)을 닫힌 면(Fill) 패스로 변환
+	// 1b) 패스 이동/오프셋(Offset): 거리만큼 확장 또는 축소
+	static std::unique_ptr<PathNode> OffsetPath(const PathNode& node, float distance, ID2D1Factory* factory,
+	                                            float flatteningTolerance = D2D1_DEFAULT_FLATTENING_TOLERANCE);
+
 	static std::unique_ptr<PathNode> OutlineStroke(const PathNode& node, ID2D1Factory* factory,
 	                                              float flatteningTolerance = D2D1_DEFAULT_FLATTENING_TOLERANCE,
 	                                              float widthOverride = -1.0f);

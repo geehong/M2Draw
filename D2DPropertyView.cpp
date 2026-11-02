@@ -156,6 +156,19 @@ CD2DPropertyView::~CD2DPropertyView()
 
 void CD2DPropertyView::SetPaneMode(PaneMode mode)
 {
+	if (m_bInitialized && m_paneMode == mode)
+	{
+		SyncControlsFromData();
+		if (GetSafeHwnd())
+		{
+			CRect rc;
+			GetClientRect(&rc);
+			UpdateLayout(static_cast<float>(rc.Width()), static_cast<float>(rc.Height()));
+			SafeInvalidate(FALSE);
+		}
+		return;
+	}
+
 	m_paneMode = mode;
 	InitControls();
 	SyncControlsFromData();   // 컨트롤을 새로 만들었으므로 현재 선택/문서 값으로 즉시 채움 (헤더·그라디언트·콤보 등)
@@ -716,9 +729,8 @@ void CD2DPropertyView::SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape)
 			m_fOpacity = shape->GetOpacity() * 100.0f;
 	}
 	if (!GetSelectedShape())
-		m_selStop = 0;
-	else
 	{
+		m_selStop = 0;
 		m_strShapeName = _T("No Selection");
 		m_strShapeType.Empty();
 	}
@@ -973,6 +985,7 @@ void CD2DPropertyView::ApplyCanvasSettings(bool bLive, bool bForceCommit)
 
 void CD2DPropertyView::InitControls()
 {
+	m_bInitialized = true;
 	m_pCurrentPanel = std::make_shared<M2DrawPanel>();
 
 	if (m_paneMode == MODE_SHAPE)

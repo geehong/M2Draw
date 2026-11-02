@@ -333,9 +333,11 @@ CSize CToolOptionBar::CalcFixedLayout(BOOL bStretch, BOOL bHorz)
 
 void CToolOptionBar::OnToolChanged(ToolType newTool)
 {
-	// 선택 도구 <-> 그라디언트 도구 전환은 선택을 유지 (선택한 도형을 그대로 그라디언트 도구로 편집)
-	const bool keepSelection = (newTool == ToolType::Gradient || m_curTool == ToolType::Gradient) &&
-		(newTool == ToolType::Select || newTool == ToolType::Gradient);
+	// 선택 도구 <-> 노드 도구 <-> 그라디언트 도구 전환은 선택을 유지
+	auto isSelectOrNodeOrGrad = [](ToolType t) -> bool {
+		return t == ToolType::Select || t == ToolType::Node || t == ToolType::Gradient;
+	};
+	const bool keepSelection = isSelectOrNodeOrGrad(newTool) && isSelectOrNodeOrGrad(m_curTool);
 	if (!keepSelection) m_selectedNodeId = 0;
 	SetMode(newTool, false);
 	if (keepSelection) return;
@@ -357,6 +359,7 @@ CString CToolOptionBar::GetModeLabel(ToolType tool, bool editing)
 	switch (tool)
 	{
 	case ToolType::Select:   return editing ? L"Selection Edit" : L"Selection";
+	case ToolType::Node:     return L"Node Edit";
 	case ToolType::Gradient: return L"Gradient";
 	case ToolType::Pen:      name = L"Path";     break;
 	case ToolType::Rect:     name = L"Rect";     break;
@@ -533,6 +536,19 @@ void CToolOptionBar::SetMode(ToolType tool, bool editing)
 		AddEdit(ID_OPT_H, L"H");
 		AddEdit(ID_OPT_ROT, L"Angle°", 60);
 		break;
+
+	case ToolType::Node:
+	{
+		AddButton(ID_NODE_CORNER, L"꺾임점(Corner)");
+		AddButton(ID_NODE_SMOOTH, L"부드럽게(Smooth)");
+		AddButton(ID_NODE_SYMMETRIC, L"대칭(Symmetric)");
+		InsertSeparator();
+		AddButton(ID_NODE_BREAK, L"끊기(Break)");
+		AddButton(ID_NODE_JOIN, L"결합(Join)");
+		InsertSeparator();
+		AddLabel(L"Drag: 앵커 이동   Shift+클릭: 다중 선택   드래그: 영역 선택   Delete: 삭제");
+		break;
+	}
 
 	case ToolType::Gradient:
 	{
@@ -1106,6 +1122,20 @@ void CToolOptionBar::OnOptionCommit(UINT id)
 				pSelect->SelectNode(pCommitted, m_pDoc);
 			}
 			m_pDoc->UpdateAllViews(nullptr);
+		}
+		return;
+	}
+	else if (id == ID_NODE_CORNER || id == ID_NODE_SMOOTH || id == ID_NODE_SYMMETRIC || id == ID_NODE_BREAK || id == ID_NODE_JOIN)
+	{
+		ITool* pTool = GetApp()->GetToolManager().GetActiveTool();
+		NodeTool* pNodeTool = dynamic_cast<NodeTool*>(pTool);
+		if (pNodeTool && m_pDoc)
+		{
+			if (id == ID_NODE_CORNER) pNodeTool->ConvertSelectedNodes(m_pDoc, ge::BezierNode::Type::Corner);
+			else if (id == ID_NODE_SMOOTH) pNodeTool->ConvertSelectedNodes(m_pDoc, ge::BezierNode::Type::Smooth);
+			else if (id == ID_NODE_SYMMETRIC) pNodeTool->ConvertSelectedNodes(m_pDoc, ge::BezierNode::Type::Symmetric);
+			else if (id == ID_NODE_BREAK) pNodeTool->BreakSelectedNodes(m_pDoc);
+			else if (id == ID_NODE_JOIN) pNodeTool->JoinSelectedNodes(m_pDoc);
 		}
 		return;
 	}

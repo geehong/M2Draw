@@ -70,10 +70,12 @@ public:
 
 	// --- 패스 연산 (Step 2.6: Outline, Simplify, Reverse, Join) ---
 	bool CanOutlineStroke() const { return m_doc.CanOutlineStroke(); }
+	bool CanOffsetPath() const { return m_doc.CanOffsetPath(); }
 	bool CanSimplify() const      { return m_doc.CanSimplify(); }
 	bool CanReversePath() const   { return m_doc.CanReversePath(); }
 	bool CanJoinPaths() const     { return m_doc.CanJoinPaths(); }
 	bool OutlineStroke(float widthOverride = -1.0f);
+	bool OffsetPath(float distance = 10.0f);
 	bool SmoothPath(float tolerance);
 	bool ConvertTextToPath();
 	afx_msg void OnFilePlaceImage();
@@ -116,6 +118,12 @@ public:
 	afx_msg void OnUpdateObjectUngroup(CCmdUI* pCmdUI);
 	afx_msg void OnObjectWrapFrame();
 	afx_msg void OnUpdateObjectWrapFrame(CCmdUI* pCmdUI);
+	bool MakeCompoundPath();
+	bool ReleaseCompoundPath();
+	afx_msg void OnObjectMakeCompound();
+	afx_msg void OnUpdateObjectMakeCompound(CCmdUI* pCmdUI);
+	afx_msg void OnObjectReleaseCompound();
+	afx_msg void OnUpdateObjectReleaseCompound(CCmdUI* pCmdUI);
 	afx_msg void OnTextToPath();
 	afx_msg void OnUpdateTextToPath(CCmdUI* pCmdUI);
 	// 선택에 월드 변환 적용 (결합 경계 상자 중심 기준 반전/90도 회전, 평행 이동). 잠긴 노드와 선택된 조상이 있는 노드는 제외. Undo 기록은 호출자 (Step 6.11.3)
@@ -135,6 +143,8 @@ public:
 	afx_msg void OnUpdateObjectReleaseMask(CCmdUI* pCmdUI);
 	afx_msg void OnPathOutline();
 	afx_msg void OnUpdatePathOutline(CCmdUI* pCmdUI);
+	afx_msg void OnPathOffset();
+	afx_msg void OnUpdatePathOffset(CCmdUI* pCmdUI);
 	afx_msg void OnPathSimplify();
 	afx_msg void OnUpdatePathSimplify(CCmdUI* pCmdUI);
 	afx_msg void OnPathReverse();

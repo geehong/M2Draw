@@ -1143,6 +1143,16 @@ void PresetShapeTool::Commit(CM2DrawDoc* pDoc, const std::vector<ge::SubPath>& p
 	auto pn = std::make_unique<ge::PathNode>();
 	pn->SetPaths(paths);
 	pn->SetName(name);
+	// 둥근 사각형/정사각형은 파라메트릭 사각형(Rect)으로 만들어 모서리 둥근 툴(라이브 코너 핸들)을 쓸 수 있게 함
+	if (m_type == ToolType::RoundRect || m_type == ToolType::Square)
+	{
+		ge::Rect2 lb{};
+		pn->GetLocalBounds(lb);
+		ge::RectParams rp;
+		rp.rx = rp.ry = (m_type == ToolType::RoundRect) ? 0.2f * (std::min)(lb.Width(), lb.Height()) : 0.0f;
+		pn->SetShapeKind(ge::ShapeKind::Rect);
+		pn->SetParams(rp);
+	}
 	ge::Node* added = pDoc->GetDoc().AddShapeAt(std::move(pn), anchor);
 	if (!added) return;
 	pDoc->GetDoc().SetSelection({ added });
@@ -1326,6 +1336,7 @@ ToolManager::ToolManager()
 	, m_isTempPan(false)
 {
 	m_tools.push_back(std::make_unique<SelectTool>());
+	m_tools.push_back(std::make_unique<NodeTool>());
 	m_tools.push_back(std::make_unique<PanTool>());
 	m_tools.push_back(std::make_unique<PenTool>());
 	m_tools.push_back(std::make_unique<PolylineTool>());

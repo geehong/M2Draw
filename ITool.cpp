@@ -559,6 +559,94 @@ static bool IsCornerRotateZone(D2D1_POINT_2F screenPt, const D2D1_POINT_2F handl
 	return false;
 }
 
+// 단일 사각형 선택 시 라이브 코너 핸들 스크린 좌표 4개 계산 (Step 6.10.2)
+// 라이브 코너 대상의 현재 반경: 파라메트릭 사각형은 rx, 프레임은 모서리 반경(좌상 기준)
+static float GetLiveCornerRadius(const ge::Node* n)
+{
+	if (auto* pn = dynamic_cast<const ge::PathNode*>(n))
+	{
+		const ge::RectParams* rp = pn->GetParam<ge::RectParams>();
+		return rp ? rp->rx : 0.0f;
+	}
+	if (auto* fr = dynamic_cast<const ge::FrameNode*>(n)) return fr->GetCornerRadius();
+	return 0.0f;
+}
+
+static bool GetLiveCornerHandles(ge::Node* shape, const ViewportTransform& view, ID2D1Factory* f, D2D1_POINT_2F outPts[4])
+{
+	if (!shape) return false;
+	const bool isFrame = dynamic_cast<ge::FrameNode*>(shape) != nullptr;
+	ge::PathNode* pn = dynamic_cast<ge::PathNode*>(shape);
+	if (!isFrame && (!pn || pn->GetShapeKind() != ge::ShapeKind::Rect)) return false;
+
+	D2D1_RECT_F lb;
+	if (isFrame)
+	{
+		auto* fr = static_cast<ge::FrameNode*>(shape);
+		lb = D2D1::RectF(0.0f, 0.0f, fr->GetWidth(), fr->GetHeight());
+	}
+	else if (!pn->GetLocalBounds(f, lb)) return false;
+	const float w = lb.right - lb.left;
+	const float h = lb.bottom - lb.top;
+	if (w < 16.0f || h < 16.0f) return false;
+
+	const float maxR = (std::min)(w, h) * 0.5f;
+	const float curR = (std::min)((std::max)(0.0f, GetLiveCornerRadius(shape)), maxR);
+	// 코너에서 안쪽으로 최소 16px, 또는 반경 + 12px 지점 (모서리에서 떨어뜨려 클릭 영역 확보)
+	const float offset = (std::min)(maxR - 2.0f, (std::max)(16.0f, curR + 12.0f));
+
+	D2D1_POINT_2F localPts[4] = {
+		D2D1::Point2F(lb.left + offset, lb.top + offset),
+		D2D1::Point2F(lb.right - offset, lb.top + offset),
+		D2D1::Point2F(lb.right - offset, lb.bottom - offset),
+		D2D1::Point2F(lb.left + offset, lb.bottom - offset)
+	};
+	const ge::Matrix2D wxf = shape->GetWorldTransform();
+	for (int i = 0; i < 4; ++i)
+		outPts[i] = CoordinateSpace::LocalToScreen(localPts[i], wxf, view);
+	return true;
+}
+
+// (left, top): 경로 원점(로컬 좌표). 기존 경로의 로컬 바운즈 좌상단에 맞춰야 도형이 튀지 않는다
+static std::vector<ge::SubPath> BuildRoundedRectPaths(float w, float h, float rx, float ry, float left = 0.0f, float top = 0.0f)
+{
+	const float crx = (std::min)((std::max)(0.0f, rx), w * 0.5f);
+	const float cry = (std::min)((std::max)(0.0f, ry), h * 0.5f);
+	ge::SubPath sp;
+	sp.closed = true;
+	auto add = [&](float ax, float ay, float ix, float iy, float ox, float oy) {
+		ge::BezierNode b; b.anchor = ge::Vec2{ left + ax, top + ay }; b.hIn = ge::Vec2{ ix, iy }; b.hOut = ge::Vec2{ ox, oy };
+		sp.nodes.push_back(b);
+	};
+	if (crx > 0.001f || cry > 0.001f) {
+		const float kx = crx * 0.55228475f, ky = cry * 0.55228475f;
+		add(crx, 0.0f, -kx, 0.0f, 0.0f, 0.0f);       add(w - crx, 0.0f, 0.0f, 0.0f, kx, 0.0f);
+		add(w, cry, 0.0f, -ky, 0.0f, 0.0f);          add(w, h - cry, 0.0f, 0.0f, 0.0f, ky);
+		add(w - crx, h, kx, 0.0f, 0.0f, 0.0f);       add(crx, h, 0.0f, 0.0f, -kx, 0.0f);
+		add(0.0f, h - cry, 0.0f, ky, 0.0f, 0.0f);   add(0.0f, cry, 0.0f, 0.0f, 0.0f, -ky);
+	} else {
+		add(0.0f, 0.0f, 0, 0, 0, 0); add(w, 0.0f, 0, 0, 0, 0); add(w, h, 0, 0, 0, 0); add(0.0f, h, 0, 0, 0, 0);
+	}
+	return { sp };
+}
+
+// 라이브 코너 대상 반경 지정. 프레임은 네 모서리를 같은 값으로 맞춘다 (Undo 는 드래그 끝에 한 번 기록)
+static void SetLiveCornerRadius(ge::Node* n, float r, float w, float h, float left, float top)
+{
+	if (auto* pn = dynamic_cast<ge::PathNode*>(n))
+	{
+		ge::RectParams* rp = pn->GetParamRef<ge::RectParams>();
+		if (!rp) return;
+		rp->rx = rp->ry = r;
+		pn->SetPaths(BuildRoundedRectPaths(w, h, r, r, left, top));
+		pn->Invalidate();
+	}
+	else if (auto* fr = dynamic_cast<ge::FrameNode*>(n))
+	{
+		fr->SetCornerRadius(r);
+	}
+}
+
 HCURSOR SelectTool::GetCursor() const
 {
 	if (m_mode == Mode::Moving || (m_mode == Mode::None && m_hoverOnShape))
@@ -962,36 +1050,32 @@ void SelectTool::OnDown(const ToolEvent& e)
 	// 다중 선택일 때는 개별 도형의 앵커/크기 핸들을 쓰지 않는다 (결합 기즈모만)
 	const std::vector<ge::Node*> perNode = (sel.size() >= 2) ? std::vector<ge::Node*>() : sel;
 
-	// 1. 이미 선택된 패스 도형의 노드(앵커, 핸들 In/Out) 클릭 여부 최우선 검사
-	for (ge::Node* n : perNode)
-	{
-		ge::PathNode* ps = dynamic_cast<ge::PathNode*>(n);
-		if (!ps || !IsInteractive(ps)) continue;
-		HitResult hr = ps->HitTestScreenSpace(screenPt, 8.0f, e.view, e.pD2DFactory);
-		if (IsEditPart(hr))
-		{
-			m_mode = Mode::EditNode;
-			m_editShape = ps;
-			m_editHit = hr;
-			m_handle = Handle::None;
-			m_initialXf = ps->GetTransform();
-
-			CString partName = (hr.part == HitResult::Part::Anchor) ? _T("정점(Anchor)") :
-			                   (hr.part == HitResult::Part::HandleIn) ? _T("핸들In") : _T("핸들Out");
-			CString str;
-			str.Format(_T("[선택 도구] %s 조절점 드래그 시작 (%s, 노드 #%d)"), (LPCTSTR)partName, ps->GetName().c_str(), hr.nodeIdx + 1);
-			LogAppEvent(str);
-			return;
-		}
-	}
-
-	// 2. 이미 선택된 도형 중 닫힌 도형(열린 곡선/직선 제외)의 바운딩 박스 핸들 클릭 여부 검사
+// 2. 이미 선택된 도형 중 닫힌 도형(열린 곡선/직선 제외)의 바운딩 박스 핸들 클릭 여부 검사
 	for (ge::Node* n : perNode)
 	{
 		if (!IsInteractive(n)) continue;
 		D2D1_POINT_2F handles[9];
 		D2D1_RECT_F localBounds;
 		if (!GetHandleScreenPositions(n, e.view, e.pD2DFactory, handles, &localBounds)) continue;
+
+		D2D1_POINT_2F cornerPts[4];
+		if (GetLiveCornerHandles(n, e.view, e.pD2DFactory, cornerPts))
+		{
+			for (int ci = 0; ci < 4; ++ci)
+			{
+				float cdx = screenPt.x - cornerPts[ci].x, cdy = screenPt.y - cornerPts[ci].y;
+				if (cdx * cdx + cdy * cdy <= 11.0f * 11.0f)
+				{
+					m_mode = Mode::LiveCornerDrag;
+					m_handle = Handle::LiveCorner;
+					m_xfTarget = n;
+					m_initialLocalBounds = localBounds;
+					m_liveCornerStartVal = GetLiveCornerRadius(n);
+					LogAppEvent(_T("[선택 도구] 라이브 코너 핸들 드래그 시작"));
+					return;
+				}
+			}
+		}
 
 		Handle hitH = HitHandleOrGlyph(screenPt, handles, 8.0f);
 		m_scaleFromGlyph = (HitHandle(screenPt, handles, 8.0f) == Handle::None);
@@ -1180,6 +1264,19 @@ void SelectTool::OnMove(const ToolEvent& e)
 				{
 					const ge::Matrix2D wxf = n->GetWorldTransform();
 					m_hoverAngleDeg = std::atan2(wxf.m12, wxf.m11) * (180.0f / 3.14159265358979323846f);
+					D2D1_POINT_2F cornerPts[4];
+					if (GetLiveCornerHandles(n, e.view, e.pD2DFactory, cornerPts))
+					{
+						for (int ci = 0; ci < 4; ++ci)
+						{
+							float cdx = screenPt.x - cornerPts[ci].x, cdy = screenPt.y - cornerPts[ci].y;
+							if (cdx * cdx + cdy * cdy <= 11.0f * 11.0f)
+							{
+								m_hoverHandle = Handle::LiveCorner;
+								return;
+							}
+						}
+					}
 					Handle hit = HitHandleOrGlyph(screenPt, handles, 8.0f);
 					if (hit != Handle::None)
 					{
@@ -1251,6 +1348,28 @@ void SelectTool::OnMove(const ToolEvent& e)
 
 	if (sel.empty())
 		return;
+
+	if (m_mode == Mode::LiveCornerDrag && m_xfTarget)
+	{
+		ge::Matrix2D wxfInv = m_xfTarget->GetWorldTransform();
+		if (wxfInv.Invert())
+		{
+			const ge::Vec2 curLocal = wxfInv.TransformPoint(ge::Vec2{ e.worldPt.x, e.worldPt.y });
+			const float w = m_initialLocalBounds.right - m_initialLocalBounds.left;
+			const float h = m_initialLocalBounds.bottom - m_initialLocalBounds.top;
+			const float maxR = (std::min)(w, h) * 0.5f;
+
+			float distTL = std::hypot(curLocal.x - m_initialLocalBounds.left, curLocal.y - m_initialLocalBounds.top);
+			float distTR = std::hypot(curLocal.x - m_initialLocalBounds.right, curLocal.y - m_initialLocalBounds.top);
+			float distBR = std::hypot(curLocal.x - m_initialLocalBounds.right, curLocal.y - m_initialLocalBounds.bottom);
+			float distBL = std::hypot(curLocal.x - m_initialLocalBounds.left, curLocal.y - m_initialLocalBounds.bottom);
+			float minDist = (std::min)({ distTL, distTR, distBR, distBL });
+			float newR = (std::min)(maxR, (std::max)(0.0f, minDist - 6.0f));
+
+			SetLiveCornerRadius(m_xfTarget, newR, w, h, m_initialLocalBounds.left, m_initialLocalBounds.top);
+		}
+		return;
+	}
 
 	switch (m_mode)
 	{
@@ -1425,27 +1544,7 @@ void SelectTool::ApplyMove(const std::vector<ge::Node*>& selection)
 }
 
 // 둥근 사각형 경로 (원점 기준 w x h, 모서리 반경 rx/ry 는 변의 절반으로 제한). 크기를 바꿔도 반경이 찌그러지지 않게 새로 만든다 (Step 6.10.1)
-static std::vector<ge::SubPath> BuildRoundedRectPaths(float w, float h, float rx, float ry)
-{
-	const float crx = (std::min)((std::max)(0.0f, rx), w * 0.5f);
-	const float cry = (std::min)((std::max)(0.0f, ry), h * 0.5f);
-	ge::SubPath sp;
-	sp.closed = true;
-	auto add = [&](float ax, float ay, float ix, float iy, float ox, float oy) {
-		ge::BezierNode b; b.anchor = ge::Vec2{ ax, ay }; b.hIn = ge::Vec2{ ix, iy }; b.hOut = ge::Vec2{ ox, oy };
-		sp.nodes.push_back(b);
-	};
-	if (crx > 0.001f || cry > 0.001f) {
-		const float kx = crx * 0.55228475f, ky = cry * 0.55228475f;
-		add(crx, 0.0f, -kx, 0.0f, 0.0f, 0.0f);       add(w - crx, 0.0f, 0.0f, 0.0f, kx, 0.0f);
-		add(w, cry, 0.0f, -ky, 0.0f, 0.0f);          add(w, h - cry, 0.0f, 0.0f, 0.0f, ky);
-		add(w - crx, h, kx, 0.0f, 0.0f, 0.0f);       add(crx, h, 0.0f, 0.0f, -kx, 0.0f);
-		add(0.0f, h - cry, 0.0f, ky, 0.0f, 0.0f);   add(0.0f, cry, 0.0f, 0.0f, 0.0f, -ky);
-	} else {
-		add(0.0f, 0.0f, 0, 0, 0, 0); add(w, 0.0f, 0, 0, 0, 0); add(w, h, 0, 0, 0, 0); add(0.0f, h, 0, 0, 0, 0);
-	}
-	return { sp };
-}
+
 
 // 엔진에 스케일 변형 위임!
 void SelectTool::ApplyScale(ge::Node* shape)
@@ -1785,6 +1884,10 @@ void SelectTool::OnUp(const ToolEvent& e)
 				if (any) LogAppEvent(_T("[선택 도구] 부모 프레임 변경"));
 			}
 		}
+		if (m_mode == Mode::LiveCornerDrag && e.pDoc)
+		{
+			e.pDoc->CommitUndoPoint(L"모서리 반경 조절");
+		}
 		e.pDoc->SetModifiedFlag(TRUE);
 		UpdateShapePropertiesSelection(e.pDoc->GetPrimarySelection(), e.pDoc);
 		CString str;
@@ -2050,43 +2153,21 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 		}
 		DrawBoxGlyphs(rt, brush, handles);
 
-		// 개별 정점(Anchor) 및 베이지어 핸들(Handle) 에디트 포인트 표시
-		ge::PathNode* pathShape = dynamic_cast<ge::PathNode*>(shape);
-		if (pathShape)
+		// 라이브 코너 핸들 (Step 6.10.2): 사각형 안쪽에 작은 원형 위젯 렌더링
+		D2D1_POINT_2F cornerPts[4];
+		if (GetLiveCornerHandles(shape, view, f, cornerPts))
 		{
-			for (const auto& sp : pathShape->GetPaths())
+			for (int ci = 0; ci < 4; ++ci)
 			{
-				for (const auto& node : sp.nodes)
-				{
-					D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, pathShape->GetWorldTransform(), view);
-
-					if (node.HasIn())
-					{
-						D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), pathShape->GetWorldTransform(), view);
-						brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
-						rt->DrawLine(aScreen, inScreen, brush, 1.0f);
-						brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
-						rt->FillEllipse(D2D1::Ellipse(inScreen, 3.0f, 3.0f), brush);
-					}
-
-					if (node.HasOut())
-					{
-						D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), pathShape->GetWorldTransform(), view);
-						brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
-						rt->DrawLine(aScreen, outScreen, brush, 1.0f);
-						brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
-						rt->FillEllipse(D2D1::Ellipse(outScreen, 3.0f, 3.0f), brush);
-					}
-
-					D2D1_RECT_F ar = D2D1::RectF(aScreen.x - 3.5f, aScreen.y - 3.5f, aScreen.x + 3.5f, aScreen.y + 3.5f);
-					brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
-					rt->FillRectangle(ar, brush);
-					brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
-					rt->DrawRectangle(ar, brush, 1.5f);
-				}
+				brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+				rt->FillEllipse(D2D1::Ellipse(cornerPts[ci], 5.5f, 5.5f), brush);
+				brush->SetColor(D2D1::ColorF(0.12f, 0.45f, 0.95f, 0.95f));
+				rt->DrawEllipse(D2D1::Ellipse(cornerPts[ci], 5.5f, 5.5f), brush, 1.6f);
+				rt->FillEllipse(D2D1::Ellipse(cornerPts[ci], 1.8f, 1.8f), brush);
 			}
 		}
-	}
+
+}
 
 	// 다중 선택 결합 기즈모 (5.2): 경계 상자 + 8핸들 + 회전 핸들 + 크기 알약
 	if (sel.size() >= 2)
@@ -3905,4 +3986,424 @@ void GradientTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brus
 	}
 
 	f->Release();
+}
+
+
+// ============================================================================
+// NodeTool (직접 선택 / 노드 도구, 'A') 구현
+// ============================================================================
+HCURSOR NodeTool::GetCursor() const
+{
+	if (m_hoverIsEditPart || m_mode == Mode::MovingAnchor || m_mode == Mode::MovingHandle)
+		return ::LoadCursor(nullptr, IDC_CROSS);
+	return ::LoadCursor(nullptr, IDC_ARROW);
+}
+
+bool NodeTool::IsAnchorSelected(ge::PathNode* p, int sp, int ni) const
+{
+	for (const auto& a : m_selectedAnchors)
+	{
+		if (a.path == p && a.subPath == sp && a.nodeIdx == ni)
+			return true;
+	}
+	return false;
+}
+
+void NodeTool::SelectAnchor(ge::PathNode* p, int sp, int ni, bool addToSelection)
+{
+	if (!addToSelection)
+	{
+		m_selectedAnchors.clear();
+	}
+	if (p && sp >= 0 && ni >= 0 && !IsAnchorSelected(p, sp, ni))
+	{
+		m_selectedAnchors.push_back({ p, sp, ni });
+	}
+}
+
+void NodeTool::OnDown(const ToolEvent& e)
+{
+	if (!e.pDoc) return;
+	auto& doc = e.pDoc->GetDoc();
+	D2D1_POINT_2F sp = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+	m_dragStartWorld = e.worldPt;
+	m_dragCurrentWorld = e.worldPt;
+	m_marqueeStartScreen = e.screenPt;
+	m_marqueeCurScreen = e.screenPt;
+	m_mode = Mode::None;
+	m_activePart = HitResult::Part::None;
+	m_activeAnchor = AnchorRef{};
+	m_dragInits.clear();
+
+	std::vector<ge::Node*> sel = doc.GetSelection();
+
+	// 1. 이미 선택된 패스들의 핸들(HandleIn/Out) 또는 앵커 클릭 검사
+	for (ge::Node* n : sel)
+	{
+		ge::PathNode* pn = dynamic_cast<ge::PathNode*>(n);
+		if (!pn || !pn->IsEffectivelyVisible() || pn->IsEffectivelyLocked()) continue;
+
+		HitResult hr = pn->HitTestScreenSpace(sp, 8.0f, e.view, e.pD2DFactory);
+		if (hr.part == HitResult::Part::HandleIn || hr.part == HitResult::Part::HandleOut)
+		{
+			m_mode = Mode::MovingHandle;
+			m_activePart = hr.part;
+			m_activeAnchor = { pn, hr.subPath, hr.nodeIdx };
+			LogAppEvent(_T("[노드 도구] 베지에 핸들 드래그 시작"));
+			return;
+		}
+		if (hr.part == HitResult::Part::Anchor)
+		{
+			m_mode = Mode::MovingAnchor;
+			m_activePart = hr.part;
+			m_activeAnchor = { pn, hr.subPath, hr.nodeIdx };
+
+			if (e.shiftDown)
+			{
+				auto it = std::find(m_selectedAnchors.begin(), m_selectedAnchors.end(), m_activeAnchor);
+				if (it != m_selectedAnchors.end()) m_selectedAnchors.erase(it);
+				else m_selectedAnchors.push_back(m_activeAnchor);
+			}
+			else
+			{
+				if (!IsAnchorSelected(pn, hr.subPath, hr.nodeIdx))
+				{
+					m_selectedAnchors = { m_activeAnchor };
+				}
+			}
+
+			for (const auto& a : m_selectedAnchors)
+			{
+				if (a.path && a.subPath >= 0 && a.subPath < (int)a.path->GetPaths().size())
+				{
+					const auto& nodes = a.path->GetPaths()[a.subPath].nodes;
+					if (a.nodeIdx >= 0 && a.nodeIdx < (int)nodes.size())
+					{
+						m_dragInits.push_back({ a, nodes[a.nodeIdx].anchor });
+					}
+				}
+			}
+			LogAppEvent(_T("[노드 도구] 앵커 드래그 시작"));
+			return;
+		}
+	}
+
+	// 2. 다른 패스 도형 클릭 히트테스트
+	ge::Node* clicked = HitTestTopShape(e.pDoc, sp, e.view, e.pD2DFactory);
+	if (clicked && dynamic_cast<ge::PathNode*>(clicked))
+	{
+		ge::PathNode* pn = static_cast<ge::PathNode*>(clicked);
+		if (e.shiftDown)
+		{
+			auto it = std::find(sel.begin(), sel.end(), pn);
+			if (it != sel.end()) sel.erase(it);
+			else sel.push_back(pn);
+		}
+		else
+		{
+			sel = { pn };
+		}
+		doc.SetSelection(sel);
+		m_selectedAnchors.clear();
+
+		HitResult hr = pn->HitTestScreenSpace(sp, 8.0f, e.view, e.pD2DFactory);
+		if (hr.part == HitResult::Part::Anchor)
+		{
+			m_mode = Mode::MovingAnchor;
+			m_activePart = hr.part;
+			m_activeAnchor = { pn, hr.subPath, hr.nodeIdx };
+			m_selectedAnchors = { m_activeAnchor };
+			const auto& nodes = pn->GetPaths()[hr.subPath].nodes;
+			m_dragInits.push_back({ m_activeAnchor, nodes[hr.nodeIdx].anchor });
+		}
+		UpdateShapePropertiesSelection(pn, e.pDoc);
+		e.pDoc->UpdateAllViews(nullptr);
+		return;
+	}
+
+	// 3. 빈 공간 클릭: 앵커 마키(Marquee) 영역 선택 시작
+	if (!e.shiftDown && !clicked)
+	{
+		m_selectedAnchors.clear();
+	}
+	m_mode = Mode::Marquee;
+}
+
+void NodeTool::OnMove(const ToolEvent& e)
+{
+	m_dragCurrentWorld = e.worldPt;
+	m_marqueeCurScreen = e.screenPt;
+	D2D1_POINT_2F sp = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+
+	if (m_mode == Mode::MovingHandle && m_activeAnchor.path)
+	{
+		m_activeAnchor.path->MoveNodeOrHandle(m_activePart, m_activeAnchor.subPath, m_activeAnchor.nodeIdx,
+		                                      ge::Vec2{ e.worldPt.x, e.worldPt.y }, e.altDown);
+		if (e.pDoc) e.pDoc->UpdateAllViews(nullptr);
+		return;
+	}
+
+	if (m_mode == Mode::MovingAnchor)
+	{
+		const float dwX = e.worldPt.x - m_dragStartWorld.x;
+		const float dwY = e.worldPt.y - m_dragStartWorld.y;
+
+		for (const auto& init : m_dragInits)
+		{
+			if (!init.ref.path) continue;
+			ge::Matrix2D inv = init.ref.path->GetWorldTransform();
+			if (!inv.Invert()) continue;
+
+			ge::Vec2 origWorld = init.ref.path->GetWorldTransform().TransformPoint(init.initAnchor);
+			ge::Vec2 newWorld = { origWorld.x + dwX, origWorld.y + dwY };
+			init.ref.path->MoveNodeOrHandle(HitResult::Part::Anchor, init.ref.subPath, init.ref.nodeIdx, newWorld, false);
+		}
+		if (e.pDoc) e.pDoc->UpdateAllViews(nullptr);
+		return;
+	}
+
+	if (m_mode == Mode::Marquee)
+	{
+		return;
+	}
+
+	m_hoverIsEditPart = false;
+	if (e.pDoc)
+	{
+		for (ge::Node* n : e.pDoc->GetDoc().GetSelection())
+		{
+			ge::PathNode* pn = dynamic_cast<ge::PathNode*>(n);
+			if (pn && pn->IsEffectivelyVisible())
+			{
+				HitResult hr = pn->HitTestScreenSpace(sp, 8.0f, e.view, e.pD2DFactory);
+				if (hr.part == HitResult::Part::Anchor || hr.part == HitResult::Part::HandleIn || hr.part == HitResult::Part::HandleOut)
+				{
+					m_hoverIsEditPart = true;
+					break;
+				}
+			}
+		}
+	}
+}
+
+void NodeTool::OnUp(const ToolEvent& e)
+{
+	if (m_mode == Mode::Marquee && e.pDoc)
+	{
+		const float minX = (std::min)(static_cast<float>(m_marqueeStartScreen.x), static_cast<float>(m_marqueeCurScreen.x));
+		const float maxX = (std::max)(static_cast<float>(m_marqueeStartScreen.x), static_cast<float>(m_marqueeCurScreen.x));
+		const float minY = (std::min)(static_cast<float>(m_marqueeStartScreen.y), static_cast<float>(m_marqueeCurScreen.y));
+		const float maxY = (std::max)(static_cast<float>(m_marqueeStartScreen.y), static_cast<float>(m_marqueeCurScreen.y));
+
+		if ((maxX - minX) > 2.0f || (maxY - minY) > 2.0f)
+		{
+			if (!e.shiftDown) m_selectedAnchors.clear();
+			for (ge::Node* n : e.pDoc->GetDoc().GetSelection())
+			{
+				ge::PathNode* pn = dynamic_cast<ge::PathNode*>(n);
+				if (!pn || !pn->IsEffectivelyVisible()) continue;
+				const auto& paths = pn->GetPaths();
+				for (int sp = 0; sp < (int)paths.size(); ++sp)
+				{
+					for (int ni = 0; ni < (int)paths[sp].nodes.size(); ++ni)
+					{
+						D2D1_POINT_2F as = CoordinateSpace::LocalToScreen(paths[sp].nodes[ni].anchor, pn->GetWorldTransform(), e.view);
+						if (as.x >= minX && as.x <= maxX && as.y >= minY && as.y <= maxY)
+						{
+							SelectAnchor(pn, sp, ni, true);
+						}
+					}
+				}
+			}
+			CString logStr;
+			logStr.Format(_T("[노드 도구] 마키 선택 완료: %d개 앵커 선택됨"), (int)m_selectedAnchors.size());
+			LogAppEvent(logStr);
+		}
+	}
+	else if ((m_mode == Mode::MovingAnchor || m_mode == Mode::MovingHandle) && e.pDoc)
+	{
+		e.pDoc->SetModifiedFlag(TRUE);
+		e.pDoc->CommitUndoPoint(L"노드 편집");
+		UpdateShapePropertiesSelection(e.pDoc->GetPrimarySelection(), e.pDoc);
+	}
+
+	m_mode = Mode::None;
+	m_dragInits.clear();
+	if (e.pDoc) e.pDoc->UpdateAllViews(nullptr);
+}
+
+void NodeTool::OnKeyDown(UINT nChar, CM2DrawDoc* pDoc)
+{
+	if (!pDoc) return;
+	if (nChar == VK_DELETE || nChar == VK_BACK)
+	{
+		if (!m_selectedAnchors.empty())
+		{
+			DeleteSelectedNodes(pDoc);
+			pDoc->UpdateAllViews(nullptr);
+		}
+	}
+}
+
+bool NodeTool::ConvertSelectedNodes(CM2DrawDoc* pDoc, ge::BezierNode::Type type)
+{
+	if (!pDoc || m_selectedAnchors.empty()) return false;
+	bool modified = false;
+	for (const auto& a : m_selectedAnchors)
+	{
+		if (a.path && a.path->SetNodeType(a.subPath, a.nodeIdx, type))
+			modified = true;
+	}
+	if (modified)
+	{
+		pDoc->SetModifiedFlag(TRUE);
+		pDoc->CommitUndoPoint(type == ge::BezierNode::Type::Corner ? L"앵커 꺾임점(Corner) 변환" :
+		                      type == ge::BezierNode::Type::Smooth ? L"앵커 부드러운점(Smooth) 변환" : L"앵커 대칭점(Symmetric) 변환");
+		pDoc->UpdateAllViews(nullptr);
+	}
+	return modified;
+}
+
+bool NodeTool::BreakSelectedNodes(CM2DrawDoc* pDoc)
+{
+	if (!pDoc || m_selectedAnchors.empty()) return false;
+	bool modified = false;
+	auto sorted = m_selectedAnchors;
+	std::sort(sorted.begin(), sorted.end(), [](const AnchorRef& a, const AnchorRef& b) {
+		if (a.path != b.path) return a.path < b.path;
+		if (a.subPath != b.subPath) return a.subPath > b.subPath;
+		return a.nodeIdx > b.nodeIdx;
+	});
+
+	for (const auto& a : sorted)
+	{
+		if (a.path && a.path->BreakAtNode(a.subPath, a.nodeIdx))
+			modified = true;
+	}
+	if (modified)
+	{
+		m_selectedAnchors.clear();
+		pDoc->SetModifiedFlag(TRUE);
+		pDoc->CommitUndoPoint(L"패스 끊기(Break Path)");
+		pDoc->UpdateAllViews(nullptr);
+	}
+	return modified;
+}
+
+bool NodeTool::JoinSelectedNodes(CM2DrawDoc* pDoc)
+{
+	if (!pDoc) return false;
+	ge::PathNode* joined = pDoc->GetDoc().JoinSelection();
+	if (joined)
+	{
+		m_selectedAnchors.clear();
+		pDoc->SetModifiedFlag(TRUE);
+		pDoc->CommitUndoPoint(L"패스 결합(Join Path)");
+		pDoc->UpdateAllViews(nullptr);
+		return true;
+	}
+	return false;
+}
+
+bool NodeTool::DeleteSelectedNodes(CM2DrawDoc* pDoc)
+{
+	if (!pDoc || m_selectedAnchors.empty()) return false;
+	auto sorted = m_selectedAnchors;
+	std::sort(sorted.begin(), sorted.end(), [](const AnchorRef& a, const AnchorRef& b) {
+		if (a.path != b.path) return a.path < b.path;
+		if (a.subPath != b.subPath) return a.subPath > b.subPath;
+		return a.nodeIdx > b.nodeIdx;
+	});
+
+	bool modified = false;
+	for (const auto& a : sorted)
+	{
+		if (a.path && a.path->RemoveNode(a.subPath, a.nodeIdx))
+			modified = true;
+	}
+	if (modified)
+	{
+		m_selectedAnchors.clear();
+		pDoc->SetModifiedFlag(TRUE);
+		pDoc->CommitUndoPoint(L"선택된 앵커 삭제");
+		pDoc->UpdateAllViews(nullptr);
+	}
+	return modified;
+}
+
+void NodeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
+                           float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc)
+{
+	if (!rt || !brush || !pDoc) return;
+	ViewportTransform view = { zoom, { pan.x, pan.y } };
+
+	// 1. 마키(Marquee) 사각형
+	if (m_mode == Mode::Marquee)
+	{
+		D2D1_RECT_F mr = D2D1::RectF(
+			(std::min)(static_cast<float>(m_marqueeStartScreen.x), static_cast<float>(m_marqueeCurScreen.x)),
+			(std::min)(static_cast<float>(m_marqueeStartScreen.y), static_cast<float>(m_marqueeCurScreen.y)),
+			(std::max)(static_cast<float>(m_marqueeStartScreen.x), static_cast<float>(m_marqueeCurScreen.x)),
+			(std::max)(static_cast<float>(m_marqueeStartScreen.y), static_cast<float>(m_marqueeCurScreen.y))
+		);
+		brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.15f));
+		rt->FillRectangle(mr, brush);
+		brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.85f));
+		rt->DrawRectangle(mr, brush, 1.2f);
+	}
+
+	const std::vector<ge::Node*>& sel = pDoc->GetDoc().GetSelection();
+	for (ge::Node* shape : sel)
+	{
+		ge::PathNode* pn = dynamic_cast<ge::PathNode*>(shape);
+		if (!pn || !pn->IsEffectivelyVisible()) continue;
+
+		const auto& paths = pn->GetPaths();
+		for (int sp = 0; sp < (int)paths.size(); ++sp)
+		{
+			for (int ni = 0; ni < (int)paths[sp].nodes.size(); ++ni)
+			{
+				const auto& node = paths[sp].nodes[ni];
+				D2D1_POINT_2F aScreen = CoordinateSpace::LocalToScreen(node.anchor, pn->GetWorldTransform(), view);
+				const bool isSelected = IsAnchorSelected(pn, sp, ni);
+
+				if (isSelected || sel.size() == 1)
+				{
+					if (node.HasIn())
+					{
+						D2D1_POINT_2F inScreen = CoordinateSpace::LocalToScreen(node.AbsIn(), pn->GetWorldTransform(), view);
+						brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
+						rt->DrawLine(aScreen, inScreen, brush, 1.0f);
+						brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
+						rt->FillEllipse(D2D1::Ellipse(inScreen, 3.2f, 3.2f), brush);
+					}
+					if (node.HasOut())
+					{
+						D2D1_POINT_2F outScreen = CoordinateSpace::LocalToScreen(node.AbsOut(), pn->GetWorldTransform(), view);
+						brush->SetColor(D2D1::ColorF(0.5f, 0.5f, 0.5f, 0.8f));
+						rt->DrawLine(aScreen, outScreen, brush, 1.0f);
+						brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
+						rt->FillEllipse(D2D1::Ellipse(outScreen, 3.2f, 3.2f), brush);
+					}
+				}
+
+				const float aSize = isSelected ? 4.5f : 3.5f;
+				D2D1_RECT_F ar = D2D1::RectF(aScreen.x - aSize, aScreen.y - aSize, aScreen.x + aSize, aScreen.y + aSize);
+				if (isSelected)
+				{
+					brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
+					rt->FillRectangle(ar, brush);
+					brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+					rt->DrawRectangle(ar, brush, 1.5f);
+				}
+				else
+				{
+					brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+					rt->FillRectangle(ar, brush);
+					brush->SetColor(D2D1::ColorF(D2D1::ColorF::DodgerBlue));
+					rt->DrawRectangle(ar, brush, 1.5f);
+				}
+			}
+		}
+	}
 }

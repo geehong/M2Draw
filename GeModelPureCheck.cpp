@@ -2840,6 +2840,97 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(pie.size() == 1 && pie[0].closed && near(pie[0].nodes.front().anchor, 0, 0), L"파이가 중심에서 시작하지 않음");
 	}
 
+	// ---- 47. 노드 타입 변환 및 패스 분할 (Step 6.9 직접 선택 도구 지원) -----------------
+	{
+		PathNode pn;
+		SubPath sp;
+		sp.closed = true;
+		BezierNode b0; b0.anchor = Vec2{ 0, 0 };
+		BezierNode b1; b1.anchor = Vec2{ 100, 0 };
+		BezierNode b2; b2.anchor = Vec2{ 100, 100 };
+		BezierNode b3; b3.anchor = Vec2{ 0, 100 };
+		sp.nodes = { b0, b1, b2, b3 };
+		pn.SetPaths({ sp });
+
+		// 노드 타입 변경
+		GE_CHECK(pn.SetNodeType(0, 1, BezierNode::Type::Smooth), L"노드 타입 변경 실패");
+		GE_CHECK(pn.GetPaths()[0].nodes[1].type == BezierNode::Type::Smooth, L"노드 타입이 Smooth로 설정되지 않음");
+
+		// 닫힌 패스 앵커에서 분할(BreakAtNode) -> 열린 패스 1개(노드 5개: 시작/끝이 분할 앵커)로 변환
+		GE_CHECK(pn.BreakAtNode(0, 1), L"닫힌 패스 분할 실패");
+		GE_CHECK(!pn.GetPaths()[0].closed, L"분할된 패스가 여전히 닫혀 있음");
+		GE_CHECK(pn.GetPaths()[0].nodes.size() == 5, L"분할 후 앵커 수가 일치하지 않음");
+
+		// 열린 패스의 중간 앵커(인덱스 2)에서 분할 -> 2개의 열린 SubPath로 분할
+		GE_CHECK(pn.BreakAtNode(0, 2), L"열린 패스 중간 앵커 분할 실패");
+		GE_CHECK(pn.GetPaths().size() == 2, L"열린 패스 분할 후 SubPath 수가 2개가 아님");
+		GE_CHECK(!pn.GetPaths()[0].closed && !pn.GetPaths()[1].closed, L"분할된 두 패스가 열린 패스가 아님");
+	}
+
+	// ---- 48. 복합 패스 (Compound Path) 생성 및 풀기 (Step 6.11.1) -------------------
+	{
+		Document doc;
+		LayerNode* layer = doc.GetActiveLayer();
+
+		// 외곽 사각형 패스
+		auto p1 = std::make_unique<PathNode>();
+		p1->SetName(L"outer");
+		p1->AddAnchor(Vec2{ 0, 0 });
+		p1->AddAnchor(Vec2{ 200, 0 });
+		p1->AddAnchor(Vec2{ 200, 200 });
+		p1->AddAnchor(Vec2{ 0, 200 });
+		p1->GetPathsRef().back().closed = true;
+		p1->SetTransform(Matrix2D::Translation(50, 50));
+		PathNode* rawP1 = static_cast<PathNode*>(layer->AddChild(std::move(p1)));
+
+		// 내부 원형/사각형 구멍 패스
+		auto p2 = std::make_unique<PathNode>();
+		p2->SetName(L"inner");
+		p2->AddAnchor(Vec2{ 0, 0 });
+		p2->AddAnchor(Vec2{ 100, 0 });
+		p2->AddAnchor(Vec2{ 100, 100 });
+		p2->AddAnchor(Vec2{ 0, 100 });
+		p2->GetPathsRef().back().closed = true;
+		p2->SetTransform(Matrix2D::Translation(100, 100));
+		PathNode* rawP2 = static_cast<PathNode*>(layer->AddChild(std::move(p2)));
+
+		doc.SetSelection({ rawP1, rawP2 });
+		GE_CHECK(doc.CanMakeCompoundPath(), L"복합 패스 생성 가능 여부 판정 실패");
+
+		PathNode* compound = doc.MakeCompoundPath();
+		GE_CHECK(compound != nullptr, L"복합 패스 생성 실패");
+		GE_CHECK(compound->GetPaths().size() == 2, L"복합 패스 서브패스 개수 오류");
+		GE_CHECK(compound->GetStyle().fillMode == FillMode::Alternate, L"복합 패스 FillMode 가 Alternate 가 아님");
+		GE_CHECK(layer->GetChildren().size() == 1, L"원본 2개가 단일 복합 패스 1개로 교체되지 않음");
+
+		// 풀기(Release) 검증
+		doc.SetSelection({ compound });
+		GE_CHECK(doc.CanReleaseCompoundPath(), L"복합 패스 풀기 가능 여부 판정 실패");
+
+		auto released = doc.ReleaseCompoundPath();
+		GE_CHECK(released.size() == 2, L"복합 패스 풀기 후 분리된 노드 수 오류");
+		GE_CHECK(layer->GetChildren().size() == 2, L"풀린 후 레이어 자식 수가 2개가 아님");
+		GE_CHECK(released[0]->GetPaths().size() == 1 && released[1]->GetPaths().size() == 1, L"분리된 각 노드의 서브패스 수가 1개가 아님");
+	}
+
+	// ---- 49. 패스 이동 / 오프셋 (Offset Path) 검증 (Step 6.11.2) ------------
+	{
+		Document doc;
+		LayerNode* layer = doc.GetActiveLayer();
+
+		auto p1 = std::make_unique<PathNode>();
+		p1->SetName(L"box");
+		p1->AddAnchor(Vec2{ 0, 0 });
+		p1->AddAnchor(Vec2{ 100, 0 });
+		p1->AddAnchor(Vec2{ 100, 100 });
+		p1->AddAnchor(Vec2{ 0, 100 });
+		p1->GetPathsRef().back().closed = true;
+		PathNode* rawP1 = static_cast<PathNode*>(layer->AddChild(std::move(p1)));
+
+		doc.SetSelection({ rawP1 });
+		GE_CHECK(doc.CanOffsetPath(), L"패스 이동 대상 감지 실패");
+	}
+
 #undef GE_CHECK
 
 	return true;
