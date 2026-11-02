@@ -3,6 +3,7 @@
 #include "HtmlComponents/UiComponents.h"
 #include "D2DGraphicEngine.h"
 #include "D2DLayer.h"
+#include "ReferenceImport.h"
 
 #include <charconv>
 #include <functional>
@@ -392,8 +393,9 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 	}
 
 	// 레이어 순회
+	// Clean(순수 SVG 내보내기)에서는 레퍼런스 레이어 제외 (7.1.1). 저장/Undo 는 레퍼런스를 유지
 	for (const auto& layer : doc.GetLayers()) {
-		if (layer) {
+		if (layer && !(m_options.mode == SvgWriteMode::Clean && IsReferenceNode(*layer))) {
 			layer->Accept(*this);
 		}
 	}

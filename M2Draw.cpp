@@ -8,6 +8,7 @@
 #include "afxdialogex.h"
 #include "RasterExport.h"
 #include "M2Draw.h"
+#include "ReferenceVerification.h"
 #include "MainFrm.h"
 
 #include "ChildFrm.h"
@@ -101,6 +102,24 @@ BOOL CM2DrawApp::InitInstance()
 	AfxEnableControlContainer();
 
 #ifdef _DEBUG
+	// 창 없이 레퍼런스/AI 패키지/아이콘 세트/SVG 가져오기 검증 (실행: M2Draw.exe --selftest-ref). 결과는 %TEMP%\m2draw_selftest.txt
+	if (m_lpCmdLine && wcsstr(m_lpCmdLine, L"--selftest-ref")) {
+		std::wstring failure, log;
+		const bool ok = ge::test::RunReferenceAgentVerification(&failure, &log);
+		const std::wstring result = ok ? (L"ALL PASS\r\n" + log) : (L"FAIL: " + failure + L"\r\n" + log);
+		const int n = ::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), nullptr, 0, nullptr, nullptr);
+		std::string bytes(static_cast<size_t>(n), '\0');
+		::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), bytes.data(), n, nullptr, nullptr);
+		wchar_t tmpDir[MAX_PATH] = {};
+		::GetTempPathW(MAX_PATH, tmpDir);
+		FILE* fp = nullptr;
+		if (_wfopen_s(&fp, (std::wstring(tmpDir) + L"m2draw_selftest.txt").c_str(), L"wb") == 0 && fp) {
+			fwrite(bytes.data(), 1, bytes.size(), fp);
+			fclose(fp);
+		}
+		return FALSE;   // 창을 띄우지 않고 종료
+	}
+
 	// 런타임 자체 검증 (래스터 출력 / 클립보드 SVG / 페인트통 등 D2D/WIC 가 필요한 부분)
 	{
 		std::wstring failure;

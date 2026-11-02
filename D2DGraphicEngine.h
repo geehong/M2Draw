@@ -1540,6 +1540,9 @@ public:
 };
 
 // Direct2D 구현 (D2D 객체와 지오메트리 캐시는 여기서만 보유)
+// 그릴 레이어 선택 (7.1.1): All = 앱 캔버스, ExcludeReference = PNG/JPG·SVG 내보내기, OnlyReference = 레퍼런스 원본 파일(투명도 무시)
+enum class RenderLayerFilter : uint8_t { All, ExcludeReference, OnlyReference };
+
 class D2DRenderer : public IRenderer {
 public:
 	D2DRenderer() = default;
@@ -1551,6 +1554,8 @@ public:
 	void EndDraw() override;
 	void DrawDocument(Document& doc, const Viewport& view) override;
 	void DrawNode(Node& node, const Matrix2D& parentXf, const Viewport& view) override;
+	// 레이어 선택 (기본 All). 내보내기에서만 바꾼다
+	void SetLayerFilter(RenderLayerFilter f) { m_layerFilter = f; }
 
 	// 노드 -> D2D 지오메트리 (m_dirty 일 때만 재생성)
 	ID2D1Geometry* GetGeometry(PathNode& node);
@@ -1581,6 +1586,7 @@ private:
 	ID2D1Brush* GetGradientBrush(const Node& node, const Rect2& bounds);
 
 	ID2D1RenderTarget*             m_rt      = nullptr;   // 비소유
+	RenderLayerFilter              m_layerFilter = RenderLayerFilter::All;
 	ID2D1Factory*                  m_factory = nullptr;   // 비소유
 	ComPtr<ID2D1SolidColorBrush>   m_brush;
 	// PathNode 별 지오메트리 캐시

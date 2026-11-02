@@ -79,6 +79,13 @@ public:
 	bool SmoothPath(float tolerance);
 	bool ConvertTextToPath();
 	afx_msg void OnFilePlaceImage();
+	afx_msg void OnFilePlaceReference();   // 레퍼런스 이미지 가져오기 (잠긴 반투명 레이어, 7.1.1)
+	afx_msg void OnFileExportAgent();      // AI 에이전트 패키지 내보내기 (7.3.1)
+	afx_msg void OnFileImportAgentSvg();   // AI 산출물 SVG 가져오기 (7.2.3)
+	afx_msg void OnFileExportIconSet();    // 아이콘 세트 내보내기 (7.4.1 / 7.4.2)
+	bool ImportSvgNodes(const std::string& svg, bool isPaste);   // SVG 노드를 선택 프레임 안(또는 활성 레이어)에 넣는다
+	bool PlaceReferenceData(std::shared_ptr<ge::ImageData> data, const CString& title);
+	bool PasteBitmapAsReference();         // 클립보드 비트맵을 레퍼런스로 붙여넣기
 	afx_msg void OnFileExportSvg();   // 순수 SVG 내보내기 (옵션: 텍스트 윤곽선 변환)
 	// HTML 미리보기(Step 4.6)용: 선택된 최상위 아트보드(없으면 nullptr = 문서 전체)와 현재 문서의 HTML
 	ge::FrameNode* GetSelectedTopArtboard();

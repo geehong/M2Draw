@@ -183,6 +183,8 @@ LANGUAGE 18, 1
         MENUITEM "HTML 내보내기(&H)...", ID_FILE_EXPORT_HTML \
         MENUITEM "HTML 미리보기(&P)...", ID_FILE_PREVIEW_HTML \
         MENUITEM "이미지 내보내기(&I)... (PNG/JPG)", ID_FILE_EXPORT_IMAGE \
+        MENUITEM "AI 에이전트 패키지(&A)...", ID_FILE_EXPORT_AGENT \
+        MENUITEM "아이콘 세트 내보내기(&K)...", ID_FILE_EXPORT_ICONSET \
     END
 
 IDR_MAINFRAME MENU
@@ -192,6 +194,8 @@ BEGIN
         MENUITEM "새로 만들기(&N)\tCtrl+N",                ID_FILE_NEW
         MENUITEM "열기(&O)...\tCtrl+O",            ID_FILE_OPEN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
+        MENUITEM "레퍼런스 가져오기(&F)...", ID_FILE_PLACE_REFERENCE
+        MENUITEM "AI 산출물 가져오기(&G)...", ID_FILE_IMPORT_AGENT_SVG
         M2_EXPORT_MENU_ITEMS
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM SEPARATOR
@@ -234,6 +238,8 @@ BEGIN
         MENUITEM "새로 만들기(&N)\tCtrl+N",                ID_FILE_NEW
         MENUITEM "열기(&O)...\tCtrl+O",            ID_FILE_OPEN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
+        MENUITEM "레퍼런스 가져오기(&F)...", ID_FILE_PLACE_REFERENCE
+        MENUITEM "AI 산출물 가져오기(&G)...", ID_FILE_IMPORT_AGENT_SVG
         M2_EXPORT_MENU_ITEMS
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM "저장(&S)\tCtrl+S",               ID_FILE_SAVE
@@ -689,6 +695,10 @@ BEGIN
     ID_SUB_SMOOTH            "각진 점을 지나는 부드러운 곡선으로 바꿉니다. 허용 오차를 입력한 뒤 적용하세요.\n부드럽게 (곡선화)"
     ID_TEXT_TO_PATH          "선택한 텍스트를 편집 가능한 패스(윤곽선)로 변환합니다.\n윤곽선으로 변환"
     ID_FILE_PLACE_IMAGE      "이미지 파일을 캔버스에 가져옵니다.\n이미지 가져오기"
+     ID_FILE_PLACE_REFERENCE  "트레이싱용 레퍼런스 이미지를 잠긴 반투명 레이어로 가져옵니다.\n레퍼런스 가져오기"
+     ID_FILE_EXPORT_AGENT    "AI 에이전트에게 넘길 패키지(scene.json, preview.png, prompt.md)를 폴더에 저장합니다.\nAI 에이전트 패키지"
+     ID_FILE_IMPORT_AGENT_SVG  "AI 에이전트가 만든 SVG 파일을 선택한 프레임 안(없으면 활성 레이어)에 가져옵니다.\nAI 산출물 가져오기"
+     ID_FILE_EXPORT_ICONSET    "선택한 도형(없으면 문서 전체)을 여러 크기 PNG, ICO, 파비콘 세트로 저장합니다.\n아이콘 세트 내보내기"
     ID_FILE_EXPORT_SVG       "순수 SVG(Illustrator/Inkscape/Figma/브라우저 호환)로 내보냅니다.\nSVG 내보내기"
     ID_FILE_PREVIEW_HTML     "WebView2 로 현재 문서의 HTML 을 실시간 미리 봅니다. 폭 조절과 PDF 저장도 지원합니다.\nHTML 미리보기"
     ID_EDIT_DUPLICATE "선택한 오브젝트를 복제합니다.\n복제"

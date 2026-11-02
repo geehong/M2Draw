@@ -51,15 +51,4 @@ ImageNode* AddReferenceImage(Document& doc, std::shared_ptr<const ImageData> dat
 	return static_cast<ImageNode*>(added);
 }
 
-bool IsReferenceNode(const Node& node)
-{
-	const Node* cur = &node;
-	while (cur) {
-		if (cur->Kind() == NodeKind::Layer)
-			return cur->GetName() == kReferenceLayerName;
-		cur = cur->GetParent();
-	}
-	return false;
-}
-
 } // namespace ge

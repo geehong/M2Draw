@@ -2,6 +2,8 @@
 #include "AgentHandoff.h"
 #include "SceneJsonWriter.h"
 #include "RasterExport.h"
+#include "ReferenceImport.h"
+#include "D2DLayer.h"
 
 #include <cmath>
 #include <filesystem>
@@ -35,12 +37,34 @@ bool WriteUtf8File(const std::filesystem::path& path, const std::string& content
 	return true;
 }
 
+void CollectFramesWithoutRole(const Node& node, std::vector<std::wstring>& out)
+{
+	if (dynamic_cast<const FrameNode*>(&node) && node.GetHtmlTag().empty())
+		out.push_back(node.GetName());
+	if (const auto* group = dynamic_cast<const GroupNode*>(&node)) {
+		for (const auto& child : group->GetChildren())
+			CollectFramesWithoutRole(*child, out);
+	}
+}
+
 std::wstring Px(float v)
 {
 	return std::to_wstring(static_cast<long long>(std::lround(v)));
 }
 
 } // namespace
+
+std::vector<std::wstring> FindFramesWithoutRole(const Document& doc, const Node* scope)
+{
+	std::vector<std::wstring> out;
+	if (scope) {
+		CollectFramesWithoutRole(*scope, out);
+	} else {
+		for (const auto& layer : doc.GetLayers())
+			CollectFramesWithoutRole(*layer, out);
+	}
+	return out;
+}
 
 std::wstring BuildAgentPrompt(const Document& doc, const Node* target)
 {
@@ -58,7 +82,10 @@ std::wstring BuildAgentPrompt(const Document& doc, const Node* target)
 	std::wstring s;
 	s += L"아래 폴더의 파일을 참고해 웹페이지를 만들어 주세요.\r\n\r\n";
 	s += L"- preview.png : 디자인 그림 (화면 구성 확인용)\r\n";
-	s += L"- scene.json : 요소 구조 (계층, 역할(role), 크기, 레이아웃, 색, 글꼴, 좌표)\r\n\r\n";
+	s += L"- scene.json : 요소 구조 (계층, 역할(role), 크기, 레이아웃, 색, 글꼴, 좌표)\r\n";
+	if (HasReferenceImage(doc))
+		s += L"- reference.png : 목표 디자인 원본. preview.png 와 비교해 차이를 줄이세요\r\n";
+	s += L"\r\n";
 	s += L"대상: " + name + L" (" + Px(w) + L" x " + Px(h) + L" px)\r\n\r\n";
 	s += L"지침\r\n";
 	s += L"1. role 이 있는 요소는 그 HTML 태그를 사용하세요.\r\n";
@@ -98,7 +125,18 @@ bool WriteAgentPackage(Document& doc, const std::wstring& folder, const AgentHan
 		return false;
 	}
 
-	// 3. 지시문 초안 (사용자가 편집해 쓰도록 파일로 남김)
+	// 3. 레퍼런스 원본 (있을 때만): 레퍼런스 레이어만 그리고 원본 색을 유지 (7.1.1)
+	if (HasReferenceImage(doc)) {
+		RasterExportOptions refOpt;
+		refOpt.transparent = false;
+		refOpt.layers = RenderLayerFilter::OnlyReference;
+		if (!ExportRaster(doc, (dir / L"reference.png").wstring(), refOpt, nullptr, &rasterErr)) {
+			if (err) *err = L"reference.png 저장 실패: " + rasterErr;
+			return false;
+		}
+	}
+
+	// 4. 지시문 초안 (사용자가 편집해 쓰도록 파일로 남김)
 	if (!WriteUtf8File(dir / L"prompt.md", ToUtf8(BuildAgentPrompt(doc, opt.target)), err))
 		return false;
 

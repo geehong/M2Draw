@@ -253,6 +253,9 @@
     <ClInclude Include="RasterExport.h" />
     <ClInclude Include="SceneJsonWriter.h" />
     <ClInclude Include="AgentHandoff.h" />
+    <ClInclude Include="ClipboardImage.h" />
+    <ClInclude Include="IconSet.h" />
+    <ClInclude Include="ReferenceVerification.h" />
     <ClInclude Include="ReferenceImport.h" />
     <ClInclude Include="HtmlComponents\TableComponent.h" />
     <ClInclude Include="HtmlComponents\UiComponents.h" />
@@ -273,6 +276,9 @@
     <ClCompile Include="RasterExport.cpp" />
     <ClCompile Include="SceneJsonWriter.cpp" />
     <ClCompile Include="AgentHandoff.cpp" />
+    <ClCompile Include="ClipboardImage.cpp" />
+    <ClCompile Include="IconSet.cpp" />
+    <ClCompile Include="ReferenceVerification.cpp" />
     <ClCompile Include="ReferenceImport.cpp" />
     <ClCompile Include="RuntimeVerification.cpp" />
     <ClCompile Include="D2DShadowRender.cpp" />

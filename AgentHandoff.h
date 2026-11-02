@@ -2,6 +2,7 @@
 
 #include "D2DGraphicEngine.h"
 #include <string>
+#include <vector>
 
 namespace ge {
 
@@ -18,6 +19,9 @@ struct AgentHandoffOptions {
 
 // 지시문 초안을 만든다 (대상 이름, 크기, 지침 포함). 파일로 쓸 때는 UTF-8 로 변환한다
 std::wstring BuildAgentPrompt(const Document& doc, const Node* target);
+
+// 역할(role)이 없는 프레임 이름 목록 (scope 아래, nullptr = 문서 전체). 패키지 저장 전 경고용 (7.3.4)
+std::vector<std::wstring> FindFramesWithoutRole(const Document& doc, const Node* scope);
 
 // 패키지를 folder 에 쓴다 (폴더가 없으면 만든다). 실패하면 false 와 사유를 err 에 넣는다
 bool WriteAgentPackage(Document& doc, const std::wstring& folder, const AgentHandoffOptions& opt, std::wstring* err);

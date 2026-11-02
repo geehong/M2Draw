@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "SceneJsonWriter.h"
 #include "D2DLayer.h"
+#include "ReferenceImport.h"
 
 #include <algorithm>
 #include <cmath>
@@ -281,8 +282,9 @@ std::string SerializeSceneJson(const Document& doc, const SceneJsonOptions& opti
 		top.push_back({ "root", NodeJson(*options.root) });
 	} else {
 		std::vector<std::string> layers;
-		for (const auto& layer : doc.GetLayers())
-			layers.push_back(NodeJson(*layer));
+		for (const auto& layer : doc.GetLayers()) {
+			if (!IsReferenceNode(*layer)) layers.push_back(NodeJson(*layer));   // 레퍼런스 원본은 reference.png 로 따로 준다
+		}
 		top.push_back({ "layers", Array(layers) });
 	}
 

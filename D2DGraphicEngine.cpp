@@ -3,6 +3,7 @@
 #pragma comment(lib, "windowscodecs.lib")
 #include "D2DGraphicEngine.h"
 #include "GeNodeVisitor.h"
+#include "ReferenceImport.h"
 
 namespace ge {
 
@@ -3579,6 +3580,10 @@ void D2DRenderer::DrawDocument(Document& doc, const Viewport& view)
 	// 레이어 0 -> N-1 (Painter's Algorithm)
 	for (auto& layer : doc.GetLayers()) {
 		if (!layer->IsVisible()) continue;
+		if (m_layerFilter != RenderLayerFilter::All) {
+			const bool isRef = IsReferenceNode(*layer);
+			if (isRef != (m_layerFilter == RenderLayerFilter::OnlyReference)) continue;
+		}
 
 		const bool needLayer = layer->GetOpacity() < 0.999f;   // 레이어 불투명도 합성 전용 (클리핑은 2.4 의 GroupNode::clipPath 로 구현)
 		if (needLayer && m_rt) {
@@ -3644,10 +3649,12 @@ void D2DRenderer::DrawNode(Node& node, const Matrix2D& parentXf, const Viewport&
 
 	// SVG opacity 의미: 도형(채움+선) / 그룹(모든 자식)을 먼저 하나로 합성한 뒤 불투명도를 한 번만 적용.
 	// 자식마다 알파를 곱하면 겹친 부분이 진해지는 문제가 생김. 레이어는 DrawDocument 가 같은 방식으로 처리.
-	const bool needLayer = m_rt && node.Kind() != NodeKind::Layer && node.GetOpacity() < 0.999f;
+	// 레퍼런스 원본 파일(OnlyReference)은 원본 색을 그대로 내야 하므로 레퍼런스 노드의 투명도를 무시한다
+	const float nodeOpacity = (m_layerFilter == RenderLayerFilter::OnlyReference && IsReferenceNode(node)) ? 1.0f : node.GetOpacity();
+	const bool needLayer = m_rt && node.Kind() != NodeKind::Layer && nodeOpacity < 0.999f;
 	if (needLayer) {
 		D2D1_LAYER_PARAMETERS params = D2D1::LayerParameters();
-		params.opacity = node.GetOpacity();
+		params.opacity = nodeOpacity;
 		params.contentBounds = D2D1::InfiniteRect();
 		m_rt->PushLayer(params, nullptr);
 	}

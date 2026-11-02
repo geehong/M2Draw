@@ -27,7 +27,26 @@ LayerNode* EnsureReferenceLayer(Document& doc);
 // 실패하면 nullptr
 ImageNode* AddReferenceImage(Document& doc, std::shared_ptr<const ImageData> data, const std::wstring& name, float maxRatio = 1.0f);
 
-// 노드가 레퍼런스 레이어 안에 있는지 (조상 체인을 따라 레이어까지 확인)
-bool IsReferenceNode(const Node& node);
+// 문서에 레퍼런스 이미지가 있는지 (레퍼런스 레이어에 자식이 하나라도 있으면 true)
+inline bool HasReferenceImage(const Document& doc)
+{
+	for (const auto& layer : doc.GetLayers()) {
+		if (layer->GetName() == kReferenceLayerName && !layer->GetChildren().empty())
+			return true;
+	}
+	return false;
+}
+
+// 노드가 레퍼런스 레이어 안에 있는지 (조상 체인을 따라 레이어까지 확인). 내보내기 제외 판정에 쓴다
+inline bool IsReferenceNode(const Node& node)
+{
+	const Node* cur = &node;
+	while (cur) {
+		if (cur->Kind() == NodeKind::Layer)
+			return cur->GetName() == kReferenceLayerName;
+		cur = cur->GetParent();
+	}
+	return false;
+}
 
 } // namespace ge

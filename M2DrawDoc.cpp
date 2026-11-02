@@ -20,6 +20,12 @@
 #include "HtmlExporter.h"
 #include "ClipboardSvg.h"
 #include "RasterExport.h"
+#include "ClipboardImage.h"
+#include "ReferenceImport.h"
+#include "AgentHandoff.h"
+#include "IconSet.h"
+#include <fstream>
+#include <iterator>
 #include <algorithm>
 #include <vector>
 
@@ -61,6 +67,10 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_COMMAND_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnAlignCommand)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_ALIGN_LEFT, ID_DISTRIBUTE_V, &CM2DrawDoc::OnUpdateAlignCommand)
 	ON_COMMAND(ID_FILE_PLACE_IMAGE, &CM2DrawDoc::OnFilePlaceImage)
+	ON_COMMAND(ID_FILE_PLACE_REFERENCE, &CM2DrawDoc::OnFilePlaceReference)
+	ON_COMMAND(ID_FILE_EXPORT_AGENT, &CM2DrawDoc::OnFileExportAgent)
+	ON_COMMAND(ID_FILE_IMPORT_AGENT_SVG, &CM2DrawDoc::OnFileImportAgentSvg)
+	ON_COMMAND(ID_FILE_EXPORT_ICONSET, &CM2DrawDoc::OnFileExportIconSet)
 	ON_COMMAND(ID_FILE_EXPORT_SVG, &CM2DrawDoc::OnFileExportSvg)
 	ON_COMMAND(ID_FILE_EXPORT_HTML, &CM2DrawDoc::OnFileExportHtml)
 	ON_COMMAND(ID_FILE_EXPORT_IMAGE, &CM2DrawDoc::OnFileExportImage)
@@ -1207,12 +1217,18 @@ bool CM2DrawDoc::CopySelectionToClipboard()
 bool CM2DrawDoc::PasteFromClipboard()
 {
 	const std::string svg = ReadClipboardSvgText();
-	if (svg.empty()) return false;
+	if (!ge::LooksLikeSvg(svg)) return PasteBitmapAsReference();
+	return ImportSvgNodes(svg, true);
+}
+
+// SVG 텍스트의 노드를 문서에 넣는다. 선택이 프레임(또는 그 안)이면 그 프레임 안으로, 아니면 활성 레이어.
+// isPaste: 연속 붙여넣기 때 겹치지 않도록 조금씩 밀어 놓는다. AI 산출물 가져오기는 밀지 않는다 (7.2.3)
+bool CM2DrawDoc::ImportSvgNodes(const std::string& svg, bool isPaste)
+{
 	ge::Document tmp;
 	std::vector<const ge::Node*> src;
 	if (!ge::ParseSvgNodes(svg, tmp, src)) return false;
 
-	// 선택이 프레임(또는 프레임 안)이면 그 프레임에 붙여넣기, 아니면 활성 레이어
 	ge::FrameNode* targetFrame = nullptr;
 	if (ge::Node* sel = GetPrimarySelection())
 		for (ge::Node* p = sel; p; p = p->GetParent())
@@ -1221,10 +1237,12 @@ bool CM2DrawDoc::PasteFromClipboard()
 	std::vector<ge::Node*> imported = m_doc.ImportNodes(src);
 	if (imported.empty()) return false;
 
-	++m_pasteCount;
-	const float off = 16.0f * static_cast<float>(((m_pasteCount - 1) % 6) + 1);   // 연속 붙여넣기 시 겹치지 않게
-	for (ge::Node* n : imported)
-		n->SetTransform(n->GetTransform() * ge::Matrix2D::Translation(off, off));
+	if (isPaste) {
+		++m_pasteCount;
+		const float off = 16.0f * static_cast<float>(((m_pasteCount - 1) % 6) + 1);   // 연속 붙여넣기 시 겹치지 않게
+		for (ge::Node* n : imported)
+			n->SetTransform(n->GetTransform() * ge::Matrix2D::Translation(off, off));
+	}
 	if (targetFrame)
 		for (ge::Node* n : imported) {
 			if (m_doc.MoveNodeTo(n, targetFrame, -1)) ge::FrameNode::ClampNode(n, false);
@@ -1232,8 +1250,8 @@ bool CM2DrawDoc::PasteFromClipboard()
 
 	m_doc.SetSelection(imported);
 	SetModifiedFlag(TRUE);
-	CommitUndoPoint(L"붙여넣기");
-	LogAppEvent(_T("[클립보드] SVG 붙여넣기"));
+	CommitUndoPoint(isPaste ? L"붙여넣기" : L"AI 산출물 가져오기");
+	LogAppEvent(isPaste ? _T("[클립보드] SVG 붙여넣기") : _T("[가져오기] AI 산출물 SVG 가져오기"));
 	UpdateShapePropertiesSelection(imported.front(), this);
 	UpdateAllViews(nullptr);
 	CWnd* pMainWnd = AfxGetMainWnd();
@@ -1242,6 +1260,36 @@ bool CM2DrawDoc::PasteFromClipboard()
 	return true;
 }
 
+// AI 산출물 SVG 가져오기 (7.2.3): 파일을 고르면 선택한 프레임 안에 놓는다
+void CM2DrawDoc::OnFileImportAgentSvg()
+{
+	CFileDialog dlg(TRUE, _T("svg"), nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
+		_T("SVG 파일 (*.svg)|*.svg|모든 파일 (*.*)|*.*||"));
+	if (dlg.DoModal() != IDOK) return;
+
+	std::ifstream ifs(std::wstring((LPCTSTR)dlg.GetPathName()), std::ios::binary);
+	const std::string svg((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+	if (svg.empty() || !ImportSvgNodes(svg, false))
+		AfxMessageBox(_T("SVG 파일을 읽을 수 없습니다."), MB_ICONERROR);
+}
+
+// 아이콘 세트 내보내기 (7.4.1 / 7.4.2): 선택한 도형(없으면 문서 전체)을 정사각형으로 잘라 여러 크기로 저장
+void CM2DrawDoc::OnFileExportIconSet()
+{
+	CFolderPickerDialog dlg(nullptr, OFN_PATHMUSTEXIST, AfxGetMainWnd());
+	if (dlg.DoModal() != IDOK) return;
+
+	std::wstring err;
+	if (!ge::ExportIconSet(m_doc, (LPCTSTR)dlg.GetPathName(), GetPrimarySelection(), &err)) {
+		AfxMessageBox(err.c_str(), MB_ICONERROR);
+		return;
+	}
+
+	CString log;
+	log.Format(_T("[아이콘] 아이콘 세트 저장: %s"), (LPCTSTR)dlg.GetPathName());
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
 void CM2DrawDoc::OnEditCopy() { CopySelectionToClipboard(); }
 
 void CM2DrawDoc::OnEditCut()
@@ -1258,7 +1306,7 @@ void CM2DrawDoc::OnUpdateEditCopy(CCmdUI* pCmdUI) { pCmdUI->Enable(HasSelectedOb
 
 void CM2DrawDoc::OnUpdateEditPaste(CCmdUI* pCmdUI)
 {
-	pCmdUI->Enable(::IsClipboardFormatAvailable(SvgClipboardFormat()) || ::IsClipboardFormatAvailable(CF_UNICODETEXT));
+	pCmdUI->Enable(::IsClipboardFormatAvailable(SvgClipboardFormat()) || ::IsClipboardFormatAvailable(CF_UNICODETEXT) || ::IsClipboardFormatAvailable(CF_BITMAP));
 }
 
 // ============================================================================
@@ -1476,6 +1524,73 @@ void CM2DrawDoc::OnFilePlaceImage()
 	PlaceImageFile(dlg.GetPathName());
 }
 
+// 레퍼런스 이미지 가져오기 (7.1.1): 잠긴 반투명 레이어에 놓는다
+void CM2DrawDoc::OnFilePlaceReference()
+{
+	CFileDialog dlg(TRUE, nullptr, nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY, kImageFilter);
+	if (dlg.DoModal() != IDOK) return;
+	auto data = LoadImageFile(dlg.GetPathName());
+	if (!data) return;
+	PlaceReferenceData(std::move(data), dlg.GetFileTitle());
+}
+
+// 레퍼런스 레이어에 이미지를 놓고 선택/Undo/패널 갱신까지 처리 (파일 가져오기와 붙여넣기 공용)
+bool CM2DrawDoc::PlaceReferenceData(std::shared_ptr<ge::ImageData> data, const CString& title)
+{
+	ge::Node* added = ge::AddReferenceImage(m_doc, std::move(data), (LPCTSTR)title, 1.0f);
+	if (!added) return false;
+	m_doc.SetSelection({ added });
+	SetModifiedFlag(TRUE);
+	CommitUndoPoint(L"레퍼런스 가져오기");
+	LogAppEvent(_T("[레퍼런스] 레퍼런스 이미지 가져오기 완료"));
+	UpdateShapePropertiesSelection(added, this);
+	UpdateAllViews(nullptr);
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	return true;
+}
+
+// 클립보드 비트맵(스크린샷 등)을 레퍼런스로 붙여넣기
+bool CM2DrawDoc::PasteBitmapAsReference()
+{
+	auto data = ReadClipboardBitmapAsPng(AfxGetMainWnd());
+	if (!data) return false;
+	return PlaceReferenceData(std::move(data), _T("클립보드 이미지"));
+}
+
+// AI 에이전트 패키지 내보내기 (7.3.1): 선택 도형이 속한 가장 안쪽 프레임(없으면 문서 전체)을 폴더에 저장
+void CM2DrawDoc::OnFileExportAgent()
+{
+	CFolderPickerDialog dlg(nullptr, OFN_PATHMUSTEXIST, AfxGetMainWnd());
+	if (dlg.DoModal() != IDOK) return;
+
+	ge::AgentHandoffOptions opt;
+	for (ge::Node* p = GetPrimarySelection(); p; p = p->GetParent()) {
+		if (dynamic_cast<ge::FrameNode*>(p)) { opt.target = p; break; }
+	}
+
+	// 역할(role)이 없는 프레임은 에이전트가 구조를 해석하기 어려우므로 저장 전에 알린다 (7.3.4)
+	const std::vector<std::wstring> noRole = ge::FindFramesWithoutRole(m_doc, opt.target);
+	if (!noRole.empty()) {
+		std::wstring msg = L"역할(role)이 없는 프레임이 " + std::to_wstring(noRole.size()) + L"개 있습니다:\n";
+		for (size_t i = 0; i < noRole.size() && i < 5; ++i) msg += L"  - " + noRole[i] + L"\n";
+		msg += L"\n그래도 저장할까요?";
+		if (AfxMessageBox(msg.c_str(), MB_YESNO | MB_ICONQUESTION) != IDYES) return;
+	}
+
+	std::wstring err;
+	if (!ge::WriteAgentPackage(m_doc, (LPCTSTR)dlg.GetPathName(), opt, &err)) {
+		AfxMessageBox(err.c_str(), MB_ICONERROR);
+		return;
+	}
+
+	CString log;
+	log.Format(_T("[에이전트] 패키지 저장: %s (%s)"), (LPCTSTR)dlg.GetPathName(),
+		opt.target ? _T("선택한 프레임") : _T("문서 전체"));
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
 // 선택된 이미지의 데이터만 교체: 위치/폭/맞춤은 유지하고 높이는 새 이미지 비율로 맞춤
 bool CM2DrawDoc::ReplaceSelectedImage()
 {

@@ -69,6 +69,7 @@ bool ExportRaster(Document& doc, const std::wstring& path, const RasterExportOpt
 		} else {
 			rt->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
 		}
+		renderer.SetLayerFilter(opt.layers);
 		renderer.DrawDocument(doc, vp);
 		const HRESULT hr = rt->EndDraw();
 		renderer.Shutdown();

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "HtmlExporter.h"
+#include "ReferenceImport.h"
 #include "SvgWriter.h"
 #include "HtmlComponents/TableComponent.h"
 #include "HtmlComponents/UiComponents.h"
@@ -236,7 +237,7 @@ HtmlExportResult HtmlExporter::Export(Document& doc, const HtmlExportOptions& op
 		const_cast<FrameNode*>(options.targetArtboard)->Accept(*this);
 	} else {
 		for (const auto& layer : doc.GetLayers()) {
-			if (layer) layer->Accept(*this);
+			if (layer && !IsReferenceNode(*layer)) layer->Accept(*this);
 		}
 	}
 

@@ -12,6 +12,7 @@ struct RasterExportOptions {
 	float dpi = 96.0f;            // 파일에 기록할 해상도 (픽셀 수에는 영향 없음, 배율이 픽셀 수를 정함)
 	bool  transparent = true;     // PNG 투명 배경. JPG 는 항상 불투명 (문서 배경색으로 채움)
 	int   jpegQuality = 92;       // 1~100
+	RenderLayerFilter layers = RenderLayerFilter::ExcludeReference;   // 기본: 레퍼런스 이미지 제외 (7.1.1)
 };
 
 // region: 문서 좌표의 출력 영역 (nullptr = 문서 전체 0,0,width,height). 성공하면 true, 실패 시 err 에 사유
