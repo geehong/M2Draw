@@ -607,6 +607,7 @@ void ComponentTool::OnUp(const ToolEvent& e)
 		tn->SetItalic(props.italic);
 		tn->SetAlign(static_cast<ge::TextAlign>((std::max)(0, (std::min)(2, props.align))));
 		tn->SetName(L"헤딩");
+		tn->SetHtmlTag("h1");
 		tn->SetTransform(ge::Matrix2D::Translation(m_startW.x, m_startW.y));
 		ge::PathOp::MeasureText(*tn);
 		added = pDoc->GetDoc().AddShapeAt(std::move(tn), ge::Vec2{ m_startW.x, m_startW.y });
@@ -1104,7 +1105,15 @@ bool BuildDragShape(ToolType t, ge::Vec2 s, ge::Vec2 c, std::vector<ge::SubPath>
 		name = L"파이"; anchor = s;
 		return true;
 	}
-	default:
+		case ToolType::PolarGrid:
+		out = ge::Shapes::PolarGrid(s.x, s.y, dist, 4, 12);
+		name = L"방사형 그리드"; anchor = s;
+		return true;
+	case ToolType::RectGrid:
+		out = ge::Shapes::RectGrid(x0, y0, w, h, 4, 4);
+		name = L"직교 그리드"; anchor = ge::Vec2{ x0, y0 };
+		return true;
+default:
 		return false;
 	}
 }
@@ -1123,6 +1132,8 @@ const wchar_t* PresetShapeTool::GetName() const
 	case ToolType::Arc3Pt:       return L"3점 호 도구";
 	case ToolType::Pie:          return L"파이 도구";
 	case ToolType::Donut:        return L"도넛 도구";
+	case ToolType::PolarGrid:    return L"방사형 그리드 도구";
+	case ToolType::RectGrid:     return L"직교 그리드 도구";
 	default:                     return L"도형 도구";
 	}
 }
@@ -1366,7 +1377,7 @@ ToolManager::ToolManager()
 	m_tools.push_back(std::make_unique<UiComponentTool>());
 	m_tools.push_back(std::make_unique<TrimTool>());
 	for (ToolType t : { ToolType::RoundRect, ToolType::Square, ToolType::Diamond, ToolType::CircleCenter,
-	                    ToolType::Circle3Pt, ToolType::Arc3Pt, ToolType::Pie, ToolType::Donut })
+	                    ToolType::Circle3Pt, ToolType::Arc3Pt, ToolType::Pie, ToolType::Donut, ToolType::PolarGrid, ToolType::RectGrid })
 		m_tools.push_back(std::make_unique<PresetShapeTool>(t));
 	m_tools.push_back(std::make_unique<ZoomInTool>());
 	m_tools.push_back(std::make_unique<ZoomOutTool>());

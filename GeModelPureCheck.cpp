@@ -2954,6 +2954,34 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(doc.GetGuides().empty(), L"가이드라인 전체 초기화");
 	}
 
+	// ------------------------------------------------------------------------
+	// [Section 51] RectGrid, PolarGrid, FrameRole & Heading level
+	// ------------------------------------------------------------------------
+	{
+		// 1. RectGrid
+		auto rectPaths = Shapes::RectGrid(0.0f, 0.0f, 200.0f, 200.0f, 4, 4);
+		GE_CHECK(!rectPaths.empty(), L"직교 그리드 서브패스 생성 성공");
+		GE_CHECK(rectPaths.size() == 7, L"직교 그리드 4x4 (외곽 1 + 내부 3 + 3 = 7)");
+
+		// 2. PolarGrid
+		auto polarPaths = Shapes::PolarGrid(100.0f, 100.0f, 80.0f, 4, 8);
+		GE_CHECK(!polarPaths.empty(), L"방사형 그리드 서브패스 생성 성공");
+		GE_CHECK(polarPaths.size() == 12, L"방사형 그리드 (동심원 4 + 방사선 8 = 12)");
+
+		// 3. TextNode heading tag
+		TextNode tn;
+		tn.SetHtmlTag("h1");
+		tn.SetFontSize(36.0f);
+		tn.SetBold(true);
+		GE_CHECK(tn.GetHtmlTag() == "h1", L"텍스트 노드 H1 태그 설정");
+		GE_CHECK(tn.GetFontSize() == 36.0f, L"H1 폰트 크기 36px");
+
+		// 4. FrameNode role tag
+		FrameNode fn;
+		fn.SetHtmlTag("form");
+		GE_CHECK(fn.GetHtmlTag() == "form", L"프레임 노드 Form 역할 설정");
+	}
+
 #undef GE_CHECK
 
 	return true;

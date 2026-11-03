@@ -415,8 +415,10 @@ BOOL CM2DrawDoc::SaveProject(LPCTSTR manifestPathLpsz)
 		if (!im->GetData() && im->GetLinkHref().empty()) continue;
 		const std::wstring oldBase = im->GetLinkHref().empty() ? std::wstring() : fs::path(AgentWide(im->GetLinkHref())).stem().wstring();
 		const std::wstring base = SafeFileBase(im->GetName());
+		// 같은 이름이 이미 있으면 _2, _3 ... 을 붙인다 (다른 레퍼런스의 파일은 덮어쓰지 않는다)
 		std::wstring cand = base;
-		for (int k = 2; used.count(cand); ++k) cand = base + L"_" + std::to_wstring(k);
+		for (int k = 2; used.count(cand) || (cand != oldBase && fs::exists(refDir / (cand + L".png")) ); ++k)
+			cand = base + L"_" + std::to_wstring(k);
 		used.insert(cand);
 
 		const fs::path target = refDir / (cand + L".png");
@@ -556,6 +558,35 @@ void CM2DrawDoc::ReplaceDocument(ge::Document&& loaded)
 	}
 }
 
+// 한 프로그램 창에는 프로젝트를 하나만 연다. 열린 프로젝트 문서가 없으면 그대로 열고, 있으면 막는다
+BOOL CM2DrawDoc::AllowOpenProject(LPCTSTR manifestPathLpsz)
+{
+	namespace fs = std::filesystem;
+	int openOthers = 0;
+	POSITION tp = AfxGetApp()->GetFirstDocTemplatePosition();
+	while (tp) {
+		CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(tp);
+		POSITION dp = tmpl->GetFirstDocPosition();
+		while (dp) {
+			CM2DrawDoc* d = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(dp));
+			if (d && d != this && (d->m_attached || !d->GetPathName().IsEmpty()))
+				++openOthers;
+		}
+	}
+	if (openOthers == 0) {
+		g_project = ProjectState();   // 열린 프로젝트 문서가 없으면 이전 상태는 버린다
+		return TRUE;
+	}
+
+	const fs::path wanted = fs::path((LPCTSTR)manifestPathLpsz).parent_path();
+	std::error_code ec;
+	if (!g_project.folder.empty() && fs::equivalent(fs::path(g_project.folder), wanted, ec)) {
+		AfxMessageBox(_T("이미 열려 있는 프로젝트입니다."), MB_ICONINFORMATION);
+		return FALSE;
+	}
+	AfxMessageBox(_T("한 창에는 프로젝트를 하나만 열 수 있습니다.\n현재 프로젝트의 문서를 모두 닫은 뒤 다시 여세요."), MB_ICONINFORMATION);
+	return FALSE;
+}
 // 프로젝트 열기: 목차에서 페이지, 레퍼런스, 현재 페이지를 읽고 현재 페이지를 연다
 BOOL CM2DrawDoc::OpenProject(LPCTSTR manifestPathLpsz)
 {
@@ -869,7 +900,11 @@ BOOL CM2DrawDoc::OnOpenDocument(LPCTSTR lpszPathName)
 		std::string head;
 		if (ProjReadAll(std::filesystem::path((LPCTSTR)path), head)) {
 			if (head.find("<m2:project") != std::string::npos)
+			{
+				if (!AllowOpenProject(lpszPathName))
+					return FALSE;
 				return OpenProject(lpszPathName);
+			}
 			if (head.find("m2:kind=\"capture\"") != std::string::npos || head.find("<m2:capture") != std::string::npos) {
 				AfxMessageBox(_T("캡처 파일(.m2svg)입니다. 파일 > 캡처 불러오기로 여세요."), MB_ICONINFORMATION);
 				return FALSE;
@@ -890,7 +925,22 @@ BOOL CM2DrawDoc::OnOpenDocument(LPCTSTR lpszPathName)
 	m_currentPath.reset();
 	m_doc = std::move(loaded);
 	ResetToolInteraction();
-	g_project.folder.clear();
+	// 프로젝트 문서가 다른 탭에 아직 열려 있으면 프로젝트 상태를 지우지 않는다 (새 문서의 레퍼런스가 그 프로젝트의 페이지가 되도록)
+	bool projectStillOpen = false;
+	POSITION tp = AfxGetApp()->GetFirstDocTemplatePosition();
+	while (tp && !projectStillOpen) {
+		CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(tp);
+		POSITION dp = tmpl->GetFirstDocPosition();
+		while (dp) {
+			CM2DrawDoc* d = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(dp));
+			if (d && d != this && d->m_attached) {
+				projectStillOpen = true;
+				break;
+			}
+		}
+	}
+	if (!projectStillOpen) g_project = ProjectState();
+	m_attached = false;
 
 	SetPathName(lpszPathName);
 	SetModifiedFlag(FALSE);
@@ -944,8 +994,13 @@ BOOL CM2DrawDoc::DoSave(LPCTSTR lpszPathName, BOOL bReplace)
 	CString newName = lpszPathName;
 	if (newName.IsEmpty())
 	{
+		// 기본 폴더: 열린 프로젝트가 있으면 그 프로젝트 폴더의 상위 폴더 (프로젝트 안의 references 를 기본으로 열지 않는다)
+		CString initialDir;
+		if (!g_project.folder.empty())
+			initialDir = CString(std::filesystem::path(g_project.folder).parent_path().wstring().c_str());
 		CFileDialog dlg(FALSE, nullptr, nullptr, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, _T("M2Draw 프로젝트 (*.m2svg)|*.m2svg||"));
 		dlg.m_ofn.lpstrTitle = _T("다른 이름으로 저장 (프로젝트 폴더 이름)");
+		if (!initialDir.IsEmpty()) dlg.m_ofn.lpstrInitialDir = initialDir;
 		if (dlg.DoModal() != IDOK)
 			return FALSE;
 		newName = dlg.GetPathName();
@@ -958,12 +1013,28 @@ BOOL CM2DrawDoc::DoSave(LPCTSTR lpszPathName, BOOL bReplace)
 	const int dot = name.ReverseFind(_T('.'));
 	if (dot > 0) name = name.Left(dot);
 	name.Trim();
-	const CString manifestPath = parent + _T("\\") + name + _T("\\") + name + _T(".m2svg");
+
+	// 고른 폴더 이름과 프로젝트 이름이 같으면 한 겹 더 만들지 않는다 (…\TestProject1 + TestProject1 → …\TestProject1\TestProject1.m2svg)
+	CString folderPath = parent + _T("\\") + name;
+	const int parentSlash = parent.ReverseFind(_T('\\'));
+	const CString parentLeaf = parentSlash >= 0 ? parent.Mid(parentSlash + 1) : parent;
+	if (parentLeaf.CompareNoCase(name) == 0)
+		folderPath = parent;
+
+	// 열린 프로젝트 폴더 안에 또 프로젝트를 만들려는 경우에는 한 번 확인한다
+	if (!g_project.folder.empty()) {
+		const CString openFolder(g_project.folder.c_str());
+		const int len = openFolder.GetLength();
+		if (folderPath.GetLength() > len && folderPath.Left(len).CompareNoCase(openFolder) == 0 && folderPath[len] == _T('\\') &&
+			AfxMessageBox(_T("열린 프로젝트 폴더 안에 새 프로젝트를 만들까요?"), MB_YESNO | MB_ICONQUESTION) != IDYES)
+			return FALSE;
+	}
+	const CString manifestPath = folderPath + _T("\\") + name + _T(".m2svg");
 
 	// 다른 폴더로 저장하면 레퍼런스와 페이지를 새 폴더로 함께 복사한다
 	if (!g_project.folder.empty()) {
 		const std::filesystem::path oldFolder(g_project.folder);
-		const std::filesystem::path newFolder(std::wstring((LPCTSTR)(parent + _T("\\") + name)));
+		const std::filesystem::path newFolder(std::wstring((LPCTSTR)folderPath));
 		std::error_code ec;
 		if (!std::filesystem::equivalent(oldFolder, newFolder, ec)) {
 			std::filesystem::create_directories(newFolder / L"pages", ec);
@@ -3023,11 +3094,18 @@ void CM2DrawDoc::OnFilePlaceReference()
 // 레퍼런스 레이어에 이미지를 놓고 선택/Undo/패널 갱신까지 처리 (파일 가져오기와 붙여넣기 공용)
 bool CM2DrawDoc::PlaceReferenceData(std::shared_ptr<ge::ImageData> data, const CString& title, bool fitWidth)
 {
+	// 프로젝트가 열려 있고 이 문서가 아직 저장되지 않았으면 그 프로젝트의 페이지가 된다 (묻지 않는다)
+	if (GetPathName().IsEmpty() && !g_project.folder.empty())
+		AttachToProject();
+
 	ge::Node* added = ge::AddReferenceImage(m_doc, std::move(data), (LPCTSTR)title, 1.0f, fitWidth);
 	if (!added) return false;
 	m_doc.SetSelection({ added });
 	SetModifiedFlag(TRUE);
 	CommitUndoPoint(L"레퍼런스 가져오기");
+	// 프로젝트 페이지이면 레퍼런스를 references 폴더에 바로 저장한다 (이름이 겹치면 _2, _3 ...)
+	if (m_attached && !g_project.manifest.empty())
+		SaveProject(CString(g_project.manifest.c_str()));
 	LogAppEvent(_T("[레퍼런스] 레퍼런스 이미지 가져오기 완료"));
 	UpdateShapePropertiesSelection(added, this);
 	UpdateAllViews(nullptr);

@@ -159,6 +159,7 @@ protected:
 	std::shared_ptr<M2DrawLabel>        m_lblButtonLabel;  // 버튼 라벨 문구 라벨
 	std::shared_ptr<M2DrawTextInput>    m_txtButtonLabel;  // 버튼 라벨 텍스트 입력창
 	std::shared_ptr<M2DrawComboBox>     m_cboFont;
+	std::shared_ptr<M2DrawComboBox>     m_cboHeadingLevel; // H1~H6 / Paragraph
 	std::shared_ptr<M2DrawNumericInput> m_spinFontSize;
 	std::shared_ptr<M2DrawComboBox>     m_cboTextAlign;
 	std::shared_ptr<M2DrawCheckBox>     m_chkBold;

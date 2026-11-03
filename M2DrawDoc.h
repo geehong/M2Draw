@@ -228,6 +228,7 @@ public:
 	// 프로젝트 (7.2.13 / 문서 형식): 목차 *.m2svg + 같은 이름의 *.m2data 폴더
 	BOOL SaveProject(LPCTSTR manifestPathLpsz);
 	BOOL OpenProject(LPCTSTR manifestPathLpsz);
+	BOOL AllowOpenProject(LPCTSTR manifestPathLpsz);   // 다른 프로젝트가 열려 있으면 막는다
 	void ReplaceDocument(ge::Document&& loaded);   // 현재 문서를 바꾸고 화면을 갱신한다
 	BOOL SwitchPage(const std::wstring& name);
 	void AttachToProject();

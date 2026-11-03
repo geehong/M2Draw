@@ -134,5 +134,67 @@ std::vector<SubPath> ArcThrough3(Vec2 a, Vec2 m, Vec2 b)
 	return { Trim::FromCubics(c, false) };
 }
 
+std::vector<SubPath> RectGrid(float x, float y, float w, float h, int rows, int cols)
+{
+	rows = (std::max)(1, (std::min)(50, rows));
+	cols = (std::max)(1, (std::min)(50, cols));
+	std::vector<SubPath> paths;
+
+	// 외곽 사각형
+	paths.push_back(RoundedRect(x, y, w, h, 0.0f)[0]);
+
+	// 내부 수평선
+	const float dy = h / static_cast<float>(rows);
+	for (int r = 1; r < rows; ++r)
+	{
+		float ly = y + r * dy;
+		std::vector<Trim::Cubic> c;
+		c.push_back(Line(V(x, ly), V(x + w, ly)));
+		paths.push_back(Trim::FromCubics(c, false));
+	}
+
+	// 내부 수직선
+	const float dx = w / static_cast<float>(cols);
+	for (int col = 1; col < cols; ++col)
+	{
+		float lx = x + col * dx;
+		std::vector<Trim::Cubic> c;
+		c.push_back(Line(V(lx, y), V(lx, y + h)));
+		paths.push_back(Trim::FromCubics(c, false));
+	}
+
+	return paths;
+}
+
+std::vector<SubPath> PolarGrid(float cx, float cy, float r, int rings, int spokes)
+{
+	rings = (std::max)(1, (std::min)(30, rings));
+	spokes = (std::max)(2, (std::min)(60, spokes));
+	std::vector<SubPath> paths;
+
+	// 동심원들
+	const float dr = r / static_cast<float>(rings);
+	for (int ring = 1; ring <= rings; ++ring)
+	{
+		float cr = ring * dr;
+		std::vector<Trim::Cubic> c;
+		ArcCubics(cx, cy, cr, cr, 0.0f, 2.0f * kPi, c);
+		paths.push_back(Trim::FromCubics(c, true));
+	}
+
+	// 방사형 직선들 (중심 -> 외곽)
+	const float dTheta = 2.0f * kPi / static_cast<float>(spokes);
+	for (int s = 0; s < spokes; ++s)
+	{
+		float th = s * dTheta;
+		Vec2 end = V(cx + r * std::cos(th), cy + r * std::sin(th));
+		std::vector<Trim::Cubic> c;
+		c.push_back(Line(V(cx, cy), end));
+		paths.push_back(Trim::FromCubics(c, false));
+	}
+
+	return paths;
+}
+
 } // namespace Shapes
 } // namespace ge

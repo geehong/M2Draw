@@ -24,5 +24,10 @@ bool CircleThrough3(Vec2 a, Vec2 b, Vec2 c, Vec2& center, float& radius);
 // 시작 a, 중간 m, 끝 b 를 지나는 열린 호. 세 점이 일직선이면 빈 결과
 std::vector<SubPath> ArcThrough3(Vec2 a, Vec2 m, Vec2 b);
 
+// 직교 그리드 (RectGrid): (x,y) 시작, 폭 w x 높이 h, rows 행 x cols 열
+std::vector<SubPath> RectGrid(float x, float y, float w, float h, int rows, int cols);
+// 방사형 그리드 (PolarGrid): 중심 (cx,cy), 반경 r, rings 동심원 수, spokes 방사선 분할 수
+std::vector<SubPath> PolarGrid(float cx, float cy, float r, int rings, int spokes);
+
 } // namespace Shapes
 } // namespace ge

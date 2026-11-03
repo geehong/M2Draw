@@ -508,9 +508,9 @@ void CD2DPropertyView::SyncFrameExtraControls()
 	const bool prev = m_bUpdating;
 	m_bUpdating = true;
 	if (auto* fr = dynamic_cast<ge::FrameNode*>(GetSelectedShape())) {
-		static const char* kRoles[] = { "", "header", "nav", "main", "aside", "section", "article", "footer" };
+		static const char* kRoles[] = { "", "header", "nav", "main", "aside", "section", "article", "footer", "form", "fieldset", "dialog" };
 		int idx = 0;
-		for (int i = 0; i < 8; ++i) if (fr->GetHtmlTag() == kRoles[i]) idx = i;
+		for (int i = 0; i < 11; ++i) if (fr->GetHtmlTag() == kRoles[i]) idx = i;
 		if (fr->GetHtmlTag() == "div") idx = 0;
 		if (m_cboFrameRole) m_cboFrameRole->SetCurSel(idx, false);
 		const ge::CornerRadii& cr = fr->GetCornerRadii();
@@ -1488,6 +1488,33 @@ void CD2DPropertyView::InitControls()
 		m_spinTextBoxW->SetOnChanged([this](M2DrawNumericInput*, double v) { ApplyTextProps([v](ge::TextNode& t) { if (t.IsAreaText()) t.SetBoxWidth(static_cast<float>(v)); }); });
 		m_pCurrentPanel->AddChild(m_spinTextBoxW);
 
+		m_cboHeadingLevel = std::make_shared<M2DrawComboBox>();
+		m_cboHeadingLevel->SetItemHeight(20.0f);
+		m_cboHeadingLevel->AddItem(L"Level: Normal (<p>)");
+		m_cboHeadingLevel->AddItem(L"Heading: H1 (36px)");
+		m_cboHeadingLevel->AddItem(L"Heading: H2 (28px)");
+		m_cboHeadingLevel->AddItem(L"Heading: H3 (22px)");
+		m_cboHeadingLevel->AddItem(L"Heading: H4 (18px)");
+		m_cboHeadingLevel->AddItem(L"Heading: H5 (16px)");
+		m_cboHeadingLevel->AddItem(L"Heading: H6 (14px)");
+		m_cboHeadingLevel->SetCurSel(0, false);
+		m_cboHeadingLevel->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			static const char* kTags[] = { "p", "h1", "h2", "h3", "h4", "h5", "h6" };
+			static const float kSizes[] = { 16.0f, 36.0f, 28.0f, 22.0f, 18.0f, 16.0f, 14.0f };
+			if (sel < 0 || sel > 6) return;
+			const std::string tag = kTags[sel];
+			const float size = kSizes[sel];
+			const bool isHeading = (sel >= 1);
+			ApplyTextProps([tag, size, isHeading](ge::TextNode& t) {
+				t.SetHtmlTag(tag);
+				t.SetFontSize(size);
+				if (isHeading) t.SetBold(true);
+			});
+			if (m_spinFontSize) m_spinFontSize->SetValue(size, false);
+			if (m_chkBold && isHeading) m_chkBold->SetChecked(true);
+		});
+		m_pCurrentPanel->AddChild(m_cboHeadingLevel);
+
 		m_spinFontSize = std::make_shared<M2DrawNumericInput>(1.0, 2000.0, 24.0, 1.0);
 		m_spinFontSize->SetSuffix(L" px");
 		m_spinFontSize->SetOnChanged([this](M2DrawNumericInput*, double v) { ApplyTextProps([v](ge::TextNode& t) { t.SetFontSize(static_cast<float>(v)); }); });
@@ -1668,10 +1695,13 @@ void CD2DPropertyView::InitControls()
 		m_cboFrameRole->AddItem(L"Role: section (섹션)");
 		m_cboFrameRole->AddItem(L"Role: article (글)");
 		m_cboFrameRole->AddItem(L"Role: footer (하단 푸터)");
+		m_cboFrameRole->AddItem(L"Role: form (양식 폼)");
+		m_cboFrameRole->AddItem(L"Role: fieldset (필드셋)");
+		m_cboFrameRole->AddItem(L"Role: dialog (모달 대화상자)");
 		m_cboFrameRole->SetCurSel(0, false);
 		m_cboFrameRole->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
-			static const char* kRoles[] = { "", "header", "nav", "main", "aside", "section", "article", "footer" };
-			if (sel < 0 || sel > 7) return;
+			static const char* kRoles[] = { "", "header", "nav", "main", "aside", "section", "article", "footer", "form", "fieldset", "dialog" };
+			if (sel < 0 || sel > 10) return;
 			const std::string tag = kRoles[sel];
 			ApplyFrameProps([tag](ge::FrameNode& fr) { fr.SetHtmlTag(tag); }, L"프레임 역할 변경");
 		});
@@ -2477,6 +2507,17 @@ void CD2DPropertyView::SyncControlsFromData()
 				if (cur < 0) { m_cboFont->AddItem(tn->GetFontFamily()); cur = i; }   // 목록에 없는 글꼴(외부 SVG 등)도 표시
 				m_cboFont->SetCurSel(cur, false);
 			}
+			if (m_cboHeadingLevel) {
+				const std::string tag = tn->GetHtmlTag();
+				int hidx = 0;
+				if (tag == "h1") hidx = 1;
+				else if (tag == "h2") hidx = 2;
+				else if (tag == "h3") hidx = 3;
+				else if (tag == "h4") hidx = 4;
+				else if (tag == "h5") hidx = 5;
+				else if (tag == "h6") hidx = 6;
+				m_cboHeadingLevel->SetCurSel(hidx, false);
+			}
 			if (m_spinFontSize) m_spinFontSize->SetValue(tn->GetFontSize(), false);
 			if (m_chkBold) m_chkBold->SetChecked(tn->IsBold());
 			if (m_chkItalic) m_chkItalic->SetChecked(tn->IsItalic());
@@ -2874,7 +2915,8 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			if (m_cboButtonAlignH) m_cboButtonAlignH->SetVisible(isButton);
 			if (m_cboButtonAlignV) m_cboButtonAlignV->SetVisible(isButton);
 			if (m_cboFont)        m_cboFont->SetVisible(showTextProps);
-			if (m_spinFontSize)   m_spinFontSize->SetVisible(showTextProps);
+			if (m_cboHeadingLevel) m_cboHeadingLevel->SetVisible(showTextProps);
+		if (m_spinFontSize)   m_spinFontSize->SetVisible(showTextProps);
 			if (m_cboTextAlign)   m_cboTextAlign->SetVisible(isText);   // 버튼은 자동 센터 정렬
 			if (m_chkBold)        m_chkBold->SetVisible(showTextProps);
 			if (m_chkItalic)      m_chkItalic->SetVisible(showTextProps);
@@ -2908,7 +2950,8 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 				}
 				else
 				{
-					if (m_spinFontSize) m_spinFontSize->SetBounds(left, y, left + halfTW, y + 24.0f);
+					if (m_cboHeadingLevel) { m_cboHeadingLevel->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+			if (m_spinFontSize) m_spinFontSize->SetBounds(left, y, left + halfTW, y + 24.0f);
 					if (m_cboTextAlign) m_cboTextAlign->SetBounds(left + halfTW + 6.0f, y, right, y + 24.0f);
 					y += 28.0f;
 				}
