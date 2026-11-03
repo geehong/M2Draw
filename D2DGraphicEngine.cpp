@@ -4,6 +4,7 @@
 #include "D2DGraphicEngine.h"
 #include "GeNodeVisitor.h"
 #include "ReferenceImport.h"
+#include "AnnotationNote.h"
 
 namespace ge {
 
@@ -3582,7 +3583,8 @@ void D2DRenderer::DrawDocument(Document& doc, const Viewport& view)
 		if (!layer->IsVisible()) continue;
 		if (m_layerFilter != RenderLayerFilter::All) {
 			const bool isRef = IsReferenceNode(*layer);
-			if (isRef != (m_layerFilter == RenderLayerFilter::OnlyReference)) continue;
+			const bool isNote = IsAnnotationNode(*layer);   // 주석은 레퍼런스와 함께 내보내기에서 제외
+			if (m_layerFilter == RenderLayerFilter::OnlyReference ? !isRef : (isRef || isNote)) continue;
 		}
 
 		const bool needLayer = layer->GetOpacity() < 0.999f;   // 레이어 불투명도 합성 전용 (클리핑은 2.4 의 GroupNode::clipPath 로 구현)
@@ -3948,7 +3950,7 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 	const bool uiComp = frame && frame->IsUiComponent();   // UI 컴포넌트는 아트보드 이름표/내부 프레임 윤곽선 표시 대상이 아님
 
 	// 내부 컨테이너 프레임: 역할이 지정된 경우 좌상단 안쪽에 작은 배지 [header] 이름 표시
-	if (frame && !uiComp && !isTopFrame && m_rt && m_brush) {   // 내부 프레임 윤곽선: 흰 배경 위에서도 범위가 보이는 편집용 표시 (저장/내보내기에는 들어가지 않음)
+	if (m_drawEditOverlays && frame && !uiComp && !isTopFrame && m_rt && m_brush) {   // 내부 프레임 윤곽선: 흰 배경 위에서도 범위가 보이는 편집용 표시 (저장/내보내기에는 들어가지 않음)
 		const D2D1_MATRIX_3X2_F fmo = (worldXf * view.ToMatrix()).ToD2D();
 		m_rt->SetTransform(fmo);
 		m_brush->SetColor(D2D1::ColorF(0.30f, 0.50f, 0.90f, 0.75f));
@@ -3956,7 +3958,7 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 		m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
 	}
 	// 내부 프레임 배지: [역할] 이름  W × H. 배지가 프레임보다 길거나(너비/높이) 안에 자식이 있으면 안쪽이 아니라 프레임 위쪽에 표시 (4.5.8.3)
-	if (frame && !uiComp && !isTopFrame && m_rt && m_brush) {
+	if (m_drawEditOverlays && frame && !uiComp && !isTopFrame && m_rt && m_brush) {
 		static ComPtr<IDWriteFactory> s_dwBadge;
 		static ComPtr<IDWriteTextFormat> s_fmtBadge;
 		if (!s_dwBadge) {
@@ -4004,7 +4006,7 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 	}
 
 	// 최상위 프레임(Artboard): 캔버스 위에 Figma 스타일로 상단 이름 라벨 표시 (예: "Frame 1  1920 × 1080")
-	if (isTopFrame && !uiComp && m_rt && m_brush) {
+	if (m_drawEditOverlays && isTopFrame && !uiComp && m_rt && m_brush) {
 		static ComPtr<IDWriteFactory> s_dwLabel;
 		static ComPtr<IDWriteTextFormat> s_fmtLabel;
 		if (!s_dwLabel) {

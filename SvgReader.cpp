@@ -893,14 +893,17 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 				// <image xlink:href="data:image/png;base64,..."> (data URI 만 지원: 외부 파일 참조는 읽지 않음)
 				std::wstring href = attrs.count(L"xlink:href") ? attrs[L"xlink:href"] : (attrs.count(L"href") ? attrs[L"href"] : L"");
 				const size_t comma = href.find(L',');
-				if (href.compare(0, 5, L"data:") == 0 && comma != std::wstring::npos && href.find(L"base64") < comma) {
+				const bool isDataUri = href.compare(0, 5, L"data:") == 0 && comma != std::wstring::npos && href.find(L"base64") < comma;
+				// 연결 이미지: 그림 데이터 없이 경로만 있으면 나중에 프로젝트 폴더에서 그림을 붙인다
+				const bool isRefLink = !isDataUri && !href.empty();
+				if (isDataUri || isRefLink) {
 					auto data = std::make_shared<ImageData>();
 					std::string mime;
-					for (size_t i = 5; i < comma && href[i] != L';'; ++i) mime.push_back(static_cast<char>(href[i]));
+					if (isDataUri) for (size_t i = 5; i < comma && href[i] != L';'; ++i) mime.push_back(static_cast<char>(href[i]));
 					if (!mime.empty()) data->mime = mime;
 					std::string b64;
-					for (size_t i = comma + 1; i < href.size(); ++i) b64.push_back(static_cast<char>(href[i] < 128 ? href[i] : '?'));
-					if (Base64Decode(b64, data->bytes)) {
+					if (isDataUri) for (size_t i = comma + 1; i < href.size(); ++i) b64.push_back(static_cast<char>(href[i] < 128 ? href[i] : '?'));
+					if (!isDataUri || Base64Decode(b64, data->bytes)) {
 						int pw = 0, ph = 0;
 						if (PathOp::DecodeImageInfo(data->bytes, pw, ph)) { data->pixelW = pw; data->pixelH = ph; }
 						auto im = std::make_unique<ImageNode>();
@@ -920,7 +923,8 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 						} else {
 							im->SetFit(ImageFit::Fit);   // SVG 기본 preserveAspectRatio = xMidYMid meet
 						}
-						im->SetData(data);
+						im->SetData(isDataUri ? std::shared_ptr<const ImageData>(data) : std::shared_ptr<const ImageData>());
+						if (isRefLink) im->SetLinkHref(WideToUtf8(href));
 						if (attrs.count(L"opacity")) im->SetOpacity(std::wcstof(attrs[L"opacity"].c_str(), nullptr));
 						const float x = attrs.count(L"x") ? ParseLength(attrs[L"x"], 0.0f) : 0.0f;
 						const float y = attrs.count(L"y") ? ParseLength(attrs[L"y"], 0.0f) : 0.0f;
@@ -1016,6 +1020,9 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 				}
 				if (attrs.count(L"m2:backgroundColor")) {
 					outDoc.backgroundColor = ParseColorHex(attrs[L"m2:backgroundColor"]);
+				}
+				if (attrs.count(L"m2:webFontHead")) {
+					outDoc.webFontHead = attrs[L"m2:webFontHead"];
 				}
 				if (attrs.count(L"m2:backgroundOpacity")) {
 					outDoc.backgroundColor.a = std::wcstof(attrs[L"m2:backgroundOpacity"].c_str(), nullptr);

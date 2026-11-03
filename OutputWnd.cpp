@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "framework.h"
 
 #include "OutputWnd.h"
@@ -42,36 +42,38 @@ int COutputWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		return -1;
 	}
 
-	// 출력 창을 만듭니다.
-	const DWORD dwStyle = LBS_NOINTEGRALHEIGHT | WS_CHILD | WS_VISIBLE | WS_HSCROLL | WS_VSCROLL;
+	// 탭 안의 창은 WS_VISIBLE 없이 만든다. 보이는 탭은 탭 컨트롤이 정한다 (다른 탭 내용이 겹쳐 보이지 않도록)
+	const DWORD dwStyle = LBS_NOINTEGRALHEIGHT | WS_CHILD | WS_HSCROLL | WS_VSCROLL;
 
-	if (!m_wndOutputBuild.Create(dwStyle, rectDummy, &m_wndTabs, 2) ||
-		!m_wndOutputDebug.Create(dwStyle, rectDummy, &m_wndTabs, 3) ||
-		!m_wndOutputFind.Create(dwStyle, rectDummy, &m_wndTabs, 4))
+	if (!m_wndLog.Create(dwStyle, rectDummy, &m_wndTabs, 2))
 	{
-		TRACE0("출력 창을 만들지 못했습니다.\n");
+		TRACE0("로그 창을 만들지 못했습니다.\n");
+		return -1;
+	}
+
+	// ChatAgent 탭 (에이전트와 대화)
+	if (!m_wndChat.Create(nullptr, _T(""), WS_CHILD, rectDummy, &m_wndTabs, 5))
+	{
+		TRACE0("ChatAgent 창을 만들지 못했습니다.\n");
+		return -1;
+	}
+
+	// Code 탭 (읽기 전용 코드 보기)
+	if (!m_wndCode.Create(nullptr, _T(""), WS_CHILD, rectDummy, &m_wndTabs, 6))
+	{
+		TRACE0("Code 창을 만들지 못했습니다.\n");
 		return -1;
 	}
 
 	UpdateFonts();
 
-	CString strTabName;
-	BOOL bNameValid;
+	// 탭 순서: ChatAgent, Code, Log
+	m_wndTabs.AddTab(&m_wndChat, _T("ChatAgent"), (UINT)0);
+	m_wndTabs.AddTab(&m_wndCode, _T("Code"), (UINT)1);
+	m_wndTabs.AddTab(&m_wndLog, _T("Log"), (UINT)2);
+	m_wndTabs.SetActiveTab(0);
 
-	// 탭에 목록 창을 연결합니다.
-	bNameValid = strTabName.LoadString(IDS_BUILD_TAB);
-	ASSERT(bNameValid);
-	m_wndTabs.AddTab(&m_wndOutputBuild, strTabName, (UINT)0);
-	bNameValid = strTabName.LoadString(IDS_DEBUG_TAB);
-	ASSERT(bNameValid);
-	m_wndTabs.AddTab(&m_wndOutputDebug, strTabName, (UINT)1);
-	bNameValid = strTabName.LoadString(IDS_FIND_TAB);
-	ASSERT(bNameValid);
-	m_wndTabs.AddTab(&m_wndOutputFind, strTabName, (UINT)2);
-
-	FillBuildWindow();
-	FillDebugWindow();
-	FillFindWindow();
+	m_wndLog.AddString(_T("[System] Event log initialized."));
 
 	return 0;
 }
@@ -99,33 +101,10 @@ void COutputWnd::AdjustHorzScroll(CListBox& wndListBox)
 	dc.SelectObject(pOldFont);
 }
 
-void COutputWnd::FillBuildWindow()
+void COutputWnd::LogMessage(const CString& strMessage, int /*tabIndex*/)
 {
-	m_wndOutputBuild.ResetContent();
-	m_wndOutputBuild.AddString(_T("[시스템] 이벤트 로그 출력이 초기화되었습니다."));
-}
-
-void COutputWnd::FillDebugWindow()
-{
-	m_wndOutputDebug.ResetContent();
-	m_wndOutputDebug.AddString(_T("[디버그] 디버그 모니터 준비 완료."));
-}
-
-void COutputWnd::FillFindWindow()
-{
-	m_wndOutputFind.ResetContent();
-	m_wndOutputFind.AddString(_T("[찾기] 찾기 로그 대기 중."));
-}
-
-void COutputWnd::LogMessage(const CString& strMessage, int tabIndex)
-{
-	COutputList* pTargetList = &m_wndOutputBuild;
-	if (tabIndex == 1)
-		pTargetList = &m_wndOutputDebug;
-	else if (tabIndex == 2)
-		pTargetList = &m_wndOutputFind;
-
-	if (pTargetList->GetSafeHwnd())
+	// 로그는 Log 탭 하나에 모은다 (빌드/디버그/찾기 탭은 제거됨)
+	if (m_wndLog.GetSafeHwnd())
 	{
 		// 현재 시각 타임스탬프 붙이기
 		CTime timeNow = CTime::GetCurrentTime();
@@ -134,41 +113,26 @@ void COutputWnd::LogMessage(const CString& strMessage, int tabIndex)
 			timeNow.GetHour(), timeNow.GetMinute(), timeNow.GetSecond(),
 			(LPCTSTR)strMessage);
 
-		int idx = pTargetList->AddString(strFormatted);
+		int idx = m_wndLog.AddString(strFormatted);
 		if (idx != LB_ERR)
 		{
-			pTargetList->SetCurSel(idx);
-			pTargetList->SetTopIndex(idx);
+			m_wndLog.SetCurSel(idx);
+			m_wndLog.SetTopIndex(idx);
 		}
 
-		AdjustHorzScroll(*pTargetList);
+		AdjustHorzScroll(m_wndLog);
 	}
 }
 
-void COutputWnd::ClearLog(int tabIndex)
+void COutputWnd::ClearLog(int /*tabIndex*/)
 {
-	if (tabIndex == 0 || tabIndex == -1)
-	{
-		if (m_wndOutputBuild.GetSafeHwnd())
-			m_wndOutputBuild.ResetContent();
-	}
-	if (tabIndex == 1 || tabIndex == -1)
-	{
-		if (m_wndOutputDebug.GetSafeHwnd())
-			m_wndOutputDebug.ResetContent();
-	}
-	if (tabIndex == 2 || tabIndex == -1)
-	{
-		if (m_wndOutputFind.GetSafeHwnd())
-			m_wndOutputFind.ResetContent();
-	}
+	if (m_wndLog.GetSafeHwnd())
+		m_wndLog.ResetContent();
 }
 
 void COutputWnd::UpdateFonts()
 {
-	m_wndOutputBuild.SetFont(&afxGlobalData.fontRegular);
-	m_wndOutputDebug.SetFont(&afxGlobalData.fontRegular);
-	m_wndOutputFind.SetFont(&afxGlobalData.fontRegular);
+	m_wndLog.SetFont(&afxGlobalData.fontRegular);
 }
 
 /////////////////////////////////////////////////////////////////////////////

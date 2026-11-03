@@ -21,7 +21,7 @@ inline const std::vector<ToolGroupDef>& GetToolGroups()
 		{ ToolType::Polygon,     { ToolType::Polygon, ToolType::Star, ToolType::Gear, ToolType::Spiral, ToolType::Heart },           L"PolygonGroupTool" },
 		{ ToolType::Frame,       { ToolType::Frame, ToolType::Table, ToolType::ComponentHeading, ToolType::ComponentButton,
 		                           ToolType::ComponentDivider, ToolType::ComponentSpacer },                                           L"HtmlGroupTool" },
-		{ ToolType::PaintBucket, { ToolType::PaintBucket, ToolType::Gradient },                                                      L"FillGroupTool" },
+		{ ToolType::PaintBucket, { ToolType::PaintBucket, ToolType::Gradient, ToolType::Eyedropper },                                L"FillGroupTool" },
 		{ ToolType::ZoomIn,      { ToolType::ZoomIn, ToolType::ZoomOut },                                                            L"ZoomGroupTool" },
 		{ ToolType::ActionGroup, { ToolType::ActionGroup, ToolType::ActionUngroup, ToolType::ActionWrapFrame },                      L"GroupActionTool" },
 		{ ToolType::ActionToFront, { ToolType::ActionToFront, ToolType::ActionForward, ToolType::ActionBackward, ToolType::ActionToBack }, L"ArrangeActionTool" },

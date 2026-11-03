@@ -25,3 +25,8 @@ M2Draw/Release/
 
 # WebView2 SDK (third_party/fetch_webview2.ps1 로 내려받음)
 third_party/WebView2/
+
+# MCP 연결 서버 빌드 산출물
+agent/node/node_modules/
+agent/csharp/**/bin/
+agent/csharp/**/obj/

@@ -25,7 +25,8 @@ LayerNode* EnsureReferenceLayer(Document& doc);
 //  - 원본 픽셀 크기를 문서 크기의 maxRatio 이내로 맞추고 문서 중앙에 배치 (pixelW/H 가 0이면 100x100 으로 둔다)
 //  - 잠금 + 반투명 (kReferenceOpacity)
 // 실패하면 nullptr
-ImageNode* AddReferenceImage(Document& doc, std::shared_ptr<const ImageData> data, const std::wstring& name, float maxRatio = 1.0f);
+// fitWidth: 문서 폭에만 맞추고 위쪽에 붙인다 (긴 웹 페이지 캡처용). 높이는 문서보다 길어도 된다.
+ImageNode* AddReferenceImage(Document& doc, std::shared_ptr<const ImageData> data, const std::wstring& name, float maxRatio = 1.0f, bool fitWidth = false);
 
 // 문서에 레퍼런스 이미지가 있는지 (레퍼런스 레이어에 자식이 하나라도 있으면 true)
 inline bool HasReferenceImage(const Document& doc)
@@ -48,5 +49,12 @@ inline bool IsReferenceNode(const Node& node)
 	}
 	return false;
 }
+
+// 레퍼런스 이미지에서 색 추출 (7.1.2): 월드 점 아래의 가장 위 레퍼런스 이미지 픽셀 색 (알파 무시).
+// 맞춤 방식은 늘이기(Stretch)로 계산한다 (Fit/Fill 은 근사).
+bool SampleReferenceColor(Document& doc, Vec2 worldPt, Color& out);
+
+// 이미지 바이트의 (x,y) 픽셀 색 (WIC 디코딩). 실패하면 false
+bool DecodeImagePixel(const ImageData& data, unsigned x, unsigned y, Color& out);
 
 } // namespace ge

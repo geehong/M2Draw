@@ -4,6 +4,7 @@
 #include "D2DGraphicEngine.h"
 #include "D2DLayer.h"
 #include "ReferenceImport.h"
+#include "AnnotationNote.h"
 
 #include <charconv>
 #include <functional>
@@ -16,9 +17,18 @@ namespace ge {
 namespace {
 
 // 로캘 독립적 부동소수점 포맷팅 (항상 '.' 소수점 보장, 불필요한 후행 0 및 소수점 제거)
+// WriteString 동안만 쓰이는 좌표 소수 자릿수 (SvgWriteOptions::decimals)
+static int g_svgDecimals = 4;
+
+struct DecimalsScope {
+	int prev;
+	explicit DecimalsScope(int d) : prev(g_svgDecimals) { g_svgDecimals = d; }
+	~DecimalsScope() { g_svgDecimals = prev; }
+};
+
 std::string FormatFloat(float v) {
 	char buf[64];
-	auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v, std::chars_format::fixed, 4);
+	auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v, std::chars_format::fixed, g_svgDecimals);
 	if (ec != std::errc()) {
 		return "0";
 	}
@@ -327,6 +337,7 @@ void SvgWriter::WriteClipPathDefs(Document& doc) {
 }
 
 std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options) {
+	DecimalsScope decimalsScope(std::clamp(options.decimals, 0, 6));
 	m_options = options;
 	m_output.clear();
 	m_indent = 0;
@@ -350,6 +361,8 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 		}
 		m_output += "     m2:canvasColor=\"" + ColorToHex(doc.canvasColor) + "\"\n";
 		m_output += std::string("     m2:originMode=\"") + (doc.originMode == CanvasOriginMode::BottomLeft ? "bottomLeft" : "topLeft") + "\"\n";
+		if (!doc.webFontHead.empty())
+			m_output += "     m2:webFontHead=\"" + EscapeXml(WideToUtf8(doc.webFontHead)) + "\"" + "\n";
 		m_output += "     m2:version=\"2.0\"";
 	}
 	m_output += ">\n";
@@ -395,7 +408,7 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 	// 레이어 순회
 	// Clean(순수 SVG 내보내기)에서는 레퍼런스 레이어 제외 (7.1.1). 저장/Undo 는 레퍼런스를 유지
 	for (const auto& layer : doc.GetLayers()) {
-		if (layer && !(m_options.mode == SvgWriteMode::Clean && IsReferenceNode(*layer))) {
+		if (layer && !(m_options.mode == SvgWriteMode::Clean && (IsReferenceNode(*layer) || IsAnnotationNode(*layer)))) {
 			layer->Accept(*this);
 		}
 	}
@@ -421,7 +434,9 @@ bool SvgWriter::WriteToFile(Document& doc, const std::wstring& filePath, const S
 
 void SvgWriter::Visit(LayerNode& node) {
 	AppendIndent();
-	m_output += "<g id=\"layer_" + std::to_string(node.GetId()) + "\"";
+	if (m_options.optimize && node.GetChildren().empty()) return;   // 최적화: 내용 없는 레이어 생략
+	m_output += "<g";
+	if (!m_options.optimize) m_output += " id=\"layer_" + std::to_string(node.GetId()) + "\"";
 
 	if (Meta()) {
 		m_output += " inkscape:groupmode=\"layer\"";
@@ -457,7 +472,9 @@ void SvgWriter::Visit(LayerNode& node) {
 
 void SvgWriter::Visit(GroupNode& node) {
 	AppendIndent();
-	m_output += "<g id=\"group_" + std::to_string(node.GetId()) + "\"";
+	if (m_options.optimize && node.GetChildren().empty() && !dynamic_cast<FrameNode*>(&node)) return;   // 최적화: 내용 없는 그룹 생략 (프레임은 배경 영역이라 유지)
+	m_output += "<g";
+	if (!m_options.optimize) m_output += " id=\"group_" + std::to_string(node.GetId()) + "\"";
 
 	if (Meta()) {
 		std::string utfName = WideToUtf8(node.GetName());
@@ -678,7 +695,17 @@ void SvgWriter::Visit(ImageNode& node) {
 		m_output += " transform=\"matrix(" + FormatFloat(xf.m11) + " " + FormatFloat(xf.m12) + " " + FormatFloat(xf.m21) + " " +
 			FormatFloat(xf.m22) + " " + FormatFloat(xf.dx) + " " + FormatFloat(xf.dy) + ")\"";
 	}
-	m_output += " xlink:href=\"data:" + node.GetData()->mime + ";base64," + Base64Encode(node.GetData()->bytes) + "\" />\n";
+	std::string linkPath;
+	if (auto it = m_options.linkedImagePaths.find(&node); it != m_options.linkedImagePaths.end()) linkPath = it->second;
+	else if (m_options.linkReferenceImages && !node.GetLinkHref().empty()) linkPath = node.GetLinkHref();
+	if (!linkPath.empty()) {
+		m_output += " xlink:href=\"" + EscapeXml(linkPath) + "\" />\n";
+	} else if (node.GetData()) {
+		m_output += " xlink:href=\"data:" + node.GetData()->mime + ";base64," + Base64Encode(node.GetData()->bytes) + "\" />\n";
+	} else {
+		m_output += " />\n";
+	}
+
 }
 
 static ID2D1Factory* SharedD2DFactory()
@@ -814,7 +841,8 @@ void SvgWriter::Visit(PathNode& node) {
 			}
 		}
 	}
-	m_output += std::string("<") + (nativeTag ? nativeTag : "path") + " id=\"path_" + std::to_string(node.GetId()) + "\"";
+	m_output += std::string("<") + (nativeTag ? nativeTag : "path");
+	if (!m_options.optimize) m_output += " id=\"path_" + std::to_string(node.GetId()) + "\"";
 
 	if (Meta()) {
 		std::string utfName = WideToUtf8(node.GetName());
@@ -882,7 +910,7 @@ void SvgWriter::Visit(PathNode& node) {
 
 	if (st.fillMode == FillMode::Alternate) {
 		m_output += " fill-rule=\"evenodd\"";
-	} else {
+	} else if (!m_options.optimize) {
 		m_output += " fill-rule=\"nonzero\"";
 	}
 

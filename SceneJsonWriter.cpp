@@ -2,6 +2,7 @@
 #include "SceneJsonWriter.h"
 #include "D2DLayer.h"
 #include "ReferenceImport.h"
+#include "AnnotationNote.h"
 
 #include <algorithm>
 #include <cmath>
@@ -283,9 +284,22 @@ std::string SerializeSceneJson(const Document& doc, const SceneJsonOptions& opti
 	} else {
 		std::vector<std::string> layers;
 		for (const auto& layer : doc.GetLayers()) {
-			if (!IsReferenceNode(*layer)) layers.push_back(NodeJson(*layer));   // 레퍼런스 원본은 reference.png 로 따로 준다
+			// 레퍼런스 원본은 reference.png 로, 주석은 annotations 목록으로 따로 준다
+			if (!IsReferenceNode(*layer) && !IsAnnotationNode(*layer)) layers.push_back(NodeJson(*layer));
 		}
 		top.push_back({ "layers", Array(layers) });
+		std::vector<std::string> notes;
+		for (const auto& layer : doc.GetLayers()) {
+			if (!IsAnnotationNode(*layer)) continue;
+			for (const auto& child : layer->GetChildren()) {
+				const auto* tn = dynamic_cast<const TextNode*>(child.get());
+				if (!tn) continue;
+				notes.push_back(Object({ { "text", Quote(Utf8(tn->GetText())) },
+				                         { "x", Num(tn->GetTransform().dx) },
+				                         { "y", Num(tn->GetTransform().dy) } }));
+			}
+		}
+		top.push_back({ "annotations", Array(notes) });
 	}
 
 	return Object(top) + "\n";

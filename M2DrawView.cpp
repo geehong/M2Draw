@@ -1124,10 +1124,6 @@ void CM2DrawView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		Invalidate(FALSE);
 	}
 
-	CString strLog;
-	strLog.Format(_T("[키보드 입력] 가상키 코드: 0x%02X"), nChar);
-	LogAppEvent(strLog);
-
 	CView::OnKeyDown(nChar, nRepCnt, nFlags);
 }
 

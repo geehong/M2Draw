@@ -2,12 +2,20 @@
 #include "ReferenceVerification.h"
 #include "ReferenceImport.h"
 #include "ClipboardImage.h"
+#include "LogoVariants.h"
+#include "HtmlExporter.h"
+#include "WebCapture.h"
+#include "AnnotationNote.h"
+#include "SvgReader.h"
+#include <algorithm>
+#include <functional>
 #include "AgentHandoff.h"
 #include "IconSet.h"
 #include "SceneJsonWriter.h"
 #include "SvgWriter.h"
 #include "ClipboardSvg.h"
 #include "D2DLayer.h"
+#include "CaptureFile.h"
 
 #include <wincodec.h>
 #include <wrl/client.h>
@@ -302,7 +310,216 @@ bool RunReferenceAgentVerification(std::wstring* failure, std::wstring* log)
 		REF_CHECK(pasted != nullptr && IsReferenceNode(*pasted) && pasted->IsLocked(), L"붙여넣은 비트맵이 레퍼런스 레이어에 잠긴 상태로 들어가지 않음");
 		AppendLog(log, L"클립보드 비트맵: CF_BITMAP -> PNG -> 레퍼런스(잠금)");
 	}
-	// 생성 결과는 남겨 둔다 (확인용): %TEMP%\m2draw_selftest 에 pkg_all, pkg_frame, icons 폴더
+	// 12. 레퍼런스 색 추출 (7.1.2): 왼쪽 위 지점의 색은 샘플 이미지의 대응 픽셀과 같아야 한다 (중앙은 클립보드 이미지가 덮음)
+	{
+		const double W = doc.width, H = doc.height;
+		const double sc = (std::min)(1.0, (std::min)(W / sw, H / sh));
+		const double ox = (W - sw * sc) * 0.5, oy = (H - sh * sc) * 0.5;
+		const unsigned u = static_cast<unsigned>((std::max)(0.0, (std::min)(sw - 1.0, (300.5 - ox) / sc)));
+		const unsigned v = static_cast<unsigned>((std::max)(0.0, (std::min)(sh - 1.0, (300.5 - oy) / sc)));
+		Px src{};
+		REF_CHECK(ReadPixel(samplePath, u, v, src), L"샘플 픽셀 읽기 실패");
+		Color c;
+		REF_CHECK(SampleReferenceColor(doc, Vec2(300.5f, 300.5f), c), L"레퍼런스 색 추출 실패");
+		if (!(std::abs(c.r * 255.0f - src.r) <= 6 && std::abs(c.g * 255.0f - src.g) <= 6 && std::abs(c.b * 255.0f - src.b) <= 6)) { if (failure) *failure = L"추출한 색이 원본 픽셀과 다름: 추출 " + std::to_wstring(static_cast<int>(c.r * 255)) + L"," + std::to_wstring(static_cast<int>(c.g * 255)) + L"," + std::to_wstring(static_cast<int>(c.b * 255)) + L" / 원본(" + std::to_wstring(u) + L"," + std::to_wstring(v) + L") " + std::to_wstring(src.r) + L"," + std::to_wstring(src.g) + L"," + std::to_wstring(src.b); return false; }
+		REF_CHECK(!SampleReferenceColor(doc, Vec2(-500.0f, -500.0f), c), L"이미지 밖 점에서 색이 추출됨");
+		AppendLog(log, L"레퍼런스 색 추출: 왼쪽 위 픽셀과 일치, 밖은 거부");
+	}
+
+	// 13. 로고 색 변형 (7.4.3): 검정 변형에는 원래 색이 없고, 레퍼런스는 없으며, 끝나면 원래 색으로 돌아온다
+	{
+		std::wstring err;
+		const fs::path ld = base / L"logo";
+		REF_CHECK(ExportLogoVariants(doc, ld.wstring(), &err), L"로고 변형 저장 실패: " + err);
+		const char* names[] = { "logo-color", "logo-black", "logo-white" };
+		for (const char* n : names) {
+			const std::wstring w(n, n + std::strlen(n));
+			REF_CHECK(fs::exists(ld / (w + L".svg")) && fs::exists(ld / (w + L".png")) && fs::exists(ld / (w + L"-on-white.png")) && fs::exists(ld / (w + L"-on-black.png")), L"로고 변형 파일이 빠짐: " + w);
+		}
+		auto lower = [](std::string s) { for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch))); return s; };
+		std::string colorSvg, blackSvg;
+		REF_CHECK(ReadText(ld / L"logo-color.svg", colorSvg) && ReadText(ld / L"logo-black.svg", blackSvg), L"로고 SVG 읽기 실패");
+		colorSvg = lower(colorSvg);
+		blackSvg = lower(blackSvg);
+		REF_CHECK(colorSvg.find("#ff0000") != std::string::npos, L"원본 로고에 빨강이 없음");
+		REF_CHECK(blackSvg.find("#ff0000") != std::string::npos, L"프레임 채우기(빨강)가 유지되지 않음 (프레임은 채우기를 바꾸지 않아야 함)");
+		REF_CHECK(blackSvg.find("<image") == std::string::npos, L"로고 SVG 에 레퍼런스가 들어감");
+		const Style after = red->GetStyle();
+		REF_CHECK(after.fill.color.r > 0.9f && after.fill.color.g < 0.1f, L"로고 내보내기 뒤 원래 색이 복원되지 않음");
+		AppendLog(log, L"로고 변형: 원본/검정/흰색 SVG+PNG 생성, 프레임 채우기 유지, 레퍼런스 제외, 원래 색 복원");
+	}
+	// 14. SVG 최적화 (7.4.4): 소수 2자리 출력은 소수 넷째 자리까지 쓰지 않는다
+	{
+		auto frac = std::make_unique<FrameNode>();
+		frac->SetFrameSize(10.0f, 10.0f);
+		frac->SetTransform(Matrix2D::Translation(33.3333f, 44.4444f));
+		frac->SetName(L"소수");
+		Node* fracNode = doc.AddShape(std::move(frac));
+		REF_CHECK(fracNode != nullptr, L"소수 좌표 프레임 추가 실패");
+		SvgWriter w4;
+		const std::string s4 = w4.WriteString(doc, SvgWriteOptions(SvgWriteMode::Clean));
+		SvgWriteOptions o2(SvgWriteMode::Clean);
+		o2.decimals = 2;
+		o2.optimize = true;
+		SvgWriter w2;
+		const std::string s2 = w2.WriteString(doc, o2);
+		REF_CHECK(s4.find("33.3333") != std::string::npos, L"기본 출력(4자리)에 소수 좌표가 없음");
+		REF_CHECK(s2.find("33.33") != std::string::npos && s2.find("33.3333") == std::string::npos, L"최적화 출력(2자리)이 줄어들지 않음");
+		REF_CHECK(s2.size() < s4.size(), L"최적화 출력이 기본보다 짧지 않음");
+		REF_CHECK(s2.find("id=\"path_") == std::string::npos && s2.find("<g id=") == std::string::npos, L"최적화 출력에 식별자(id)가 남아 있음");
+		AppendLog(log, L"SVG 최적화: 소수 2자리 출력이 4자리보다 짧음");
+	}
+
+	// 15. 웹 프로젝트 묶음 (7.4.5) + 웹폰트 <head> 추가 (7.1.4)
+	{
+		HtmlExporter he;
+		HtmlExportOptions ho;
+		ho.singleFile = false;
+		ho.headExtra = "  <link rel=\"stylesheet\" href=\"https://example.com/font.css\">";
+		const fs::path wd = base / L"web" / L"index.html";
+		REF_CHECK(he.ExportToFile(doc, wd.wstring(), ho), L"웹 프로젝트 저장 실패");
+		REF_CHECK(fs::exists(base / L"web" / L"styles.css"), L"styles.css 가 없음");
+		std::string html;
+		REF_CHECK(ReadText(wd, html), L"index.html 읽기 실패");
+		REF_CHECK(html.find("font.css") != std::string::npos, L"웹폰트 링크가 <head> 에 없음");
+		REF_CHECK(html.find("styles.css") != std::string::npos && html.find("<style>") == std::string::npos, L"분리 모드인데 CSS 가 인라인으로 들어감");
+		AppendLog(log, L"웹 프로젝트: index.html + styles.css, 웹폰트 링크 삽입");
+	}
+	// 16. URL 캡처 (7.1.6 / 7.1.7): 로컬 HTML 을 WebView2 로 찍어 크기, 픽셀 색, DOM 블록을 검사한다
+	{
+		fs::create_directories(base, ec);
+		const fs::path htmlPath = base / L"capture_test.html";
+		const std::wstring html = L"<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>selftest</title><style>h1,p{margin:0}</style></head>"
+			L"<body style=\"margin:0\"><header style=\"height:100px;background:#ff0000\"><h1>헤더</h1></header>"
+			L"<section style=\"height:1900px;background:#00ff00\"><p>본문</p></section></body></html>";
+		{
+			const std::string bytes = Utf8(html);
+			std::ofstream hf(htmlPath, std::ios::binary | std::ios::trunc);
+			hf.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+		}
+		const std::wstring fileUrl = L"file:///" + htmlPath.generic_wstring();
+		WebCaptureResult cap;
+		std::wstring capErr;
+		REF_CHECK(CaptureWebPage(fileUrl, 800, 30000, cap, &capErr), L"URL 캡처 실패: " + capErr);
+		REF_CHECK(cap.pixelW == 800, L"캡처 폭이 800 이 아님");
+		REF_CHECK(cap.pixelH >= 2000, L"캡처 높이가 페이지 높이(2000)보다 작음");
+		REF_CHECK(cap.domJson.find("regions") != std::string::npos && cap.domJson.find("header") != std::string::npos, L"레이아웃 요약(regions/header)이 없음");
+		const fs::path pngPath = base / L"capture_test.png";
+		{
+			std::ofstream pf(pngPath, std::ios::binary | std::ios::trunc);
+			pf.write(reinterpret_cast<const char*>(cap.png.data()), static_cast<std::streamsize>(cap.png.size()));
+		}
+		Px hp{}, bp{};
+		REF_CHECK(ReadPixel(pngPath.wstring(), 10, 10, hp) && hp.r > 200 && hp.g < 60 && hp.b < 60, L"캡처 그림의 헤더(빨강) 픽셀이 다름");
+		REF_CHECK(ReadPixel(pngPath.wstring(), 10, 500, bp) && bp.g > 200 && bp.r < 60, L"캡처 그림의 본문(초록) 픽셀이 다름");
+		AppendLog(log, L"URL 캡처(로컬 HTML): 800 x " + std::to_wstring(cap.pixelH) + L", 헤더/본문 색과 DOM 영역 확인");
+
+		// 선택: 실제 사이트 (환경변수 M2_SELFTEST_URL). 결과만 기록하고 실패로 보지 않는다
+		std::wstring liveUrl;
+		if (wchar_t* e = nullptr; _wdupenv_s(&e, nullptr, L"M2_SELFTEST_URL") == 0 && e) {
+			liveUrl = e;
+			std::free(e);
+		}
+		if (!liveUrl.empty()) {
+			WebCaptureResult live;
+			std::wstring liveErr;
+			if (CaptureWebPage(liveUrl, 1440, 60000, live, &liveErr)) {
+				size_t blocks = 0;
+				for (size_t at = live.domJson.find("\"role\""); at != std::string::npos; at = live.domJson.find("\"role\"", at + 1)) ++blocks;
+				AppendLog(log, std::wstring(L"실제 사이트 캡처: ") + liveUrl + L" -> " + std::to_wstring(live.pixelW) + L" x " + std::to_wstring(live.pixelH) + L", 영역 " + std::to_wstring(blocks) + L"개");
+			} else {
+				AppendLog(log, std::wstring(L"실제 사이트 캡처 실패: ") + liveErr);
+			}
+		}
+	}
+	// 17. 주석 (7.3.3): scene.json 과 프롬프트에는 들어가고, 순수 SVG 에서는 빠진다. 파일 저장에는 남는다
+	{
+		const std::wstring noteText = L"테스트메모";
+		REF_CHECK(AddAnnotation(doc, noteText, Vec2(300.0f, 300.0f)) != nullptr, L"주석 추가 실패");
+		const auto notes = AnnotationTexts(doc);
+		REF_CHECK(std::find(notes.begin(), notes.end(), noteText) != notes.end(), L"주석 목록에 메모가 없음");
+		const std::string json = SerializeSceneJson(doc);
+		REF_CHECK(json.find("\"annotations\"") != std::string::npos && json.find(Utf8(noteText)) != std::string::npos, L"scene.json 에 주석이 없음");
+		SvgWriter wc;
+		const std::string clean = wc.WriteString(doc, SvgWriteOptions(SvgWriteMode::Clean));
+		REF_CHECK(clean.find(Utf8(noteText)) == std::string::npos, L"순수 SVG 에 주석이 들어감");
+		SvgWriter wf;
+		const std::string file = wf.WriteString(doc, SvgWriteOptions(SvgWriteMode::File));
+		REF_CHECK(file.find(Utf8(noteText)) != std::string::npos, L"파일 저장에서 주석이 빠짐");
+		AgentHandoffOptions opt;
+		std::wstring err;
+		REF_CHECK(WriteAgentPackage(doc, (base / L"pkg_note").wstring(), opt, &err), L"주석 포함 패키지 저장 실패: " + err);
+		std::string prompt;
+		REF_CHECK(ReadText(base / L"pkg_note" / L"prompt.md", prompt) && prompt.find(Utf8(noteText)) != std::string::npos, L"prompt.md 에 주석이 없음");
+		AppendLog(log, L"주석: scene.json/프롬프트 포함, 순수 SVG 제외, 파일 저장 유지");
+	}
+	// 18. 웹폰트 링크 (7.1.4): 문서에 저장되어 SVG 저장 후 다시 열어도 남는다
+	{
+		doc.webFontHead = L"<link rel=\"stylesheet\" href=\"https://fonts.example/f.css\">";
+		SvgWriter wf;
+		const std::string svg = wf.WriteString(doc, SvgWriteOptions(SvgWriteMode::File));
+		REF_CHECK(svg.find("m2:webFontHead") != std::string::npos, L"SVG 에 웹폰트 속성이 없음");
+		Document back;
+		SvgReader rd;
+		REF_CHECK(rd.ReadFromString(svg, back), L"SVG 다시 읽기 실패");
+		REF_CHECK(back.webFontHead == doc.webFontHead, L"웹폰트 링크가 SVG 왕복 후 사라짐");
+		AppendLog(log, L"웹폰트 링크: 문서 속성으로 SVG 저장/다시 열기 유지");
+	}
+	// 19. 캡처 파일 (*.m2svg): 주소·DOM 요약·그림이 저장 후 그대로 돌아온다 (7.1.6 저장/불러오기)
+	{
+		const std::vector<uint8_t> tiny = { 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0, 0, 13, 'I', 'H', 'D', 'R',
+			0, 0, 0, 7, 0, 0, 0, 3, 8, 6, 0, 0, 0, 1, 2, 3, 4, 5 };   // 7 x 3 크기 PNG 머리 (내용은 비교용 바이트)
+		ge::CaptureFileData cap;
+		cap.url = "https://example.com/?q=a&b=<c>";
+		cap.domJson = "{\"title\":\"x\",\"note\":\"]]> 포함\"}";
+		cap.png = tiny;
+		cap.width = 7;
+		cap.height = 3;
+		const fs::path folder = fs::temp_directory_path() / L"m2draw_capture_check";
+		const fs::path file = folder / L"m2draw_capture_check.m2svg";
+		std::wstring cerr;
+		REF_CHECK(ge::WriteCaptureFolder(file.wstring(), cap, &cerr), L"캡처 폴더 저장 실패");
+		ge::CaptureFileData back;
+		REF_CHECK(ge::ReadCaptureFolder(file.wstring(), back, &cerr), L"캡처 폴더 다시 읽기 실패");
+		REF_CHECK(back.url == cap.url, L"캡처 주소가 왕복 후 달라짐");
+		REF_CHECK(back.domJson == cap.domJson, L"DOM 요약이 왕복 후 달라짐 (]]> 분할 포함)");
+		REF_CHECK(back.png == cap.png, L"그림 바이트가 왕복 후 달라짐");
+		REF_CHECK(back.width == 7 && back.height == 3, L"그림 크기가 왕복 후 달라짐");
+		std::error_code rmEc;
+		fs::remove_all(folder, rmEc);
+		AppendLog(log, L"캡처 폴더(목차 *.m2svg + reference.png + dom.json): 주소, DOM 요약, 그림 왕복 유지");
+	}
+	// 20. 레퍼런스 연결: 노드마다 연결 경로를 주면 그림 대신 경로가 남고, 다시 읽으면 경로만 남는다
+	{
+		auto img = std::make_shared<ge::ImageData>();
+		img->bytes = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 'I', 'H', 'D', 'R', 0, 0, 0, 7, 0, 0, 0, 3, 8, 6, 0, 0, 0 };
+		img->mime = "image/png";
+		img->pixelW = 7;
+		img->pixelH = 3;
+		Document linked;
+		ImageNode* refNode = ge::AddReferenceImage(linked, img, L"a", 1.0f, false);
+		REF_CHECK(refNode != nullptr, L"레퍼런스 노드 만들기 실패");
+		SvgWriteOptions lo(SvgWriteMode::File);
+		lo.linkReferenceImages = true;
+		lo.linkedImagePaths[refNode] = "../references/a.png";
+		SvgWriter lw;
+		const std::string lsvg = lw.WriteString(linked, lo);
+		REF_CHECK(lsvg.find("../references/a.png") != std::string::npos, L"연결 경로가 SVG 에 없음");
+		REF_CHECK(lsvg.find("base64") == std::string::npos, L"연결 모드인데 그림 데이터가 들어감");
+		Document lback;
+		SvgReader lrd;
+		REF_CHECK(lrd.ReadFromString(lsvg, lback), L"연결 SVG 다시 읽기 실패");
+		bool linkedBack = false;
+		std::function<void(const Node&)> walk = [&](const Node& n) {
+			if (const auto* im = dynamic_cast<const ImageNode*>(&n))
+				if (im->GetLinkHref() == "../references/a.png" && !im->GetData()) linkedBack = true;
+			if (const auto* g = dynamic_cast<const GroupNode*>(&n))
+				for (const auto& c : g->GetChildren()) walk(*c);
+		};
+		for (const auto& l : lback.GetLayers()) walk(*l);
+		REF_CHECK(linkedBack, L"다시 읽은 레퍼런스에 연결 경로가 남지 않음");
+		AppendLog(log, L"레퍼런스 연결: 페이지에는 경로만, 읽으면 경로만 남음");
+	}	// 생성 결과는 남겨 둔다 (확인용): %TEMP%\m2draw_selftest 에 pkg_all, pkg_frame, icons 폴더
 	return true;
 }
 

@@ -26,12 +26,17 @@ const UINT uiLastUserToolBarId = uiFirstUserToolBarId + iMaxUserToolbars - 1;
 BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_WM_CREATE()
 	ON_WM_CLOSE()
+	ON_WM_ACTIVATE()
+	ON_WM_TIMER()
+	ON_COMMAND(ID_URL_GET, &CMainFrame::OnUrlGet)
+	ON_UPDATE_COMMAND_UI(ID_URL_LABEL, &CMainFrame::OnUpdateUrlLabel)
+	ON_UPDATE_COMMAND_UI(ID_URL_EDIT, &CMainFrame::OnUpdateUrlEdit)
 	ON_WM_DESTROY()
 	ON_COMMAND(ID_WINDOW_MANAGER, &CMainFrame::OnWindowManager)
 	ON_COMMAND(ID_VIEW_CUSTOMIZE, &CMainFrame::OnViewCustomize)
 	ON_COMMAND(ID_FILE_PREVIEW_HTML, &CMainFrame::OnFilePreviewHtml)
-	ON_COMMAND_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_DIRECTSELECT, &CMainFrame::OnToolMenuCommand)
-	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_DIRECTSELECT, &CMainFrame::OnUpdateToolMenuCommand)
+	ON_COMMAND_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_RECTGRID, &CMainFrame::OnToolMenuCommand)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_RECTGRID, &CMainFrame::OnUpdateToolMenuCommand)
 	ON_COMMAND(ID_HELP_SHORTCUTS, &CMainFrame::OnHelpShortcuts)
 	ON_REGISTERED_MESSAGE(AFX_WM_CREATETOOLBAR, &CMainFrame::OnToolbarCreateNew)
 	ON_WM_SETTINGCHANGE()
@@ -119,6 +124,13 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	bNameValid = strCustomize.LoadString(IDS_TOOLBAR_CUSTOMIZE);
 	ASSERT(bNameValid);
 	m_wndToolBar.EnableCustomizeButton(TRUE, ID_VIEW_CUSTOMIZE, strCustomize);
+
+	// 주소창 + Get Ref 버튼 (7.1.6): 기본 도구 모음 오른쪽 빈 칸
+	m_wndToolBar.InsertButton(CMFCToolBarButton(ID_URL_LABEL, -1, L"주소창 :"));
+	m_wndToolBar.InsertButton(CMFCToolBarEditBoxButton(ID_URL_EDIT, -1, ES_AUTOHSCROLL | WS_BORDER, 360));
+	m_wndToolBar.InsertButton(CMFCToolBarButton(ID_URL_GET, -1, L"Get Ref"));
+	m_wndToolBar.AdjustLayout();
+	SetTimer(7204, 2000, nullptr);   // 외부 수정 감시 타이머 (7.2.4)
 
 	// 사용자 정의 도구 모음 작업을 허용합니다.
 	InitUserToolbars(nullptr, uiFirstUserToolBarId, uiLastUserToolBarId);
@@ -444,6 +456,79 @@ CM2DrawDoc* CMainFrame::GetActiveM2DrawDoc()
 	return nullptr;
 }
 
+// 2초마다 외부에서 바뀐 AI 산출물을 확인한다 (앱이 활성일 때만) (7.2.4)
+void CMainFrame::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == 7204 && !m_bClosing) {
+		if (CM2DrawDoc* pDoc = GetActiveM2DrawDoc()) {
+			pDoc->AgentTick();   // 결과 가져오기 + 현재 상태 저장 (창이 뒤에 있어도 동작)
+			if (::GetForegroundWindow() == m_hWnd) pDoc->CheckExternalImportChange();
+		}
+		// 활성 탭이 바뀌면 채팅을 그 문서의 에이전트 패키지에 연결한다
+		if (CM2DrawDoc* active = GetActiveM2DrawDoc(); static_cast<const void*>(active) != m_chatDoc) {
+			m_chatDoc = active;
+			if (active) GetOutputWnd().GetChat().UseDocument(active->GetAgentDirForChat(), active->GetSiteForChat());
+		}
+		// 열린 모든 문서의 자동 저장 (저장 위치가 있는 문서만)
+		POSITION tp = AfxGetApp()->GetFirstDocTemplatePosition();
+		while (tp) {
+			CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(tp);
+			POSITION dp = tmpl->GetFirstDocPosition();
+			while (dp) {
+				if (CM2DrawDoc* doc = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(dp)))
+					doc->AutoSaveIfDirty();
+			}
+		}	}
+	CMDIFrameWndEx::OnTimer(nIDEvent);
+}
+
+// 창이 다시 활성화되면 외부에서 바뀐 AI 산출물을 확인한다 (7.2.4)
+// 주소창의 주소로 레퍼런스 가져오기 (Get Ref)
+void CMainFrame::OnUrlGet()
+{
+	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
+	if (!pDoc) {
+		AfxMessageBox(_T("먼저 문서를 여세요."), MB_ICONINFORMATION);
+		return;
+	}
+	CString s = GetUrlEditText();
+	s.Trim();
+	pDoc->ImportUrlReference(std::wstring((LPCTSTR)s));
+}
+
+void CMainFrame::OnUpdateUrlLabel(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(FALSE);   // 글자 라벨 (누를 수 없음)
+}
+
+// 명령 처리 함수가 없으면 도구 모음의 입력칸이 자동으로 비활성화되므로 항상 켠다
+void CMainFrame::OnUpdateUrlEdit(CCmdUI* pCmdUI)
+{
+	pCmdUI->Enable(TRUE);
+}
+
+CString CMainFrame::GetUrlEditText()
+{
+	for (int i = 0; i < m_wndToolBar.GetCount(); ++i) {
+		if (auto* eb = DYNAMIC_DOWNCAST(CMFCToolBarEditBoxButton, m_wndToolBar.GetButton(i))) {
+			if (eb->m_nID == ID_URL_EDIT && eb->GetEditBox()) {
+				CString s;
+				eb->GetEditBox()->GetWindowText(s);
+				return s;
+			}
+		}
+	}
+	return _T("");
+}
+
+void CMainFrame::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	CMDIFrameWndEx::OnActivate(nState, pWndOther, bMinimized);
+	if (nState != WA_INACTIVE && !m_bClosing)
+		if (CM2DrawDoc* pDoc = GetActiveM2DrawDoc())
+			pDoc->CheckExternalImportChange();
+}
+
 void CMainFrame::OnClose()
 {
 	// 문서 닫기 중에도 선택/도구 변경으로 서브도구 바가 갱신되므로 종료 시작 시점에 표시
@@ -499,6 +584,8 @@ static UINT ToolMenuIdOf(ToolType t)
 	case ToolType::ZoomOut: return ID_TOOLMENU_ZOOMOUT;
 	case ToolType::Trim: return ID_TOOLMENU_TRIM;
 	case ToolType::Eyedropper: return ID_TOOLMENU_EYEDROPPER;
+	case ToolType::PolarGrid: return ID_TOOLMENU_POLARGRID;
+	case ToolType::RectGrid: return ID_TOOLMENU_RECTGRID;
 	default: return 0;
 	}
 }
@@ -697,6 +784,8 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_TOOLMENU_GRADIENT: imgIdx = 61; break;
 		case ID_TOOLMENU_TRIM: imgIdx = 62; break;
 		case ID_TOOLMENU_EYEDROPPER: imgIdx = 60; break;
+		case ID_TOOLMENU_POLARGRID: imgIdx = 59; break;
+		case ID_TOOLMENU_RECTGRID: imgIdx = 0; break;
 		case ID_TOOL_RECT:          imgIdx = 0; break;
 		case ID_TOOL_TRIANGLE:      imgIdx = 1; break;
 		case ID_TOOL_POLYGON:       imgIdx = 2; break;
@@ -788,6 +877,8 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_TOOLMENU_GRADIENT: tip = L"그라디언트"; break;
 		case ID_TOOLMENU_TRIM: tip = L"트림"; break;
 		case ID_TOOLMENU_EYEDROPPER: tip = L"스포이드 (I)"; break;
+		case ID_TOOLMENU_POLARGRID: tip = L"방사형 그리드"; break;
+		case ID_TOOLMENU_RECTGRID: tip = L"직교 그리드"; break;
 		case ID_TOOL_RECT: tip = L"사각형"; break;
 		case ID_TOOL_TRIANGLE: tip = L"삼각형"; break;
 		case ID_TOOL_POLYGON: tip = L"정다각형"; break;
@@ -1003,6 +1094,8 @@ static const ToolMenuEntry kToolMenu[] = {
 	{ ID_TOOLMENU_PIE, ToolType::Pie, -1 },
 	{ ID_TOOLMENU_DONUT, ToolType::Donut, -1 },
 	{ ID_TOOLMENU_EYEDROPPER, ToolType::Eyedropper, -1 },
+	{ ID_TOOLMENU_POLARGRID, ToolType::PolarGrid, -1 },
+	{ ID_TOOLMENU_RECTGRID, ToolType::RectGrid, -1 },
 };
 
 static const ToolMenuEntry* FindToolMenu(UINT nID)

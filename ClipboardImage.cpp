@@ -79,3 +79,18 @@ std::shared_ptr<ge::ImageData> ReadClipboardBitmapAsPng(CWnd* owner)
 	::CloseClipboard();
 	return out;
 }
+
+std::wstring ReadClipboardText(CWnd* owner)
+{
+	if (!::IsClipboardFormatAvailable(CF_UNICODETEXT) || !owner || !owner->OpenClipboard())
+		return {};
+	std::wstring out;
+	if (HANDLE h = ::GetClipboardData(CF_UNICODETEXT)) {
+		if (const wchar_t* p = static_cast<const wchar_t*>(::GlobalLock(h))) {
+			out = p;
+			::GlobalUnlock(h);
+		}
+	}
+	::CloseClipboard();
+	return out;
+}

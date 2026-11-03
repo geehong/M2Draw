@@ -18,6 +18,7 @@ struct HtmlExportOptions {
 	const FrameNode* targetArtboard = nullptr; // 특정 Artboard(최상위 Frame)만 내보내기 (nullptr 이면 전체 문서)
 	std::string title = "M2Draw Export";
 	bool tableAsGrid = false;           // true: 테이블을 <table> 대신 CSS Grid(div)로 출력
+	std::string headExtra;              // <head> 에 그대로 넣을 HTML (웹폰트 <link> 등, 7.1.4). 비우면 아무것도 넣지 않음
 };
 
 // HTML / CSS 내보내기 결과물

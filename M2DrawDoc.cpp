@@ -19,14 +19,25 @@
 #include "SvgReader.h"
 #include "HtmlExporter.h"
 #include "ClipboardSvg.h"
+#include "CaptureFile.h"
 #include "RasterExport.h"
 #include "ClipboardImage.h"
 #include "ReferenceImport.h"
 #include "AgentHandoff.h"
+#include "AgentGuide.h"
+namespace { std::wstring AgentWide(const std::string& s); }
+#include "SceneJsonWriter.h"
 #include "IconSet.h"
+#include "LogoVariants.h"
+#include "WebCapture.h"
+#include "AnnotationNote.h"
+#include "WebFontDlg.h"
+#include <fstream>
 #include <fstream>
 #include <iterator>
 #include <algorithm>
+#include <filesystem>
+#include <set>
 #include <vector>
 
 #include <propkey.h>
@@ -71,6 +82,17 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_COMMAND(ID_FILE_EXPORT_AGENT, &CM2DrawDoc::OnFileExportAgent)
 	ON_COMMAND(ID_FILE_IMPORT_AGENT_SVG, &CM2DrawDoc::OnFileImportAgentSvg)
 	ON_COMMAND(ID_FILE_EXPORT_ICONSET, &CM2DrawDoc::OnFileExportIconSet)
+	ON_COMMAND(ID_FILE_EXPORT_LOGO, &CM2DrawDoc::OnFileExportLogo)
+	ON_COMMAND(ID_FILE_EXPORT_SVG_OPT, &CM2DrawDoc::OnFileExportSvgOptimized)
+	ON_COMMAND(ID_FILE_EXPORT_WEB, &CM2DrawDoc::OnFileExportWebBundle)
+	ON_COMMAND(ID_FILE_IMPORT_URL, &CM2DrawDoc::OnFileImportUrlReference)
+	ON_COMMAND(ID_FILE_ADD_ANNOTATION, &CM2DrawDoc::OnFileAddAnnotation)
+	ON_COMMAND(ID_FILE_WEBFONT, &CM2DrawDoc::OnFileWebFontLink)
+	ON_COMMAND(ID_FILE_AGENT_START, &CM2DrawDoc::OnFileAgentStart)
+	ON_COMMAND(ID_FILE_AGENT_SEND_FRAME, &CM2DrawDoc::OnFileAgentSendFrame)
+	ON_COMMAND(ID_FILE_PAGE_NEW, &CM2DrawDoc::OnFilePageNew)
+	ON_COMMAND(ID_FILE_PAGE_OPEN, &CM2DrawDoc::OnFilePageOpen)
+	ON_COMMAND(ID_FILE_PAGE_RENAME, &CM2DrawDoc::OnFilePageRename)
 	ON_COMMAND(ID_FILE_EXPORT_SVG, &CM2DrawDoc::OnFileExportSvg)
 	ON_COMMAND(ID_FILE_EXPORT_HTML, &CM2DrawDoc::OnFileExportHtml)
 	ON_COMMAND(ID_FILE_EXPORT_IMAGE, &CM2DrawDoc::OnFileExportImage)
@@ -161,33 +183,701 @@ void CM2DrawDoc::Serialize(CArchive& /*ar*/)
 	// 기본 CArchive 직렬화 대신 OnSaveDocument / OnOpenDocument 를 직접 사용합니다.
 }
 
+namespace {
+
+// 프로젝트 상태: 인스턴스당 하나. 열린 문서들은 모두 이 프로젝트의 페이지가 된다
+struct ProjectState
+{
+	std::wstring                            folder;     // 프로젝트 폴더 (이름\)
+	std::wstring                            manifest;   // 목차 (이름\이름.m2svg)
+	std::vector<ProjectPageEntry>           pages;
+	std::vector<ProjectRefEntry>            refs;
+	std::map<std::wstring, std::string>     refDoms;
+};
+ProjectState g_project;
+// 프로젝트 파일 도우미 (목차 *.m2svg 읽기/쓰기)
+std::string ProjUtf8(const std::wstring& w)
+{
+	if (w.empty()) return {};
+	const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
+	std::string out(static_cast<size_t>(n), '\0');
+	WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
+	return out;
+}
+
+std::string ProjEscape(const std::string& s)
+{
+	std::string out;
+	for (char c : s) {
+		switch (c) {
+		case '&': out += "&amp;"; break;
+		case '<': out += "&lt;"; break;
+		case '>': out += "&gt;"; break;
+		case '"': out += "&quot;"; break;
+		default: out += c;
+		}
+	}
+	return out;
+}
+
+// name="값" 을 읽는다 (XML 이스케이프 되돌리기)
+bool ProjAttr(const std::string& xml, const char* name, std::string& value)
+{
+	const std::string key = std::string(" ") + name + "=\"";
+	const size_t at = xml.find(key);
+	if (at == std::string::npos) return false;
+	const size_t begin = at + key.size();
+	const size_t end = xml.find('"', begin);
+	if (end == std::string::npos) return false;
+	value.clear();
+	for (size_t i = begin; i < end; ++i) {
+		if (xml.compare(i, 5, "&amp;") == 0) { value += '&'; i += 4; }
+		else if (xml.compare(i, 4, "&lt;") == 0) { value += '<'; i += 3; }
+		else if (xml.compare(i, 4, "&gt;") == 0) { value += '>'; i += 3; }
+		else if (xml.compare(i, 6, "&quot;") == 0) { value += '"'; i += 5; }
+		else value += xml[i];
+	}
+	return true;
+}
+
+bool AgentWriteFile(const std::filesystem::path& p, const std::string& data);   // 정의는 아래 에이전트 도우미 쪽
+
+bool ProjReadAll(const std::filesystem::path& p, std::string& out)
+{
+	std::ifstream ifs(p, std::ios::binary);
+	if (!ifs) return false;
+	out.assign((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+	return true;
+}
+
+std::string ProjNow()
+{
+	CStringA s(CTime::GetCurrentTime().Format(_T("%Y-%m-%d %H:%M:%S")));
+	return std::string((LPCSTR)s);
+}
+
+} // namespace
+
 BOOL CM2DrawDoc::OnSaveDocument(LPCTSTR lpszPathName)
 {
 	if (!lpszPathName || lpszPathName[0] == _T('\0'))
 		return FALSE;
 
-	ge::SvgWriter writer;
-	if (!writer.WriteToFile(m_doc, lpszPathName))
-	{
-		AfxMessageBox(_T("SVG 파일을 저장하는 중 오류가 발생했습니다."), MB_ICONERROR);
+	if (!SaveProject(lpszPathName))
 		return FALSE;
-	}
 
 	SetModifiedFlag(FALSE);
 
 	CString strLog;
-	strLog.Format(_T("[파일 저장 완료] %s"), lpszPathName);
+	strLog.Format(_T("[프로젝트 저장 완료] %s"), lpszPathName);
 	LogAppEvent(strLog);
 	SetAppStatusText(strLog);
 
 	return TRUE;
 }
 
+namespace {
+
+// 상대 경로 (폴더 안이면 폴더 기준으로, 아니면 그대로)
+std::wstring ProjRel(const std::wstring& path, const std::wstring& folder)
+{
+	const std::wstring prefix = folder + L"\\";
+	if (!path.empty() && path.rfind(prefix, 0) == 0) return path.substr(prefix.size());
+	return path;
+}
+
+// 목차에 적힌 경로를 실제 경로로 (상대 경로면 프로젝트 폴더 기준)
+std::wstring ProjAbs(const std::wstring& path, const std::wstring& folder)
+{
+	if (path.empty()) return path;
+	std::filesystem::path p(path);
+	return p.is_relative() ? (std::filesystem::path(folder) / p).wstring() : path;
+}
+
+// 연결 경로(페이지 파일 기준)로 레퍼런스 그림을 다시 붙인다
+void RelinkNode(ge::Node& node, const std::wstring& folder)
+{
+	if (auto* im = dynamic_cast<ge::ImageNode*>(&node)) {
+		if (!im->GetData() && !im->GetLinkHref().empty()) {
+			const std::filesystem::path file = (std::filesystem::path(folder) / L"pages" / AgentWide(im->GetLinkHref())).lexically_normal();
+			std::string png;
+			if (ProjReadAll(file, png) && png.size() >= 24) {
+				auto data = std::make_shared<ge::ImageData>();
+				data->bytes.assign(png.begin(), png.end());
+				data->mime = "image/png";
+				auto be32 = [&](size_t o) {
+					return (static_cast<unsigned>(static_cast<unsigned char>(png[o])) << 24) | (static_cast<unsigned>(static_cast<unsigned char>(png[o + 1])) << 16) |
+					       (static_cast<unsigned>(static_cast<unsigned char>(png[o + 2])) << 8) | static_cast<unsigned>(static_cast<unsigned char>(png[o + 3]));
+				};
+				data->pixelW = static_cast<int>(be32(16));
+				data->pixelH = static_cast<int>(be32(20));
+				im->SetData(data);
+			}
+		}
+	}
+	if (auto* g = dynamic_cast<ge::GroupNode*>(&node))
+		for (const auto& c : g->GetChildren()) RelinkNode(*c, folder);
+}
+
+void RelinkDocument(ge::Document& doc, const std::wstring& folder)
+{
+	for (const auto& layer : doc.GetLayers()) RelinkNode(*layer, folder);
+}
+
+// 문서 안의 모든 이미지 노드 모으기
+void CollectImages(ge::Node& node, std::vector<ge::ImageNode*>& out)
+{
+	if (auto* im = dynamic_cast<ge::ImageNode*>(&node)) out.push_back(im);
+	if (auto* g = dynamic_cast<ge::GroupNode*>(&node))
+		for (const auto& c : g->GetChildren()) CollectImages(*c, out);
+}
+
+// 파일 이름으로 쓸 수 없는 글자를 _ 로 바꾼다
+std::wstring SafeFileBase(const std::wstring& name)
+{
+	std::wstring out = name;
+	for (auto& ch : out)
+		if (ch == L'\\' || ch == L'/' || ch == L':' || ch == L'*' || ch == L'?' || ch == L'"' || ch == L'<' || ch == L'>' || ch == L'|' || ch < 0x20) ch = L'_';
+	while (!out.empty() && (out.back() == L'.' || out.back() == L' ')) out.pop_back();
+	return out.empty() ? std::wstring(L"reference") : out;
+}
+
+// 기본 레퍼런스 이름: 사이트이름_YYYYMMDDHHMM (예: https://www.webmd.com/ -> webmd_202611031257)
+std::wstring DefaultReferenceName(const std::wstring& url)
+{
+	std::wstring host = url;
+	if (const size_t scheme = host.find(L"://"); scheme != std::wstring::npos) host = host.substr(scheme + 3);
+	host = host.substr(0, host.find(L'/'));
+	if (host.rfind(L"www.", 0) == 0) host = host.substr(4);
+	std::vector<std::wstring> labels;
+	for (size_t s = 0, e = 0; s <= host.size(); s = e + 1) {
+		e = host.find(L'.', s);
+		if (e == std::wstring::npos) e = host.size();
+		if (e > s) labels.push_back(host.substr(s, e - s));
+	}
+	std::wstring siteName = labels.empty() ? std::wstring(L"capture") : labels[labels.size() >= 2 ? labels.size() - 2 : 0];
+	if (labels.size() >= 3 && labels.back().size() == 2 && labels[labels.size() - 2].size() <= 3)
+		siteName = labels[labels.size() - 3];
+	const CString stamp = CTime::GetCurrentTime().Format(_T("%Y%m%d%H%M"));
+	return siteName + L"_" + std::wstring((LPCTSTR)stamp);
+}
+// 목차의 <m2:page ...> 와 <m2:reference ...> 태그를 하나씩 꺼낸다
+std::vector<std::string> ProjTags(const std::string& xml, const char* tagName)
+{
+	std::vector<std::string> out;
+	const std::string open = std::string("<") + tagName + " ";
+	size_t pos = 0;
+	while ((pos = xml.find(open, pos)) != std::string::npos) {
+		const size_t end = xml.find('>', pos);
+		if (end == std::string::npos) break;
+		out.push_back(xml.substr(pos, end - pos + 1));
+		pos = end + 1;
+	}
+	return out;
+}
+
+} // namespace
+
+// 프로젝트 저장: 폴더 하나가 프로젝트다. 폴더 이름 = 프로젝트 이름
+//   이름\ 이름.m2svg (목차) · pages\페이지.m2doc · references\NNN_이름\ · agent\페이지\
+// 저장은 현재 페이지와 목차만 쓴다. 레퍼런스는 캡처할 때 따로 만들어진다.
+BOOL CM2DrawDoc::SaveProject(LPCTSTR manifestPathLpsz)
+{
+	namespace fs = std::filesystem;
+	const fs::path manifest((LPCTSTR)manifestPathLpsz);
+	const fs::path folder = manifest.parent_path();
+	std::error_code ec;
+	fs::create_directories(folder / L"pages", ec);
+	fs::create_directories(folder / L"references", ec);
+	if (m_activePage.empty()) m_activePage = L"메인";
+
+	// 현재 페이지 항목 (에이전트 위치 갱신)
+	ProjectPageEntry* cur = nullptr;
+	for (auto& pg : g_project.pages)
+		if (pg.name == m_activePage) cur = &pg;
+	if (!cur) {
+		g_project.pages.push_back(ProjectPageEntry{ m_activePage, L"" });
+		cur = &g_project.pages.back();
+	}
+	cur->agentDir = ProjRel(std::wstring((LPCTSTR)m_agentDir), folder.wstring());
+
+	// 1) 현재 페이지 본체 (레퍼런스 그림은 번호 경로로 연결)
+	ge::SvgWriteOptions opt(ge::SvgWriteMode::File);
+	opt.linkReferenceImages = true;
+
+	// 레퍼런스 그림: 레이어 이름이 파일 이름이 된다 (같은 이름이면 _2, _3 ...). 이름을 바꾸면 파일과 목차도 따라간다
+	const fs::path refDir = folder / L"references";
+	std::vector<ge::ImageNode*> images;
+	for (const auto& layer : m_doc.GetLayers()) CollectImages(*layer, images);
+	std::set<std::wstring> used;
+	for (ge::ImageNode* im : images) {
+		if (!ge::IsReferenceNode(*im)) continue;
+		if (!im->GetData() && im->GetLinkHref().empty()) continue;
+		const std::wstring oldBase = im->GetLinkHref().empty() ? std::wstring() : fs::path(AgentWide(im->GetLinkHref())).stem().wstring();
+		const std::wstring base = SafeFileBase(im->GetName());
+		std::wstring cand = base;
+		for (int k = 2; used.count(cand); ++k) cand = base + L"_" + std::to_wstring(k);
+		used.insert(cand);
+
+		const fs::path target = refDir / (cand + L".png");
+		if (im->GetData()) {
+			AgentWriteFile(target, std::string(im->GetData()->bytes.begin(), im->GetData()->bytes.end()));
+		} else {
+			const fs::path src = (folder / L"pages" / AgentWide(im->GetLinkHref())).lexically_normal();
+			std::error_code copyEc;
+			if (fs::exists(src) && !fs::exists(target)) fs::copy_file(src, target, copyEc);
+		}
+
+		// DOM 요약 (이름이 바뀌면 같이 옮긴다)
+		const std::wstring key = oldBase.empty() ? base : oldBase;
+		if (key != cand && g_project.refDoms.count(key)) {
+			g_project.refDoms[cand] = g_project.refDoms[key];
+			g_project.refDoms.erase(key);
+		}
+		if (g_project.refDoms.count(cand)) AgentWriteFile(refDir / (cand + L".json"), g_project.refDoms[cand]);
+
+		// 목차의 레퍼런스 항목 이름도 맞춘다
+		for (auto& r : g_project.refs)
+			if (r.leaf == key) r.leaf = cand;
+
+		const std::string rel = "../references/" + ProjUtf8(cand) + ".png";
+		opt.linkedImagePaths[im] = rel;
+		im->SetLinkHref(rel);
+	}
+	ge::SvgWriter writer;
+	if (!writer.WriteToFile(m_doc, (folder / L"pages" / (m_activePage + L".m2doc")).wstring(), opt)) {
+		AfxMessageBox(_T("페이지를 저장하는 중 오류가 발생했습니다."), MB_ICONERROR);
+		return FALSE;
+	}
+
+	// 3-b) 어느 페이지에도 열린 문서에도 쓰이지 않는 레퍼런스 파일과 항목을 지운다
+	CleanupUnusedReferences(folder.wstring());
+
+	// 2) 목차
+	std::string created;
+	std::string previous;
+	if (ProjReadAll(manifest, previous)) ProjAttr(previous, "m2:created", created);
+	if (created.empty()) created = ProjNow();
+
+	std::string xml = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
+	xml += "<m2:project xmlns:m2=\"https://m2draw/ns\" m2:version=\"2\"";
+	xml += " m2:name=\"" + ProjEscape(ProjUtf8(manifest.stem().wstring())) + "\"";
+	xml += " m2:created=\"" + ProjEscape(created) + "\"";
+	xml += " m2:modified=\"" + ProjEscape(ProjNow()) + "\"";
+	xml += " m2:site=\"" + ProjEscape(ProjUtf8(m_agentSiteUrl)) + "\"";
+	xml += " m2:active=\"" + ProjEscape(ProjUtf8(m_activePage)) + "\">\n";
+	for (const auto& pg : g_project.pages) {
+		xml += "  <m2:page name=\"" + ProjEscape(ProjUtf8(pg.name)) + "\" file=\"" + ProjEscape(ProjUtf8(L"pages\\" + pg.name + L".m2doc")) +
+		       "\" agent=\"" + ProjEscape(ProjUtf8(pg.agentDir)) + "\"/>\n";
+	}
+	for (const auto& r : g_project.refs) {
+		xml += "  <m2:reference id=\"" + std::to_string(r.id) + "\" name=\"" + ProjEscape(ProjUtf8(r.leaf)) + "\" url=\"" + ProjEscape(ProjUtf8(r.url)) +
+		       "\" created=\"" + ProjEscape(r.created) + "\" width=\"" + std::to_string(r.width) + "\" height=\"" + std::to_string(r.height) + "\"/>\n";
+	}
+	xml += "</m2:project>\n";
+	if (!AgentWriteFile(manifest, xml)) {
+		AfxMessageBox(_T("프로젝트 목차(*.m2svg)를 쓰는 중 오류가 발생했습니다."), MB_ICONERROR);
+		return FALSE;
+	}
+
+	g_project.folder = folder.wstring();
+	g_project.manifest = manifest.wstring();
+	return TRUE;
+}
+
+// 프로젝트 안의 레퍼런스 정리: 열린 문서들과 디스크의 페이지 파일이 아무도 쓰지 않는 references 파일은 지운다
+void CM2DrawDoc::CleanupUnusedReferences(const std::wstring& folderPath)
+{
+	namespace fs = std::filesystem;
+	const fs::path folder(folderPath);
+	std::set<std::string> used;   // UTF-8 파일 이름 (확장자 없음)
+	auto collect = [&](ge::Node& n, auto&& self) -> void {
+		if (auto* im = dynamic_cast<ge::ImageNode*>(&n))
+			if (!im->GetLinkHref().empty())
+				used.insert(ProjUtf8(fs::path(AgentWide(im->GetLinkHref())).stem().wstring()));
+		if (auto* g = dynamic_cast<ge::GroupNode*>(&n))
+			for (const auto& c : g->GetChildren()) self(*c, self);
+	};
+	// 열린 문서 (메모리에 있는 최신 상태)
+	if (CDocTemplate* tmpl = nullptr; true) {
+		POSITION tp = AfxGetApp()->GetFirstDocTemplatePosition();
+		while (tp) {
+			tmpl = AfxGetApp()->GetNextDocTemplate(tp);
+			POSITION dp = tmpl->GetFirstDocPosition();
+			while (dp) {
+				if (CM2DrawDoc* d = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(dp)))
+					for (const auto& layer : d->m_doc.GetLayers()) collect(*layer, collect);
+			}
+		}
+	}
+	// 디스크의 페이지 파일 (열려 있지 않은 페이지 포함)
+	std::error_code ec;
+	for (const auto& entry : fs::directory_iterator(folder / L"pages", ec)) {
+		if (entry.path().extension() != L".m2doc") continue;
+		std::string xml;
+		if (!ProjReadAll(entry.path(), xml)) continue;
+		const std::string key = "href=\"../references/";
+		size_t pos = 0;
+		while ((pos = xml.find(key, pos)) != std::string::npos) {
+			pos += key.size();
+			const size_t end = xml.find('"', pos);
+			if (end == std::string::npos) break;
+			used.insert(fs::path(xml.substr(pos, end - pos)).stem().string());
+			pos = end;
+		}
+	}
+	// 쓰이지 않는 파일과 목차 항목 지우기
+	for (const auto& entry : fs::directory_iterator(folder / L"references", ec)) {
+		const auto ext = entry.path().extension();
+		if (ext != L".png" && ext != L".json") continue;
+		if (used.count(ProjUtf8(entry.path().stem().wstring())) == 0)
+		{
+			std::error_code rmEc;
+			fs::remove(entry.path(), rmEc);
+		}
+	}
+	g_project.refs.erase(std::remove_if(g_project.refs.begin(), g_project.refs.end(), [&](const ProjectRefEntry& r) {
+		return used.count(ProjUtf8(r.leaf)) == 0;
+	}), g_project.refs.end());
+}
+
+// 현재 문서를 바꾸고 화면을 갱신한다
+void CM2DrawDoc::ReplaceDocument(ge::Document&& loaded)
+{
+	m_currentPath.reset();
+	m_doc = std::move(loaded);
+	ResetToolInteraction();
+	m_undoMgr.Reset(m_doc);
+	UpdateAllViews(nullptr);
+	UpdateShapePropertiesSelection(nullptr, this);
+	if (CWnd* pMainWnd = AfxGetMainWnd()) {
+		if (pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+			static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+	}
+}
+
+// 프로젝트 열기: 목차에서 페이지, 레퍼런스, 현재 페이지를 읽고 현재 페이지를 연다
+BOOL CM2DrawDoc::OpenProject(LPCTSTR manifestPathLpsz)
+{
+	namespace fs = std::filesystem;
+	const fs::path manifest((LPCTSTR)manifestPathLpsz);
+	const fs::path folder = manifest.parent_path();
+
+	std::string xml;
+	if (!ProjReadAll(manifest, xml)) {
+		AfxMessageBox(_T("프로젝트 파일을 읽을 수 없습니다."), MB_ICONERROR);
+		return FALSE;
+	}
+	g_project.folder = folder.wstring();
+
+	g_project.manifest = manifest.wstring();
+	m_attached = false;
+
+	// 목차: 페이지, 레퍼런스, 현재 페이지, 주소
+	g_project.pages.clear();
+	g_project.refs.clear();
+	for (const auto& tag : ProjTags(xml, "m2:page")) {
+		std::string n, ag;
+		ProjAttr(tag, "name", n);
+		ProjAttr(tag, "agent", ag);
+		g_project.pages.push_back(ProjectPageEntry{ AgentWide(n), AgentWide(ag) });
+	}
+	for (const auto& tag : ProjTags(xml, "m2:reference")) {
+		ProjectRefEntry r;
+		std::string id, leaf, url, w, h;
+		ProjAttr(tag, "id", id);
+		ProjAttr(tag, "name", leaf);
+		ProjAttr(tag, "url", url);
+		ProjAttr(tag, "created", r.created);
+		ProjAttr(tag, "width", w);
+		ProjAttr(tag, "height", h);
+		r.id = id.empty() ? 0 : std::stoi(id);
+		r.leaf = AgentWide(leaf);
+		r.url = AgentWide(url);
+		r.width = w.empty() ? 0 : std::stoi(w);
+		r.height = h.empty() ? 0 : std::stoi(h);
+		g_project.refs.push_back(r);
+	}
+	std::string active, site, legacyAgent;
+	ProjAttr(xml, "m2:active", active);
+	ProjAttr(xml, "m2:site", site);
+	m_agentSiteUrl = AgentWide(site);
+	m_activePage = active.empty() ? std::wstring(L"메인") : AgentWide(active);
+	if (g_project.pages.empty()) {
+		// 예전 형식 (페이지 목록 없음): 본체 하나를 "메인" 페이지로 본다
+		ProjAttr(xml, "m2:agent", legacyAgent);
+		g_project.pages.push_back(ProjectPageEntry{ L"메인", AgentWide(legacyAgent) });
+		m_activePage = L"메인";
+	}
+
+	// 현재 페이지 본체 (예전 형식은 document.m2doc 또는 이름.m2data\document.m2doc)
+	fs::path pagePath = folder / L"pages" / (m_activePage + L".m2doc");
+	if (!fs::exists(pagePath)) pagePath = folder / L"document.m2doc";
+	if (!fs::exists(pagePath)) pagePath = folder / (manifest.stem().wstring() + L".m2data") / L"document.m2doc";
+	ge::Document loaded;
+	ge::SvgReader reader;
+	if (!reader.ReadFromFile(pagePath.wstring(), loaded)) {
+		AfxMessageBox(_T("프로젝트 페이지를 열 수 없습니다."), MB_ICONERROR);
+		return FALSE;
+	}
+	RelinkDocument(loaded, folder.wstring());
+
+	// 현재 페이지의 에이전트 위치
+	m_agentDir.Empty();
+	for (const auto& pg : g_project.pages)
+		if (pg.name == m_activePage && !pg.agentDir.empty())
+			m_agentDir = CString(ProjAbs(pg.agentDir, folder.wstring()).c_str());
+
+	// 마지막 캡처의 DOM 요약 (예전 형식은 folder\dom.json)
+	g_project.refDoms.clear();
+	std::error_code domEc;
+	for (const auto& entry : fs::directory_iterator(folder / L"references", domEc)) {
+		if (entry.path().extension() != L".json") continue;
+		std::string text;
+		if (ProjReadAll(entry.path(), text)) g_project.refDoms[entry.path().stem().wstring()] = text;
+	}
+	m_agentLastDom.clear();
+	if (!g_project.refs.empty() && g_project.refDoms.count(g_project.refs.back().leaf)) m_agentLastDom = AgentWide(g_project.refDoms[g_project.refs.back().leaf]);
+	m_capturePng.clear();
+
+	m_agentFrameId = 0;
+	m_agentResultSeen.clear();
+	m_agentResultNodes.clear();
+	std::error_code ec;
+	if (!m_agentDir.IsEmpty()) {
+		for (const auto& entry : fs::directory_iterator(fs::path((LPCTSTR)m_agentDir) / L"result", ec)) {
+			if (!entry.is_regular_file(ec)) continue;
+			m_agentResultSeen[entry.path().filename().wstring()] = fs::last_write_time(entry.path(), ec).time_since_epoch().count();
+		}
+	}
+
+	ReplaceDocument(std::move(loaded));
+	SetPathName(manifestPathLpsz);
+	SetTitle(CString(manifest.stem().wstring().c_str()));   // 제목 = 프로젝트 이름
+	SetModifiedFlag(FALSE);
+
+	// 나머지 페이지는 각각 탭(문서)으로 연다
+	POSITION templatePos = AfxGetApp()->GetFirstDocTemplatePosition();
+	if (templatePos != nullptr)
+	{
+		CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(templatePos);
+		for (const auto& pg : g_project.pages)
+		{
+			if (pg.name == m_activePage) continue;
+			CM2DrawDoc* pageDoc = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->CreateNewDocument());
+			if (!pageDoc) continue;
+			pageDoc->LoadPageAttached(pg.name);
+			if (CFrameWnd* frame = tmpl->CreateNewFrame(pageDoc, nullptr))
+				tmpl->InitialUpdateFrame(frame, pageDoc);
+		}
+	}
+
+	CString strLog;
+	strLog.Format(_T("[프로젝트 열기 완료] %s (페이지: %s)"), manifestPathLpsz, m_activePage.c_str());
+	LogAppEvent(strLog);
+	SetAppStatusText(strLog);
+	return TRUE;
+}
+
+// 프로젝트의 페이지 하나를 이 문서에 붙여 연다 (열 때 탭으로 여는 페이지)
+void CM2DrawDoc::LoadPageAttached(const std::wstring& name)
+{
+	namespace fs = std::filesystem;
+	const fs::path folder(g_project.folder);
+	ge::Document loaded;
+	ge::SvgReader reader;
+	const fs::path file = folder / L"pages" / (name + L".m2doc");
+	if (!fs::exists(file) || !reader.ReadFromFile(file.wstring(), loaded))
+		return;
+	RelinkDocument(loaded, folder.wstring());
+
+	m_doc = std::move(loaded);
+	m_activePage = name;
+	m_attached = true;
+	m_agentDir.Empty();
+	for (const auto& pg : g_project.pages)
+		if (pg.name == name && !pg.agentDir.empty())
+			m_agentDir = CString(ProjAbs(pg.agentDir, folder.wstring()).c_str());
+	ResetToolInteraction();
+	m_undoMgr.Reset(m_doc);
+	SetPathName(CString(g_project.manifest.c_str()));
+	SetModifiedFlag(FALSE);
+}
+// 페이지 전환: 현재 페이지를 저장하고 다른 페이지를 연다. 파일이 없으면 현재 대지 크기의 빈 페이지를 만든다
+BOOL CM2DrawDoc::SwitchPage(const std::wstring& name)
+{
+	namespace fs = std::filesystem;
+	if (g_project.folder.empty() || GetPathName().IsEmpty()) return FALSE;
+	if (name == m_activePage) return TRUE;
+
+	// 1) 현재 페이지 저장 (목차 포함)
+	if (!SaveProject(GetPathName())) return FALSE;
+
+	// 2) 대상 페이지 읽기 (없으면 빈 페이지)
+	const fs::path folder(g_project.folder);
+	const fs::path file = folder / L"pages" / (name + L".m2doc");
+	ge::Document loaded;
+	if (fs::exists(file)) {
+		ge::SvgReader reader;
+		if (!reader.ReadFromFile(file.wstring(), loaded)) {
+			AfxMessageBox(_T("페이지를 열 수 없습니다."), MB_ICONERROR);
+			return FALSE;
+		}
+		RelinkDocument(loaded, folder.wstring());
+	} else {
+		loaded.width = m_doc.width;
+		loaded.height = m_doc.height;
+		loaded.backgroundColor = m_doc.backgroundColor;
+	}
+
+	// 3) 목차에 올리고, 그 페이지의 에이전트 위치를 쓴다
+	bool known = false;
+	for (const auto& pg : g_project.pages)
+		if (pg.name == name) known = true;
+	if (!known) g_project.pages.push_back(ProjectPageEntry{ name, L"" });
+	m_activePage = name;
+	m_agentDir.Empty();
+	for (const auto& pg : g_project.pages)
+		if (pg.name == name && !pg.agentDir.empty())
+			m_agentDir = CString(ProjAbs(pg.agentDir, folder.wstring()).c_str());
+
+	ReplaceDocument(std::move(loaded));
+	SaveProject(GetPathName());
+	SetModifiedFlag(FALSE);
+
+	CString log;
+	log.Format(_T("[페이지] %s"), name.c_str());
+	LogAppEvent(log);
+	SetAppStatusText(log);
+	return TRUE;
+}
+
+// 파일 > 새 페이지: pages 폴더에 이름을 정해 빈 페이지를 만들고 연다
+void CM2DrawDoc::OnFilePageNew()
+{
+	if (g_project.folder.empty() || GetPathName().IsEmpty()) {
+		AfxMessageBox(_T("먼저 프로젝트를 저장하세요."), MB_ICONINFORMATION);
+		return;
+	}
+	const CString initial = std::filesystem::path(std::filesystem::path(g_project.folder) / L"pages").wstring().c_str();
+	CFileDialog dlg(FALSE, nullptr, _T("새 페이지"), OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY | OFN_NOCHANGEDIR,
+		_T("페이지 (*.m2doc)|*.m2doc||"), AfxGetMainWnd());
+	dlg.m_ofn.lpstrInitialDir = initial;
+	dlg.m_ofn.lpstrTitle = _T("새 페이지 이름");
+	if (dlg.DoModal() != IDOK) return;
+
+	CString name = dlg.GetFileTitle();
+	const int dot = name.ReverseFind(_T('.'));
+	if (dot > 0) name = name.Left(dot);
+	name.Trim();
+	if (!name.IsEmpty())
+		SwitchPage(std::wstring((LPCTSTR)name));
+}
+
+// 파일 > 페이지 이름 바꾸기: 파일 이름과 목차를 함께 바꾼다
+void CM2DrawDoc::OnFilePageRename()
+{
+	if (g_project.folder.empty() || GetPathName().IsEmpty()) {
+		AfxMessageBox(_T("먼저 프로젝트를 저장하세요."), MB_ICONINFORMATION);
+		return;
+	}
+	const CString initial = std::filesystem::path(std::filesystem::path(g_project.folder) / L"pages").wstring().c_str();
+	CFileDialog dlg(FALSE, nullptr, CString(m_activePage.c_str()), OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY | OFN_NOCHANGEDIR,
+		_T("페이지 (*.m2doc)|*.m2doc||"), AfxGetMainWnd());
+	dlg.m_ofn.lpstrInitialDir = initial;
+	dlg.m_ofn.lpstrTitle = _T("페이지 새 이름");
+	if (dlg.DoModal() != IDOK) return;
+
+	CString name = dlg.GetFileTitle();
+	const int dot = name.ReverseFind(_T('.'));
+	if (dot > 0) name = name.Left(dot);
+	name.Trim();
+	if (!name.IsEmpty()) RenamePage(std::wstring((LPCTSTR)name));
+}
+
+void CM2DrawDoc::RenamePage(const std::wstring& newName)
+{
+	namespace fs = std::filesystem;
+	const std::wstring oldName = m_activePage;
+	if (newName.empty() || newName == oldName) return;
+	for (const auto& pg : g_project.pages)
+		if (pg.name == newName) {
+			AfxMessageBox(_T("같은 이름의 페이지가 이미 있습니다."), MB_ICONERROR);
+			return;
+		}
+
+	SaveProject(GetPathName());   // 지금 상태를 옛 이름으로 먼저 저장
+	const fs::path dir = fs::path(g_project.folder) / L"pages";
+	std::error_code ec;
+	if (fs::exists(dir / (oldName + L".m2doc")))
+		fs::rename(dir / (oldName + L".m2doc"), dir / (newName + L".m2doc"), ec);
+	if (ec) {
+		AfxMessageBox(_T("페이지 파일 이름을 바꾸지 못했습니다."), MB_ICONERROR);
+		return;
+	}
+	for (auto& pg : g_project.pages)
+		if (pg.name == oldName) pg.name = newName;
+	m_activePage = newName;
+	if (m_attached) SetTitle(CString(newName.c_str()));
+	SaveProject(GetPathName());   // 목차와 새 파일 이름 반영
+	SetModifiedFlag(FALSE);
+
+	CString log;
+	log.Format(_T("[페이지] 이름 변경: %s -> %s"), oldName.c_str(), newName.c_str());
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
+
+// 파일 > 페이지 열기: pages 폴더에서 고른 페이지로 바꾼다
+void CM2DrawDoc::OnFilePageOpen()
+{
+	if (g_project.folder.empty() || GetPathName().IsEmpty()) {
+		AfxMessageBox(_T("먼저 프로젝트를 저장하세요."), MB_ICONINFORMATION);
+		return;
+	}
+	const CString initial = std::filesystem::path(std::filesystem::path(g_project.folder) / L"pages").wstring().c_str();
+	CFileDialog dlg(TRUE, _T("m2doc"), nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR,
+		_T("페이지 (*.m2doc)|*.m2doc||"), AfxGetMainWnd());
+	dlg.m_ofn.lpstrInitialDir = initial;
+	dlg.m_ofn.lpstrTitle = _T("열 페이지 고르기");
+	if (dlg.DoModal() != IDOK) return;
+
+	CString name = dlg.GetFileTitle();
+	const int dot = name.ReverseFind(_T('.'));
+	if (dot > 0) name = name.Left(dot);
+	SwitchPage(std::wstring((LPCTSTR)name));
+}
+// 에이전트 패키지를 둘 폴더: 프로젝트가 있으면 그 안, 없으면 기본 작업 폴더
+std::wstring CM2DrawDoc::AgentRootForDoc() const
+{
+	if (!g_project.folder.empty())
+		return g_project.folder + L"\\agent\\" + m_activePage;
+	return ge::AgentWorkspaceRoot();
+}
+
+CString CM2DrawDoc::GetAgentDirForChat() const { return m_agentDir; }
+CString CM2DrawDoc::GetSiteForChat() const { return CString(m_agentSiteUrl.c_str()); }
+
 BOOL CM2DrawDoc::OnOpenDocument(LPCTSTR lpszPathName)
 {
 	if (!lpszPathName || lpszPathName[0] == _T('\0'))
 		return FALSE;
 
+	// *.m2svg 는 프로젝트 목차이거나 캡처 파일이다. 내용으로 구분한다
+	const CString path(lpszPathName);
+	if (path.Right(6).CompareNoCase(_T(".m2svg")) == 0) {
+		std::string head;
+		if (ProjReadAll(std::filesystem::path((LPCTSTR)path), head)) {
+			if (head.find("<m2:project") != std::string::npos)
+				return OpenProject(lpszPathName);
+			if (head.find("m2:kind=\"capture\"") != std::string::npos || head.find("<m2:capture") != std::string::npos) {
+				AfxMessageBox(_T("캡처 파일(.m2svg)입니다. 파일 > 캡처 불러오기로 여세요."), MB_ICONINFORMATION);
+				return FALSE;
+			}
+		}
+	}
+
+	// 예전 SVG 문서 (이전 버전에서 저장한 파일을 계속 열 수 있게 둔다)
 	// 임시 문서로 먼저 읽어 실패 시 현재 문서를 그대로 유지 (깨진 파일이 문서를 망가뜨리지 않도록)
 	ge::Document loaded;
 	ge::SvgReader reader;
@@ -200,6 +890,7 @@ BOOL CM2DrawDoc::OnOpenDocument(LPCTSTR lpszPathName)
 	m_currentPath.reset();
 	m_doc = std::move(loaded);
 	ResetToolInteraction();
+	g_project.folder.clear();
 
 	SetPathName(lpszPathName);
 	SetModifiedFlag(FALSE);
@@ -222,27 +913,101 @@ BOOL CM2DrawDoc::OnOpenDocument(LPCTSTR lpszPathName)
 	return TRUE;
 }
 
+// 열린 프로젝트의 페이지로 붙인다: 이름은 문서 이름(기본값), 저장은 프로젝트 목차로 간다 (묻지 않는다)
+void CM2DrawDoc::AttachToProject()
+{
+	CString title = GetTitle();
+	const int dot = title.ReverseFind(_T('.'));
+	if (dot > 0) title = title.Left(dot);
+	title.Replace(_T(" *"), _T(""));
+	title.Trim();
+	const std::wstring base = SafeFileBase(std::wstring((LPCTSTR)title));
+	std::wstring cand = base;
+	for (int k = 2; std::any_of(g_project.pages.begin(), g_project.pages.end(), [&](const ProjectPageEntry& pg) { return pg.name == cand; }); ++k)
+		cand = base + L"_" + std::to_wstring(k);
+
+	m_activePage = cand;
+	g_project.pages.push_back(ProjectPageEntry{ cand, L"" });
+	m_attached = true;
+	SetPathName(CString(g_project.manifest.c_str()));
+	SetTitle(CString(cand.c_str()));
+	SaveProject(CString(g_project.manifest.c_str()));
+	SetModifiedFlag(FALSE);
+}
 BOOL CM2DrawDoc::DoSave(LPCTSTR lpszPathName, BOOL bReplace)
 {
+	if (m_attached && !g_project.manifest.empty())
+	{
+		CWaitCursor attachedWait;
+		return OnSaveDocument(CString(g_project.manifest.c_str()));
+	}
 	CString newName = lpszPathName;
 	if (newName.IsEmpty())
 	{
-		CString filter = _T("SVG 파일 (*.svg)|*.svg|M2Draw 확장 SVG (*.m2svg)|*.m2svg|모든 파일 (*.*)|*.*||");
-		CFileDialog dlg(FALSE, _T("svg"), nullptr, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, filter);
-		dlg.m_ofn.lpstrTitle = _T("다른 이름으로 저장");
+		CFileDialog dlg(FALSE, nullptr, nullptr, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, _T("M2Draw 프로젝트 (*.m2svg)|*.m2svg||"));
+		dlg.m_ofn.lpstrTitle = _T("다른 이름으로 저장 (프로젝트 폴더 이름)");
 		if (dlg.DoModal() != IDOK)
 			return FALSE;
 		newName = dlg.GetPathName();
 	}
 
+	// 프로젝트 이름 = 폴더 이름. 폴더 안에 이름.m2svg 를 둔다 (확장자는 항상 .m2svg)
+	const int slash = (std::max)(newName.ReverseFind(_T('\\')), newName.ReverseFind(_T('/')));
+	CString parent = slash >= 0 ? newName.Left(slash) : CString();
+	CString name = slash >= 0 ? newName.Mid(slash + 1) : newName;
+	const int dot = name.ReverseFind(_T('.'));
+	if (dot > 0) name = name.Left(dot);
+	name.Trim();
+	const CString manifestPath = parent + _T("\\") + name + _T("\\") + name + _T(".m2svg");
+
+	// 다른 폴더로 저장하면 레퍼런스와 페이지를 새 폴더로 함께 복사한다
+	if (!g_project.folder.empty()) {
+		const std::filesystem::path oldFolder(g_project.folder);
+		const std::filesystem::path newFolder(std::wstring((LPCTSTR)(parent + _T("\\") + name)));
+		std::error_code ec;
+		if (!std::filesystem::equivalent(oldFolder, newFolder, ec)) {
+			std::filesystem::create_directories(newFolder / L"pages", ec);
+			std::filesystem::create_directories(newFolder / L"references", ec);
+			std::filesystem::copy(oldFolder / L"references", newFolder / L"references", std::filesystem::copy_options::recursive | std::filesystem::copy_options::skip_existing, ec);
+			std::filesystem::copy(oldFolder / L"pages", newFolder / L"pages", std::filesystem::copy_options::recursive | std::filesystem::copy_options::skip_existing, ec);
+		}
+	}
+
 	CWaitCursor wait;
-	if (!OnSaveDocument(newName))
+	if (!OnSaveDocument(manifestPath))
 		return FALSE;
 
 	if (bReplace)
-		SetPathName(newName);
-
+	{
+		SetPathName(manifestPath);
+		SetTitle(name);   // 제목 = 프로젝트 이름
+	}
 	return TRUE;
+}
+// 저장 위치가 있는 문서가 수정된 뒤 30초가 지나면 자동으로 저장한다 (닫을 때 잊어도 되도록)
+void CM2DrawDoc::AutoSaveIfDirty()
+{
+	if (!IsModified() || GetPathName().IsEmpty())
+	{
+		m_dirtyTick = 0;
+		return;
+	}
+	const DWORD now = ::GetTickCount();
+	if (m_dirtyTick == 0)
+	{
+		m_dirtyTick = now;   // 수정이 처음 보인 시각
+		return;
+	}
+	if (now - m_dirtyTick < 30000)
+		return;
+
+	m_dirtyTick = 0;
+	if (DoSave(GetPathName(), FALSE))
+	{
+		CString log;
+		log.Format(_T("[자동 저장] %s"), (LPCTSTR)GetPathName());
+		LogAppEvent(log);
+	}
 }
 
 void CM2DrawDoc::UpdateTitleWithModified()
@@ -268,6 +1033,20 @@ void CM2DrawDoc::UpdateTitleWithModified()
 void CM2DrawDoc::SetPathName(LPCTSTR lpszPathName, BOOL bAddToMRU)
 {
 	CDocument::SetPathName(lpszPathName, bAddToMRU);
+	// 제목: 페이지 문서는 페이지 이름, 프로젝트 목차는 프로젝트 이름 (폴더 이름)
+	if (m_attached)
+	{
+		SetTitle(CString(m_activePage.c_str()));
+	}
+	else if (lpszPathName && lpszPathName[0] != _T('\0'))
+	{
+		const CString path(lpszPathName);
+		const int slash = (std::max)(path.ReverseFind(_T('\\')), path.ReverseFind(_T('/')));
+		CString name = path.Mid(slash + 1);
+		const int dot = name.ReverseFind(_T('.'));
+		if (dot > 0) name = name.Left(dot);
+		SetTitle(name);
+	}
 	UpdateTitleWithModified();
 }
 
@@ -1269,24 +2048,721 @@ void CM2DrawDoc::OnFileImportAgentSvg()
 
 	std::ifstream ifs(std::wstring((LPCTSTR)dlg.GetPathName()), std::ios::binary);
 	const std::string svg((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
-	if (svg.empty() || !ImportSvgNodes(svg, false))
+	ge::NodeId frameId = 0;
+	for (ge::Node* p = GetPrimarySelection(); p; p = p->GetParent())
+		if (dynamic_cast<ge::FrameNode*>(p)) { frameId = p->GetId(); break; }
+	if (svg.empty() || !ImportSvgNodes(svg, false)) {
 		AfxMessageBox(_T("SVG 파일을 읽을 수 없습니다."), MB_ICONERROR);
+		return;
+	}
+	RecordWatchedImport(dlg.GetPathName(), frameId, m_doc.GetSelection());
 }
 
-// 아이콘 세트 내보내기 (7.4.1 / 7.4.2): 선택한 도형(없으면 문서 전체)을 정사각형으로 잘라 여러 크기로 저장
-void CM2DrawDoc::OnFileExportIconSet()
+// 가져온 파일과 노드를 기록해 두어 외부 수정을 나중에 알아챌 수 있게 한다 (7.2.4)
+void CM2DrawDoc::RecordWatchedImport(const CString& path, ge::NodeId frameId, const std::vector<ge::Node*>& nodes)
 {
-	CFolderPickerDialog dlg(nullptr, OFN_PATHMUSTEXIST, AfxGetMainWnd());
+	m_watchPath = path;
+	m_watchFrame = frameId;
+	m_watchNodes.clear();
+	for (ge::Node* n : nodes)
+		if (n) m_watchNodes.push_back(n->GetId());
+	std::error_code ec;
+	m_watchMtime = std::filesystem::last_write_time((LPCTSTR)path, ec).time_since_epoch().count();
+	CString log;
+	log.Format(_T("[외부 수정 감시] %s 등록 (도형 %d개)"), (LPCTSTR)path, static_cast<int>(m_watchNodes.size()));
+	LogAppEvent(log);
+}
+
+// 창이 활성화될 때: 가져온 AI 산출물 파일이 바뀌었으면 다시 불러올지 묻는다 (7.2.4)
+void CM2DrawDoc::CheckExternalImportChange()
+{
+	static bool s_busy = false;   // 확인 창이 떠 있는 동안 다시 들어오지 않게
+	if (s_busy || m_watchPath.IsEmpty() || m_watchNodes.empty()) return;
+	std::error_code ec;
+	const long long mt = std::filesystem::last_write_time((LPCTSTR)m_watchPath, ec).time_since_epoch().count();
+	if (ec || mt == m_watchMtime) return;
+	s_busy = true;
+	struct BusyReset { bool& b; ~BusyReset() { b = false; } } busyReset{ s_busy };
+
+	if (AfxMessageBox(_T("가져온 AI 산출물 파일이 외부에서 수정되었습니다.\n다시 불러올까요? (이전에 가져온 도형은 지워집니다)"), MB_YESNO | MB_ICONQUESTION) != IDYES) {
+		m_watchMtime = mt;   // 이 수정은 무시
+		return;
+	}
+
+	std::ifstream ifs(std::wstring((LPCTSTR)m_watchPath), std::ios::binary);
+	const std::string svg((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+	const ge::NodeId frameId = m_watchFrame;
+	for (ge::NodeId id : m_watchNodes)
+		if (ge::Node* n = m_doc.FindById(id)) m_doc.RemoveNode(n);   // 반환된 소유권은 바로 버린다 (삭제)
+	ge::Node* frame = frameId ? m_doc.FindById(frameId) : nullptr;
+	m_doc.SetSelection(frame ? std::vector<ge::Node*>{ frame } : std::vector<ge::Node*>{});
+	if (svg.empty() || !ImportSvgNodes(svg, false)) {
+		AfxMessageBox(_T("다시 불러오지 못했습니다. 파일을 확인하세요."), MB_ICONERROR);
+		m_watchNodes.clear();
+		UpdateAllViews(nullptr);
+		return;
+	}
+	RecordWatchedImport(m_watchPath, frameId, m_doc.GetSelection());
+	CString log;
+	log.Format(_T("[가져오기] 외부 수정된 AI 산출물을 다시 불러옴: %s"), (LPCTSTR)m_watchPath);
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
+
+// 좌표 소수 2자리 SVG (순수 SVG + 최적화) 내보내기 (7.4.4)
+void CM2DrawDoc::OnFileExportSvgOptimized()
+{
+	CString suggested = GetTitle();
+	const int dot = suggested.ReverseFind(_T('.'));
+	if (dot > 0) suggested = suggested.Left(dot);
+	CFileDialog dlg(FALSE, _T("svg"), suggested + _T("_opt.svg"), OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY, _T("SVG 파일 (*.svg)|*.svg||"));
 	if (dlg.DoModal() != IDOK) return;
 
+	ge::SvgWriteOptions opt(ge::SvgWriteMode::Clean);
+	opt.decimals = 2;
+	opt.optimize = true;
+	ge::SvgWriter writer;
+	if (!writer.WriteToFile(m_doc, (LPCTSTR)dlg.GetPathName(), opt)) {
+		AfxMessageBox(_T("SVG 파일을 쓸 수 없습니다."), MB_ICONERROR);
+		return;
+	}
+	CString log;
+	log.Format(_T("[SVG] 최적화 SVG 저장 (좌표 2자리): %s"), (LPCTSTR)dlg.GetPathName());
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
+
+// 주석(메모) 추가 (7.3.3): 선택한 도형의 오른쪽 위에 "메모" 글자를 놓는다. 더블클릭하면 글을 고친다
+void CM2DrawDoc::OnFileAddAnnotation()
+{
+	ge::Vec2 at{ m_doc.width * 0.5f, m_doc.height * 0.5f };
+	ge::Rect2 b;
+	if (m_doc.GetSelectionBounds(b))
+		at = ge::Vec2{ b.right + 20.0f, b.top };
+	ge::TextNode* note = ge::AddAnnotation(m_doc, L"메모", at);
+	if (!note) return;
+
+	ge::Node* added = note;
+	m_doc.SetSelection({ added });
+	SetModifiedFlag(TRUE);
+	CommitUndoPoint(L"주석 추가");
+	LogAppEvent(_T("[주석] 주석 추가 (더블클릭해서 글을 고칩니다)"));
+	UpdateShapePropertiesSelection(added, this);
+	UpdateAllViews(nullptr);
+	CWnd* pMainWnd = AfxGetMainWnd();
+	if (pMainWnd && pMainWnd->IsKindOf(RUNTIME_CLASS(CMainFrame)))
+		static_cast<CMainFrame*>(pMainWnd)->GetLayerWnd().RefreshLayers();
+}
+
+// 클립보드의 웹 주소를 캡처해 레퍼런스로 가져온다 (7.1.6). 분석 JSON(7.1.7)은 원하면 폴더에 함께 저장한다
+void CM2DrawDoc::OnFileImportUrlReference()
+{
+	ImportUrlReference(ReadClipboardText(AfxGetMainWnd()));
+}
+
+// 캡처 파일(*.m2svg)을 불러와 레퍼런스로 올리고, 주소와 DOM 요약을 되살린다
+namespace {
+
+bool ReadWholeFileA(const CString& path, std::string& out)
+{
+	std::ifstream ifs(std::filesystem::path((LPCTSTR)path), std::ios::binary);
+	if (!ifs) return false;
+	out.assign((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+	return true;
+}
+
+} // namespace
+
+void CM2DrawDoc::LoadCaptureFile(const std::wstring& path)
+{
+	ge::CaptureFileData cap;
 	std::wstring err;
-	if (!ge::ExportIconSet(m_doc, (LPCTSTR)dlg.GetPathName(), GetPrimarySelection(), &err)) {
+	std::string head;
+	const bool folderFormat = ReadWholeFileA(CString(path.c_str()), head) && ge::IsCaptureManifest(head);
+	const bool ok = folderFormat ? ge::ReadCaptureFolder(path, cap, &err) : ge::ReadCaptureFile(path, cap, &err);
+	if (!ok) {
+		AfxMessageBox(err.c_str(), MB_ICONERROR);
+		return;
+	}
+	m_agentLastDom = AgentWide(cap.domJson);
+	m_agentSiteUrl = AgentWide(cap.url);
+
+	auto data = std::make_shared<ge::ImageData>();
+	data->bytes = cap.png;
+	data->mime = "image/png";
+	data->pixelW = cap.width;
+	data->pixelH = cap.height;
+	const CString title = CString(std::filesystem::path(path).stem().c_str());
+	if (!PlaceReferenceData(data, title, true)) {
+		AfxMessageBox(_T("레퍼런스 이미지를 놓지 못했습니다."), MB_ICONERROR);
+		return;
+	}
+
+	CString log;
+	log.Format(_T("[URL] 캡처 불러오기: %s (%d x %d) 주소: %s"), (LPCTSTR)title, cap.width, cap.height,
+		(LPCTSTR)CString(m_agentSiteUrl.c_str()));
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
+
+// 파일 > 캡처 불러오기 (*.m2svg)
+void CM2DrawDoc::ImportReferenceFile(const std::wstring& pngPath)
+{
+	namespace fs = std::filesystem;
+	const fs::path png(pngPath);
+	std::string bytes;
+	if (!ProjReadAll(png, bytes) || bytes.size() < 24) {
+		AfxMessageBox(_T("그림 파일을 읽을 수 없습니다."), MB_ICONERROR);
+		return;
+	}
+	auto data = std::make_shared<ge::ImageData>();
+	data->bytes.assign(bytes.begin(), bytes.end());
+	data->mime = "image/png";
+	auto be32 = [&](size_t o) {
+		return (static_cast<unsigned>(static_cast<unsigned char>(bytes[o])) << 24) | (static_cast<unsigned>(static_cast<unsigned char>(bytes[o + 1])) << 16) |
+		       (static_cast<unsigned>(static_cast<unsigned char>(bytes[o + 2])) << 8) | static_cast<unsigned>(static_cast<unsigned char>(bytes[o + 3]));
+	};
+	data->pixelW = static_cast<int>(be32(16));
+	data->pixelH = static_cast<int>(be32(20));
+
+	const std::wstring name = png.stem().wstring();
+	std::string dom;
+	if (ProjReadAll(fs::path(png).replace_extension(L".json"), dom)) {
+		m_agentLastDom = AgentWide(dom);
+		g_project.refDoms[name] = dom;
+	}
+	if (!g_project.folder.empty()) {
+		bool known = false;
+		for (const auto& r : g_project.refs)
+			if (r.leaf == name) known = true;
+		if (!known) {
+			ProjectRefEntry r;
+			int id = 1;
+			for (const auto& e : g_project.refs) id = (std::max)(id, e.id + 1);
+			r.id = id;
+			r.leaf = name;
+			r.created = ProjNow();
+			r.width = data->pixelW;
+			r.height = data->pixelH;
+			g_project.refs.push_back(r);
+		}
+	}
+	if (!PlaceReferenceData(data, CString(name.c_str()), true)) {
+		AfxMessageBox(_T("레퍼런스 이미지를 놓지 못했습니다."), MB_ICONERROR);
+		return;
+	}
+	SetModifiedFlag(TRUE);
+}
+void CM2DrawDoc::ImportUrlReference(std::wstring url)
+{
+	while (!url.empty() && (url.back() == L'\r' || url.back() == L'\n' || url.back() == L' ')) url.pop_back();
+
+	// 주소창에 캡처 파일(.m2svg) 경로를 넣으면 다시 불러온다 (따옴표 제거 후 확인)
+	std::wstring path = url;
+	if (!path.empty() && path.front() == L'"') path.erase(0, 1);
+	if (!path.empty() && path.back() == L'"') path.pop_back();
+	if (path.size() > 6 && _wcsicmp(path.c_str() + path.size() - 6, L".m2svg") == 0) {
+		LoadCaptureFile(path);
+		return;
+	}
+	const bool isWeb = url.rfind(L"http://", 0) == 0 || url.rfind(L"https://", 0) == 0;
+	if (!isWeb) {
+		AfxMessageBox(_T("클립보드에 웹 주소(http:// 또는 https://)를 먼저 복사한 뒤 다시 실행하세요."), MB_ICONINFORMATION);
+		return;
+	}
+
+	// 캡처가 끝난 뒤 에이전트로 자동 처리할지 먼저 묻는다 (예 = 구조 파악을 바로 요청, 아니오 = 수동)
+	const bool autoAnalyze = AfxMessageBox(_T("에이전트로 자동 처리하시겠습니까?\n\n예: 캡처 후 구조 파악을 바로 요청합니다.\n아니오: 수동으로 처리합니다."), MB_YESNO | MB_ICONQUESTION) == IDYES;
+
+	ge::WebCaptureResult res;
+	std::wstring err;
+	BeginWaitCursor();
+	const bool ok = ge::CaptureWebPage(url, 1440, 45000, res, &err);
+	EndWaitCursor();
+	if (!ok) {
+		AfxMessageBox(err.c_str(), MB_ICONERROR);
+		return;
+	}
+
+	m_agentLastDom = AgentWide(res.domJson);   // 에이전트 작업 시작 때 dom.json 으로 함께 넣는다
+	m_agentSiteUrl = url;
+	auto data = std::make_shared<ge::ImageData>();
+	data->bytes = res.png;
+	data->mime = "image/png";
+	data->pixelW = static_cast<int>(res.pixelW);
+	data->pixelH = static_cast<int>(res.pixelH);
+	// 1) 프로젝트가 아직 없으면 한 번 묻는다 (저장하면 이 캡처가 첫 레퍼런스가 된다)
+	// 저장하지 않은 문서에서는 처음 한 번만 묻는다 (아니요를 골랐으면 다음 캡처에서 다시 묻지 않는다. 저장은 Ctrl+S 로)
+	// 열린 프로젝트가 있으면 이 문서는 그 프로젝트의 페이지가 된다 (묻지 않는다)
+	if (GetPathName().IsEmpty() && !g_project.folder.empty())
+		AttachToProject();
+
+	bool wantSave = false;
+	if (GetPathName().IsEmpty() && !m_saveAsked)
+	{
+		m_saveAsked = true;
+		wantSave = AfxMessageBox(_T("이 캡처를 프로젝트로 저장할까요?\n\n예: 폴더를 만들고 저장합니다. 이후 캡처와 저장은 묻지 않고 같은 폴더에 저장합니다.\n아니요: 지금은 저장하지 않습니다. (나중에 Ctrl+S 로 저장)"), MB_YESNO | MB_ICONQUESTION) == IDYES;
+	}
+	if (wantSave)
+	{
+		std::wstring host = url;
+		if (const size_t scheme = host.find(L"://"); scheme != std::wstring::npos) host = host.substr(scheme + 3);
+		host = host.substr(0, host.find(L'/'));
+		if (host.rfind(L"www.", 0) == 0) host = host.substr(4);
+		std::vector<std::wstring> labels;
+		for (size_t s = 0, e = 0; s <= host.size(); s = e + 1)
+		{
+			e = host.find(L'.', s);
+			if (e == std::wstring::npos) e = host.size();
+			if (e > s) labels.push_back(host.substr(s, e - s));
+		}
+		std::wstring siteName = labels.empty() ? std::wstring(L"capture") : labels[labels.size() >= 2 ? labels.size() - 2 : 0];
+		if (labels.size() >= 3 && labels.back().size() == 2 && labels[labels.size() - 2].size() <= 3)
+			siteName = labels[labels.size() - 3];
+		const CString suggested = CString(siteName.c_str()) + _T("_") + CTime::GetCurrentTime().Format(_T("%Y%m%d%H%M"));
+
+		CFileDialog dlg(FALSE, nullptr, suggested, OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY | OFN_NOCHANGEDIR,
+			_T("M2Draw 프로젝트 (*.m2svg)|*.m2svg||"), AfxGetMainWnd());
+		dlg.m_ofn.lpstrTitle = _T("프로젝트 저장 (폴더 이름)");
+		if (dlg.DoModal() == IDOK)
+			DoSave(dlg.GetPathName(), TRUE);
+	}
+
+	// 2) 레퍼런스를 현재 문서에 올린다. 이름은 기본값(사이트_시각)이고, 저장할 때 레이어 이름이 파일 이름이 된다
+	m_capturePng = res.png;
+	m_agentLastDom = AgentWide(res.domJson);
+	const std::wstring base = DefaultReferenceName(url);
+	int id = 1;
+	for (const auto& r : g_project.refs)
+		id = (std::max)(id, r.id + 1);
+	g_project.refDoms[base] = res.domJson;
+	ProjectRefEntry r;
+	r.id = id;
+	r.leaf = base;
+	r.url = url;
+	r.created = ProjNow();
+	r.width = static_cast<int>(res.pixelW);
+	r.height = static_cast<int>(res.pixelH);
+	g_project.refs.push_back(r);
+
+	if (!PlaceReferenceData(data, CString(base.c_str()), true)) {
+		AfxMessageBox(_T("레퍼런스 이미지를 놓지 못했습니다."), MB_ICONERROR);
+		return;
+	}
+	if (!GetPathName().IsEmpty() && !g_project.folder.empty())
+	{
+		SaveProject(GetPathName());   // 프로젝트가 있으면 그 자리에 바로 저장한다
+		SetModifiedFlag(FALSE);
+	}
+	else
+	{
+		SetModifiedFlag(TRUE);
+	}
+	CString log;
+	log.Format(_T("[URL] 레퍼런스 가져오기: %s (%u x %u)"), (LPCTSTR)CString(url.c_str()), res.pixelW, res.pixelH);
+	LogAppEvent(log);
+	SetAppStatusText(log);
+
+	// 자동 처리를 골랐으면 에이전트 작업을 시작하고 바로 구조 파악을 요청한다
+	if (autoAnalyze) {
+		OnFileAgentStart();
+		if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd()))
+			mf->GetOutputWnd().GetChat().RunAutoChain();   // 구조 파악 → 웹페이지 생성
+	}
+}
+
+// 웹폰트 링크 설정 (7.1.4): 입력한 HTML 을 문서에 저장한다 (웹 출력 <head> 에 들어감)
+void CM2DrawDoc::OnFileWebFontLink()
+{
+	CWebFontDlg dlg(CString(m_doc.webFontHead.c_str()), AfxGetMainWnd());
+	if (dlg.DoModal() != IDOK) return;
+	m_doc.webFontHead = std::wstring((LPCTSTR)dlg.m_text);
+	SetModifiedFlag(TRUE);
+	LogAppEvent(_T("[웹폰트] 웹폰트 링크를 문서에 저장했습니다"));
+}
+
+namespace {
+std::string WideToUtf8Text(const std::wstring& w)
+{
+	if (w.empty()) return {};
+	const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
+	std::string out(static_cast<size_t>(n), '\0');
+	WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
+	return out;
+}
+} // namespace
+// ---- 에이전트 작업 연결 (7.2.6) ----------------------------------------------
+namespace {
+
+std::string AgentUtf8(const std::wstring& w)
+{
+	if (w.empty()) return {};
+	const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
+	std::string out(static_cast<size_t>(n), '\0');
+	WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
+	return out;
+}
+
+std::wstring AgentWide(const std::string& s)
+{
+	if (s.empty()) return {};
+	const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+	std::wstring out(static_cast<size_t>(n), L'\0');
+	MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n);
+	return out;
+}
+
+// 파일 이름으로 쓸 수 없는 문자를 _ 로 바꾼다
+std::wstring AgentSafeName(std::wstring s)
+{
+	const std::wstring bad = L"\\/:*?\"<>|";
+	for (auto& ch : s) if (bad.find(ch) != std::wstring::npos || ch < 0x20) ch = L'_';
+	while (!s.empty() && (s.back() == L' ' || s.back() == L'.')) s.pop_back();
+	return s.empty() ? L"untitled" : s;
+}
+
+bool AgentWriteFile(const std::filesystem::path& p, const std::string& data)
+{
+	std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+	if (!ofs) return false;
+	ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
+	return static_cast<bool>(ofs);
+}
+
+} // namespace
+
+// 에이전트 작업 시작: 패키지(scene, 그림, 지시문, 안내, DOM 요약)를 작업 폴더에 만들고, 결과를 받을 프레임을 정한다
+// 선택한 프레임 하나만 에이전트 패키지로 보낸다 (7.2.11). 결과는 그 프레임 안에 다시 들어간다
+void CM2DrawDoc::OnFileAgentSendFrame()
+{
+	namespace fs = std::filesystem;
+
+	ge::FrameNode* frame = nullptr;
+	if (ge::Node* sel = GetPrimarySelection())
+		for (ge::Node* p = sel; p && !frame; p = p->GetParent())
+			frame = dynamic_cast<ge::FrameNode*>(p);
+	if (!frame) {
+		AfxMessageBox(_T("먼저 캔버스에서 프레임을 선택하세요."), MB_ICONINFORMATION);
+		return;
+	}
+
+	// 패키지 폴더: 작업 폴더\사이트host_frame_시각
+	const fs::path root = AgentRootForDoc();
+	std::wstring host = m_agentSiteUrl;
+	if (const size_t scheme = host.find(L"://"); scheme != std::wstring::npos) host = host.substr(scheme + 3);
+	host = host.substr(0, host.find(L'/'));
+	const std::wstring stamp = std::wstring((LPCTSTR)CTime::GetCurrentTime().Format(_T("%Y%m%d_%H%M%S")));
+	const std::wstring frameName = frame->GetName().empty() ? std::wstring(L"frame") : frame->GetName();
+	const fs::path dir = root / AgentSafeName((host.empty() ? frameName : host + L"_" + frameName) + L"_" + stamp);
+
+	ge::AgentHandoffOptions opt;
+	opt.target = frame;
+	std::wstring err;
+	if (!ge::WriteAgentPackage(m_doc, dir.wstring(), opt, &err)) {
+		AfxMessageBox(err.c_str(), MB_ICONERROR);
+		return;
+	}
+
+	const std::string guide = ge::BuildAgentGuideUtf8();
+	std::error_code ec;
+	fs::create_directories(root, ec);
+	AgentWriteFile(root / L"AGENT_GUIDE.md", guide);
+	AgentWriteFile(dir / L"AGENT_GUIDE.md", guide);
+	if (!m_agentLastDom.empty())
+		AgentWriteFile(dir / L"dom.json", AgentUtf8(m_agentLastDom));
+
+	// 연결: 결과 SVG 는 이 프레임에 다시 들어간다 (AgentCheckResults 가 m_agentFrameId 를 쓴다)
+	m_agentDir = CString(dir.c_str());
+	// 에이전트 위치를 프로젝트 목차에도 남긴다 (프로젝트가 저장된 문서라면)
+	if (!GetPathName().IsEmpty() && !g_project.folder.empty())
+		SaveProject(GetPathName());
+	m_agentFrameId = frame->GetId();
+	m_agentResultSeen.clear();
+	m_agentResultNodes.clear();
+	m_agentSeenVersion = ge::ChangeTracker::Value();
+	m_agentSyncedVersion = ~0ull;
+	m_agentChangedAt = 0;
+
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd())) {
+		CChatAgentWnd& chat = mf->GetOutputWnd().GetChat();
+		chat.SetPackageDir(m_agentDir, CString(m_agentSiteUrl.c_str()));
+		chat.RunFrameRequest(CString(frameName.c_str()), frame->GetWidth(), frame->GetHeight());
+	}
+
+	CString log;
+	log.Format(_T("[에이전트] 선택 프레임 보내기: %s (%s)"), (LPCTSTR)CString(frameName.c_str()), (LPCTSTR)m_agentDir);
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
+
+void CM2DrawDoc::OnFileAgentStart()
+{
+	namespace fs = std::filesystem;
+
+	// 1. 결과를 받을 프레임: 선택한 프레임(없으면 대지 크기의 새 프레임)
+	ge::FrameNode* frame = nullptr;
+	if (ge::Node* sel = GetPrimarySelection())
+		for (ge::Node* p = sel; p && !frame; p = p->GetParent())
+			frame = dynamic_cast<ge::FrameNode*>(p);
+	if (!frame) {
+		auto fr = std::make_unique<ge::FrameNode>();
+		fr->SetFrameSize(m_doc.width, m_doc.height);
+		fr->SetName(L"에이전트 작업");
+		frame = static_cast<ge::FrameNode*>(m_doc.AddShape(std::move(fr)));
+		if (!frame) return;
+		ge::Node* one = frame;
+		m_doc.SetSelection({ one });
+		UpdateAllViews(nullptr);
+	}
+
+	// 2. 패키지 폴더: 작업 폴더\사이트 host_시각 (시작할 때마다 새 폴더 = 새 대화, 이전 결과가 섞이지 않음)
+	const fs::path root = AgentRootForDoc();
+	CString title = GetTitle();
+	const int dot = title.ReverseFind(_T('.'));
+	if (dot > 0) title = title.Left(dot);
+	title.Replace(_T(" *"), _T(""));   // 저장 안 됨 표시(*) 제거
+	title.Trim();
+	std::wstring host = m_agentSiteUrl;
+	if (const size_t scheme = host.find(L"://"); scheme != std::wstring::npos) host = host.substr(scheme + 3);
+	host = host.substr(0, host.find(L'/'));
+	const std::wstring baseName = host.empty() ? std::wstring((LPCTSTR)title) : host;
+	const std::wstring stamp = std::wstring((LPCTSTR)CTime::GetCurrentTime().Format(_T("%Y%m%d_%H%M%S")));
+	const fs::path dir = root / AgentSafeName(baseName + L"_" + stamp);
+
+	ge::AgentHandoffOptions opt;
+	opt.target = frame;
+	std::wstring err;
+	if (!ge::WriteAgentPackage(m_doc, dir.wstring(), opt, &err)) {
+		AfxMessageBox(err.c_str(), MB_ICONERROR);
+		return;
+	}
+
+	// 3. 안내 (작업 폴더 루트와 패키지 안 둘 다) 와 원본 DOM 요약
+	const std::string guide = ge::BuildAgentGuideUtf8();
+	std::error_code ec;
+	fs::create_directories(root, ec);
+	AgentWriteFile(root / L"AGENT_GUIDE.md", guide);
+	AgentWriteFile(dir / L"AGENT_GUIDE.md", guide);
+	if (!m_agentLastDom.empty())
+		AgentWriteFile(dir / L"dom.json", AgentUtf8(m_agentLastDom));
+
+	// 4. 연결: 이후 결과 자동 가져오기와 현재 상태 자동 저장이 이 패키지를 대상으로 한다
+	m_agentDir = CString(dir.c_str());
+	// 에이전트 위치를 프로젝트 목차에도 남긴다 (프로젝트가 저장된 문서라면)
+	if (!GetPathName().IsEmpty() && !g_project.folder.empty())
+		SaveProject(GetPathName());
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd()))
+		mf->GetOutputWnd().GetChat().SetPackageDir(m_agentDir, CString(m_agentSiteUrl.c_str()));   // ChatAgent 탭을 이 패키지에 연결
+	m_agentFrameId = frame->GetId();
+	m_agentResultSeen.clear();
+	m_agentResultNodes.clear();
+	m_agentSeenVersion = ge::ChangeTracker::Value();
+	m_agentSyncedVersion = ~0ull;   // 다음 확인 때 바로 current 를 쓴다
+	m_agentChangedAt = 0;
+
+	CString log;
+	log.Format(_T("[에이전트] 작업 시작: %s (결과는 result 폴더에 SVG 로 저장하면 자동으로 표시됩니다)"), (LPCTSTR)m_agentDir);
+	LogAppEvent(log);
+	SetAppStatusText(log);
+	AgentTick();
+}
+
+// 2초마다 호출된다 (메인 창 타이머)
+void CM2DrawDoc::AgentTick()
+{
+	if (m_agentDir.IsEmpty()) return;
+	AgentCheckResults();
+	AgentSyncCurrent();
+}
+
+// result 폴더의 새 SVG 를 프레임 안에 가져온다. 같은 이름이면 이전 결과를 지우고 바꾼다
+void CM2DrawDoc::AgentCheckResults()
+{
+	namespace fs = std::filesystem;
+	const fs::path resDir = fs::path((LPCTSTR)m_agentDir) / L"result";
+	std::error_code ec;
+	if (!fs::is_directory(resDir, ec)) return;
+
+	for (const auto& entry : fs::directory_iterator(resDir, ec)) {
+		if (!entry.is_regular_file(ec) || entry.path().extension() != L".svg") continue;
+		const std::wstring name = entry.path().filename().wstring();
+		const long long mt = fs::last_write_time(entry.path(), ec).time_since_epoch().count();
+		auto seen = m_agentResultSeen.find(name);
+		if (seen != m_agentResultSeen.end() && seen->second == mt) continue;
+		m_agentResultSeen[name] = mt;
+
+		// 같은 이름의 이전 결과 도형 삭제
+		for (ge::NodeId id : m_agentResultNodes[name])
+			if (ge::Node* old = m_doc.FindById(id)) m_doc.RemoveNode(old);
+		m_agentResultNodes[name].clear();
+
+		std::ifstream ifs(entry.path(), std::ios::binary);
+		const std::string svg((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+		ge::Node* frame = m_agentFrameId ? m_doc.FindById(m_agentFrameId) : nullptr;
+		m_doc.SetSelection(frame ? std::vector<ge::Node*>{ frame } : std::vector<ge::Node*>{});
+		if (svg.empty() || !ImportSvgNodes(svg, false)) {
+			CString log;
+			log.Format(_T("[에이전트] 결과를 가져오지 못함: %s"), name.c_str());
+			LogAppEvent(log);
+			continue;
+		}
+		for (ge::Node* n : m_doc.GetSelection())
+			if (n) m_agentResultNodes[name].push_back(n->GetId());
+
+		CString log;
+		log.Format(_T("[에이전트] 결과 가져옴: %s (도형 %d개)"), name.c_str(), static_cast<int>(m_agentResultNodes[name].size()));
+		LogAppEvent(log);
+	}
+	// 에이전트 결과를 가져온 변경은 사용자 변경이 아니므로 변경됨 배지에서 뺀다
+	m_agentQuietVersion = ge::ChangeTracker::Value();
+}
+
+// 문서가 바뀌고 2초 동안 가만히 있으면 current/scene.json 과 current/preview.png 를 쓴다
+void CM2DrawDoc::AgentSyncCurrent()
+{
+	namespace fs = std::filesystem;
+	const unsigned long long v = ge::ChangeTracker::Value();
+	const DWORD now = ::GetTickCount();
+	if (v != m_agentSeenVersion) {
+		m_agentSeenVersion = v;
+		m_agentChangedAt = now;
+		return;
+	}
+	if (v == m_agentSyncedVersion || now - m_agentChangedAt < 2000) return;
+
+	// 처음 동기화(패키지 시작 직후)는 사용자 변경이 아니므로 배지를 켜지 않는다
+	const bool firstSync = (m_agentSyncedVersion == ~0ull);
+
+	const fs::path cur = fs::path((LPCTSTR)m_agentDir) / L"current";
+	std::error_code ec;
+	fs::create_directories(cur, ec);
+	AgentWriteFile(cur / L"scene.json", ge::SerializeSceneJson(m_doc));
+
+	ge::Rect2 region;
+	const ge::Rect2* regionPtr = nullptr;
+	if (ge::Node* frame = m_agentFrameId ? m_doc.FindById(m_agentFrameId) : nullptr)
+		if (ge::Document::GetWorldBounds(*frame, region)) regionPtr = &region;
+	ge::RasterExportOptions ro;
+	std::wstring rerr;
+	ge::ExportRaster(m_doc, (cur / L"preview.png").wstring(), ro, regionPtr, &rerr);
+
+	m_agentSyncedVersion = v;
+
+	// 사용자가 고친 내용이 current 에 저장됐음을 채팅 탭에 알린다
+	if (!firstSync && v != m_agentQuietVersion) {
+		if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd()))
+			mf->GetOutputWnd().GetChat().SetChangedBadge(true);
+	}
+}
+// 웹 프로젝트 묶음 (7.4.5): 폴더 하나에 index.html, styles.css, assets/ 를 나눠 저장
+// 여러 파일로 내보내는 경우 (아이콘, 로고, 웹 묶음): 예 = {프로젝트명}_{종류} 폴더를 만들어 저장, 아니요 = 고른 폴더에 바로 저장
+bool CM2DrawDoc::ChooseExportFolder(const CString& kind, CString& folderOut)
+{
+	const int answer = AfxMessageBox(_T("폴더로 저장하시겠습니까?\n\n예: {프로젝트명}_") + kind + _T(" 폴더를 만들어 그 안에 저장합니다.\n아니요: 다음에 고르는 폴더에 바로 저장합니다."), MB_YESNOCANCEL | MB_ICONQUESTION);
+	if (answer == IDCANCEL)
+		return false;
+
+	if (answer == IDYES)
+	{
+		// 프로젝트 이름: 문서 이름에서 확장자와 저장 안 됨 표시(*)를 뺀 것
+		CString name = GetTitle();
+		const int dot = name.ReverseFind(_T('.'));
+		if (dot > 0) name = name.Left(dot);
+		name.Replace(_T(" *"), _T(""));
+		name.Trim();
+
+		// 기준 폴더: 프로젝트가 저장된 폴더 (아직 저장 전이면 고르기)
+		CString base;
+		const CString pathName = GetPathName();
+		if (!pathName.IsEmpty())
+		{
+			const int slash = (std::max)(pathName.ReverseFind(_T('\\')), pathName.ReverseFind(_T('/')));
+			base = pathName.Left(slash);
+		}
+		else
+		{
+			CFolderPickerDialog pick(nullptr, OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR, AfxGetMainWnd());
+			if (pick.DoModal() != IDOK)
+				return false;
+			base = pick.GetPathName();
+		}
+
+		folderOut = base + _T("\\") + name + _T("_") + kind;
+		std::error_code ec;
+		std::filesystem::create_directories((LPCTSTR)folderOut, ec);
+		return true;
+	}
+
+	// 아니요: 사용자가 고른 폴더에 바로 저장
+	CFolderPickerDialog pick(nullptr, OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR, AfxGetMainWnd());
+	if (pick.DoModal() != IDOK)
+		return false;
+	folderOut = pick.GetPathName();
+	return true;
+}
+void CM2DrawDoc::OnFileExportWebBundle()
+{
+	CString folder;
+	if (!ChooseExportFolder(_T("웹"), folder)) return;
+
+	// 웹폰트 링크 입력 창: 확인하면 문서에 저장하고, 취소하면 저장된 값을 그대로 쓴다 (7.1.4)
+	CWebFontDlg fontDlg(CString(m_doc.webFontHead.c_str()), AfxGetMainWnd());
+	if (fontDlg.DoModal() == IDOK) {
+		m_doc.webFontHead = std::wstring((LPCTSTR)fontDlg.m_text);
+		SetModifiedFlag(TRUE);
+	}
+
+	const std::filesystem::path dir((LPCTSTR)folder);
+	ge::HtmlExportOptions opt;
+	opt.headExtra = WideToUtf8Text(m_doc.webFontHead);
+	opt.singleFile = false;            // index.html + styles.css + assets/
+	opt.extractCssClasses = true;
+	CString t = GetTitle();
+	opt.title = (const char*)CStringA(t);
+
+	ge::HtmlExporter exporter;
+	if (!exporter.ExportToFile(m_doc, (dir / L"index.html").wstring(), opt)) {
+		AfxMessageBox(_T("웹 프로젝트 파일을 쓸 수 없습니다."), MB_ICONERROR);
+		return;
+	}
+	CString log;
+	log.Format(_T("[웹] 웹 프로젝트 묶음 저장: %s (index.html, styles.css, assets/)"), (LPCTSTR)folder);
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
+
+// 로고 색 변형 내보내기 (7.4.3): 문서 전체를 원본/검정/흰색 단색 SVG + PNG 로 저장
+void CM2DrawDoc::OnFileExportLogo()
+{
+	CString folder;
+	if (!ChooseExportFolder(_T("로고"), folder)) return;
+
+	std::wstring err;
+	if (!ge::ExportLogoVariants(m_doc, (LPCTSTR)folder, &err)) {
 		AfxMessageBox(err.c_str(), MB_ICONERROR);
 		return;
 	}
 
 	CString log;
-	log.Format(_T("[아이콘] 아이콘 세트 저장: %s"), (LPCTSTR)dlg.GetPathName());
+	log.Format(_T("[로고] 로고 변형 저장: %s"), (LPCTSTR)folder);
+	LogAppEvent(log);
+	SetAppStatusText(log);
+}
+
+// 아이콘 세트 내보내기 (7.4.1 / 7.4.2): 선택한 도형(없으면 문서 전체)을 정사각형으로 잘라 여러 크기로 저장
+void CM2DrawDoc::OnFileExportIconSet()
+{
+	CString folder;
+	if (!ChooseExportFolder(_T("아이콘"), folder)) return;
+
+	std::wstring err;
+	if (!ge::ExportIconSet(m_doc, (LPCTSTR)folder, GetPrimarySelection(), &err)) {
+		AfxMessageBox(err.c_str(), MB_ICONERROR);
+		return;
+	}
+
+	CString log;
+	log.Format(_T("[아이콘] 아이콘 세트 저장: %s"), (LPCTSTR)folder);
 	LogAppEvent(log);
 	SetAppStatusText(log);
 }
@@ -1527,17 +3003,27 @@ void CM2DrawDoc::OnFilePlaceImage()
 // 레퍼런스 이미지 가져오기 (7.1.1): 잠긴 반투명 레이어에 놓는다
 void CM2DrawDoc::OnFilePlaceReference()
 {
-	CFileDialog dlg(TRUE, nullptr, nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY, kImageFilter);
+	// 프로젝트가 열려 있으면 references 폴더를 기본으로 연다 (다른 폴더의 그림도 고를 수 있다)
+	const CString initial = g_project.folder.empty() ? CString() : CString(std::filesystem::path(std::filesystem::path(g_project.folder) / L"references").wstring().c_str());
+	CFileDialog dlg(TRUE, nullptr, nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR, kImageFilter);
+	if (!initial.IsEmpty()) dlg.m_ofn.lpstrInitialDir = initial;
 	if (dlg.DoModal() != IDOK) return;
+
+	// PNG 는 DOM 요약(같은 이름의 .json)까지 함께 불러온다
+	const CString ext = dlg.GetFileName().Right(4);
+	if (ext.CompareNoCase(_T(".png")) == 0) {
+		ImportReferenceFile(std::wstring((LPCTSTR)dlg.GetPathName()));
+		return;
+	}
 	auto data = LoadImageFile(dlg.GetPathName());
 	if (!data) return;
 	PlaceReferenceData(std::move(data), dlg.GetFileTitle());
 }
 
 // 레퍼런스 레이어에 이미지를 놓고 선택/Undo/패널 갱신까지 처리 (파일 가져오기와 붙여넣기 공용)
-bool CM2DrawDoc::PlaceReferenceData(std::shared_ptr<ge::ImageData> data, const CString& title)
+bool CM2DrawDoc::PlaceReferenceData(std::shared_ptr<ge::ImageData> data, const CString& title, bool fitWidth)
 {
-	ge::Node* added = ge::AddReferenceImage(m_doc, std::move(data), (LPCTSTR)title, 1.0f);
+	ge::Node* added = ge::AddReferenceImage(m_doc, std::move(data), (LPCTSTR)title, 1.0f, fitWidth);
 	if (!added) return false;
 	m_doc.SetSelection({ added });
 	SetModifiedFlag(TRUE);
@@ -1562,7 +3048,10 @@ bool CM2DrawDoc::PasteBitmapAsReference()
 // AI 에이전트 패키지 내보내기 (7.3.1): 선택 도형이 속한 가장 안쪽 프레임(없으면 문서 전체)을 폴더에 저장
 void CM2DrawDoc::OnFileExportAgent()
 {
-	CFolderPickerDialog dlg(nullptr, OFN_PATHMUSTEXIST, AfxGetMainWnd());
+	// 폴더 이름을 직접 입력한다 (없으면 만든다). 폴더 선택 창은 기존 폴더만 받기 때문
+	CFileDialog dlg(FALSE, nullptr, _T("AI_package"), OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY | OFN_NOCHANGEDIR,
+		_T("폴더 이름 입력 (*.*)|*.*||"), AfxGetMainWnd());
+	dlg.m_ofn.lpstrTitle = _T("AI 에이전트 패키지 폴더 이름 입력");
 	if (dlg.DoModal() != IDOK) return;
 
 	ge::AgentHandoffOptions opt;

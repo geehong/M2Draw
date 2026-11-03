@@ -319,7 +319,9 @@ HRESULT CToolBoxPane::CreateDeviceResources()
 				{ ToolType::Spiral,      L"spiral-line.png",     L"spiral-line_active.png" },
 				{ ToolType::Heart,       L"heart-line.png",      L"heart-line_active.png" },
 				{ ToolType::Text,        L"type.png",            L"type_active.png" },
-				{ ToolType::PaintBucket, L"paint-bucket.png",    L"paint-bucket_active.png" },
+				{ ToolType::PaintBucket, L"paint-bucket-svgrepo.png", L"paint-bucket-svgrepo_active.png" },
+				{ ToolType::Gradient,    L"gradient-line.png",   L"gradient-line_active.png" },
+				{ ToolType::Eyedropper,  L"dropper-line.png",    L"dropper-line_active.png" },
 				{ ToolType::ZoomIn,      L"zoom-in-line.png",    L"zoom-in-line_active.png" },
 				{ ToolType::ZoomOut,     L"zoom-out-line.png",   L"zoom-out-line_active.png" }
 			};
@@ -1510,6 +1512,9 @@ static bool DrawFlyoutPng(CDC& dc, ToolType t, bool active, CRect box, IWICImagi
 		case ToolType::Heart:    fname = active ? L"heart-line_active.png" : L"heart-line.png"; break;
 		case ToolType::ZoomIn:   fname = active ? L"zoom-in-line_active.png" : L"zoom-in-line.png"; break;
 		case ToolType::ZoomOut:  fname = active ? L"zoom-out-line_active.png" : L"zoom-out-line.png"; break;
+		case ToolType::PaintBucket: fname = active ? L"paint-bucket-svgrepo_active.png" : L"paint-bucket-svgrepo.png"; break;
+		case ToolType::Gradient:    fname = active ? L"gradient-line_active.png" : L"gradient-line.png"; break;
+		case ToolType::Eyedropper:  fname = active ? L"dropper-line_active.png" : L"dropper-line.png"; break;
 		default: break;
 		}
 

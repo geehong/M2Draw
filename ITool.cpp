@@ -3,6 +3,10 @@
 #include "HtmlComponents/TableComponent.h"
 #include "M2DrawDoc.h"
 #include "M2DrawView.h"
+#include "ReferenceImport.h"
+#include <cmath>
+#include <cstring>
+#include <vector>
 #include "M2Draw.h"
 #include "MainFrm.h"
 
@@ -132,13 +136,18 @@ static ge::Node* HitTestDeepNode(ge::Node* n, D2D1_POINT_2F screenPt, const View
 // - 컴포넌트(버튼 등)는 자식 텍스트와 프레임이 분리되지 않고 하나의 컴포넌트 오브젝트로 선택됨
 // - 일반 프레임(FrameNode) 안의 자식 객체(버튼, 테이블, 텍스트, 도형 등)는 개별 선택 가능함
 // - 일반 그룹(Ctrl+G)은 그룹 단위로 선택됨
-static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f)
+static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const ViewportTransform& view, ID2D1Factory* f, bool deepPick = false)
 {
 	ge::Node* hitTarget = nullptr;
 	ge::GroupNode* isoGroup = pDoc->GetDoc().GetIsolationGroup();
 	ForEachSelectableTopDown(pDoc, [&](ge::Node* topNode) {
 		ge::Node* deep = HitTestDeepNode(topNode, screenPt, view, f);
 		if (!deep) return false;
+		// Ctrl+클릭: 그룹을 풀지 않고 맞은 가장 안쪽 요소를 바로 고른다 (Illustrator/Inkscape 방식)
+		if (deepPick && !deep->IsEffectivelyLocked()) {
+			hitTarget = deep;
+			return true;
+		}
 
 		// 1) deep 노드가 "버튼" 컴포넌트의 자식 텍스트이거나 버튼 내부 요소인 경우, 버튼 컴포넌트 전체를 선택
 		ge::Node* checkBtn = deep;
@@ -152,29 +161,20 @@ static ge::Node* HitTestTopShape(CM2DrawDoc* pDoc, D2D1_POINT_2F screenPt, const
 			checkBtn = checkBtn->GetParent();
 		}
 
-		// 2) deep 노드에서 부모 방향으로 올라가면서, FrameNode의 직속 자식이면 그 자식 단위로 선택
-		ge::Node* curr = deep;
-		while (curr && curr->GetParent())
+		// 2) 일반 클릭은 프레임(웹 컴포넌트)만 선택한다. 맞은 말단을 감싸는 가장 안쪽 프레임/그룹이 단위.
+		//    - 프레임 자체가 맞았으면 그 프레임 (부모든 자식이든)
+		//    - 오브젝트가 맞았으면 바로 위 그룹/프레임 (레이어 직속이면 오브젝트 자신)
+		//    안쪽 오브젝트는 Ctrl+클릭(깊은 선택)으로 고른다.
+		ge::Node* unit = deep;
+		if (!dynamic_cast<ge::FrameNode*>(deep))
 		{
-			ge::GroupNode* parent = curr->GetParent();
-			if (dynamic_cast<ge::FrameNode*>(parent) != nullptr)
-			{
-				// FrameNode의 직속 자식이면 이 curr 노드를 개별 선택 대상으로 확정!
-				if (!curr->IsEffectivelyLocked())
-					hitTarget = curr;
-				return hitTarget != nullptr;
-			}
-			if (parent->Kind() == ge::NodeKind::Layer || parent == isoGroup)   // 격리 중에는 격리 그룹의 직속 자식 단위
-			{
-				if (!curr->IsEffectivelyLocked())
-					hitTarget = curr;
-				return hitTarget != nullptr;
-			}
-			curr = parent;
+			ge::GroupNode* parent = deep->GetParent();
+			if (parent && parent->Kind() != ge::NodeKind::Layer && parent != isoGroup)
+				unit = parent;
 		}
 
-		if (!topNode->IsEffectivelyLocked())
-			hitTarget = topNode;
+		if (!unit->IsEffectivelyLocked())
+			hitTarget = unit;
 		return hitTarget != nullptr;
 	});
 
@@ -1109,14 +1109,18 @@ void SelectTool::OnDown(const ToolEvent& e)
 	}
 
 	// 3. 새로운 도형 선택 히트 테스트 (모든 레이어, 최상단 도형부터)
-	ge::Node* clicked = HitTestTopShape(e.pDoc, screenPt, e.view, e.pD2DFactory);
+	ge::Node* clicked = HitTestTopShape(e.pDoc, screenPt, e.view, e.pD2DFactory, e.ctrlDown);
 	if (clicked)
 	{
 		std::vector<ge::Node*> newSel = sel;
 		auto it = std::find(newSel.begin(), newSel.end(), clicked);
 		if (e.ctrlDown)
 		{
-			if (it != newSel.end()) newSel.erase(it);
+			newSel = { clicked };   // Ctrl+클릭: 안쪽 요소를 바로 선택 (기존 선택 대체)
+		}
+		else if (e.shiftDown)
+		{
+			if (it != newSel.end()) newSel.erase(it);   // Shift+클릭: 선택에 추가/제외
 			else newSel.push_back(clicked);
 		}
 		else if (it == newSel.end())
@@ -1288,7 +1292,14 @@ void SelectTool::OnMove(const ToolEvent& e)
 		}
 
 		// 2) 도형 스트로크 또는 면(채우기 내부) 호버 검사 -> 4방향 이동 커서(IDC_SIZEALL) 활성화
-		m_hoverOnShape = HitTestTopShape(e.pDoc, screenPt, e.view, e.pD2DFactory) != nullptr;
+		// 클릭하면 선택될 대상(Ctrl 이면 안쪽 요소)을 윤곽선으로 미리 보여 준다
+		ge::Node* hover = HitTestTopShape(e.pDoc, screenPt, e.view, e.pD2DFactory, e.ctrlDown);
+		m_hoverOnShape = hover != nullptr;
+		const ge::NodeId newHoverId = hover ? hover->GetId() : 0;
+		if (newHoverId != m_hoverId) {
+			m_hoverId = newHoverId;
+			if (e.pView) e.pView->Invalidate(FALSE);
+		}
 		return;
 	}
 
@@ -1995,6 +2006,19 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	if (!rt || !brush || !pDoc) return;
 
 	ViewportTransform view = { zoom, { pan.x, pan.y } };
+
+	// 호버 미리보기: 마우스 밑에서 클릭하면 선택될 오브젝트를 파란 윤곽으로 보여 준다
+	if (m_hoverId != 0 && m_mode == Mode::None) {
+		if (ge::Node* hn = pDoc->GetDoc().FindById(m_hoverId)) {
+			ge::Rect2 wb;
+			if (ge::Document::GetWorldBounds(*hn, wb)) {
+				const ge::Vec2 p0 = view.WorldToScreen(ge::Vec2{ wb.left, wb.top });
+				const ge::Vec2 p1 = view.WorldToScreen(ge::Vec2{ wb.right, wb.bottom });
+				brush->SetColor(D2D1::ColorF(0.10f, 0.45f, 1.0f, 0.95f));
+				rt->DrawRectangle(D2D1::RectF(p0.x, p0.y, p1.x, p1.y), brush, 1.5f);
+			}
+		}
+	}
 
 	// 1. 마키(Marquee) 드래그 선택 사각형 렌더링
 	if (m_mode == Mode::Marquee)
@@ -4024,14 +4048,196 @@ void NodeTool::SelectAnchor(ge::PathNode* p, int sp, int ni, bool addToSelection
 // ============================================================================
 // EyedropperTool 구현
 // ============================================================================
+// 레퍼런스 이미지(또는 도형이 없는 빈 곳)를 찍으면 그 픽셀 색을 선택 도형의 채우기 색으로 적용 (7.1.2)
+static void PickReferenceColor(const ToolEvent& e)
+{
+	ge::Color c;
+	if (!ge::SampleReferenceColor(e.pDoc->GetDoc(), ge::Vec2(e.worldPt.x, e.worldPt.y), c)) return;
+
+	const int r = static_cast<int>(std::lround(c.r * 255.0f)), g = static_cast<int>(std::lround(c.g * 255.0f)), b = static_cast<int>(std::lround(c.b * 255.0f));
+	CString hex;
+	hex.Format(_T("#%02X%02X%02X"), r, g, b);
+
+	bool applied = false;
+	for (ge::Node* n : e.pDoc->GetDoc().GetSelection()) {
+		if (!n || n->Kind() == ge::NodeKind::Image || ge::IsReferenceNode(*n)) continue;
+		ge::Style s = n->GetStyle();
+		s.fill.type = ge::PaintType::Solid;
+		s.fill.color = ge::Color(c.r, c.g, c.b, 1.0f);
+		n->SetStyle(s);
+		applied = true;
+	}
+	if (applied) {
+		e.pDoc->CommitUndoPoint(L"레퍼런스 색 적용");
+		e.pDoc->UpdateAllViews(nullptr);
+	}
+	CString msg;
+	msg.Format(_T("[스포이드] 레퍼런스 색 %s %s"), (LPCTSTR)hex, applied ? _T("을 선택 도형에 적용") : _T("추출 (선택한 도형 없음)"));
+	LogAppEvent(msg);
+}
+
+// ---- 스포이드/거리 측정 커서와 미리보기 ------------------------------------
+namespace {
+
+double SegmentDistance(double px, double py, double ax, double ay, double bx, double by, double* tOut = nullptr)
+{
+	const double vx = bx - ax, vy = by - ay;
+	double t = ((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy);
+	t = (std::max)(0.0, (std::min)(1.0, t));
+	if (tOut) *tOut = t;
+	const double dx = ax + t * vx - px, dy = ay + t * vy - py;
+	return std::sqrt(dx * dx + dy * dy);
+}
+
+// 32x32 색 커서를 그린다 (스포이드 또는 자). 뾰족한 끝(2, 29)이 찍는 점
+HCURSOR MakeToolCursor(bool ruler)
+{
+	const int N = 32;
+	BITMAPINFO bi{};
+	bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bi.bmiHeader.biWidth = N;
+	bi.bmiHeader.biHeight = -N;   // 위에서 아래로
+	bi.bmiHeader.biPlanes = 1;
+	bi.bmiHeader.biBitCount = 32;
+	bi.bmiHeader.biCompression = BI_RGB;
+
+	void* bits = nullptr;
+	HDC dc = ::GetDC(nullptr);
+	HBITMAP color = ::CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+	::ReleaseDC(nullptr, dc);
+	if (!color || !bits) return ::LoadCursor(nullptr, IDC_CROSS);
+
+	auto* px = static_cast<uint32_t*>(bits);
+	std::memset(px, 0, sizeof(uint32_t) * N * N);
+	for (int y = 0; y < N; ++y) {
+		for (int x = 0; x < N; ++x) {
+			const double cx = x + 0.5, cy = y + 0.5;
+			uint8_t r = 0, g = 0, b = 0, a = 0;
+			if (!ruler) {
+				// 스포이드: 꼭지 (2,30)-(5,27), 몸통 (5,27)-(20,12), 전구 원 중심 (23,9) 반지름 6
+				const double dTip = SegmentDistance(cx, cy, 2, 30, 5, 27);
+				const double dBody = SegmentDistance(cx, cy, 5, 27, 20, 12);
+				const double dBulb = std::hypot(cx - 23.0, cy - 9.0);
+				if (dTip <= 3.2 || dBody <= 4.2 || dBulb <= 7.2) { a = 255; r = g = b = 30; }          // 검은 외곽선
+				if (dTip <= 2.0 || dBody <= 3.0 || dBulb <= 6.0) { a = 255; r = g = b = 240; }         // 흰 몸통
+				if (dBulb <= 4.0) { a = 255; r = 60; g = 150; b = 255; }                               // 파란 전구 (색 샘플)
+			} else {
+				// 자: (3,29)-(29,3) 방향의 노란 막대와 눈금
+				double t = 0.0;
+				const double d = SegmentDistance(cx, cy, 3, 29, 29, 3, &t);
+				const double along = t * std::hypot(26.0, 26.0);
+				if (d <= 4.2) { a = 255; r = g = b = 30; }
+				if (d <= 3.0) { a = 255; r = 255; g = 215; b = 0; }
+				if (d <= 3.0 && std::fmod(along, 4.0) < 1.0) { a = 255; r = g = b = 30; }
+			}
+			px[y * N + x] = static_cast<uint32_t>(b) | (static_cast<uint32_t>(g) << 8) | (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(a) << 24);
+		}
+	}
+
+	std::vector<uint8_t> zeros(static_cast<size_t>(N / 8) * N, 0);   // 모두 0 = 불투명 마스크 (색 알파 사용)
+	HBITMAP mask = ::CreateBitmap(N, N, 1, 1, zeros.data());
+	ICONINFO ii{};
+	ii.fIcon = FALSE;
+	ii.xHotspot = 2;
+	ii.yHotspot = 29;
+	ii.hbmMask = mask;
+	ii.hbmColor = color;
+	HCURSOR cur = ::CreateIconIndirect(&ii);
+	::DeleteObject(mask);
+	::DeleteObject(color);
+	return cur ? cur : ::LoadCursor(nullptr, IDC_CROSS);
+}
+
+} // namespace
+
+HCURSOR EyedropperTool::GetCursor() const
+{
+	static HCURSOR s_dropper = MakeToolCursor(false);
+	static HCURSOR s_ruler = MakeToolCursor(true);
+	return m_measuring ? s_ruler : s_dropper;
+}
+
+void EyedropperTool::OnMove(const ToolEvent& e)
+{
+	if (!m_pendingPick) return;
+	m_currentWorld = e.worldPt;
+	const float dx = e.worldPt.x - m_startWorld.x;
+	const float dy = e.worldPt.y - m_startWorld.y;
+	m_measuring = std::sqrt(dx * dx + dy * dy) >= 2.0f;
+}
+
+// 끄는 동안: 시작점~현재점에 파란 점선과 "길이 … px" 글자를 미리 보여 준다
+void EyedropperTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* /*pDoc*/)
+{
+	if (!m_measuring || !rt || !brush) return;
+
+	ViewportTransform view = { zoom, { pan.x, pan.y } };
+	const ge::Vec2 sa = view.WorldToScreen(ge::Vec2{ m_startWorld.x, m_startWorld.y });
+	const ge::Vec2 sb = view.WorldToScreen(ge::Vec2{ m_currentWorld.x, m_currentWorld.y });
+	const float sdx = sb.x - sa.x, sdy = sb.y - sa.y;
+	const float slen = std::sqrt(sdx * sdx + sdy * sdy);
+	if (slen < 1.0f) return;
+	const float ux = sdx / slen, uy = sdy / slen;
+
+	brush->SetColor(D2D1::ColorF(0.10f, 0.40f, 1.00f, 1.0f));
+	for (float s = 0.0f; s < slen; s += 10.0f) {
+		const float e2 = (std::min)(s + 6.0f, slen);
+		rt->DrawLine(D2D1::Point2F(sa.x + ux * s, sa.y + uy * s), D2D1::Point2F(sa.x + ux * e2, sa.y + uy * e2), brush, 1.5f);
+	}
+
+	// 측정값 글자 (문서 px). 정확한 길이는 끝낼 때 출력 창에도 남는다
+	const float wdx = m_currentWorld.x - m_startWorld.x, wdy = m_currentWorld.y - m_startWorld.y;
+	wchar_t text[64];
+	swprintf_s(text, L"길이 %.1f px", std::sqrt(wdx * wdx + wdy * wdy));
+
+	static IDWriteFactory* s_dwMeasure = nullptr;
+	static IDWriteTextFormat* s_fmtMeasure = nullptr;
+	if (!s_dwMeasure) {
+		DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&s_dwMeasure));
+		if (s_dwMeasure)
+			s_dwMeasure->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 12.0f, L"ko-kr", &s_fmtMeasure);
+	}
+	if (!s_fmtMeasure) return;
+
+	const D2D1_RECT_F box = D2D1::RectF(sb.x + 12.0f, sb.y + 12.0f, sb.x + 150.0f, sb.y + 36.0f);
+	brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.92f));
+	rt->FillRectangle(box, brush);
+	brush->SetColor(D2D1::ColorF(0.10f, 0.40f, 1.00f, 1.0f));
+	rt->DrawText(text, static_cast<UINT32>(wcslen(text)), s_fmtMeasure, box, brush);
+}
+void EyedropperTool::OnUp(const ToolEvent& e)
+{
+	if (!m_pendingPick || !e.pDoc) return;
+	m_pendingPick = false;
+	m_measuring = false;
+
+	const float dx = e.worldPt.x - m_startWorld.x;
+	const float dy = e.worldPt.y - m_startWorld.y;
+	const float len = std::sqrt(dx * dx + dy * dy);
+	if (len < 2.0f) {
+		PickReferenceColor(e);
+		return;
+	}
+
+	// 거리 측정 (7.1.2): 문서 좌표(px) 기준 길이와 가로·세로 변화량을 상태 표시줄과 출력 창에 남긴다
+	CString msg;
+	msg.Format(_T("[측정] 길이 %.1f px (가로 %.1f, 세로 %.1f)"), len, std::fabs(dx), std::fabs(dy));
+	LogAppEvent(msg);
+	SetAppStatusText(msg);
+}
+
 void EyedropperTool::OnDown(const ToolEvent& e)
 {
 	if (!e.pDoc) return;
 
 	D2D1_POINT_2F sp = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
 	ge::Node* targetNode = HitTestTopShape(e.pDoc, sp, e.view, e.pD2DFactory);
-	if (!targetNode) return;
-
+	if (!targetNode || ge::IsReferenceNode(*targetNode)) {
+		// 클릭이면 색 추출, 드래그면 거리 측정 (OnUp 에서 판단)
+		m_pendingPick = true;
+		m_startWorld = e.worldPt;
+		return;
+	}
 	ge::PathNode* srcPath = dynamic_cast<ge::PathNode*>(targetNode);
 	ge::TextNode* srcText = dynamic_cast<ge::TextNode*>(targetNode);
 	if (!srcPath && !srcText) return;

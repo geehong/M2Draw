@@ -3,6 +3,7 @@
 #include "SceneJsonWriter.h"
 #include "RasterExport.h"
 #include "ReferenceImport.h"
+#include "AnnotationNote.h"
 #include "D2DLayer.h"
 
 #include <cmath>
@@ -91,7 +92,18 @@ std::wstring BuildAgentPrompt(const Document& doc, const Node* target)
 	s += L"1. role 이 있는 요소는 그 HTML 태그를 사용하세요.\r\n";
 	s += L"2. layout.mode 가 row 또는 column 이면 flex 로 구현하고 gap, padding 을 따르세요.\r\n";
 	s += L"3. 색과 글꼴은 scene.json 의 값을 그대로 쓰고, 추측하지 마세요.\r\n";
-	s += L"4. 결과는 index.html 과 styles.css 로 주세요.\r\n";
+	s += L"4. 결과는 result 폴더의 SVG 로 저장하세요 (앱에 바로 표시됩니다). index.html 과 styles.css 는 만들지 마세요.\r\n";
+	s += L"5. 원본 글자(제목, 메뉴, 버튼, 기사 제목)는 reference.png 에서 읽은 그대로 옮기세요. 새로 만들거나 바꾸지 마세요.\r\n";
+	s += L"6. 브랜드 이름과 로고 글자는 원본에 보이는 것만 씁니다. 없으면 로고 자리만 두세요.\r\n";
+	s += L"7. 메뉴와 버튼 글자는 한 줄에 들어가도록 칸 폭을 넉넉히 잡으세요 (글자 하나당 약 9px 이상).\r\n";
+	s += L"8. 원본 사진은 복사하지 말고, 같은 자리에 회색 상자와 \"사진\" 라벨로 두세요.\r\n";
+	s += L"9. 대지 크기 안에는 원본의 첫 화면 범위만 담으세요 (상단 머리 바, 첫 번째 구획, 광고 자리). 그 아래 구획과 푸터는 만들지 마세요.\r\n";
+	const std::vector<std::wstring> notes = AnnotationTexts(doc);
+	if (!notes.empty()) {
+		s += L"\r\n주석 (사용자 메모. 해당 위치의 요소를 참고하세요)\r\n";
+		for (const auto& note : notes)
+			s += L"- " + note + L"\r\n";
+	}
 	return s;
 }
 

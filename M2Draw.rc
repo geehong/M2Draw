@@ -183,8 +183,10 @@ LANGUAGE 18, 1
         MENUITEM "HTML 내보내기(&H)...", ID_FILE_EXPORT_HTML \
         MENUITEM "HTML 미리보기(&P)...", ID_FILE_PREVIEW_HTML \
         MENUITEM "이미지 내보내기(&I)... (PNG/JPG)", ID_FILE_EXPORT_IMAGE \
-        MENUITEM "AI 에이전트 패키지(&A)...", ID_FILE_EXPORT_AGENT \
         MENUITEM "아이콘 세트 내보내기(&K)...", ID_FILE_EXPORT_ICONSET \
+        MENUITEM "로고 변형 내보내기(&L)...", ID_FILE_EXPORT_LOGO \
+        MENUITEM "SVG 최적화 내보내기(&O)...", ID_FILE_EXPORT_SVG_OPT \
+        MENUITEM "웹 프로젝트 묶음 내보내기(&W)...", ID_FILE_EXPORT_WEB \
     END
 
 IDR_MAINFRAME MENU
@@ -196,6 +198,13 @@ BEGIN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
         MENUITEM "레퍼런스 가져오기(&F)...", ID_FILE_PLACE_REFERENCE
         MENUITEM "AI 산출물 가져오기(&G)...", ID_FILE_IMPORT_AGENT_SVG
+        MENUITEM "URL 레퍼런스 가져오기(&U)...", ID_FILE_IMPORT_URL
+        MENUITEM "새 페이지(&N)...", ID_FILE_PAGE_NEW
+        MENUITEM "페이지 열기(&P)...", ID_FILE_PAGE_OPEN
+        MENUITEM "페이지 이름 바꾸기(&R)...", ID_FILE_PAGE_RENAME
+        MENUITEM "주석 추가(&M)...", ID_FILE_ADD_ANNOTATION
+        MENUITEM "웹폰트 링크 설정(&J)...", ID_FILE_WEBFONT
+        MENUITEM "에이전트 작업 시작(&T)...", ID_FILE_AGENT_START
         M2_EXPORT_MENU_ITEMS
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM SEPARATOR
@@ -240,6 +249,13 @@ BEGIN
         MENUITEM "이미지 가져오기(&I)...\tCtrl+Shift+I", ID_FILE_PLACE_IMAGE
         MENUITEM "레퍼런스 가져오기(&F)...", ID_FILE_PLACE_REFERENCE
         MENUITEM "AI 산출물 가져오기(&G)...", ID_FILE_IMPORT_AGENT_SVG
+        MENUITEM "URL 레퍼런스 가져오기(&U)...", ID_FILE_IMPORT_URL
+        MENUITEM "새 페이지(&N)...", ID_FILE_PAGE_NEW
+        MENUITEM "페이지 열기(&P)...", ID_FILE_PAGE_OPEN
+        MENUITEM "페이지 이름 바꾸기(&R)...", ID_FILE_PAGE_RENAME
+        MENUITEM "주석 추가(&M)...", ID_FILE_ADD_ANNOTATION
+        MENUITEM "웹폰트 링크 설정(&J)...", ID_FILE_WEBFONT
+        MENUITEM "에이전트 작업 시작(&T)...", ID_FILE_AGENT_START
         M2_EXPORT_MENU_ITEMS
         MENUITEM "닫기(&C)",                      ID_FILE_CLOSE
         MENUITEM "저장(&S)\tCtrl+S",               ID_FILE_SAVE
@@ -698,7 +714,14 @@ BEGIN
      ID_FILE_PLACE_REFERENCE  "트레이싱용 레퍼런스 이미지를 잠긴 반투명 레이어로 가져옵니다.\n레퍼런스 가져오기"
      ID_FILE_EXPORT_AGENT    "AI 에이전트에게 넘길 패키지(scene.json, preview.png, prompt.md)를 폴더에 저장합니다.\nAI 에이전트 패키지"
      ID_FILE_IMPORT_AGENT_SVG  "AI 에이전트가 만든 SVG 파일을 선택한 프레임 안(없으면 활성 레이어)에 가져옵니다.\nAI 산출물 가져오기"
+     ID_FILE_IMPORT_URL        "클립보드의 웹 주소를 캡처해 레퍼런스 레이어에 폭에 맞춰 가져옵니다.\nURL 레퍼런스 가져오기"
+     ID_FILE_ADD_ANNOTATION    "선택한 도형 옆에 주석(메모) 글자를 추가합니다. 더블클릭해서 글을 고칩니다.\n주석 추가"
+     ID_FILE_WEBFONT           "웹 출력의 head 에 넣을 웹폰트 링크를 설정합니다. 문서에 저장됩니다.\n웹폰트 링크 설정"
+     ID_FILE_AGENT_START       "에이전트 작업 폴더에 패키지를 만들고 결과 자동 표시를 시작합니다.\n에이전트 작업 시작"
      ID_FILE_EXPORT_ICONSET    "선택한 도형(없으면 문서 전체)을 여러 크기 PNG, ICO, 파비콘 세트로 저장합니다.\n아이콘 세트 내보내기"
+     ID_FILE_EXPORT_LOGO       "문서를 원본·검정·흰색 단색 로고 변형(SVG + PNG)으로 저장합니다.\n로고 변형 내보내기"
+     ID_FILE_EXPORT_SVG_OPT    "좌표를 소수 2자리로 줄인 순수 SVG를 저장합니다 (파일 크기 감소).\n최적화 SVG 내보내기"
+     ID_FILE_EXPORT_WEB        "index.html, styles.css, assets 폴더로 나눈 웹 프로젝트를 폴더에 저장합니다.\n웹 프로젝트 묶음 내보내기"
     ID_FILE_EXPORT_SVG       "순수 SVG(Illustrator/Inkscape/Figma/브라우저 호환)로 내보냅니다.\nSVG 내보내기"
     ID_FILE_PREVIEW_HTML     "WebView2 로 현재 문서의 HTML 을 실시간 미리 봅니다. 폭 조절과 PDF 저장도 지원합니다.\nHTML 미리보기"
     ID_EDIT_DUPLICATE "선택한 오브젝트를 복제합니다.\n복제"
@@ -935,3 +958,15 @@ LANGUAGE 18, 1
 // #endif
 #endif
 #endif    // APSTUDIO_INVOKED가 아님
+
+IDD_WEBFONT_LINK DIALOG 0, 0, 300, 150
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "웹폰트 링크"
+FONT 9, "맑은 고딕"
+BEGIN
+    LTEXT "웹 출력(index.html)의 head 안에 넣을 HTML 을 붙여넣으세요.", IDC_STATIC, 8, 6, 284, 10
+    LTEXT "예) Google Fonts: fonts.google.com 에서 글꼴 선택 > Get embed code > <link> 태그를 복사", IDC_STATIC, 8, 17, 284, 10
+    EDITTEXT IDC_WEBFONT_EDIT, 8, 32, 284, 92, ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_BORDER
+    DEFPUSHBUTTON "확인", IDOK, 180, 128, 50, 14
+    PUSHBUTTON "취소", IDCANCEL, 240, 128, 50, 14
+END

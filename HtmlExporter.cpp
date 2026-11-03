@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "HtmlExporter.h"
 #include "ReferenceImport.h"
+#include "AnnotationNote.h"
 #include "SvgWriter.h"
 #include "HtmlComponents/TableComponent.h"
 #include "HtmlComponents/UiComponents.h"
@@ -237,7 +238,7 @@ HtmlExportResult HtmlExporter::Export(Document& doc, const HtmlExportOptions& op
 		const_cast<FrameNode*>(options.targetArtboard)->Accept(*this);
 	} else {
 		for (const auto& layer : doc.GetLayers()) {
-			if (layer && !IsReferenceNode(*layer)) layer->Accept(*this);
+			if (layer && !IsReferenceNode(*layer) && !IsAnnotationNode(*layer)) layer->Accept(*this);
 		}
 	}
 
@@ -273,6 +274,7 @@ HtmlExportResult HtmlExporter::Export(Document& doc, const HtmlExportOptions& op
 	fullDoc << "  <meta charset=\"UTF-8\">\n";
 	fullDoc << "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n";
 	fullDoc << "  <title>" << EscapeHtml(m_options.title) << "</title>\n";
+	if (!m_options.headExtra.empty()) fullDoc << m_options.headExtra << "\n";
 
 	if (m_options.singleFile) {
 		fullDoc << "  <style>\n" << m_result.css << "  </style>\n";

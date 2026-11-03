@@ -134,8 +134,8 @@ BOOL CM2DrawApp::InitInstance()
 
 	EnableTaskbarInteraction();
 
-	// RichEdit 컨트롤을 사용하려면 AfxInitRichEdit2()가 있어야 합니다.
-	// AfxInitRichEdit2();
+	// RichEdit 컨트롤을 사용하려면 AfxInitRichEdit2()가 있어야 합니다 (ChatAgent 대화 기록의 마크다운 서식).
+	AfxInitRichEdit2();
 
 	// 표준 초기화
 	// 이들 기능을 사용하지 않고 최종 실행 파일의 크기를 줄이려면
@@ -364,7 +364,7 @@ void UpdateOptionBarCreationCoords(float x, float y, float w, float h, bool hasF
 
 void CM2DrawApp::OnFileOpen()
 {
-	CString filter = _T("SVG 파일 (*.svg;*.m2svg)|*.svg;*.m2svg|SVG 파일 (*.svg)|*.svg|M2Draw 확장 SVG (*.m2svg)|*.m2svg|모든 파일 (*.*)|*.*||");
+	CString filter = _T("M2Draw 프로젝트 (*.m2svg)|*.m2svg|이전 SVG 문서 (*.svg)|*.svg|모든 파일 (*.*)|*.*||");
 	CFileDialog dlg(TRUE, _T("svg"), nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY, filter);
 	dlg.m_ofn.lpstrTitle = _T("SVG 파일 열기");
 	if (dlg.DoModal() == IDOK)

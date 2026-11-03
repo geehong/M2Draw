@@ -49,6 +49,7 @@ protected:  // 컨트롤 모음이 포함된 멤버입니다.
 
 public:
 	COutputWnd& GetOutputWnd() { return m_wndOutput; }
+	const void* m_chatDoc = nullptr;   // 채팅 연결이 마지막으로 따라간 문서 (탭 전환 감지)
 	CToolBoxPane& GetToolBox() { return m_wndToolBox; }
 	CToolOptionBar& GetOptionBar() { return m_wndOptionBar; }
 	CMFCStatusBar& GetStatusBar() { return m_wndStatusBar; }
@@ -72,6 +73,12 @@ protected:
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
 	afx_msg void OnDestroy();
 	afx_msg void OnClose();
+	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);   // 외부 수정 감지 (7.2.4)
+	afx_msg void OnTimer(UINT_PTR nIDEvent);   // 2초마다 외부 수정 확인 (7.2.4)
+	afx_msg void OnUrlGet();                             // Get Ref 버튼: 주소창의 주소로 레퍼런스 가져오기 (7.1.6)
+	afx_msg void OnUpdateUrlLabel(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateUrlEdit(CCmdUI* pCmdUI);
+	CString GetUrlEditText();
 	bool m_bClosing = false;   // 종료 중: 서브도구 바를 다시 만들면 파괴된 툴팁(DelTool assert)을 건드리므로 막음
 	afx_msg void OnWindowManager();
 	afx_msg void OnViewCustomize();

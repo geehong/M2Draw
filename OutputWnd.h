@@ -1,4 +1,7 @@
-﻿#pragma once
+#pragma once
+
+#include "ChatAgentWnd.h"
+#include "CodeViewWnd.h"
 
 /////////////////////////////////////////////////////////////////////////////
 // COutputList 창
@@ -29,8 +32,9 @@ public:
 	COutputWnd() noexcept;
 
 	void UpdateFonts();
+	CChatAgentWnd& GetChat() { return m_wndChat; }
 
-	// 외부(뷰, 프레임, 속성창 등)에서 출력 창으로 로그 메시지를 기록하는 함수
+	// 외부(뷰, 프레임, 속성창 등)에서 출력 창으로 로그 메시지를 기록하는 함수 (로그 탭 하나에 쌓는다)
 	void LogMessage(const CString& strMessage, int tabIndex = 0);
 	void ClearLog(int tabIndex = -1);
 
@@ -38,15 +42,11 @@ public:
 protected:
 	CMFCTabCtrl	m_wndTabs;
 
-	COutputList m_wndOutputBuild;
-	COutputList m_wndOutputDebug;
-	COutputList m_wndOutputFind;
+	COutputList   m_wndLog;       // Log 탭 (앱 이벤트 로그)
+	CChatAgentWnd m_wndChat;      // ChatAgent 탭 (에이전트와 대화)
+	CCodeViewWnd  m_wndCode;      // Code 탭 (SVG / HTML 태그 / HTML 내보내기 코드, 읽기 전용)
 
 protected:
-	void FillBuildWindow();
-	void FillDebugWindow();
-	void FillFindWindow();
-
 	void AdjustHorzScroll(CListBox& wndListBox);
 
 // 구현입니다.

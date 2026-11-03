@@ -808,10 +808,14 @@ public:
 	void  SetSize(float w, float h) { m_w = (std::max)(1.0f, w); m_h = (std::max)(1.0f, h); Invalidate(); }
 	ImageFit GetFit() const { return m_fit; }
 	void  SetFit(ImageFit f) { m_fit = f; Invalidate(); }
+	// 프로젝트 연결 경로: 그림 데이터 대신 파일 경로(UTF-8, 페이지 파일 기준 상대 경로)만 가진 레퍼런스
+	const std::string& GetLinkHref() const { return m_linkHref; }
+	void  SetLinkHref(std::string h) { m_linkHref = std::move(h); }
 
 private:
 	ImageFit m_fit = ImageFit::Stretch;
 	std::shared_ptr<const ImageData> m_data;
+	std::string m_linkHref;
 	float m_w = 100.0f, m_h = 100.0f;
 };
 
@@ -1353,6 +1357,7 @@ public:
 	Color backgroundColor = Color(1.0f, 1.0f, 1.0f, 1.0f); // 도큐멘트(용지) 배경색 (투명도 포함)
 	Color canvasColor     = Color(0.84f, 0.85f, 0.88f, 1.0f); // 캔버스(전체 월드 작업대) 배경색
 	CanvasOriginMode originMode = CanvasOriginMode::TopLeft;
+	std::wstring webFontHead;   // 웹 출력 <head> 에 넣을 HTML (웹폰트 링크 등, 7.1.4). 파일에 저장된다
 
 	NodeId IssueId() { return ++m_nextId; }
 	NodeId PeekMaxId() const { return m_nextId; }
@@ -1556,6 +1561,8 @@ public:
 	void DrawNode(Node& node, const Matrix2D& parentXf, const Viewport& view) override;
 	// 레이어 선택 (기본 All). 내보내기에서만 바꾼다
 	void SetLayerFilter(RenderLayerFilter f) { m_layerFilter = f; }
+	// 편집 전용 표시 (프레임 윤곽선, 역할 배지, 아트보드 이름 라벨). 내보내기에서는 끈다 (기본 켬)
+	void SetEditOverlays(bool v) { m_drawEditOverlays = v; }
 
 	// 노드 -> D2D 지오메트리 (m_dirty 일 때만 재생성)
 	ID2D1Geometry* GetGeometry(PathNode& node);
@@ -1587,6 +1594,7 @@ private:
 
 	ID2D1RenderTarget*             m_rt      = nullptr;   // 비소유
 	RenderLayerFilter              m_layerFilter = RenderLayerFilter::All;
+	bool                           m_drawEditOverlays = true;
 	ID2D1Factory*                  m_factory = nullptr;   // 비소유
 	ComPtr<ID2D1SolidColorBrush>   m_brush;
 	// PathNode 별 지오메트리 캐시

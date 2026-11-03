@@ -113,7 +113,9 @@ enum class ToolType
 	Circle3Pt,             // 3점 원: 세 점 클릭
 	Arc3Pt,                // 3점 호: 시작점, 끝점, 호 위의 한 점 클릭
 	Pie,                   // 파이(부채꼴): 중심 클릭 후 드래그로 반지름 (각도는 드래그 방향에서 90도)
-	Donut,                 // 도넛: 중심 클릭 후 드래그로 바깥 반지름 (안쪽은 50%)
+	Donut,                 //
+	PolarGrid,             // 방사형 그리드 도구 (6.13.3)
+	RectGrid,              // 직교 그리드 도구 (6.13.3) 도넛: 중심 클릭 후 드래그로 바깥 반지름 (안쪽은 50%)
 	Eyedropper,            // 스포이드 도구 (I): 클릭 시 스타일 추출 및 적용
 	Node                   // 노드/직접 선택 도구 (A): 정점/핸들 직접 편집 및 다중 앵커 조작
 };
@@ -231,6 +233,7 @@ private:
 	HitResult      m_editHit;
 	bool           m_hoverIsNode = false;
 	bool           m_hoverOnShape = false; // 스트로크/면 위에 마우스가 올라가 있는지
+	ge::NodeId     m_hoverId = 0;          // 클릭하면 선택될 오브젝트 (호버 윤곽 미리보기)
 
 	// 그라디언트 기즈모 (선택된 단일 도형/프레임의 그라디언트 시작/끝/중심/초점/반지름 핸들) — 드래그 동안만 유효
 	enum class GradHandle { None, Start, End, Radius };   // 방사형: Start=중심, End=초점
@@ -783,11 +786,18 @@ public:
 	ToolType GetType() const override { return ToolType::Eyedropper; }
 	const wchar_t* GetName() const override { return L"스포이드 도구 (Eyedropper)"; }
 	wchar_t GetShortcut() const override { return L'I'; }
-	HCURSOR GetCursor() const override { return ::LoadCursor(nullptr, IDC_CROSS); }
+	HCURSOR GetCursor() const override;   // 평소 스포이드 모양, 거리 측정(끌기) 중에는 자 모양
 
 	void OnDown(const ToolEvent& e) override;
-	void OnMove(const ToolEvent& e) override {}
-	void OnUp(const ToolEvent& e) override {}
+	void OnMove(const ToolEvent& e) override;
+	void OnUp(const ToolEvent& e) override;
+	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+
+private:
+	bool           m_pendingPick = false;   // 도형이 없는 곳/레퍼런스 위에서 눌렀음 (떼는 위치로 클릭인지 드래그인지 판단)
+	bool           m_measuring = false;     // 끌어서 거리 측정 중 (미리보기 선·글자, 자 커서)
+	D2D1_POINT_2F  m_startWorld{};
+	D2D1_POINT_2F  m_currentWorld{};
 };
 
 class NodeTool : public ITool

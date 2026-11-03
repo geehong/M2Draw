@@ -1,4 +1,7 @@
 #pragma once
+
+#include <map>
+#include <vector>
 #include "D2DGraphicEngine.h"
 #include "UndoManager.h"
 
@@ -14,6 +17,24 @@ using HeartParams = ge::HeartParams;
 using ShapeParams = ge::ShapeParams;
 using BezierNode = ge::BezierNode;
 using SubPath = ge::SubPath;
+
+// 프로젝트 안의 페이지 (pages\\이름.m2doc)
+struct ProjectPageEntry
+{
+	std::wstring name;        // 페이지 이름 (파일 이름과 같다)
+	std::wstring agentDir;    // 이 페이지의 에이전트 패키지 폴더 (프로젝트 기준 상대 경로 또는 절대 경로)
+};
+
+// 프로젝트 안의 레퍼런스 (references\\NNN_이름\\reference.png)
+struct ProjectRefEntry
+{
+	int          id = 0;      // 번호 (001, 002 ...). 덮어쓰지 않고 계속 늘린다
+	std::wstring leaf;        // 폴더 이름 (예: 001_webmd_202611031329)
+	std::wstring url;         // 캡처한 주소
+	std::string  created;     // 캡처한 날짜
+	int          width = 0;
+	int          height = 0;
+};
 
 class CM2DrawDoc : public CDocument
 {
@@ -83,8 +104,44 @@ public:
 	afx_msg void OnFileExportAgent();      // AI 에이전트 패키지 내보내기 (7.3.1)
 	afx_msg void OnFileImportAgentSvg();   // AI 산출물 SVG 가져오기 (7.2.3)
 	afx_msg void OnFileExportIconSet();    // 아이콘 세트 내보내기 (7.4.1 / 7.4.2)
+	afx_msg void OnFileExportLogo();       // 로고 색 변형 내보내기 (7.4.3)
+	afx_msg void OnFileExportSvgOptimized(); // 좌표 2자리 최적화 SVG 내보내기 (7.4.4)
+	afx_msg void OnFileExportWebBundle();    // 웹 프로젝트 묶음 (index.html + styles.css + assets/) (7.4.5)
+	afx_msg void OnFileImportUrlReference(); // 클립보드의 웹 주소를 캡처해 레퍼런스로 가져오기 (7.1.6 / 7.1.7)
+	void ImportUrlReference(std::wstring url);   // 주소를 받아 캡처 후 레퍼런스로 가져오기 (주소창/클립보드 공용)
+	void LoadCaptureFile(const std::wstring& path);   // 캡처 파일(*.m2svg)을 불러와 레퍼런스로 올리기
+	afx_msg void OnFileCaptureOpen();                 // 파일 > 캡처 불러오기 (*.m2svg)
+	afx_msg void OnFileAddAnnotation();      // 주석(메모) 추가: 선택 도형 옆에 주석 레이어 텍스트 (7.3.3)
+	afx_msg void OnFileWebFontLink();        // 웹폰트 링크 설정 (문서에 저장, 7.1.4)
 	bool ImportSvgNodes(const std::string& svg, bool isPaste);   // SVG 노드를 선택 프레임 안(또는 활성 레이어)에 넣는다
-	bool PlaceReferenceData(std::shared_ptr<ge::ImageData> data, const CString& title);
+	// AI 산출물 외부 수정 감지 (7.2.4): 마지막으로 가져온 SVG 를 기록해 두고, 창이 활성화될 때 수정 여부를 본다
+	void RecordWatchedImport(const CString& path, ge::NodeId frameId, const std::vector<ge::Node*>& nodes);
+	CString                 m_watchPath;
+	long long               m_watchMtime = 0;
+	std::vector<ge::NodeId> m_watchNodes;
+	ge::NodeId              m_watchFrame = 0;
+	// 에이전트 작업 연결 (7.2.6): 작업 폴더의 패키지와 결과 자동 가져오기, 현재 상태 자동 저장
+	CString                                  m_agentDir;                 // 작업 패키지 폴더 (비어 있으면 연결 안 됨)
+	ge::NodeId                               m_agentFrameId = 0;         // 결과를 넣을 프레임
+	std::map<std::wstring, long long>        m_agentResultSeen;          // 결과 파일 -> 마지막 수정 시각
+	std::map<std::wstring, std::vector<ge::NodeId>> m_agentResultNodes;  // 결과 파일 -> 가져온 도형
+	unsigned long long                       m_agentSeenVersion = 0;     // 마지막으로 본 변경 번호
+	unsigned long long                       m_agentSyncedVersion = 0;   // 마지막으로 current 에 쓴 변경 번호
+	unsigned long long                       m_agentQuietVersion = 0;    // 에이전트 결과를 가져온 직후의 변경 번호 (변경됨 배지 제외용)
+	unsigned long                            m_agentChangedAt = 0;       // 변경을 처음 본 시각 (ms)
+	DWORD                                    m_dirtyTick = 0;            // 수정이 처음 감지된 시각 (자동 저장 기준)
+	bool                                     m_attached = false;         // 열린 프로젝트의 페이지로 붙은 문서 (저장은 프로젝트 목차로)
+	bool                                     m_saveAsked = false;        // 저장하지 않은 문서에서 프로젝트 저장을 이미 물었는지
+	std::wstring                             m_activePage = L"메인";     // 지금 열려 있는 페이지
+	std::vector<uint8_t>                     m_capturePng;               // 마지막 URL 캡처의 그림 (프로젝트 폴더의 reference.png)
+	std::wstring                             m_agentLastDom;             // 마지막 URL 캡처의 DOM 요약 JSON
+	std::wstring                             m_agentSiteUrl;             // 마지막 URL 캡처의 주소 (패키지 이름·지시문의 대상 사이트)
+	void AgentCheckResults();
+	void AgentSyncCurrent();	void CheckExternalImportChange();   // 앱 창이 활성화될 때 호출 (7.2.4)
+	void AgentTick();                   // 2초마다 호출: 결과 가져오기 + 현재 상태 저장 (7.2.6)
+	afx_msg void OnFileAgentStart();    // 에이전트 작업 시작 (7.2.6)
+	afx_msg void OnFileAgentSendFrame(); // 선택한 프레임만 에이전트 패키지로 보내기 (7.2.11)
+	bool PlaceReferenceData(std::shared_ptr<ge::ImageData> data, const CString& title, bool fitWidth = false);
 	bool PasteBitmapAsReference();         // 클립보드 비트맵을 레퍼런스로 붙여넣기
 	afx_msg void OnFileExportSvg();   // 순수 SVG 내보내기 (옵션: 텍스트 윤곽선 변환)
 	// HTML 미리보기(Step 4.6)용: 선택된 최상위 아트보드(없으면 nullptr = 문서 전체)와 현재 문서의 HTML
@@ -168,6 +225,24 @@ public:
 	virtual BOOL OnNewDocument();
 	virtual BOOL OnOpenDocument(LPCTSTR lpszPathName);
 	virtual BOOL OnSaveDocument(LPCTSTR lpszPathName);
+	// 프로젝트 (7.2.13 / 문서 형식): 목차 *.m2svg + 같은 이름의 *.m2data 폴더
+	BOOL SaveProject(LPCTSTR manifestPathLpsz);
+	BOOL OpenProject(LPCTSTR manifestPathLpsz);
+	void ReplaceDocument(ge::Document&& loaded);   // 현재 문서를 바꾸고 화면을 갱신한다
+	BOOL SwitchPage(const std::wstring& name);
+	void AttachToProject();
+	void AutoSaveIfDirty();
+	void LoadPageAttached(const std::wstring& name);   // 프로젝트의 페이지 하나를 이 문서에 연다 (탭으로 여는 페이지용)
+	afx_msg void OnFilePageNew();                  // 새 페이지 (pages 폴더에 이름을 정해 만든다)
+	afx_msg void OnFilePageOpen();
+	afx_msg void OnFilePageRename();               // 페이지 이름 바꾸기 (파일 이름과 목차를 함께)
+	void RenamePage(const std::wstring& newName);
+	void CleanupUnusedReferences(const std::wstring& folderPath);   // 아무도 쓰지 않는 레퍼런스 파일 정리
+	void ImportReferenceFile(const std::wstring& pngPath);              // 레퍼런스 그림 파일을 레퍼런스로 올리기
+	CString GetAgentDirForChat() const;                                 // 탭별 채팅 연결용: 이 문서의 에이전트 패키지 폴더
+	CString GetSiteForChat() const;                                     // 탭별 채팅 연결용: 이 문서의 대상 사이트                 // 페이지 열기 (pages 폴더에서 고른다)
+	bool ChooseExportFolder(const CString& kind, CString& folderOut);   // 여러 파일 내보내기: 폴더로 저장할지 묻고 폴더를 정한다
+	std::wstring AgentRootForDoc() const;   // 에이전트 패키지를 둘 폴더 (프로젝트 안이면 <프로젝트>.m2data\agent)
 	virtual BOOL DoSave(LPCTSTR lpszPathName, BOOL bReplace = TRUE);
 	virtual void SetPathName(LPCTSTR lpszPathName, BOOL bAddToMRU = TRUE);
 	void SetModifiedFlag(BOOL bModified = TRUE);   // CDocument::SetModifiedFlag 는 가상 함수가 아니므로 숨김(hiding) 임에 주의

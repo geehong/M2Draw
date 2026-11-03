@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+
 #include "GeNodeVisitor.h"
 #include <string>
 #include <unordered_map>
@@ -27,6 +29,13 @@ struct SvgWriteOptions {
 	bool nativeShapes = false;
 	// 텍스트를 글꼴 없이도 같게 보이도록 윤곽선(<path>)으로 출력 (3.5.5 "텍스트를 윤곽선으로 변환하여 출력"). 기본 꺼짐
 	bool textAsOutlines = false;
+	// 좌표 소수 자릿수 (0~6). 기본 4 (기존 출력과 같음). 최적화 출력은 2 등으로 줄여 파일 크기를 줄인다 (7.4.4)
+	int decimals = 4;
+	// 최적화 출력 (순수 SVG 전용): 식별자(id) 생략, 내용 없는 그룹 제거 (7.4.4)
+	bool optimize = false;
+	// 연결 모드: 그림 데이터 대신 연결 경로(href)를 쓴다. 경로는 노드별로 주거나 노드가 가진 연결 경로를 쓴다
+	bool linkReferenceImages = false;
+	std::map<const Node*, std::string> linkedImagePaths;   // 노드 -> 연결 경로 (UTF-8)
 
 	SvgWriteOptions() = default;
 	explicit SvgWriteOptions(SvgWriteMode m) : mode(m), nativeShapes(m == SvgWriteMode::Clean) {}

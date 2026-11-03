@@ -70,6 +70,7 @@ bool ExportRaster(Document& doc, const std::wstring& path, const RasterExportOpt
 			rt->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
 		}
 		renderer.SetLayerFilter(opt.layers);
+		renderer.SetEditOverlays(false);   // 이름표/윤곽선은 편집용이므로 출력에 넣지 않는다
 		renderer.DrawDocument(doc, vp);
 		const HRESULT hr = rt->EndDraw();
 		renderer.Shutdown();
