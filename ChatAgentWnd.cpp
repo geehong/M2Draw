@@ -578,6 +578,21 @@ void CChatAgentWnd::SendToAgent()
 	m_input.GetWindowText(text);
 	text.Trim();
 	if (text.IsEmpty()) return;
+
+	// 슬래시 명령 (7.2.13): 입력창에 정확히 /구조, /생성, /수정 을 넣으면 퀵 액션과 같은 동작을 한다
+	static const struct { LPCTSTR cmd; UINT id; } kSlash[] = {
+		{ _T("/구조"), IDC_CHAT_Q_FIRST },
+		{ _T("/생성"), IDC_CHAT_Q_FIRST + 1 },
+		{ _T("/수정"), IDC_CHAT_Q_FIRST + 2 },   // 결과 반영 (고친 장면을 다시 반영)
+	};
+	for (const auto& s : kSlash) {
+		if (text.CompareNoCase(s.cmd) == 0) {
+			OnQuickClicked(s.id);
+			if (m_busy) m_input.SetWindowText(_T(""));   // 보내지 못했으면 입력을 남겨 둔다
+			return;
+		}
+	}
+
 	if (SendText(text, text)) m_input.SetWindowText(_T(""));
 }
 
