@@ -886,6 +886,30 @@ std::wstring CM2DrawDoc::AgentRootForDoc() const
 	return ge::AgentWorkspaceRoot();
 }
 
+// 프로젝트 안에 만든 패키지를 기본 작업 폴더에서도 보이게 바로가기(정션)를 둔다.
+// MCP 서버는 기본 작업 폴더의 패키지만 읽고 쓰므로, 정션을 통해 결과(result\v1.svg)가 프로젝트 폴더에 떨어진다
+void LinkPackageToWorkspace(const std::filesystem::path& pkgDir)
+{
+	namespace fs = std::filesystem;
+	const fs::path ws(ge::AgentWorkspaceRoot());
+	if (pkgDir.parent_path() == ws) return;
+	std::error_code ec;
+	fs::create_directories(ws, ec);
+	const fs::path link = ws / pkgDir.filename();
+	if (fs::exists(link, ec)) return;
+
+	std::wstring cmd = L"cmd /c mklink /J \"" + link.wstring() + L"\" \"" + pkgDir.wstring() + L"\"";
+	std::vector<wchar_t> buf(cmd.begin(), cmd.end());
+	buf.push_back(L'\0');
+	STARTUPINFOW si{ sizeof(si) };
+	PROCESS_INFORMATION pi{};
+	if (CreateProcessW(nullptr, buf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+		WaitForSingleObject(pi.hProcess, 5000);
+		CloseHandle(pi.hThread);
+		CloseHandle(pi.hProcess);
+	}
+}
+
 CString CM2DrawDoc::GetAgentDirForChat() const { return m_agentDir; }
 CString CM2DrawDoc::GetSiteForChat() const { return CString(m_agentSiteUrl.c_str()); }
 
@@ -2533,6 +2557,7 @@ void CM2DrawDoc::OnFileAgentSendFrame()
 		AfxMessageBox(err.c_str(), MB_ICONERROR);
 		return;
 	}
+	LinkPackageToWorkspace(dir);
 
 	const std::string guide = ge::BuildAgentGuideUtf8();
 	std::error_code ec;
@@ -2607,6 +2632,7 @@ void CM2DrawDoc::OnFileAgentStart()
 		AfxMessageBox(err.c_str(), MB_ICONERROR);
 		return;
 	}
+	LinkPackageToWorkspace(dir);
 
 	// 3. 안내 (작업 폴더 루트와 패키지 안 둘 다) 와 원본 DOM 요약
 	const std::string guide = ge::BuildAgentGuideUtf8();
