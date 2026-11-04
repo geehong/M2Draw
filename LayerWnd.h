@@ -104,6 +104,7 @@ protected:
 
 	CM2DrawDoc*                        m_pDoc = nullptr;
 	std::vector<LayerRowItem>          m_rowItems;
+	const void*                        m_rowDoc = nullptr;   // 행을 만든 문서 (닫힌 문서의 노드를 그리지 않도록 비교만 한다)
 	std::unordered_set<ge::NodeId>     m_collapsedIds;   // 접힌 레이어/그룹 (RefreshLayers 사이에 유지)
 	std::shared_ptr<M2DrawControl>     m_capturedControl;
 

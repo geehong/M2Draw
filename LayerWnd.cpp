@@ -808,6 +808,7 @@ void CLayerView::RefreshLayers()
 {
 	CM2DrawDoc* pDoc = GetDocSafe();
 	m_rowItems.clear();
+	m_rowDoc = pDoc;
 	if (!pDoc)
 	{
 		SafeInvalidate(FALSE);
@@ -906,6 +907,10 @@ BOOL CLayerView::OnEraseBkgnd(CDC* /*pDC*/)
 void CLayerView::OnPaint()
 {
 	CPaintDC dc(this);
+
+	// 활성 문서가 바뀌었거나 닫혔으면 행을 다시 만든다 (이전 문서의 노드를 그리면 접근 위반이 난다)
+	if (GetDocSafe() != m_rowDoc)
+		RefreshLayers();
 
 	if (FAILED(CreateDeviceResources()) || !m_pRenderTarget)
 		return;

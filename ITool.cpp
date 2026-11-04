@@ -2014,8 +2014,19 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 			if (ge::Document::GetWorldBounds(*hn, wb)) {
 				const ge::Vec2 p0 = view.WorldToScreen(ge::Vec2{ wb.left, wb.top });
 				const ge::Vec2 p1 = view.WorldToScreen(ge::Vec2{ wb.right, wb.bottom });
-				brush->SetColor(D2D1::ColorF(0.10f, 0.45f, 1.0f, 0.95f));
-				rt->DrawRectangle(D2D1::RectF(p0.x, p0.y, p1.x, p1.y), brush, 1.5f);
+				brush->SetColor(D2D1::ColorF(0.10f, 0.45f, 1.0f, 0.7f));
+				// 파란 점선, 얇게 (실선은 너무 진해서 쓰지 않는다)
+					ID2D1Factory* hf = nullptr;
+					rt->GetFactory(&hf);
+					ID2D1StrokeStyle* dash = nullptr;
+					if (hf) {
+						const D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+							D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_DASH, 0.0f);
+						hf->CreateStrokeStyle(sp, nullptr, 0, &dash);
+					}
+					rt->DrawRectangle(D2D1::RectF(p0.x, p0.y, p1.x, p1.y), brush, 1.0f, dash);
+					if (dash) dash->Release();
+					if (hf) hf->Release();
 			}
 		}
 	}
