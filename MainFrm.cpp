@@ -191,8 +191,12 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 		return -1;
 	}
 
-	theApp.CleanState();
-
+	// 종료할 때 저장한 배치가 있으면 복원하고, 없으면 아래 기본 배치로 도킹한다 (저장 여부는 Layout3/Saved)
+	const bool layoutSaved = theApp.GetProfileInt(_T("Layout3"), _T("Saved"), 0) != 0;
+	if (layoutSaved)
+		LoadBarState(_T("M2DrawLayout"));
+	else
+	{
 	m_wndToolBox.EnableDocking(CBRS_ALIGN_LEFT);
 	DockPane(&m_wndToolBox);
 
@@ -217,6 +221,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	m_wndProperties.EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndProperties, AFX_IDW_DOCKBAR_LEFT);
 	m_wndProperties.DockToWindow(&m_wndToolBox, CBRS_ALIGN_RIGHT);
+	}
 
 
 	// 모든 사용자 인터페이스 요소를 그리는 데 사용하는 비주얼 관리자를 설정합니다.

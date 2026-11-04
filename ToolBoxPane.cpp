@@ -375,20 +375,32 @@ void CToolBoxPane::OnSize(UINT nType, int cx, int cy)
 		m_pRenderTarget->Resize(D2D1::SizeU(cx, cy));
 	}
 
-	// 1열 버튼 레이아웃 계산 (너비에 맞게 36~40px)
-	const int btnSize = 36;
-	const int margin = 4;
+	// 너비에 맞춰 열 수를 정하고 가운데 정렬한다 (라이노 도구 상자처럼 옆으로 넓히면 가로로 늘어난다)
+	// 칸 크기 = 아이콘 36px + 간격 4px. 그룹 간격(gapBefore)이 있는 버튼은 새 줄에서 시작한다
+	const int iconSize = 36;
+	const int iconMargin = 4;
+	const int cellSize = iconSize + iconMargin;
 	const int startY = 8;
+	const int edgePad = 2;
 
-	int left = (cx - btnSize) / 2;
-	if (left < 2) left = 2;
+	int gridCols = (cx - 2 * edgePad + iconMargin) / cellSize;
+	if (gridCols < 1) gridCols = 1;
+	const int gridWidth = gridCols * cellSize - iconMargin;
+	int gridX0 = (cx - gridWidth) / 2;
+	if (gridX0 < edgePad) gridX0 = edgePad;
 
-	int top = startY;
+	int gridY = startY;
+	int gridCol = 0;
 	for (size_t i = 0; i < m_buttons.size(); ++i)
 	{
-		top += m_buttons[i].gapBefore;
-		m_buttons[i].rect = CRect(left, top, left + btnSize, top + btnSize);
-		top += btnSize + margin;
+		if (m_buttons[i].gapBefore > 0)
+		{
+			if (gridCol > 0) { gridY += cellSize; gridCol = 0; }   // 그룹이 바뀌면 줄을 바꾼다
+			gridY += m_buttons[i].gapBefore;
+		}
+		const int x = gridX0 + gridCol * cellSize;
+		m_buttons[i].rect = CRect(x, gridY, x + iconSize, gridY + iconSize);
+		if (++gridCol >= gridCols) { gridCol = 0; gridY += cellSize; }
 	}
 }
 
