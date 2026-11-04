@@ -219,8 +219,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	m_wndCanvasProp.DockToWindow(&m_wndGridProp, CBRS_ALIGN_BOTTOM);
 
 	m_wndProperties.EnableDocking(CBRS_ALIGN_ANY);
-	DockPane(&m_wndProperties, AFX_IDW_DOCKBAR_LEFT);
-	m_wndProperties.DockToWindow(&m_wndToolBox, CBRS_ALIGN_RIGHT);
+		m_wndProperties.DockToWindow(&m_wndToolBox, CBRS_ALIGN_RIGHT);
 	}
 
 
