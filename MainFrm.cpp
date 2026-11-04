@@ -196,28 +196,27 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	m_wndToolBox.EnableDocking(CBRS_ALIGN_LEFT);
 	DockPane(&m_wndToolBox);
 
+	// 기본 배치 (실행할 때마다 같은 모습): 왼쪽 도구 상자 옆에 오브젝트 설정, 오른쪽 위에 레이어와 오브젝트,
+	// 그 아래에 그리드 설정과 캔버스 설정, 맨 아래 전체 폭에 채팅·코드·출력 및 명령
 	m_wndOutput.EnableDocking(CBRS_ALIGN_ANY);
-	DockPane(&m_wndOutput);
-
-	m_wndProperties.EnableDocking(CBRS_ALIGN_ANY);
-	DockPane(&m_wndProperties);
-
-	m_wndGridProp.EnableDocking(CBRS_ALIGN_ANY);
-	DockPane(&m_wndGridProp);
-
-	m_wndCanvasProp.EnableDocking(CBRS_ALIGN_ANY);
-	DockPane(&m_wndCanvasProp);
+	// 도킹할 때의 높이는 창의 현재 크기로 정해진다 (생성 때 100px). 채팅이 보이도록 먼저 높이를 준다
+	m_wndOutput.SetWindowPos(nullptr, 0, 0, 100, 240, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	DockPane(&m_wndOutput, AFX_IDW_DOCKBAR_BOTTOM);
 
 	m_wndLayers.EnableDocking(CBRS_ALIGN_ANY);
-	DockPane(&m_wndLayers);
+	DockPane(&m_wndLayers, AFX_IDW_DOCKBAR_RIGHT);
 
-	// Grid Settings를 Object Settings 아래로 도킹, Canvas Settings를 Grid Settings와 탭으로 그룹핑
-	m_wndGridProp.DockToWindow(&m_wndProperties, CBRS_ALIGN_BOTTOM);
+	m_wndGridProp.EnableDocking(CBRS_ALIGN_ANY);
+	DockPane(&m_wndGridProp, AFX_IDW_DOCKBAR_RIGHT);
+	m_wndGridProp.DockToWindow(&m_wndLayers, CBRS_ALIGN_BOTTOM);
+
+	m_wndCanvasProp.EnableDocking(CBRS_ALIGN_ANY);
+	DockPane(&m_wndCanvasProp, AFX_IDW_DOCKBAR_RIGHT);
 	m_wndCanvasProp.DockToWindow(&m_wndGridProp, CBRS_ALIGN_BOTTOM);
 
-	// Layers and Objects를 Object Settings의 탭으로 안전하게 병합
-	m_wndLayers.DockToWindow(&m_wndProperties, CBRS_ALIGN_BOTTOM);
-	m_wndLayers.AttachToTabWnd(&m_wndProperties, DM_SHOW, FALSE);
+	m_wndProperties.EnableDocking(CBRS_ALIGN_ANY);
+	DockPane(&m_wndProperties, AFX_IDW_DOCKBAR_LEFT);
+	m_wndProperties.DockToWindow(&m_wndToolBox, CBRS_ALIGN_RIGHT);
 
 
 	// 모든 사용자 인터페이스 요소를 그리는 데 사용하는 비주얼 관리자를 설정합니다.

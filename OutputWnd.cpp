@@ -70,7 +70,7 @@ int COutputWnd::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	// 탭 순서: ChatAgent, Code, Log
 	m_wndTabs.AddTab(&m_wndChat, _T("ChatAgent"), (UINT)0);
 	m_wndTabs.AddTab(&m_wndCode, _T("Code"), (UINT)1);
-	m_wndTabs.AddTab(&m_wndLog, _T("Log"), (UINT)2);
+	m_wndTabs.AddTab(&m_wndLog, _T("출력 및 명령"), (UINT)2);
 	m_wndTabs.SetActiveTab(0);
 
 	m_wndLog.AddString(_T("[System] Event log initialized."));

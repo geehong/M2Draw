@@ -824,6 +824,7 @@ ge::PathNode* HitTrimPath(CM2DrawDoc* pDoc, const ToolEvent& e, const std::vecto
 
 } // namespace
 
+// 안내는 출력 창(Log)에 쓴다. 라이노의 명령 줄처럼 단계마다 한 줄씩 남는다
 void TrimTool::UpdatePrompt() const
 {
 	const wchar_t* e = m_extendCutters ? L"예" : L"아니요";
@@ -831,16 +832,24 @@ void TrimTool::UpdatePrompt() const
 	CString s;
 	if (m_stage == Stage::Cutters)
 	{
-		s.Format(_T("절단 개체 선택%s (절단_선_연장(E)=%s  가상_교차(A)=%s  선(L)%s)"),
+		s.Format(_T("트림 => 절단 개체를 선택하세요%s (절단_선_연장(E)=%s  가상_교차(A)=%s  선(L)%s)"),
 			m_hasLineStart ? _T(" - 직선의 두 번째 점을 클릭") : _T(""), e, a, m_lineMode ? _T("[켜짐]") : _T(""));
 		if (!m_cutterIds.empty() || !m_lines.empty())
 			s += _T(" 완료되면 Enter 키를 누르십시오");
 	}
 	else
 	{
-		s.Format(_T("트림할 개체 선택. 연장하려면 Shift 키를 누르면서 선택. 완료되면 Enter 키를 누르십시오 (절단_선_연장(E)=%s  가상_교차(A)=%s  실행취소(U))"), e, a);
+		s.Format(_T("트림 => 트림할 개체를 선택하세요. 연장하려면 Shift 키를 누르면서 선택. 완료되면 Enter 키를 누르십시오 (절단_선_연장(E)=%s  가상_교차(A)=%s  실행취소(U))"), e, a);
 	}
-	SetAppStatusText(s);
+	LogAppEvent(s);
+}
+
+// 도구를 켜면 명령 이름과 첫 안내를 쓴다
+void TrimTool::Begin()
+{
+	m_stage = Stage::Cutters;
+	LogAppEvent(_T("명령: _Trim"));
+	UpdatePrompt();
 }
 
 void TrimTool::Finish()
@@ -850,7 +859,7 @@ void TrimTool::Finish()
 	m_lines.clear();
 	m_lineMode = false;
 	m_hasLineStart = false;
-	SetAppStatusText(_T("트림 종료"));
+	LogAppEvent(_T("트림 => 종료"));
 	GetApp()->GetToolManager().SetActiveTool(ToolType::Select);
 }
 
@@ -879,11 +888,11 @@ void TrimTool::OnDown(const ToolEvent& e)
 		return;
 	}
 
-	// 2단계: 대상 조각 클릭 (Shift = 끝점 연장)
-	ge::PathNode* target = HitTrimPath(pDoc, e, m_cutterIds);
+	// 2단계: 대상 조각 클릭 (Shift = 끝점 연장). 절단 개체도 대상이 된다 (라이노처럼 삼각형 외곽선을 만들 때 필요)
+	ge::PathNode* target = HitTrimPath(pDoc, e, {});
 	if (!target)
 	{
-		SetAppStatusText(_T("트림할 개체를 찾지 못했습니다"));
+		LogAppEvent(_T("트림 => 트림할 개체를 찾지 못했습니다. 대상 선 위를 정확히 클릭하세요 (절단 개체 밖의 개체)"));
 		return;
 	}
 	ge::Matrix2D tw = target->GetWorldTransform();
@@ -904,7 +913,11 @@ void TrimTool::OnDown(const ToolEvent& e)
 	}
 	if (paths.empty()) return;
 
-	const auto cutters = BuildCutters(pDoc->GetDoc(), m_cutterIds, [this] {
+	// 대상 자신은 절단 개체에서 뺀다 (자기 자신과는 교차하지 않는다)
+	std::vector<ge::NodeId> cutterIds;
+	for (ge::NodeId id : m_cutterIds)
+		if (id != target->GetId()) cutterIds.push_back(id);
+	const auto cutters = BuildCutters(pDoc->GetDoc(), cutterIds, [this] {
 		std::vector<std::pair<ge::Vec2, ge::Vec2>> v; for (const auto& l : m_lines) v.push_back({ l.a, l.b }); return v; }(), tinv);
 
 	ge::Trim::TrimResult res;
@@ -913,7 +926,7 @@ void TrimTool::OnDown(const ToolEvent& e)
 		ge::SubPath extended;
 		if (!ge::Trim::ExtendEnd(paths[best], cutters, m_virtualCuts, local, zoomTol, extended))
 		{
-			SetAppStatusText(_T("연장할 교차점이 없습니다"));
+			LogAppEvent(_T("트림 => 연장할 교차점이 없습니다"));
 			return;
 		}
 		res.pieces.push_back(extended);
@@ -924,7 +937,7 @@ void TrimTool::OnDown(const ToolEvent& e)
 		res = ge::Trim::TrimAtClick(paths[best], cutters, m_extendCutters, local);
 		if (!res.ok)
 		{
-			SetAppStatusText(_T("잘라낼 교차점이 없습니다 (닫힌 경로는 교차점이 2개 이상 필요)"));
+			LogAppEvent(_T("트림 => 잘라낼 교차점이 없습니다 (닫힌 경로는 교차점이 2개 이상 필요)"));
 			return;
 		}
 	}
@@ -1403,6 +1416,8 @@ void ToolManager::SetActiveTool(ToolType type)
 		CString str;
 		str.Format(_T("[활성 도구 전환] %s (단축키: %c)"), pTool->GetName(), pTool->GetShortcut());
 		LogAppEvent(str);
+		if (auto* trim = dynamic_cast<TrimTool*>(pTool))
+			trim->Begin();
 	}
 }
 

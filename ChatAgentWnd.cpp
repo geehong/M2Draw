@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "ChatAgentWnd.h"
 #include "Resource.h"
+#include "AgentGuide.h"
+#include <shellapi.h>
 #include <afxtabctrl.h>
 
 #include <memory>
@@ -578,6 +580,17 @@ void CChatAgentWnd::SendToAgent()
 	m_input.GetWindowText(text);
 	text.Trim();
 	if (text.IsEmpty()) return;
+
+	// /지침 (7.3.2 진입점): 워크스페이스의 지침_템플릿.md 를 기본 편집기로 연다
+	if (text.CompareNoCase(_T("/지침")) == 0) {
+		const CString file = CString(ge::AgentWorkspaceRoot().c_str()) + _T("\\지침_템플릿.md");
+		if (GetFileAttributes(file) == INVALID_FILE_ATTRIBUTES)
+			AppendLine(_T("지침 파일이 아직 없습니다. 에이전트 패키지를 한 번 만들면 기본 지침 파일이 생깁니다: ") + file);
+		else
+			ShellExecute(GetSafeHwnd(), _T("open"), _T("notepad.exe"), file, nullptr, SW_SHOWNORMAL);   // .md 기본 연결 프로그램 대신 메모장
+		m_input.SetWindowText(_T(""));
+		return;
+	}
 
 	// 슬래시 명령 (7.2.13): 입력창에 정확히 /구조, /생성, /수정 을 넣으면 퀵 액션과 같은 동작을 한다
 	static const struct { LPCTSTR cmd; UINT id; } kSlash[] = {

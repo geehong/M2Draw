@@ -658,6 +658,7 @@ public:
 	bool HasActiveShape() const override { return m_stage == Stage::Target || !m_cutterIds.empty() || m_hasLineStart; }
 	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 	                 float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
+	void Begin();   // 도구를 켰을 때: 명령 이름과 첫 안내를 출력 창에 쓴다 (라이노 명령 줄처럼)
 
 private:
 	enum class Stage { Cutters, Target };
