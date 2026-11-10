@@ -409,10 +409,16 @@ void CM2DrawApp::OnFileNewDocument()
 {
 	if (CM2DrawDoc::AddPageToProject()) return;
 	CWinAppEx::OnFileNew();
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd())) mf->RefreshProjectTree();   // 저장 전 페이지(M2DrawN)도 바로 트리에
 }
-// 파일 > 새 프로젝트: 새 문서를 만들고 바로 프로젝트 폴더 이름을 정해 저장한다 (8.6)
+// 파일 > 새 프로젝트: 저장 안 된 문서(M2Draw1, M2Draw2 ...)가 있으면 그 문서들을 한 프로젝트로 묶어 이름을 정해 저장한다.
+// 하나도 없으면 새 문서를 만들어 프로젝트 이름을 정해 저장한다 (8.6)
 void CM2DrawApp::OnFileProjectNew()
 {
+	if (CM2DrawDoc::HasUntitledDocs()) {   // 이름 입력을 취소하면 아무것도 만들지 않는다
+		CM2DrawDoc::SaveUntitledAsProject();
+		return;
+	}
 	CWinAppEx::OnFileNew();
 	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd()))
 		if (CM2DrawDoc* doc = mf->GetActiveM2DrawDoc())

@@ -154,6 +154,15 @@ void CM2DrawView::DiscardDeviceResources()
 	}
 }
 
+// 탭을 바꿔 이 뷰가 활성이 되면 레이어·속성 패널이 이 문서(와 선택)를 따라가게 한다
+void CM2DrawView::OnActivateView(BOOL bActivate, CView* pActivateView, CView* pDeactiveView)
+{
+	CView::OnActivateView(bActivate, pActivateView, pDeactiveView);
+	if (bActivate && pActivateView == this)
+		if (CM2DrawDoc* pDoc = GetDocument())
+			UpdateShapePropertiesSelection(pDoc->GetPrimarySelection(), pDoc);
+}
+
 void CM2DrawView::OnInitialUpdate()
 {
 	CView::OnInitialUpdate();

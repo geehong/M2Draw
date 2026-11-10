@@ -238,6 +238,9 @@ public:
 	void AutoSaveIfDirty();
 	void LoadPageAttached(const std::wstring& name);   // 프로젝트의 페이지 하나를 이 문서에 연다 (탭으로 여는 페이지용)
 	BOOL OpenPageTab(const std::wstring& name);        // 페이지를 자기 탭(창)으로 연다. 이미 열려 있으면 그 탭을 활성화한다
+	static bool HasUntitledDocs();                      // 프로젝트가 없고 저장 안 된 문서가 열려 있는가 (저장 전 DefaultProject 상태)
+	static BOOL SaveUntitledAsProject();               // 저장 안 된 문서들을 한 프로젝트로 묶어 저장한다 (이름을 한 번 묻는다)
+	void AskSaveProjectOnFirstEdit();                   // 저장 안 된 문서에서 처음 작업이 시작되면 프로젝트 저장 여부를 한 번 묻는다
 	static CM2DrawDoc* AddPageToProject(const std::wstring& wantedName = std::wstring());   // 프로젝트가 열려 있을 때 새로 만들기: 빈 페이지를 목차에 바로 등록하고 연다 (이름이 비면 "페이지"; 프로젝트가 없으면 nullptr)
 	afx_msg void OnFilePageNew();                  // 새 페이지 (pages 폴더에 이름을 정해 만든다)
 	afx_msg void OnFilePageOpen();
@@ -248,6 +251,7 @@ public:
 	void RenamePage(const std::wstring& newName);
 	void CleanupUnusedReferences(const std::wstring& folderPath);   // 아무도 쓰지 않는 레퍼런스 파일 정리
 	std::set<std::string> UsedReferenceNames(const std::wstring& folderPath);   // 쓰이고 있는 레퍼런스 이름 (UTF-8, 확장자 없음)
+	BOOL RenameProjectPage(const std::wstring& oldName, const std::wstring& newName);   // 프로젝트 트리에서 페이지 이름 바꾸기 (열린 페이지도, 닫힌 페이지도)
 	BOOL RemoveProjectPage(const std::wstring& name);   // 프로젝트 목차에서 페이지를 뺀다 (페이지 파일은 남긴다)
 	void ImportReferenceFile(const std::wstring& pngPath);              // 레퍼런스 그림 파일을 레퍼런스로 올리기
 	CString GetAgentDirForChat() const;                                 // 탭별 채팅 연결용: 이 문서의 에이전트 패키지 폴더

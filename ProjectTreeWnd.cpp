@@ -6,6 +6,7 @@
 #include "PanelStyle.h"
 
 // M2DrawDoc.cpp 의 프로젝트 읽기 도우미 (8.8)
+bool ProjectTreeSaved();
 std::wstring ProjectTreeName();
 std::vector<ProjectPageEntry> ProjectTreePages();
 std::vector<ProjectRefEntry> ProjectTreeRefs();
@@ -13,6 +14,7 @@ std::wstring ProjectTreeSignature();
 
 namespace {
 const UINT kProjectTreeId = 33100;
+const UINT kSyncDeferredMsg = WM_APP + 41;
 const wchar_t* kPagesLabel = L"페이지";
 const wchar_t* kRefsLabel = L"레퍼런스";
 }
@@ -25,6 +27,9 @@ BEGIN_MESSAGE_MAP(CProjectTreeWnd, CDockablePane)
 	ON_WM_ERASEBKGND()
 	ON_NOTIFY(NM_DBLCLK, kProjectTreeId, &CProjectTreeWnd::OnTreeDblClk)
 	ON_NOTIFY(NM_RCLICK, kProjectTreeId, &CProjectTreeWnd::OnTreeRClick)
+	ON_NOTIFY(TVN_BEGINLABELEDIT, kProjectTreeId, &CProjectTreeWnd::OnBeginLabelEdit)
+	ON_NOTIFY(TVN_ENDLABELEDIT, kProjectTreeId, &CProjectTreeWnd::OnEndLabelEdit)
+	ON_MESSAGE(kSyncDeferredMsg, &CProjectTreeWnd::OnSyncDeferred)
 END_MESSAGE_MAP()
 
 CProjectTreeWnd::CProjectTreeWnd() noexcept {}
@@ -33,7 +38,7 @@ CProjectTreeWnd::~CProjectTreeWnd() {}
 int CProjectTreeWnd::OnCreate(LPCREATESTRUCT lpcs)
 {
 	if (CDockablePane::OnCreate(lpcs) == -1) return -1;
-	m_tree.Create(WS_CHILD | WS_VISIBLE | TVS_HASLINES | TVS_LINESATROOT | TVS_HASBUTTONS | TVS_SHOWSELALWAYS,
+	m_tree.Create(WS_CHILD | WS_VISIBLE | TVS_HASLINES | TVS_LINESATROOT | TVS_HASBUTTONS | TVS_SHOWSELALWAYS | TVS_EDITLABELS,
 		CRect(0, 0, 0, 0), this, kProjectTreeId);
 	m_tree.SetBkColor(PanelStyle::kPanelBg);      // 다른 패널과 같은 다크 테마
 	m_tree.SetTextColor(PanelStyle::kPanelText);
@@ -109,12 +114,19 @@ void CProjectTreeWnd::OnTreeRClick(NMHDR* /*pNMHDR*/, LRESULT* pResult)
 	m_tree.SelectItem(item);
 	HTREEITEM parent = m_tree.GetParentItem(item);
 	if (!parent || m_tree.GetItemText(parent) != kPagesLabel) return;   // 페이지 항목만 뺀다
+	if (!ProjectTreeSaved()) return;   // 저장 전(DefaultProject)에는 이름 바꾸기·빼기 없음
 
 	CMenu menu;
 	menu.CreatePopupMenu();
-	menu.AppendMenu(MF_STRING, 1, _T("프로젝트에서 빼기"));
+	menu.AppendMenu(MF_STRING, 1, _T("이름 바꾸기"));
+	menu.AppendMenu(MF_STRING, 2, _T("프로젝트에서 빼기"));
 	const UINT cmd = menu.TrackPopupMenu(TPM_RIGHTBUTTON | TPM_RETURNCMD, screenPt.x, screenPt.y, this);
-	if (cmd != 1) return;
+	if (cmd == 1) {
+		m_tree.SetFocus();
+		m_tree.EditLabel(item);
+		return;
+	}
+	if (cmd != 2) return;
 
 	auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd());
 	if (!mf) return;
@@ -122,4 +134,47 @@ void CProjectTreeWnd::OnTreeRClick(NMHDR* /*pNMHDR*/, LRESULT* pResult)
 	if (!doc) return;
 	doc->RemoveProjectPage(std::wstring((LPCTSTR)m_tree.GetItemText(item)));
 	Sync();
+}
+
+// 페이지 항목만 이름을 고칠 수 있다 (프로젝트·폴더·레퍼런스 항목은 막는다)
+void CProjectTreeWnd::OnBeginLabelEdit(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	auto* info = reinterpret_cast<NMTVDISPINFO*>(pNMHDR);
+	HTREEITEM parent = m_tree.GetParentItem(info->item.hItem);
+	*pResult = (parent && m_tree.GetItemText(parent) == kPagesLabel && ProjectTreeSaved()) ? 0 : 1;   // 1 = 편집 거부
+}
+
+// 입력한 이름으로 페이지 이름을 바꾼다. 글자 자체는 트리가 바꾸지 않고(거부), 바뀐 프로젝트 상태로 다시 채운다
+void CProjectTreeWnd::OnEndLabelEdit(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	*pResult = 0;
+	auto* info = reinterpret_cast<NMTVDISPINFO*>(pNMHDR);
+	if (info->item.pszText == nullptr) return;   // Esc 로 취소
+	CString newName(info->item.pszText);
+	newName.Trim();
+	const std::wstring oldName((LPCTSTR)m_tree.GetItemText(info->item.hItem));
+	if (newName.IsEmpty() || std::wstring((LPCTSTR)newName) == oldName) return;
+
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd()))
+		if (CM2DrawDoc* doc = mf->GetActiveM2DrawDoc())
+			doc->RenameProjectPage(oldName, std::wstring((LPCTSTR)newName));
+	PostMessage(kSyncDeferredMsg);
+}
+
+LRESULT CProjectTreeWnd::OnSyncDeferred(WPARAM, LPARAM)
+{
+	Sync();
+	return 0;
+}
+
+// 이름 편집 중 Enter = 확정, Esc = 취소. 프레임의 메시지 처리(단축키 등)가 먼저 먹지 않도록 여기서 직접 처리한다
+BOOL CProjectTreeWnd::PreTranslateMessage(MSG* pMsg)
+{
+	if (pMsg->message == WM_KEYDOWN && (pMsg->wParam == VK_RETURN || pMsg->wParam == VK_ESCAPE) &&
+		m_tree.GetSafeHwnd() && m_tree.GetEditControl() != nullptr)
+	{
+		m_tree.SendMessage(TVM_ENDEDITLABELNOW, pMsg->wParam == VK_ESCAPE ? TRUE : FALSE, 0);
+		return TRUE;
+	}
+	return CDockablePane::PreTranslateMessage(pMsg);
 }

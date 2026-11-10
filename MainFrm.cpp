@@ -500,7 +500,11 @@ void CMainFrame::OnTimer(UINT_PTR nIDEvent)
 			POSITION dp = tmpl->GetFirstDocPosition();
 			while (dp) {
 				if (CM2DrawDoc* doc = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(dp)))
+				{
 					doc->AutoSaveIfDirty();
+					if (::GetForegroundWindow() == m_hWnd)   // 창이 뒤에 있을 때는 묻지 않는다
+						doc->AskSaveProjectOnFirstEdit();   // 저장 안 된 문서에서 처음 작업이 시작되면 프로젝트 저장 여부를 한 번 묻는다
+				}
 			}
 		}	}
 	CMDIFrameWndEx::OnTimer(nIDEvent);

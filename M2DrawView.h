@@ -17,6 +17,7 @@ public:
 	virtual void OnDraw(CDC* pDC);
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	virtual void OnInitialUpdate();
+	virtual void OnActivateView(BOOL bActivate, CView* pActivateView, CView* pDeactiveView);   // 탭 전환: 레이어·속성 패널이 이 문서를 따라간다
 protected:
 	virtual BOOL OnPreparePrinting(CPrintInfo* pInfo);
 	virtual void OnBeginPrinting(CDC* pDC, CPrintInfo* pInfo);

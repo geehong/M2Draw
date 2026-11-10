@@ -787,10 +787,88 @@ void CM2DrawDoc::LoadPageAttached(const std::wstring& name)
 	SetPathName(CString(g_project.manifest.c_str()));
 	SetModifiedFlag(FALSE);
 }
+// 저장 전(프로젝트 폴더가 없는) 문서의 페이지 이름: 문서 이름 그대로 (M2Draw1, M2Draw2 ...)
+static std::wstring UntitledPageBase(const CM2DrawDoc* d)
+{
+	CString title = d->GetTitle();
+	const int dot = title.ReverseFind(_T('.'));
+	if (dot > 0) title = title.Left(dot);
+	title.Replace(_T(" *"), _T(""));
+	title.Trim();
+	return SafeFileBase(std::wstring((LPCTSTR)title));
+}
+
+// 어느 프로젝트에도 속하지 않은 이름 없는 문서들 (만든 순서). 저장 전 "DefaultProject" 의 페이지로 본다
+static std::vector<CM2DrawDoc*> UntitledDocs()
+{
+	std::vector<CM2DrawDoc*> out;
+	POSITION tp = AfxGetApp()->GetFirstDocTemplatePosition();
+	while (tp != nullptr) {
+		CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(tp);
+		POSITION dp = tmpl->GetFirstDocPosition();
+		while (dp != nullptr)
+			if (CM2DrawDoc* d = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(dp)))
+				if (!d->IsProjectDocForClose() && d->GetPathName().IsEmpty()) out.push_back(d);
+	}
+	return out;
+}
+
+bool CM2DrawDoc::HasUntitledDocs()
+{
+	return g_project.folder.empty() && !UntitledDocs().empty();
+}
+
+// 저장 안 된 문서들(M2Draw1, M2Draw2 ...)을 한 프로젝트로 묶어 저장한다: 이름을 한 번 묻고 모든 문서가 그 프로젝트의 페이지가 된다
+BOOL CM2DrawDoc::SaveUntitledAsProject()
+{
+	std::vector<CM2DrawDoc*> untitled = UntitledDocs();
+	if (untitled.empty() || !g_project.folder.empty()) return FALSE;
+
+	CM2DrawDoc* first = untitled.front();
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd()))
+		if (CM2DrawDoc* active = mf->GetActiveM2DrawDoc())
+			if (std::find(untitled.begin(), untitled.end(), active) != untitled.end()) first = active;
+
+	// 문서가 여럿이면 첫 문서의 페이지 이름도 문서 이름으로 한다 (하나뿐이면 기본 "메인")
+	const std::wstring prevPage = first->m_activePage;
+	if (untitled.size() > 1) first->m_activePage = UntitledPageBase(first);
+	if (!first->DoSave(nullptr, TRUE)) {   // 이름 묻기. 취소하면 아무것도 바뀌지 않는다
+		first->m_activePage = prevPage;
+		return FALSE;
+	}
+	for (CM2DrawDoc* d : untitled)
+		if (d != first) d->AttachToProject();
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd())) mf->RefreshProjectTree();
+	return TRUE;
+}
+
+// 저장 안 된 문서에서 처음 작업이 시작되면 한 번 묻는다. 예: 이름을 정해 프로젝트로 저장 (이미 만든 페이지 모두 포함)
+void CM2DrawDoc::AskSaveProjectOnFirstEdit()
+{
+	static bool s_asked = false;
+	if (s_asked || m_saveAsked || m_attached || !GetPathName().IsEmpty() || !g_project.folder.empty() || !IsModified()) return;
+	s_asked = true;
+	for (CM2DrawDoc* d : UntitledDocs()) d->m_saveAsked = true;   // 캡처 붙여넣기에서 같은 질문을 또 하지 않는다
+	if (AfxMessageBox(_T("프로젝트를 저장하시겠습니까?\n\n예: 이름을 정해 지금까지 만든 모든 페이지를 프로젝트로 저장합니다.\n아니요: 나중에 저장합니다. (Ctrl+S 또는 파일 > 새 프로젝트)"),
+		MB_YESNO | MB_ICONQUESTION) == IDYES)
+		SaveUntitledAsProject();
+}
+
 // 페이지를 자기 탭(창)으로 연다. 이미 열린 페이지면 그 탭을 활성화해서 같은 페이지가 두 창에 뜨지 않게 한다
 BOOL CM2DrawDoc::OpenPageTab(const std::wstring& name)
 {
-	if (g_project.folder.empty() || GetPathName().IsEmpty()) return FALSE;
+	// 저장 전(DefaultProject): 이름이 같은 열린 문서의 탭을 활성화한다
+	if (g_project.folder.empty()) {
+		for (CM2DrawDoc* d : UntitledDocs()) {
+			if (UntitledPageBase(d) != name) continue;
+			POSITION viewPos = d->GetFirstViewPosition();
+			if (CView* view = d->GetNextView(viewPos))
+				view->GetParentFrame()->ActivateFrame();
+			return TRUE;
+		}
+		return FALSE;
+	}
+	if (GetPathName().IsEmpty()) return FALSE;
 	POSITION templatePos = AfxGetApp()->GetFirstDocTemplatePosition();
 	if (templatePos == nullptr) return FALSE;
 	CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(templatePos);
@@ -1025,6 +1103,53 @@ void CM2DrawDoc::RenamePage(const std::wstring& newName)
 	SetAppStatusText(log);
 }
 
+// 프로젝트 트리에서 페이지 이름 바꾸기: 열려 있는 페이지는 그 문서가, 닫힌 페이지는 파일과 목차만 바꾼다
+BOOL CM2DrawDoc::RenameProjectPage(const std::wstring& oldName, const std::wstring& newName)
+{
+	namespace fs = std::filesystem;
+	if (!IsProjectDocForClose() || newName.empty() || newName == oldName) return FALSE;
+	if (newName.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos) {
+		AfxMessageBox(_T("페이지 이름에 쓸 수 없는 글자가 있습니다."), MB_ICONERROR);
+		return FALSE;
+	}
+	auto hasPage = [](const std::wstring& n) {
+		return std::any_of(g_project.pages.begin(), g_project.pages.end(), [&](const ProjectPageEntry& pg) { return pg.name == n; });
+	};
+	if (hasPage(newName)) {
+		AfxMessageBox(_T("같은 이름의 페이지가 이미 있습니다."), MB_ICONERROR);
+		return FALSE;
+	}
+
+	// 열려 있는 페이지면 그 문서가 바꾼다 (제목·저장 위치 갱신 포함)
+	POSITION templatePos = AfxGetApp()->GetFirstDocTemplatePosition();
+	while (templatePos != nullptr) {
+		CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(templatePos);
+		POSITION docPos = tmpl->GetFirstDocPosition();
+		while (docPos != nullptr) {
+			CM2DrawDoc* d = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(docPos));
+			if (d && d->m_attached && d->m_activePage == oldName) {
+				d->RenamePage(newName);
+				return hasPage(newName);
+			}
+		}
+	}
+
+	// 닫힌 페이지: 파일 이름과 목차만 바꾼다
+	const fs::path dir = fs::path(g_project.folder) / L"pages";
+	std::error_code ec;
+	if (fs::exists(dir / (oldName + L".m2doc")))
+		fs::rename(dir / (oldName + L".m2doc"), dir / (newName + L".m2doc"), ec);
+	if (ec) {
+		AfxMessageBox(_T("페이지 파일 이름을 바꾸지 못했습니다."), MB_ICONERROR);
+		return FALSE;
+	}
+	for (auto& pg : g_project.pages)
+		if (pg.name == oldName) pg.name = newName;
+	SaveProject(GetPathName());
+	SetAppStatusText(CString(_T("페이지 이름 변경: ")) + CString(oldName.c_str()) + _T(" -> ") + CString(newName.c_str()));
+	return TRUE;
+}
+
 // 파일 > 페이지 열기: pages 폴더에서 고른 페이지로 바꾼다
 void CM2DrawDoc::OnFilePageOpen()
 {
@@ -1196,8 +1321,9 @@ BOOL CM2DrawDoc::DoSave(LPCTSTR lpszPathName, BOOL bReplace)
 		CString initialDir;
 		if (!g_project.folder.empty())
 			initialDir = CString(std::filesystem::path(g_project.folder).parent_path().wstring().c_str());
-		CFileDialog dlg(FALSE, nullptr, nullptr, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, _T("M2Draw 프로젝트 (*.m2svg)|*.m2svg||"));
-		dlg.m_ofn.lpstrTitle = _T("다른 이름으로 저장 (프로젝트 폴더 이름)");
+		// 프로젝트가 아직 없으면 이름 기본값은 DefaultProject (바꿔서 저장)
+		CFileDialog dlg(FALSE, nullptr, g_project.folder.empty() ? _T("DefaultProject") : nullptr, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, _T("M2Draw 프로젝트 (*.m2svg)|*.m2svg||"));
+		dlg.m_ofn.lpstrTitle = g_project.folder.empty() ? _T("프로젝트 저장 (프로젝트 폴더 이름)") : _T("다른 이름으로 저장 (프로젝트 폴더 이름)");
 		if (!initialDir.IsEmpty()) dlg.m_ofn.lpstrInitialDir = initialDir;
 		if (dlg.DoModal() != IDOK)
 			return FALSE;
@@ -1248,8 +1374,8 @@ BOOL CM2DrawDoc::DoSave(LPCTSTR lpszPathName, BOOL bReplace)
 
 	if (bReplace)
 	{
+		m_attached = true;   // 프로젝트를 만든 문서도 그 프로젝트의 첫 페이지 문서다 (제목은 페이지 이름, 프로젝트 이름이 아니다)
 		SetPathName(manifestPath);
-		SetTitle(name);   // 제목 = 프로젝트 이름
 	}
 	return TRUE;
 }
@@ -3555,20 +3681,29 @@ void CM2DrawDoc::OnUpdatePathJoin(CCmdUI* pCmdUI)
 
 
 // 프로젝트 트리 패널용 읽기 전용 도우미 (8.8). 이름 없는 네임스페이스 밖에 두어 ProjectTreeWnd.cpp 에서 쓴다
+// 저장된 프로젝트가 있는가 (없으면 트리는 저장 전 DefaultProject 를 보여 준다)
+bool ProjectTreeSaved() { return !g_project.folder.empty(); }
 std::wstring ProjectTreeName()
 {
-	if (g_project.folder.empty()) return {};
+	if (g_project.folder.empty())
+		return UntitledDocs().empty() ? std::wstring() : std::wstring(L"DefaultProject (저장 안 됨)");
 	std::filesystem::path p(g_project.folder);
 	if (p.filename().empty()) p = p.parent_path();   // 끝에 \ 가 붙은 경우
 	return p.filename().wstring();
 }
-std::vector<ProjectPageEntry> ProjectTreePages() { return g_project.pages; }
+std::vector<ProjectPageEntry> ProjectTreePages()
+{
+	if (!g_project.folder.empty()) return g_project.pages;
+	std::vector<ProjectPageEntry> pages;   // 저장 전: 열려 있는 이름 없는 문서가 페이지
+	for (CM2DrawDoc* d : UntitledDocs()) pages.push_back(ProjectPageEntry{ UntitledPageBase(d), L"" });
+	return pages;
+}
 std::vector<ProjectRefEntry> ProjectTreeRefs() { return g_project.refs; }
 // 트리를 다시 그릴지 정하는 값: 프로젝트 폴더, 페이지 이름, 레퍼런스 이름이 바뀌면 달라진다
 std::wstring ProjectTreeSignature()
 {
 	std::wstring sig = g_project.folder + L"|";
-	for (const auto& pg : g_project.pages) sig += pg.name + L";";
+	for (const auto& pg : ProjectTreePages()) sig += pg.name + L";";
 	sig += L"|";
 	for (const auto& r : g_project.refs) sig += r.leaf + L";";
 	return sig;
