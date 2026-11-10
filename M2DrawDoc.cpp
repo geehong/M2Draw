@@ -26,6 +26,14 @@
 #include "AgentHandoff.h"
 #include "AgentGuide.h"
 namespace { std::wstring AgentWide(const std::string& s); }
+namespace {
+// 클립보드 텍스트가 HTML 코드(예: 개발자도구의 outerHTML 복사)인지 대략 확인한다: 첫 글자가 '<' 이고 태그가 닫히는 '>' 가 있다
+bool LooksLikeHtmlText(const std::wstring& t)
+{
+	const size_t first = t.find_first_not_of(L" \t\r\n");
+	return first != std::wstring::npos && t[first] == L'<' && t.find(L'>') != std::wstring::npos;
+}
+} // namespace
 #include "SceneJsonWriter.h"
 #include "IconSet.h"
 #include "LogoVariants.h"
@@ -93,6 +101,8 @@ BEGIN_MESSAGE_MAP(CM2DrawDoc, CDocument)
 	ON_COMMAND(ID_FILE_PAGE_NEW, &CM2DrawDoc::OnFilePageNew)
 	ON_COMMAND(ID_FILE_PAGE_OPEN, &CM2DrawDoc::OnFilePageOpen)
 	ON_COMMAND(ID_FILE_PAGE_RENAME, &CM2DrawDoc::OnFilePageRename)
+	ON_COMMAND(ID_FILE_PROJECT_CLOSE, &CM2DrawDoc::OnFileProjectClose)
+	ON_COMMAND(ID_FILE_PAGE_IMPORT, &CM2DrawDoc::OnFilePageImport)
 	ON_COMMAND(ID_FILE_EXPORT_SVG, &CM2DrawDoc::OnFileExportSvg)
 	ON_COMMAND(ID_FILE_EXPORT_HTML, &CM2DrawDoc::OnFileExportHtml)
 	ON_COMMAND(ID_FILE_EXPORT_IMAGE, &CM2DrawDoc::OnFileExportImage)
@@ -195,6 +205,7 @@ struct ProjectState
 	std::map<std::wstring, std::string>     refDoms;
 };
 ProjectState g_project;
+
 // 프로젝트 파일 도우미 (목차 *.m2svg 읽기/쓰기)
 std::string ProjUtf8(const std::wstring& w)
 {
@@ -257,6 +268,18 @@ std::string ProjNow()
 }
 
 } // namespace
+
+// 닫히기 전에 레이어 패널이 이 문서의 노드를 놓게 한다 (닫힌 뒤 옛 노드를 그리면 접근 위반이 난다)
+void CM2DrawDoc::OnCloseDocument()
+{
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd()))
+	{
+		mf->GetLayerWnd().ReleaseDocument(this);
+		mf->GetPropertiesWnd().ReleaseDocument(this);
+		mf->GetOptionBar().ReleaseDocument(this);
+	}
+	CDocument::OnCloseDocument();
+}
 
 BOOL CM2DrawDoc::OnSaveDocument(LPCTSTR lpszPathName)
 {
@@ -487,12 +510,12 @@ BOOL CM2DrawDoc::SaveProject(LPCTSTR manifestPathLpsz)
 	return TRUE;
 }
 
-// 프로젝트 안의 레퍼런스 정리: 열린 문서들과 디스크의 페이지 파일이 아무도 쓰지 않는 references 파일은 지운다
-void CM2DrawDoc::CleanupUnusedReferences(const std::wstring& folderPath)
+// 프로젝트의 레퍼런스를 쓰고 있는 이름 (열린 문서 + 디스크의 페이지 파일). UTF-8 이름, 확장자 없음
+std::set<std::string> CM2DrawDoc::UsedReferenceNames(const std::wstring& folderPath)
 {
 	namespace fs = std::filesystem;
 	const fs::path folder(folderPath);
-	std::set<std::string> used;   // UTF-8 파일 이름 (확장자 없음)
+	std::set<std::string> used;
 	auto collect = [&](ge::Node& n, auto&& self) -> void {
 		if (auto* im = dynamic_cast<ge::ImageNode*>(&n))
 			if (!im->GetLinkHref().empty())
@@ -524,11 +547,21 @@ void CM2DrawDoc::CleanupUnusedReferences(const std::wstring& folderPath)
 			pos += key.size();
 			const size_t end = xml.find('"', pos);
 			if (end == std::string::npos) break;
-			used.insert(fs::path(xml.substr(pos, end - pos)).stem().string());
+			// 목차 파일은 UTF-8 이므로 std::string 으로 경로를 만들면 코드 페이지 변환에서 예외가 난다 (한글 이름). 넓은 문자열로 바꿔 쓴다
+			used.insert(ProjUtf8(fs::path(AgentWide(xml.substr(pos, end - pos))).stem().wstring()));
 			pos = end;
 		}
 	}
-	// 쓰이지 않는 파일과 목차 항목 지우기
+	return used;
+}
+
+// 쓰이지 않는 레퍼런스 파일과 목차 항목을 지운다
+void CM2DrawDoc::CleanupUnusedReferences(const std::wstring& folderPath)
+{
+	namespace fs = std::filesystem;
+	const fs::path folder(folderPath);
+	const std::set<std::string> used = UsedReferenceNames(folderPath);
+	std::error_code ec;
 	for (const auto& entry : fs::directory_iterator(folder / L"references", ec)) {
 		const auto ext = entry.path().extension();
 		if (ext != L".png" && ext != L".json") continue;
@@ -683,8 +716,9 @@ BOOL CM2DrawDoc::OpenProject(LPCTSTR manifestPathLpsz)
 	}
 
 	ReplaceDocument(std::move(loaded));
+	// 열린 활성 페이지도 프로젝트 페이지 문서다 (다른 페이지 탭과 같게 attached). 제목은 페이지 이름이 된다
+	m_attached = true;
 	SetPathName(manifestPathLpsz);
-	SetTitle(CString(manifest.stem().wstring().c_str()));   // 제목 = 프로젝트 이름
 	SetModifiedFlag(FALSE);
 
 	// 나머지 페이지는 각각 탭(문서)으로 연다
@@ -701,6 +735,25 @@ BOOL CM2DrawDoc::OpenProject(LPCTSTR manifestPathLpsz)
 			if (CFrameWnd* frame = tmpl->CreateNewFrame(pageDoc, nullptr))
 				tmpl->InitialUpdateFrame(frame, pageDoc);
 		}
+	}
+
+	// 파일 이름 없이 비어 있던 문서(시작할 때 열린 창 등)는 프로젝트 페이지가 아니므로 닫는다. 수정한 문서는 그대로 둔다
+	{
+		std::vector<CFrameWnd*> frames;
+		POSITION utp = AfxGetApp()->GetFirstDocTemplatePosition();
+		while (utp != nullptr) {
+			CDocTemplate* t = AfxGetApp()->GetNextDocTemplate(utp);
+			POSITION udp = t->GetFirstDocPosition();
+			while (udp != nullptr) {
+				CM2DrawDoc* d = DYNAMIC_DOWNCAST(CM2DrawDoc, t->GetNextDoc(udp));
+				if (!d || d->IsProjectDocForClose() || d->IsModified() || !d->GetPathName().IsEmpty()) continue;
+				POSITION vp = d->GetFirstViewPosition();
+				while (vp != nullptr)
+					if (CView* v = d->GetNextView(vp))
+						if (CFrameWnd* f = v->GetParentFrame()) frames.push_back(f);
+			}
+		}
+		for (CFrameWnd* f : frames) f->SendMessage(WM_CLOSE);
 	}
 
 	CString strLog;
@@ -733,6 +786,114 @@ void CM2DrawDoc::LoadPageAttached(const std::wstring& name)
 	m_undoMgr.Reset(m_doc);
 	SetPathName(CString(g_project.manifest.c_str()));
 	SetModifiedFlag(FALSE);
+}
+// 페이지를 자기 탭(창)으로 연다. 이미 열린 페이지면 그 탭을 활성화해서 같은 페이지가 두 창에 뜨지 않게 한다
+BOOL CM2DrawDoc::OpenPageTab(const std::wstring& name)
+{
+	if (g_project.folder.empty() || GetPathName().IsEmpty()) return FALSE;
+	POSITION templatePos = AfxGetApp()->GetFirstDocTemplatePosition();
+	if (templatePos == nullptr) return FALSE;
+	CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(templatePos);
+
+	// 1) 이미 열려 있는 페이지면 그 탭을 활성화한다
+	POSITION docPos = tmpl->GetFirstDocPosition();
+	while (docPos != nullptr) {
+		CM2DrawDoc* openDoc = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(docPos));
+		if (!openDoc || !openDoc->m_attached || openDoc->m_activePage != name) continue;
+		POSITION viewPos = openDoc->GetFirstViewPosition();
+		if (CView* view = openDoc->GetNextView(viewPos))
+			view->GetParentFrame()->ActivateFrame();
+		return TRUE;
+	}
+
+	// 2) 현재 페이지를 저장한 뒤 새 탭으로 연다
+	if (!SaveProject(GetPathName())) return FALSE;
+	CM2DrawDoc* pageDoc = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->CreateNewDocument());
+	if (!pageDoc) return FALSE;
+	pageDoc->LoadPageAttached(name);
+	if (CFrameWnd* frame = tmpl->CreateNewFrame(pageDoc, nullptr))
+		tmpl->InitialUpdateFrame(frame, pageDoc);
+	return TRUE;
+}
+// 프로젝트가 열려 있을 때 새로 만들기: 빈 페이지를 만들어 목차에 바로 등록하고 연다 (이름: 페이지, 페이지_2 ...)
+CM2DrawDoc* CM2DrawDoc::AddPageToProject(const std::wstring& wantedName)
+{
+	namespace fs = std::filesystem;
+	if (g_project.folder.empty() || g_project.manifest.empty()) return nullptr;
+	const fs::path folder(g_project.folder);
+	const CString manifest(g_project.manifest.c_str());
+	const std::wstring base = wantedName.empty() ? std::wstring(L"페이지") : wantedName;
+	std::wstring name = base;
+	for (int k = 2; std::any_of(g_project.pages.begin(), g_project.pages.end(),
+		[&](const ProjectPageEntry& pg) { return pg.name == name; }) || fs::exists(folder / L"pages" / (name + L".m2doc")); ++k)
+		name = base + L"_" + std::to_wstring(k);
+
+	POSITION templatePos = AfxGetApp()->GetFirstDocTemplatePosition();
+	if (templatePos == nullptr) return nullptr;
+	CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(templatePos);
+	CM2DrawDoc* pageDoc = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->OpenDocumentFile(nullptr));
+	if (!pageDoc) return nullptr;
+	pageDoc->m_activePage = name;
+	pageDoc->m_attached = true;
+	pageDoc->m_agentDir.Empty();
+	pageDoc->SetPathName(manifest, FALSE);
+	pageDoc->SaveProject(manifest);   // 목차에 페이지가 없으면 SaveProject 가 넣고, 빈 페이지 파일을 만든다
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd())) mf->RefreshProjectTree();   // 타이머를 기다리지 않고 바로 트리에 보인다
+	return pageDoc;
+}
+// 프로젝트 목차에서 페이지를 뺀다. 묻지 않고 바로 뺀다. 페이지 파일(pages\이름.m2doc)은 지우지 않는다 (다시 가져오기 가능)
+// 그 페이지의 창이 열려 있으면 저장하지 않고 닫는다: 창을 닫을 때의 저장이 목차에 다시 넣기 때문
+BOOL CM2DrawDoc::RemoveProjectPage(const std::wstring& name)
+{
+	if (!IsProjectDocForClose()) return FALSE;
+	auto forEachDoc = [](auto&& fn) {
+		POSITION tp = AfxGetApp()->GetFirstDocTemplatePosition();
+		while (tp != nullptr) {
+			CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(tp);
+			POSITION dp = tmpl->GetFirstDocPosition();
+			while (dp != nullptr)
+				if (CM2DrawDoc* d = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(dp))) fn(d);
+		}
+	};
+
+	// 1) 빼는 페이지 말고 열린 페이지가 없으면, 다른 페이지를 먼저 연다 (목차를 쓸 문서가 남도록)
+	bool otherOpen = false;
+	forEachDoc([&](CM2DrawDoc* d) { if (d->m_attached && d->m_activePage != name) otherOpen = true; });
+	if (!otherOpen) {
+		std::wstring other;
+		for (const auto& pg : g_project.pages)
+			if (pg.name != name) { other = pg.name; break; }
+		if (other.empty()) {
+			AfxMessageBox(_T("마지막 페이지는 뺄 수 없습니다."), MB_ICONINFORMATION);
+			return FALSE;
+		}
+		if (!OpenPageTab(other)) return FALSE;
+	}
+
+	// 2) 목차에서 뺀다
+	g_project.pages.erase(std::remove_if(g_project.pages.begin(), g_project.pages.end(),
+		[&](const ProjectPageEntry& pg) { return pg.name == name; }), g_project.pages.end());
+
+	// 3) 그 페이지의 창을 저장 없이 닫는다 (수정 표시를 지워 저장 질문이 나오지 않게 한다)
+	std::vector<CFrameWnd*> frames;
+	forEachDoc([&](CM2DrawDoc* d) {
+		if (!d->m_attached || d->m_activePage != name) return;
+		d->SetModifiedFlag(FALSE);
+		POSITION vp = d->GetFirstViewPosition();
+		while (vp != nullptr)
+			if (CView* v = d->GetNextView(vp))
+				if (CFrameWnd* f = v->GetParentFrame()) frames.push_back(f);
+	});
+	for (CFrameWnd* f : frames) f->SendMessage(WM_CLOSE);
+
+	// 4) 목차는 남아 있는 페이지 문서로 저장한다 (닫힌 문서는 쓰지 않는다)
+	CM2DrawDoc* keeper = nullptr;
+	forEachDoc([&](CM2DrawDoc* d) {
+		if (!keeper && d->m_attached && d->m_activePage != name) keeper = d;
+	});
+	if (keeper) keeper->SaveProject(keeper->GetPathName());
+	SetAppStatusText(CString(_T("프로젝트에서 뺐습니다: ")) + CString(name.c_str()));
+	return TRUE;
 }
 // 페이지 전환: 현재 페이지를 저장하고 다른 페이지를 연다. 파일이 없으면 현재 대지 크기의 빈 페이지를 만든다
 BOOL CM2DrawDoc::SwitchPage(const std::wstring& name)
@@ -801,8 +962,13 @@ void CM2DrawDoc::OnFilePageNew()
 	const int dot = name.ReverseFind(_T('.'));
 	if (dot > 0) name = name.Left(dot);
 	name.Trim();
-	if (!name.IsEmpty())
-		SwitchPage(std::wstring((LPCTSTR)name));
+	if (name.IsEmpty()) return;
+	// 페이지마다 자기 탭: 이미 있는 페이지면 그 탭을 열고, 없으면 빈 페이지를 등록해 새 탭으로 연다
+	const std::wstring pageName((LPCTSTR)name);
+	const bool exists = std::any_of(g_project.pages.begin(), g_project.pages.end(),
+		[&](const ProjectPageEntry& pg) { return pg.name == pageName; });
+	if (exists) OpenPageTab(pageName);
+	else AddPageToProject(pageName);
 }
 
 // 파일 > 페이지 이름 바꾸기: 파일 이름과 목차를 함께 바꾼다
@@ -876,7 +1042,15 @@ void CM2DrawDoc::OnFilePageOpen()
 	CString name = dlg.GetFileTitle();
 	const int dot = name.ReverseFind(_T('.'));
 	if (dot > 0) name = name.Left(dot);
-	SwitchPage(std::wstring((LPCTSTR)name));
+	const std::wstring pageName((LPCTSTR)name);
+	// 목차에 없는 파일(다른 프로젝트의 페이지)은 열지 않고 가져오기로 안내한다
+	const bool inProject = std::any_of(g_project.pages.begin(), g_project.pages.end(),
+		[&](const ProjectPageEntry& pg) { return pg.name == pageName; });
+	if (!inProject) {
+		AfxMessageBox(_T("이 프로젝트의 페이지가 아닙니다. 다른 프로젝트의 페이지는 '페이지 가져오기'로 들여 주세요."), MB_ICONINFORMATION);
+		return;
+	}
+	OpenPageTab(pageName);
 }
 // 에이전트 패키지를 둘 폴더: 프로젝트가 있으면 그 안, 없으면 기본 작업 폴더
 std::wstring CM2DrawDoc::AgentRootForDoc() const
@@ -2091,7 +2265,29 @@ bool CM2DrawDoc::CopySelectionToClipboard()
 bool CM2DrawDoc::PasteFromClipboard()
 {
 	const std::string svg = ReadClipboardSvgText();
-	if (!ge::LooksLikeSvg(svg)) return PasteBitmapAsReference();
+	if (!ge::LooksLikeSvg(svg)) {
+		// 개발자도구의 outerHTML 복사는 구조 정보로 저장하고 자동 처리를 시작한다
+		const std::wstring text = ReadClipboardText(AfxGetMainWnd());
+		if (LooksLikeHtmlText(text)) return SaveStructureFromClipboard(text);
+		// 그림 캡처는 사이트 주소가 있어야 웹뷰로 구조를 복사할 수 있다: 주소창이 비어 있으면 주소를 먼저 묻는다
+		// 그림에는 주소창이 없으므로 주소창 값을 확인받는다 (이전 주소가 남아 있을 수 있다)
+		if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd())) {
+			CString url = mf->GetUrlText();
+			url.Trim();
+			if (url.IsEmpty()) {
+				AfxMessageBox(_T("이 그림의 사이트 주소를 모르겠습니다.\n주소창에 사이트 주소를 입력한 뒤 다시 붙여넣으세요.\n(예: https://www.example.com)"), MB_ICONQUESTION);
+				mf->FocusUrlEdit();
+				return false;
+			}
+			CString ask;
+			ask.Format(_T("이 그림의 사이트 주소가 맞습니까?\n\n%s\n\n예: 이 주소로 진행\n아니요: 주소창을 고쳐서 다시 붙여넣기"), (LPCTSTR)url);
+			if (AfxMessageBox(ask, MB_YESNO | MB_ICONQUESTION) != IDYES) {
+				mf->FocusUrlEdit();
+				return false;
+			}
+		}
+		return PasteBitmapAsReference();
+	}
 	return ImportSvgNodes(svg, true);
 }
 
@@ -2372,7 +2568,7 @@ void CM2DrawDoc::ImportUrlReference(std::wstring url)
 	ge::WebCaptureResult res;
 	std::wstring err;
 	BeginWaitCursor();
-	const bool ok = ge::CaptureWebPage(url, 1440, 45000, res, &err);
+	const bool ok = ge::CaptureWebPage(url, 1920, 45000, res, &err);
 	EndWaitCursor();
 	if (!ok) {
 		AfxMessageBox(err.c_str(), MB_ICONERROR);
@@ -2589,6 +2785,17 @@ void CM2DrawDoc::OnFileAgentSendFrame()
 	log.Format(_T("[에이전트] 선택 프레임 보내기: %s (%s)"), (LPCTSTR)CString(frameName.c_str()), (LPCTSTR)m_agentDir);
 	LogAppEvent(log);
 	SetAppStatusText(log);
+}
+
+// 클립보드의 HTML(outerHTML) 을 구조 정보(dom.json)로 저장한다. 패키지가 있으면 그 안에도 바로 쓴다. 에이전트는 실행하지 않는다
+bool CM2DrawDoc::SaveStructureFromClipboard(const std::wstring& html)
+{
+	m_agentLastDom = html;
+	if (!m_agentDir.IsEmpty())
+		AgentWriteFile(std::filesystem::path((LPCTSTR)m_agentDir) / L"dom.json", AgentUtf8(html));
+	LogAppEvent(_T("[구조] 클립보드 HTML 을 구조 정보로 저장했습니다"));
+	SetAppStatusText(_T("구조 정보 저장됨"));
+	return true;
 }
 
 void CM2DrawDoc::OnFileAgentStart()
@@ -3346,3 +3553,139 @@ void CM2DrawDoc::OnUpdatePathJoin(CCmdUI* pCmdUI)
 
 
 
+
+// 프로젝트 트리 패널용 읽기 전용 도우미 (8.8). 이름 없는 네임스페이스 밖에 두어 ProjectTreeWnd.cpp 에서 쓴다
+std::wstring ProjectTreeName()
+{
+	if (g_project.folder.empty()) return {};
+	std::filesystem::path p(g_project.folder);
+	if (p.filename().empty()) p = p.parent_path();   // 끝에 \ 가 붙은 경우
+	return p.filename().wstring();
+}
+std::vector<ProjectPageEntry> ProjectTreePages() { return g_project.pages; }
+std::vector<ProjectRefEntry> ProjectTreeRefs() { return g_project.refs; }
+// 트리를 다시 그릴지 정하는 값: 프로젝트 폴더, 페이지 이름, 레퍼런스 이름이 바뀌면 달라진다
+std::wstring ProjectTreeSignature()
+{
+	std::wstring sig = g_project.folder + L"|";
+	for (const auto& pg : g_project.pages) sig += pg.name + L";";
+	sig += L"|";
+	for (const auto& r : g_project.refs) sig += r.leaf + L";";
+	return sig;
+}
+
+// 파일 > 프로젝트 닫기: 열린 프로젝트의 페이지(문서)를 모두 닫는다. 저장 안 된 페이지는 CDocument 가 묻는다 (8.6)
+void CM2DrawDoc::OnFileProjectClose()
+{
+	std::vector<CM2DrawDoc*> pages;
+	POSITION tp = AfxGetApp()->GetFirstDocTemplatePosition();
+	while (tp) {
+		CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(tp);
+		POSITION dp = tmpl->GetFirstDocPosition();
+		while (dp) {
+			if (CM2DrawDoc* d = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(dp)))
+				if (d->IsProjectDocForClose()) pages.push_back(d);
+		}
+	}
+	// 각 페이지의 창을 정상 닫기 경로(WM_CLOSE)로 닫는다: 저장 질문과 창 제거가 함께 처리된다
+	std::vector<CFrameWnd*> frames;
+	for (CM2DrawDoc* d : pages) {
+		POSITION vp = d->GetFirstViewPosition();
+		while (vp) {
+			if (CView* v = d->GetNextView(vp)) {
+				if (CFrameWnd* f = v->GetParentFrame()) frames.push_back(f);
+			}
+		}
+	}
+	for (CFrameWnd* f : frames) {
+		f->SendMessage(WM_CLOSE);
+	}
+	// 하나라도 닫히지 않았으면(저장 질문에서 취소) 프로젝트 상태는 그대로 둔다
+	bool anyLeft = false;
+	POSITION rtp = AfxGetApp()->GetFirstDocTemplatePosition();
+	while (rtp && !anyLeft) {
+		CDocTemplate* tmpl = AfxGetApp()->GetNextDocTemplate(rtp);
+		POSITION rdp = tmpl->GetFirstDocPosition();
+		while (rdp && !anyLeft) {
+			if (CM2DrawDoc* d = DYNAMIC_DOWNCAST(CM2DrawDoc, tmpl->GetNextDoc(rdp)))
+				if (d->IsProjectDocForClose()) anyLeft = true;
+		}
+	}
+	if (!anyLeft) g_project = ProjectState();
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd())) mf->RefreshProjectTree();
+}
+
+// 프로젝트 닫기에서 쓰는 판정: 프로젝트 페이지로 연결된 문서 (첫 페이지는 목차 경로로, 나머지는 플래그로 식별된다)
+bool CM2DrawDoc::IsProjectDocForClose() const
+{
+	if (m_attached) return true;
+	return !g_project.manifest.empty() && GetPathName() == CString(g_project.manifest.c_str());
+}
+
+// 파일 > 페이지 가져오기: 다른 프로젝트(또는 아무 폴더)의 .m2doc 을 현재 프로젝트의 페이지로 복사한다 (8.7)
+// 페이지가 쓰는 레퍼런스 그림(../references/...)도 함께 복사해서 링크가 깨지지 않게 한다. 이름이 겹치면 _2, _3 을 붙인다
+void CM2DrawDoc::OnFilePageImport()
+{
+	namespace fs = std::filesystem;
+	if (g_project.folder.empty() || GetPathName().IsEmpty()) {
+		AfxMessageBox(_T("먼저 프로젝트를 저장하세요."), MB_ICONINFORMATION);
+		return;
+	}
+	CFileDialog dlg(TRUE, _T("m2doc"), nullptr, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR,
+		_T("페이지 (*.m2doc)|*.m2doc||"), AfxGetMainWnd());
+	dlg.m_ofn.lpstrTitle = _T("가져올 페이지 고르기");
+	if (dlg.DoModal() != IDOK) return;
+
+	const fs::path src((LPCTSTR)dlg.GetPathName());
+	const fs::path srcRoot = src.parent_path().parent_path();   // 원래 프로젝트 폴더 (pages 의 위)
+	const fs::path dstRoot = g_project.folder;
+	std::error_code ec;
+	fs::create_directories(dstRoot / L"pages", ec);
+	fs::create_directories(dstRoot / L"references", ec);
+
+	// 이름 정하기 (겹치면 _2, _3 ...)
+	const std::wstring base = src.stem().wstring();
+	std::wstring cand = base;
+	for (int k = 2;; ++k) {
+		bool used = fs::exists(dstRoot / L"pages" / (cand + L".m2doc"));
+		for (const auto& pg : g_project.pages)
+			if (pg.name == cand) used = true;
+		if (!used) break;
+		cand = base + L"_" + std::to_wstring(k);
+	}
+
+	// 페이지 파일을 복사하고, 그 안의 레퍼런스 링크(../references/이름.png)를 찾아 그림과 DOM 요약을 함께 복사한다
+	std::string xml;
+	if (!ProjReadAll(src, xml)) {
+		AfxMessageBox(_T("페이지 파일을 읽을 수 없습니다."), MB_ICONERROR);
+		return;
+	}
+	{
+		std::ofstream ofs(dstRoot / L"pages" / (cand + L".m2doc"), std::ios::binary | std::ios::trunc);
+		ofs.write(xml.data(), static_cast<std::streamsize>(xml.size()));
+	}
+	const std::string key = "href=\"../references/";
+	size_t pos = 0;
+	while ((pos = xml.find(key, pos)) != std::string::npos) {
+		pos += key.size();
+		const size_t end = xml.find('"', pos);
+		if (end == std::string::npos) break;
+		const std::string rel = xml.substr(pos, end - pos);   // 예: 001_name.png
+		const fs::path stem = fs::path(rel).stem();
+		for (const wchar_t* ext : { L".png", L".json" }) {
+			const fs::path from = srcRoot / L"references" / (stem.wstring() + ext);
+			const fs::path to = dstRoot / L"references" / (stem.wstring() + ext);
+			if (fs::exists(from) && !fs::exists(to)) fs::copy_file(from, to, ec);
+		}
+		pos = end;
+	}
+
+	// 목차에 페이지를 추가하고 저장한 뒤, 가져온 페이지를 연다
+	g_project.pages.push_back(ProjectPageEntry{ cand, L"" });
+	SaveProject(CString(g_project.manifest.c_str()));
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd())) mf->RefreshProjectTree();
+	OpenPageTab(cand);
+	CString msg;
+	msg.Format(_T("페이지를 가져왔습니다: %s"), (LPCTSTR)CString(cand.c_str()));
+	SetAppStatusText(msg);
+}

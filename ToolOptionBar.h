@@ -122,6 +122,8 @@ public:
 
 	// 선택된 도형/문서 상태로부터 옵션바 수치 실시간 동기화
 	void SyncSelection(CM2DrawDoc* pDoc, ge::Node* pShape);
+	// 닫히는 문서가 선택 대상이었으면 가리키던 문서를 놓는다
+	void ReleaseDocument(const CM2DrawDoc* pDoc) { if (m_pDoc == pDoc) { m_pDoc = nullptr; m_selectedNodeId = 0; } }
 
 	// 도형 생성(만들기) 중 마우스 이동에 따른 실시간 좌표/크기 동기화
 	void SyncCreationCoordinates(float x, float y, float w, float h, bool hasFixedStart);

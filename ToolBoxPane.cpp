@@ -47,6 +47,14 @@ static const wchar_t* GetFlyoutToolName(ToolType t);
 
 IMPLEMENT_DYNAMIC(CToolBoxPane, CDockablePane)
 
+// 도구 패널의 최소 크기 (도킹 바가 폭을 정할 때 쓰는 값). 다른 패널(오브젝트 설정 240, 레이어 240)과 같은 방식으로 알려 준다
+void CToolBoxPane::GetMinSize(CSize& size) const
+{
+	size.cx = 44;   // 아이콘 36px 한 열 + 양옆 여유 4px
+	size.cy = 0;
+}
+
+
 BEGIN_MESSAGE_MAP(CToolBoxPane, CDockablePane)
 	ON_WM_CREATE()
 	ON_WM_DESTROY()

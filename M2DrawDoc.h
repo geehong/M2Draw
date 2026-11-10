@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <vector>
 #include "D2DGraphicEngine.h"
 #include "UndoManager.h"
@@ -152,6 +153,7 @@ public:
 	// --- 클립보드 (Step 5.4): SVG 로 교환 (CF_UNICODETEXT + image/svg+xml) ---
 	bool CopySelectionToClipboard();
 	bool PasteFromClipboard();
+	bool SaveStructureFromClipboard(const std::wstring& html);   // 클립보드 HTML → 구조 정보(dom.json) 저장 (에이전트는 버튼으로 실행)
 	afx_msg void OnEditCopy();
 	afx_msg void OnEditCut();
 	afx_msg void OnEditPaste();
@@ -225,6 +227,7 @@ public:
 	virtual BOOL OnNewDocument();
 	virtual BOOL OnOpenDocument(LPCTSTR lpszPathName);
 	virtual BOOL OnSaveDocument(LPCTSTR lpszPathName);
+	virtual void OnCloseDocument();   // 닫히기 전에 레이어 패널이 이 문서의 노드를 놓게 한다
 	// 프로젝트 (7.2.13 / 문서 형식): 목차 *.m2svg + 같은 이름의 *.m2data 폴더
 	BOOL SaveProject(LPCTSTR manifestPathLpsz);
 	BOOL OpenProject(LPCTSTR manifestPathLpsz);
@@ -234,11 +237,18 @@ public:
 	void AttachToProject();
 	void AutoSaveIfDirty();
 	void LoadPageAttached(const std::wstring& name);   // 프로젝트의 페이지 하나를 이 문서에 연다 (탭으로 여는 페이지용)
+	BOOL OpenPageTab(const std::wstring& name);        // 페이지를 자기 탭(창)으로 연다. 이미 열려 있으면 그 탭을 활성화한다
+	static CM2DrawDoc* AddPageToProject(const std::wstring& wantedName = std::wstring());   // 프로젝트가 열려 있을 때 새로 만들기: 빈 페이지를 목차에 바로 등록하고 연다 (이름이 비면 "페이지"; 프로젝트가 없으면 nullptr)
 	afx_msg void OnFilePageNew();                  // 새 페이지 (pages 폴더에 이름을 정해 만든다)
 	afx_msg void OnFilePageOpen();
 	afx_msg void OnFilePageRename();               // 페이지 이름 바꾸기 (파일 이름과 목차를 함께)
+	afx_msg void OnFileProjectClose();
+	afx_msg void OnFilePageImport();               // 페이지 가져오기: 다른 프로젝트의 페이지를 현재 프로젝트로 복사한다             // 프로젝트 닫기: 열린 프로젝트의 페이지를 모두 닫는다
+	bool IsProjectDocForClose() const;   // 프로젝트에 속한 페이지인지 (플래그 또는 프로젝트 목차 경로)
 	void RenamePage(const std::wstring& newName);
 	void CleanupUnusedReferences(const std::wstring& folderPath);   // 아무도 쓰지 않는 레퍼런스 파일 정리
+	std::set<std::string> UsedReferenceNames(const std::wstring& folderPath);   // 쓰이고 있는 레퍼런스 이름 (UTF-8, 확장자 없음)
+	BOOL RemoveProjectPage(const std::wstring& name);   // 프로젝트 목차에서 페이지를 뺀다 (페이지 파일은 남긴다)
 	void ImportReferenceFile(const std::wstring& pngPath);              // 레퍼런스 그림 파일을 레퍼런스로 올리기
 	CString GetAgentDirForChat() const;                                 // 탭별 채팅 연결용: 이 문서의 에이전트 패키지 폴더
 	CString GetSiteForChat() const;                                     // 탭별 채팅 연결용: 이 문서의 대상 사이트                 // 페이지 열기 (pages 폴더에서 고른다)

@@ -2,6 +2,8 @@
 #include "ChatAgentWnd.h"
 #include "Resource.h"
 #include "AgentGuide.h"
+#include "MainFrm.h"
+#include "PanelStyle.h"
 #include <shellapi.h>
 #include <afxtabctrl.h>
 
@@ -743,12 +745,13 @@ void CChatAgentWnd::StartJob(int button, const CString& label)
 
 void CChatAgentWnd::FinishJob(bool ok)
 {
-	KillTimer(IDC_CHAT_JOB_TIMER);
+	SetTimer(IDC_CHAT_JOB_TIMER, 2000, nullptr);   // 완료 표시는 2초만 빨간색으로 두고, 그 뒤 일반 버튼으로 돌아간다
 	m_jobState = 2;
 	const DWORD secs = (::GetTickCount() - m_jobStart) / 1000;
 	CString msg;
 	msg.Format(_T("%s: %s (%u:%02u)"), ok ? _T("완료") : _T("실패"), (LPCTSTR)m_jobLabel, secs / 60, secs % 60);
 	m_statusColor = RGB(200, 40, 40);
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd())) mf->NoteUnsavedDocument();   // 저장 안 된 문서면 한 줄 안내 (8.2)
 	if (m_status.GetSafeHwnd()) {
 		m_status.SetWindowText(msg);
 		m_status.Invalidate(FALSE);
@@ -772,6 +775,15 @@ void CChatAgentWnd::UpdateJobUi()
 
 void CChatAgentWnd::OnTimer(UINT_PTR idEvent)
 {
+	if (idEvent == IDC_CHAT_JOB_TIMER && m_jobState == 2) {
+		// 완료 표시 시간이 지나면 일반 버튼으로 되돌린다
+		KillTimer(IDC_CHAT_JOB_TIMER);
+		const int doneButton = m_jobButton;
+		m_jobState = 0;
+		m_jobButton = -1;
+		if (doneButton >= 0 && m_quick[doneButton].GetSafeHwnd()) m_quick[doneButton].Invalidate(FALSE);
+		return;
+	}
 	if (idEvent == IDC_CHAT_JOB_TIMER && m_jobState == 1) {
 		m_blinkOn = !m_blinkOn;
 		UpdateJobUi();
@@ -796,11 +808,11 @@ void CChatAgentWnd::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 	COLORREF fill = ::GetSysColor(COLOR_BTNFACE);
 	COLORREF text = ::GetSysColor(COLOR_BTNTEXT);
 	if (idx == m_jobButton && m_jobState == 1) {
-		fill = m_blinkOn ? RGB(30, 110, 255) : RGB(160, 200, 255);
-		text = m_blinkOn ? RGB(255, 255, 255) : RGB(20, 50, 110);
+		fill = m_blinkOn ? PanelStyle::kRunFillOn : PanelStyle::kRunFillOff;
+		text = m_blinkOn ? PanelStyle::kRunTextOn : PanelStyle::kRunTextOff;
 	} else if (idx == m_jobButton && m_jobState == 2) {
-		fill = RGB(200, 40, 40);
-		text = RGB(255, 255, 255);
+		fill = PanelStyle::kDoneFill;
+		text = PanelStyle::kDoneText;
 	}
 	if (lpDrawItemStruct->itemState & ODS_SELECTED)   // 누르는 동안 조금 어둡게
 		fill = RGB(GetRValue(fill) * 3 / 4, GetGValue(fill) * 3 / 4, GetBValue(fill) * 3 / 4);

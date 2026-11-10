@@ -58,6 +58,7 @@ public:
 	virtual ~CLayerView();
 
 	void SetDocument(CM2DrawDoc* pDoc);
+	void ReleaseDocument(const CM2DrawDoc* pDoc);   // 닫히는 문서를 놓는다 (그 문서의 노드를 든 행·포인터를 비운다)
 	void RefreshLayers();
 	void SelectNode(ge::Node* pNode);
 	void CommitEditName();
@@ -200,6 +201,11 @@ public:
 	void SetDocument(CM2DrawDoc* pDoc)
 	{
 		m_wndLayerView.SetDocument(pDoc);
+	}
+
+	void ReleaseDocument(const CM2DrawDoc* pDoc)
+	{
+		m_wndLayerView.ReleaseDocument(pDoc);
 	}
 
 	void RefreshLayers()

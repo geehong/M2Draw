@@ -5,6 +5,13 @@
 #include "M2Draw.h"
 #include "MainFrm.h"
 #include "ITool.h"
+#include "PanelStyle.h"
+
+// PanelStyle 의 COLORREF 값을 D2D 색으로 바꾼다 (8.9: 패널 공통 색)
+static D2D1_COLOR_F PanelColorF(COLORREF c, float alpha = 1.0f)
+{
+	return D2D1::ColorF(GetRValue(c) / 255.0f, GetGValue(c) / 255.0f, GetBValue(c) / 255.0f, alpha);
+}
 
 #define IDC_LAYER_TREE         42001
 #define IDC_LAYER_BTN_NEW      42002
@@ -406,6 +413,19 @@ void CLayerView::SetDocument(CM2DrawDoc* pDoc)
 {
 	m_pDoc = pDoc;
 	RefreshLayers();
+}
+
+// 닫히는 문서를 놓는다: 그 문서의 노드를 든 행과 포인터를 비워, 옛 노드를 그리거나 가리키지 않게 한다
+void CLayerView::ReleaseDocument(const CM2DrawDoc* pDoc)
+{
+	if (!pDoc || (m_pDoc != pDoc && m_rowDoc != pDoc)) return;
+	m_pDoc = nullptr;
+	m_rowDoc = nullptr;
+	m_rowItems.clear();
+	m_dragNode = nullptr;
+	m_pEditingNode = nullptr;
+	m_pLastClickedNode = nullptr;
+	SafeInvalidate(FALSE);
 }
 HRESULT CLayerView::CreateDeviceResources()
 {
@@ -917,8 +937,8 @@ void CLayerView::OnPaint()
 
 	m_pRenderTarget->BeginDraw();
 
-	// 다크 테마 패널 배경 (#1e1e22)
-	m_pRenderTarget->Clear(D2D1::ColorF(0.12f, 0.12f, 0.14f, 1.0f));
+	// 다크 테마 패널 배경 (PanelStyle::kPanelBg)
+	m_pRenderTarget->Clear(PanelColorF(PanelStyle::kPanelBg));
 
 	CRect rc;
 	GetClientRect(&rc);
@@ -984,9 +1004,9 @@ void CLayerView::OnPaint()
 		// 행 배경
 		if (isSelected)
 		{
-			m_pBrush->SetColor(D2D1::ColorF(0.16f, 0.33f, 0.60f, 0.85f));
+			m_pBrush->SetColor(PanelColorF(PanelStyle::kPanelSelBg, 0.85f));
 			m_pRenderTarget->FillRectangle(row.rowRect, m_pBrush);
-			m_pBrush->SetColor(D2D1::ColorF(0.20f, 0.45f, 0.85f, 1.0f));
+			m_pBrush->SetColor(PanelColorF(PanelStyle::kPanelSelBg));
 			m_pRenderTarget->DrawRectangle(row.rowRect, m_pBrush, 1.0f);
 		}
 
@@ -1026,7 +1046,7 @@ void CLayerView::OnPaint()
 			{
 				name = L"<클립> " + name;
 			}
-			m_pBrush->SetColor(isSelected ? D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f) : D2D1::ColorF(0.88f, 0.88f, 0.92f, 1.0f));
+			m_pBrush->SetColor(PanelColorF(isSelected ? PanelStyle::kPanelSelText : PanelStyle::kPanelText));
 			m_pRenderTarget->PushAxisAlignedClip(row.labelRect, D2D1_ANTIALIAS_MODE_ALIASED);
 			m_pRenderTarget->DrawText(
 				name.c_str(), static_cast<UINT32>(name.length()),

@@ -166,16 +166,27 @@ std::string HtmlExporter::RegisterCssRule(const std::string& desiredPrefix, cons
 std::string HtmlExporter::PositionDecls(const Node& node, bool& omitW, bool& omitH)
 {
 	omitW = omitH = false;
-	auto* pf = dynamic_cast<FrameNode*>(node.GetParent());
-	if (!pf || pf->GetLayoutMode() != FrameLayoutMode::None) return "";
+	auto* parentNode = node.GetParent();
+	if (!parentNode) return "";
+	auto* pf = dynamic_cast<FrameNode*>(parentNode);
+	if (pf && pf->GetLayoutMode() != FrameLayoutMode::None) return "";   // 자동 배치 프레임 안은 흐름 배치
 
 	const Matrix2D& xf = node.GetTransform();
 	Rect2 lb{};
 	Rect2 b{ xf.dx, xf.dy, xf.dx, xf.dy };
 	if (const_cast<Node&>(node).GetLocalBounds(lb)) b = xf.TransformRect(lb);
+	std::ostringstream s;
+	// 일반 그룹 안: 그룹의 왼쪽 위를 기준으로 절대 배치 (그룹은 position: relative 이므로 여기서 위치가 잡힌다)
+	if (!pf) {
+		Rect2 pb{};
+		const bool hasParentBounds = Document::GetWorldBounds(*parentNode, pb);
+		const float ox = hasParentBounds ? pb.left : 0.0f;
+		const float oy = hasParentBounds ? pb.top : 0.0f;
+		s << "position: absolute; left: " << FormatUnit(b.left - ox) << "; top: " << FormatUnit(b.top - oy) << "; ";
+		return s.str();
+	}
 	const float pw = pf->GetWidth(), ph = pf->GetHeight();
 
-	std::ostringstream s;
 	s << "position: absolute; ";
 	std::string tfm;
 	switch (node.GetConstraintH()) {

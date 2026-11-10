@@ -1,4 +1,5 @@
 #pragma once
+#include "ProjectTreeWnd.h"
 #include "OutputWnd.h"
 #include "PropertiesWnd.h"
 #include "ToolBoxPane.h"
@@ -46,11 +47,16 @@ protected:  // 컨트롤 모음이 포함된 멤버입니다.
 	CPropertiesWnd    m_wndGridProp;
 	CPropertiesWnd    m_wndCanvasProp;
 	CLayerWnd         m_wndLayers;
+	CProjectTreeWnd   m_wndProject;   // 프로젝트 트리 (8.8)
 
 public:
 	COutputWnd& GetOutputWnd() { return m_wndOutput; }
+	CString GetUrlText() { return GetUrlEditText(); }           // 주소창의 현재 글자 (비어 있을 수 있음)
+	void FocusUrlEdit();                                       // 주소창에 커서를 둔다 (주소를 입력받을 때)
+	void NoteUnsavedDocument();                                // 작업이 끝났을 때 저장 안 된 문서면 채팅에 한 줄 안내 (8.2)
 	const void* m_chatDoc = nullptr;   // 채팅 연결이 마지막으로 따라간 문서 (탭 전환 감지)
 	CToolBoxPane& GetToolBox() { return m_wndToolBox; }
+	void RefreshProjectTree() { m_wndProject.Sync(); }   // 프로젝트 상태가 바뀌었을 때 바로 트리를 다시 그린다 (타이머를 기다리지 않음)
 	CToolOptionBar& GetOptionBar() { return m_wndOptionBar; }
 	CMFCStatusBar& GetStatusBar() { return m_wndStatusBar; }
 	CPropertiesWnd& GetPropertiesWnd() { return m_wndProperties; }

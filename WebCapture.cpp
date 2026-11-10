@@ -77,25 +77,76 @@ public:
 				}).Get(), &navToken);
 		m_web->Navigate(url.c_str());
 		if (!Pump([&] { return navDone; }) || !navOk) return fail(L"페이지를 열지 못했습니다 (주소·네트워크 확인)");
-		PumpFor(1500);   // 스크립트로 그려지는 내용이 나타날 시간
+		// 고정 시간 대신: 로딩과 애니메이션이 끝날 때까지 기다린다 (상한 8초)
+		const ULONGLONG settleStartMs = ::GetTickCount64();
+		while (::GetTickCount64() - settleStartMs < 8000) {
+			std::wstring readyJson;
+			RunScript(L"(window.scrollY === 0 && document.readyState === 'complete' && Array.from(document.images).every(function (i) { return i.complete; }) && !(function () { var el = document.elementFromPoint(innerWidth / 2, innerHeight / 2); while (el) { var r = el.getBoundingClientRect(); if (getComputedStyle(el).position === 'fixed' && r.width >= innerWidth * 0.8 && r.height >= innerHeight * 0.8) return true; el = el.parentElement; } return false; })() && (!document.getAnimations || document.getAnimations().every(function (a) { return a.playState !== 'running'; }))) ? 1 : 0", readyJson);
+			if (readyJson.find(L'1') != std::wstring::npos) break;
+			PumpFor(200);
+		}
+		// 지연 로딩 내용 끌어오기: 맨 아래까지 내렸다가 다시 위로
+		std::wstring scrollJson;
+		RunScript(L"document.documentElement.style.scrollBehavior='auto';window.scrollTo({top:document.documentElement.scrollHeight,behavior:'instant'});", scrollJson);
+		PumpFor(400);
+		RunScript(L"document.documentElement.style.scrollBehavior='auto';window.scrollTo({top:0,behavior:'instant'});", scrollJson);
+		// 스크롤로 나타난 사진과 효과가 다 그려질 때까지 한 번 더 기다린다 (위로 올린 뒤 다시 확인)
+		const ULONGLONG rescrollStartMs = ::GetTickCount64();
+		while (::GetTickCount64() - rescrollStartMs < 8000) {
+			PumpFor(200);
+			std::wstring rescrollJson;
+			RunScript(L"(window.scrollY === 0 && document.readyState === 'complete' && Array.from(document.images).every(function (i) { return i.complete; }) && !(function () { var el = document.elementFromPoint(innerWidth / 2, innerHeight / 2); while (el) { var r = el.getBoundingClientRect(); if (getComputedStyle(el).position === 'fixed' && r.width >= innerWidth * 0.8 && r.height >= innerHeight * 0.8) return true; el = el.parentElement; } return false; })() && (!document.getAnimations || document.getAnimations().every(function (a) { return a.playState !== 'running'; }))) ? 1 : 0", rescrollJson);
+			if (rescrollJson.find(L'1') != std::wstring::npos) break;
+		}
+		// 화면에 붙는 고정 바는 캡처에서 뺀다 (페이지 중간을 가리지 않도록)
+		std::wstring fixedJson;
+		RunScript(L"(function(){document.querySelectorAll('*').forEach(function (el) { if (getComputedStyle(el).position === 'fixed' && el.getBoundingClientRect().height < 150) el.style.setProperty('display', 'none', 'important'); }); return 1;})()", fixedJson);
 
 		// 4. 스크롤바 숨김 (캡처 폭에 스크롤바가 끼지 않게) 후 전체 높이
 		std::wstring hideJson;
 		RunScript(L"(function(){var s=document.createElement('style');s.textContent='html,body{height:auto!important;overflow:visible!important}html::-webkit-scrollbar,body::-webkit-scrollbar,*::-webkit-scrollbar{display:none!important;width:0!important}';document.head.appendChild(s);return 1;})()", hideJson);
 		std::wstring expandJson;
 		RunScript(kExpandScript, expandJson);
-		PumpFor(600);   // 펼친 뒤 레이아웃이 끝날 시간
+		// 펼친 뒤: 전체 높이가 3번 연속 같아지면 안정된 것으로 본다 (상한 8초)
+		long stableLastH = -1;
+		int stableCount = 0;
+		while (::GetTickCount64() - settleStartMs < 8000) {
+			std::wstring stableJson;
+			RunScript(L"document.documentElement.scrollHeight", stableJson);
+			const long stableH = _wtol(stableJson.c_str());
+			if (stableH == stableLastH) {
+				if (++stableCount >= 8) break;
+			} else {
+				stableLastH = stableH;
+				stableCount = 0;
+			}
+			PumpFor(200);
+		}
 		std::wstring heightJson;
 		if (!RunScript(L"document.documentElement.scrollHeight", heightJson)) return fail(L"페이지 높이를 읽지 못했습니다");
 		const long pageH = _wtol(heightJson.c_str());
-		const unsigned capH = static_cast<unsigned>((std::max)(100L, (std::min)(pageH, 8000L)));
+		const unsigned capH = static_cast<unsigned>((std::max)(100L, (std::min)(pageH, 3240L)));   // 기본 1920x1080 의 세 배 (3240) 까지만 찍는다. 넘는 페이지는 잘린다
 		SetBounds(capH);
-		PumpFor(900);   // 크기 변경 뒤 레이아웃과 그리기가 끝날 시간
+		// 크기를 바꾼 뒤 다시 그리기를 강제로 일으킨다 (그리지 않은 영역이 남는 문제): resize 알림 + 1px 스크롤
+		RunScript(L"window.dispatchEvent(new Event('resize'));window.scrollBy(0,1);window.scrollBy(0,-1);", heightJson);
+		PumpFor(300);
+		// 크기를 바꾸면 화면에 들어온 것으로 보고 효과가 새로 시작된다: 다 끝날 때까지 다시 기다린다 (상한 8초)
+		const ULONGLONG resizeStartMs = ::GetTickCount64();
+		while (::GetTickCount64() - resizeStartMs < 8000) {
+			PumpFor(200);
+			std::wstring resizeJson;
+			RunScript(L"(document.readyState === 'complete' && Array.from(document.images).every(function (i) { return i.complete; }) && (!document.getAnimations || document.getAnimations().every(function (a) { return a.playState !== 'running'; }))) ? 1 : 0", resizeJson);
+			if (resizeJson.find(L'1') != std::wstring::npos) break;
+		}
 
 		// 5. DOM 블록 정보
 		std::wstring dom;
 		if (!RunScript(kDomScript, dom)) return fail(L"DOM 정보를 읽지 못했습니다");
 		out.domJson = ToUtf8(dom);
+		// 진단: 사진·입력칸·버튼·효과가 걸린 요소의 투명도와 표시 상태 (안 보이는 원인 확인용)
+		std::wstring probe;
+		RunScript(L"(function(){var out=[];var sel=document.querySelectorAll('img,input,button,textarea,select,[class*=reveal],[class*=fade],[class*=anim]');for(var i=0;i<sel.length&&out.length<120;i++){var el=sel[i];var cs=getComputedStyle(el);var r=el.getBoundingClientRect();out.push({t:el.tagName,c:String(el.className).slice(0,60),op:cs.opacity,vis:cs.visibility,disp:cs.display,w:Math.round(r.width),h:Math.round(r.height),y:Math.round(r.top+scrollY)});}return JSON.stringify(out);})()", probe);
+		out.probeJson = ToUtf8(probe);
 
 		// 6. 전체 페이지 PNG (WebView2 CapturePreview)
 		ComPtr<IStream> stream;

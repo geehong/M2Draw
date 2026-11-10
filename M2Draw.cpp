@@ -15,6 +15,7 @@
 #include "M2DrawDoc.h"
 #include "M2DrawView.h"
 #include "GeModelPureCheck.h"
+#include "WebCapture.h"
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -26,7 +27,8 @@
 BEGIN_MESSAGE_MAP(CM2DrawApp, CWinAppEx)
 	ON_COMMAND(ID_APP_ABOUT, &CM2DrawApp::OnAppAbout)
 	// 표준 파일을 기초로 하는 문서 명령입니다.
-	ON_COMMAND(ID_FILE_NEW, &CWinAppEx::OnFileNew)
+	ON_COMMAND(ID_FILE_NEW, &CM2DrawApp::OnFileNewDocument)
+	ON_COMMAND(ID_FILE_PROJECT_NEW, &CM2DrawApp::OnFileProjectNew)
 	ON_COMMAND(ID_FILE_OPEN, &CM2DrawApp::OnFileOpen)
 	// 표준 인쇄 설정 명령입니다.
 	ON_COMMAND(ID_FILE_PRINT_SETUP, &CWinAppEx::OnFilePrintSetup)
@@ -120,7 +122,37 @@ BOOL CM2DrawApp::InitInstance()
 		return FALSE;   // 창을 띄우지 않고 종료
 	}
 
-	// 런타임 자체 검증 (래스터 출력 / 클립보드 SVG / 페인트통 등 D2D/WIC 가 필요한 부분)
+	// 웹 캡처 진단 (창 없이): M2Draw.exe --capture-url <주소>
+		// 결과는 %TEMP%\m2draw_capture.png (그림), m2draw_capture.txt (상태·크기), m2draw_capture_dom.json (DOM 요약)
+		if (m_lpCmdLine && wcsstr(m_lpCmdLine, L"--capture-url")) {
+			std::wstring cmd = m_lpCmdLine;
+			size_t at = cmd.find(L"--capture-url") + 13;
+			while (at < cmd.size() && cmd[at] == L' ') ++at;
+			size_t end = cmd.find(L' ', at);
+			const std::wstring url = cmd.substr(at, end == std::wstring::npos ? std::wstring::npos : end - at);
+			wchar_t tmpDir[MAX_PATH] = {};
+			::GetTempPathW(MAX_PATH, tmpDir);
+			const std::wstring base = tmpDir;
+			ge::WebCaptureResult res;
+			std::wstring err;
+			const bool ok = ge::CaptureWebPage(url, 1920, 45000, res, &err);
+			std::wstring status = ok ? L"OK" : (L"FAIL: " + err);
+			status += L"\r\nsize=" + std::to_wstring(res.pixelW) + L"x" + std::to_wstring(res.pixelH);
+			auto writeFile = [](const std::wstring& path, const void* data, size_t n) {
+				FILE* fp = nullptr;
+				if (_wfopen_s(&fp, path.c_str(), L"wb") == 0 && fp) { fwrite(data, 1, n, fp); fclose(fp); }
+			};
+			const std::string statusUtf8(status.begin(), status.end());
+			writeFile(base + L"m2draw_capture.txt", statusUtf8.data(), statusUtf8.size());
+			if (ok) {
+				writeFile(base + L"m2draw_capture.png", res.png.data(), res.png.size());
+				writeFile(base + L"m2draw_capture_dom.json", res.domJson.data(), res.domJson.size());
+				writeFile(base + L"m2draw_capture_probe.json", res.probeJson.data(), res.probeJson.size());
+			}
+			return FALSE;
+		}
+
+		// 런타임 자체 검증 (래스터 출력 / 클립보드 SVG / 페인트통 등 D2D/WIC 가 필요한 부분)
 	{
 		std::wstring failure;
 		if (!ge::RunRuntimeVerification(&failure))
@@ -371,4 +403,18 @@ void CM2DrawApp::OnFileOpen()
 	{
 		OpenDocumentFile(dlg.GetPathName());
 	}
+}
+// 파일 > 새로 만들기: 프로젝트가 열려 있으면 빈 페이지를 만들어 목차에 바로 등록한다. 없으면 기존처럼 새 문서
+void CM2DrawApp::OnFileNewDocument()
+{
+	if (CM2DrawDoc::AddPageToProject()) return;
+	CWinAppEx::OnFileNew();
+}
+// 파일 > 새 프로젝트: 새 문서를 만들고 바로 프로젝트 폴더 이름을 정해 저장한다 (8.6)
+void CM2DrawApp::OnFileProjectNew()
+{
+	CWinAppEx::OnFileNew();
+	if (auto* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd()))
+		if (CM2DrawDoc* doc = mf->GetActiveM2DrawDoc())
+			doc->DoSave(nullptr, TRUE);
 }

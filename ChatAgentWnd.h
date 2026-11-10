@@ -26,6 +26,7 @@ public:
 	void RunFrameRequest(const CString& frameName, float width, float height);
 	// 자동 처리: 구조 파악 → 웹페이지 생성 (Get Ref 자동 선택 시, Auto 버튼)
 	void RunAutoChain();
+	void AppendNotice(const CString& line) { AppendLine(line); }   // 채팅 대화창에 안내 한 줄
 	// 앱에서 고친 내용이 current/ 에 저장되면 탭에 ● 를 붙인다 (에이전트가 읽도록 요청을 보내면 지운다, 7.2.12)
 	void SetChangedBadge(bool on);
 

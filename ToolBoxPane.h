@@ -56,6 +56,9 @@ public:
 	// IToolChangeListener 구현
 	void OnToolChanged(ToolType newTool) override;
 
+	// 최소 크기: 도킹 바가 도구 패널 폭을 정할 때 쓴다 (다른 패널의 GetMinSize 와 같은 방식)
+	void GetMinSize(CSize& size) const override;
+
 protected:
 	ID2D1Factory*          m_pD2DFactory;
 	ID2D1HwndRenderTarget* m_pRenderTarget;

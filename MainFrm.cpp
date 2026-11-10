@@ -208,6 +208,10 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	DockPane(&m_wndOutput, AFX_IDW_DOCKBAR_BOTTOM);
 
 	m_wndLayers.EnableDocking(CBRS_ALIGN_ANY);
+
+	// 프로젝트 트리는 오른쪽 열의 맨 위에 붙이고, 레이어 패널은 그 아래에 붙인다 (8.8)
+	m_wndProject.EnableDocking(CBRS_ALIGN_ANY);
+	m_wndProject.SetWindowPos(nullptr, 0, 0, 260, 200, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 	DockPane(&m_wndLayers, AFX_IDW_DOCKBAR_RIGHT);
 
 	m_wndGridProp.EnableDocking(CBRS_ALIGN_ANY);
@@ -217,6 +221,8 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	m_wndCanvasProp.EnableDocking(CBRS_ALIGN_ANY);
 	DockPane(&m_wndCanvasProp, AFX_IDW_DOCKBAR_RIGHT);
 	m_wndCanvasProp.DockToWindow(&m_wndGridProp, CBRS_ALIGN_BOTTOM);
+	// 프로젝트 트리는 오른쪽 열의 맨 아래 (캔버스 설정 아래). 검증된 쌓기 방식을 그대로 쓴다 (8.8)
+	m_wndProject.DockToWindow(&m_wndCanvasProp, CBRS_ALIGN_BOTTOM);
 
 	m_wndProperties.EnableDocking(CBRS_ALIGN_ANY);
 		m_wndProperties.DockToWindow(&m_wndToolBox, CBRS_ALIGN_RIGHT);
@@ -329,6 +335,12 @@ BOOL CMainFrame::CreateDockingWindows()
 	}
 
 	// Layers and Objects 창을 만듭니다. (너비 260px)
+	// 프로젝트 트리 (8.8): 레이어 패널 위에 붙는다
+	if (!m_wndProject.Create(_T("프로젝트"), this, CRect(0, 0, 260, 200), TRUE, ID_VIEW_PROPERTIESWND + 4, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
+	{
+		TRACE0("프로젝트 트리 창을 만들지 못했습니다.\n");
+		return FALSE;
+	}
 	CString strLayersWnd = _T("Layers and Objects");
 	if (!m_wndLayers.Create(strLayersWnd, this, CRect(0, 0, 260, 300), TRUE, ID_VIEW_PROPERTIESWND + 3, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN | CBRS_RIGHT | CBRS_FLOAT_MULTI))
 	{
@@ -449,6 +461,14 @@ void CMainFrame::OnUpdateOptionBar(CCmdUI* pCmdUI)
 	pCmdUI->Enable(TRUE);
 }
 
+// 저장 질문 없이, 저장 안 된 문서일 때만 채팅창에 안내한다 (8.2)
+void CMainFrame::NoteUnsavedDocument()
+{
+	CM2DrawDoc* pDoc = GetActiveM2DrawDoc();
+	if (pDoc && pDoc->GetPathName().IsEmpty())
+		GetOutputWnd().GetChat().AppendNotice(_T("아직 저장되지 않았습니다. Ctrl+S 로 저장하세요."));
+}
+
 CM2DrawDoc* CMainFrame::GetActiveM2DrawDoc()
 {
 	CMDIChildWndEx* pChild = DYNAMIC_DOWNCAST(CMDIChildWndEx, MDIGetActive());
@@ -463,6 +483,7 @@ CM2DrawDoc* CMainFrame::GetActiveM2DrawDoc()
 void CMainFrame::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 7204 && !m_bClosing) {
+		m_wndProject.Sync();   // 프로젝트가 바뀌면 트리를 다시 그린다 (8.8)
 		if (CM2DrawDoc* pDoc = GetActiveM2DrawDoc()) {
 			pDoc->AgentTick();   // 결과 가져오기 + 현재 상태 저장 (창이 뒤에 있어도 동작)
 			if (::GetForegroundWindow() == m_hWnd) pDoc->CheckExternalImportChange();
@@ -508,6 +529,18 @@ void CMainFrame::OnUpdateUrlLabel(CCmdUI* pCmdUI)
 void CMainFrame::OnUpdateUrlEdit(CCmdUI* pCmdUI)
 {
 	pCmdUI->Enable(TRUE);
+}
+
+void CMainFrame::FocusUrlEdit()
+{
+	for (int i = 0; i < m_wndToolBar.GetCount(); ++i) {
+		if (auto* eb = DYNAMIC_DOWNCAST(CMFCToolBarEditBoxButton, m_wndToolBar.GetButton(i))) {
+			if (eb->m_nID == ID_URL_EDIT && eb->GetEditBox()) {
+				eb->GetEditBox()->SetFocus();
+				return;
+			}
+		}
+	}
 }
 
 CString CMainFrame::GetUrlEditText()

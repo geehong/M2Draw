@@ -12,6 +12,7 @@ struct WebCaptureResult {
 	unsigned pixelW = 0;
 	unsigned pixelH = 0;
 	std::string domJson;        // 주요 블록의 위치·크기·계산 스타일 JSON (에이전트가 해석한다. 프레임은 앱이 만들지 않음)
+	std::string probeJson;      // 진단용: 사진·입력칸·버튼의 투명도·표시 상태 (캡처 직전 측정)
 };
 
 // URL 을 WebView2 로 열어 폭 width 의 전체 페이지를 PNG 로 찍고, DOM 블록 정보를 JSON 으로 뽑는다.

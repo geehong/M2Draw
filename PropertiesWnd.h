@@ -28,6 +28,8 @@ public:
 
 	void AdjustLayout();
 	void SetSelectedShape(ge::Node* pShape, CM2DrawDoc* pDoc);
+	// 닫히는 문서가 선택 대상이었으면 선택을 비운다 (옛 문서를 가리키지 않게)
+	void ReleaseDocument(const CM2DrawDoc* pDoc) { if (m_pActiveDoc == pDoc) SetSelectedShape(nullptr, nullptr); }
 	CD2DPropertyView::PaneMode GetPaneMode() const { return m_paneMode; }
 	CD2DPropertyView& GetD2DPropView() { return m_wndD2DProp; }
 

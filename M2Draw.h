@@ -43,6 +43,8 @@ public:
 
 	afx_msg void OnAppAbout();
 	afx_msg void OnFileOpen();
+	afx_msg void OnFileNewDocument();   // 새로 만들기: 프로젝트가 열려 있으면 페이지로 등록, 아니면 새 문서
+	afx_msg void OnFileProjectNew();   // 새 프로젝트: 새 문서를 만들고 프로젝트 폴더 이름을 정해 저장
 	DECLARE_MESSAGE_MAP()
 };
 

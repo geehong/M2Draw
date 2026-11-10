@@ -5,6 +5,7 @@
 #include "M2Draw.h"
 #include "MainFrm.h"
 #include "HtmlComponents/TableComponent.h"
+#include "PanelStyle.h"
 #include <cmath>
 
 #ifndef M_PI
@@ -3793,8 +3794,9 @@ void CD2DPropertyView::OnPaint()
 
 	m_pRenderTarget->BeginDraw();
 
-	// 다크 테마 배경 (#1f1f23)
-	m_pRenderTarget->Clear(D2D1::ColorF(0.12f, 0.12f, 0.14f, 1.0f));
+	// 다크 테마 배경 (PanelStyle::kPanelBg, 레이어·트리 패널과 같은 값)
+	m_pRenderTarget->Clear(D2D1::ColorF(GetRValue(PanelStyle::kPanelBg) / 255.0f,
+		GetGValue(PanelStyle::kPanelBg) / 255.0f, GetBValue(PanelStyle::kPanelBg) / 255.0f, 1.0f));
 
 	CRect rc;
 	if (GetSafeHwnd()) GetClientRect(&rc);
