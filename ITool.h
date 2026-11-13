@@ -827,6 +827,8 @@ public:
 
 	const std::vector<AnchorRef>& GetSelectedAnchors() const { return m_selectedAnchors; }
 	void ClearAnchorSelection() { m_selectedAnchors.clear(); }
+	// 문서 교체(Undo/Redo/열기) 시 노드 포인터가 무효가 되므로 선택/드래그 상태를 모두 폐기
+	void ResetInteraction() { m_mode = Mode::None; m_selectedAnchors.clear(); m_activeAnchor = AnchorRef(); m_activePart = HitResult::Part::None; m_dragInits.clear(); m_hoverIsEditPart = false; }
 
 	// 앵커 속성 조작
 	bool ConvertSelectedNodes(CM2DrawDoc* pDoc, ge::BezierNode::Type type);

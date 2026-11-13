@@ -199,7 +199,7 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "새로 만들기(&N)\tCtrl+N", ID_FILE_NEW
         MENUITEM "새 페이지(&G)...", ID_FILE_PAGE_NEW
-        MENUITEM "페이지 열기(&P)...", ID_FILE_PAGE_OPEN
+        MENUITEM "페이지 열기(&E)...", ID_FILE_PAGE_OPEN
         MENUITEM "페이지 가져오기(&I)...", ID_FILE_PAGE_IMPORT
         MENUITEM "페이지 이름 바꾸기(&R)...", ID_FILE_PAGE_RENAME
         MENUITEM "닫기(&C)", ID_FILE_CLOSE
@@ -214,7 +214,7 @@ BEGIN
         MENUITEM "에이전트 작업 시작(&T)...", ID_FILE_AGENT_START
         M2_EXPORT_MENU_ITEMS
         MENUITEM SEPARATOR
-        MENUITEM "인쇄 설정(&R)...",             ID_FILE_PRINT_SETUP
+        MENUITEM "인쇄 설정(&D)...",             ID_FILE_PRINT_SETUP
         MENUITEM SEPARATOR
         MENUITEM "최근에 사용한 파일",                 ID_FILE_MRU_FILE1,GRAYED
         MENUITEM SEPARATOR
@@ -256,7 +256,7 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "새로 만들기(&N)\tCtrl+N", ID_FILE_NEW
         MENUITEM "새 페이지(&G)...", ID_FILE_PAGE_NEW
-        MENUITEM "페이지 열기(&P)...", ID_FILE_PAGE_OPEN
+        MENUITEM "페이지 열기(&E)...", ID_FILE_PAGE_OPEN
         MENUITEM "페이지 가져오기(&I)...", ID_FILE_PAGE_IMPORT
         MENUITEM "페이지 이름 바꾸기(&R)...", ID_FILE_PAGE_RENAME
         MENUITEM "닫기(&C)", ID_FILE_CLOSE
@@ -275,7 +275,7 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "인쇄(&P)...\tCtrl+P",           ID_FILE_PRINT
         MENUITEM "인쇄 미리 보기(&V)",              ID_FILE_PRINT_PREVIEW
-        MENUITEM "인쇄 설정(&R)...",             ID_FILE_PRINT_SETUP
+        MENUITEM "인쇄 설정(&D)...",             ID_FILE_PRINT_SETUP
         MENUITEM SEPARATOR
         MENUITEM "최근에 사용한 파일",                 ID_FILE_MRU_FILE1,GRAYED
         MENUITEM SEPARATOR
@@ -408,6 +408,9 @@ BEGIN
             MENUITEM "배지(&G)",                        ID_TOOLMENU_UI_BADGE
             MENUITEM "카드(&D)",                        ID_TOOLMENU_UI_CARD
             MENUITEM "페이지/경로(&P)",                  ID_TOOLMENU_UI_PAGER
+            MENUITEM "알림 박스(&W)",                    ID_TOOLMENU_UI_ALERT
+            MENUITEM "아코디언(&C)",                     ID_TOOLMENU_UI_ACCORDION
+            MENUITEM "내비게이션 바(&N)",                ID_TOOLMENU_UI_NAVBAR
         END
         MENUITEM SEPARATOR
         MENUITEM "트림(&B)\tR",                        ID_TOOLMENU_TRIM
@@ -730,6 +733,12 @@ BEGIN
      ID_FILE_ADD_ANNOTATION    "선택한 도형 옆에 주석(메모) 글자를 추가합니다. 더블클릭해서 글을 고칩니다.\n주석 추가"
      ID_FILE_WEBFONT           "웹 출력의 head 에 넣을 웹폰트 링크를 설정합니다. 문서에 저장됩니다.\n웹폰트 링크 설정"
      ID_FILE_AGENT_START       "에이전트 작업 폴더에 패키지를 만들고 결과 자동 표시를 시작합니다.\n에이전트 작업 시작"
+      ID_FILE_PROJECT_NEW       "새 프로젝트를 만듭니다. 열려 있는 문서가 있으면 한 프로젝트로 묶어 저장합니다.\n새 프로젝트"
+      ID_FILE_PROJECT_CLOSE     "열린 프로젝트의 페이지를 모두 닫습니다.\n프로젝트 닫기"
+      ID_FILE_PAGE_NEW          "이름을 정해 새 페이지를 만듭니다.\n새 페이지"
+      ID_FILE_PAGE_OPEN         "프로젝트의 페이지를 새 탭으로 엽니다.\n페이지 열기"
+      ID_FILE_PAGE_IMPORT       "다른 프로젝트의 페이지를 이 프로젝트로 가져옵니다.\n페이지 가져오기"
+      ID_FILE_PAGE_RENAME       "페이지 이름을 바꿉니다. 파일 이름과 목차가 함께 바뀝니다.\n페이지 이름 바꾸기"
      ID_FILE_EXPORT_ICONSET    "선택한 도형(없으면 문서 전체)을 여러 크기 PNG, ICO, 파비콘 세트로 저장합니다.\n아이콘 세트 내보내기"
      ID_FILE_EXPORT_LOGO       "문서를 원본·검정·흰색 단색 로고 변형(SVG + PNG)으로 저장합니다.\n로고 변형 내보내기"
      ID_FILE_EXPORT_SVG_OPT    "좌표를 소수 2자리로 줄인 순수 SVG를 저장합니다 (파일 크기 감소).\n최적화 SVG 내보내기"
@@ -799,6 +808,9 @@ BEGIN
     ID_TOOLMENU_UI_BADGE "배지 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n배지"
     ID_TOOLMENU_UI_CARD "카드 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n카드"
     ID_TOOLMENU_UI_PAGER "페이지/경로 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n페이지/경로"
+    ID_TOOLMENU_UI_ALERT "알림 박스 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n알림 박스"
+    ID_TOOLMENU_UI_ACCORDION "아코디언 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n아코디언"
+    ID_TOOLMENU_UI_NAVBAR "내비게이션 바 HTML UI 컴포넌트를 만듭니다. 드래그하여 크기를 정합니다.\n내비게이션 바"
     ID_FILE_EXPORT_HTML      "시맨틱 HTML/CSS 반응형 웹 파일로 내보냅니다.\nHTML 내보내기"
     ID_FILE_EXPORT_IMAGE     "배율/해상도를 지정해 PNG 또는 JPG 이미지로 내보냅니다.\n이미지 내보내기"
     ID_SUB_SIMPLIFY          "정점을 줄여 패스를 단순화합니다. 허용 오차를 입력한 뒤 적용하세요.
@@ -862,6 +874,9 @@ BEGIN
     ID_HTML_UI_BADGE          "배지: 작은 알약 모양 라벨을 만듭니다.\n배지"
     ID_HTML_UI_CARD           "카드: 이미지/제목/내용/버튼이 있는 카드를 만듭니다.\n카드"
     ID_HTML_UI_PAGER          "페이지/경로: 페이지 번호 또는 경로(breadcrumb)를 만듭니다.\n페이지 경로"
+    ID_HTML_UI_ALERT          "알림 박스: 정보/성공/경고/위험 알림을 만듭니다.\n알림 박스"
+    ID_HTML_UI_ACCORDION      "아코디언: 접고 펼 수 있는 제목과 본문을 만듭니다.\n아코디언"
+    ID_HTML_UI_NAVBAR         "내비게이션 바: 로고, 메뉴 링크, 버튼이 있는 상단 바를 만듭니다.\n내비게이션 바"
     ID_FILE_NEW             "새 문서를 만듭니다.\n새로 만들기"
     ID_FILE_OPEN            "기존 문서를 엽니다.\n열기"
     ID_FILE_CLOSE           "활성 문서를 닫습니다.\n닫기"

@@ -1,5 +1,8 @@
 #include "pch.h"
 #include "ResponsiveLayout.h"
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 
 #include <algorithm>
 #include <cstddef>

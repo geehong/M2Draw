@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <afxwin.h>
 #include <d2d1.h>
 #include <dwrite.h>
@@ -30,12 +30,18 @@ public:
 
 	// 타깃 도형 설정 및 적용
 	void SetTargetShape(CM2DrawDoc* pDoc, ge::Node* pShape);
-	void ApplyToShape();
+	void ApplyToShape();                       // 슬라이더/색상환 드래그처럼 이벤트가 잦은 입력은 16ms 간격으로 모아서 적용한다
+	void ApplyToShapeNow();                    // 지금 바로 선택 도형에 적용
+	void FlushPendingApply();                  // 모아 둔 적용이 있으면 바로 적용 (Undo 기록 전에 호출)
+	ULONGLONG m_lastApplyTick = 0;
+	bool      m_applyPending = false;
+	uint64_t  m_applyTargetId = 0;             // 모아 둔 적용의 대상 도형 (선택이 바뀌었으면 버린다)
 	D2D1_COLOR_F GetActiveFillColor() const { return m_fillColor; }   // 페인트통 등이 쓰는 현재 채우기 색
 	// bLive: 슬라이더 드래그 중 미리보기 - undo 기록/패널 동기화 없이 현재 문서 뷰만 갱신
 	// bForceCommit: 값이 이미 반영되어 있어도 undo 지점을 확정 (드래그 종료 시)
 	void ApplyCanvasSettings(bool bLive = false, bool bForceCommit = false);
 	void SyncControlsFromData();
+	void SyncFrameSection();   // 프레임 컨트롤 값 동기화
 	void SyncTransformOnly();
 	CM2DrawDoc* GetActiveDoc() const;
 	void UpdatePresetComboFromInputs();
@@ -181,10 +187,13 @@ protected:
 	std::shared_ptr<M2DrawCheckBox>     m_chkFrameClip;        // 자식 클리핑(Clip content)
 	std::shared_ptr<M2DrawLabel>        m_lblFrameRadius;      // 코너 반경
 	std::shared_ptr<M2DrawNumericInput> m_spinFrameRadius;
-	std::shared_ptr<M2DrawLabel>        m_lblFrameLayout;      // 레이아웃 모드
+	std::shared_ptr<M2DrawLabel>        m_lblResp;             // 페이지 폭 프리셋 (6.26.3): 최상위 프레임 폭
+	std::shared_ptr<M2DrawComboBox>     m_cboResp;
+	std::shared_ptr<M2DrawLabel>        m_lblFrameLayout;    // 레이아웃 모드
 	std::shared_ptr<M2DrawComboBox>     m_cboFrameLayout;      // None, Row, Column
 	std::shared_ptr<M2DrawLabel>        m_lblFrameGap;         // 간격(Gap)
 	std::shared_ptr<M2DrawNumericInput> m_spinFrameGap;
+	std::shared_ptr<M2DrawNumericInput> m_spinFrameWrap;     // Row: 한 행의 열 수, Column: 한 열의 행 수 (0 = 끔)
 	std::shared_ptr<M2DrawLabel>        m_lblFramePadding;     // 안쪽 여백(Padding)
 	std::shared_ptr<M2DrawNumericInput> m_spinFramePadding;
 	std::shared_ptr<M2DrawLabel>        m_lblFrameAlign;       // "Alignment (Main | Cross)"
@@ -220,6 +229,11 @@ protected:
 	std::shared_ptr<M2DrawLabel>        m_lblLine;
 	std::shared_ptr<M2DrawNumericInput> m_spinLineW;
 	std::shared_ptr<M2DrawComboBox>     m_cboLineKind;
+	std::shared_ptr<M2DrawLabel>        m_lblMarker;          // 선 마커 (6.25.3): 시작 | 중간 | 끝
+	std::shared_ptr<M2DrawComboBox>     m_cboMarkerStart;
+	std::shared_ptr<M2DrawComboBox>     m_cboMarkerMid;
+	std::shared_ptr<M2DrawComboBox>     m_cboMarkerEnd;
+	std::shared_ptr<M2DrawNumericInput> m_spinMarkerScale;    // 마커 크기 배율 (선 두께의 몇 배)
 	void ApplyLineProps(const std::function<void(ge::Node&)>& fn);
 	void ApplyShadowProps(const std::function<void(ge::Shadow&)>& fn);
 	void SyncAppearanceControls();
@@ -318,6 +332,7 @@ protected:
 	}
 
 	void InitControls();
+	void InitFrameSection();   // 프레임 속성 컨트롤 생성
 	void UpdateLayout(float width, float height);
 	void NotifyGridChanged();
 
@@ -328,6 +343,7 @@ protected:
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);

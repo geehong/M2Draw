@@ -117,7 +117,7 @@ HRESULT CM2DrawView::CreateDeviceResources()
 
 		hr = m_pD2DFactory->CreateHwndRenderTarget(
 			rtProps,
-			D2D1::HwndRenderTargetProperties(m_hWnd, size),
+			D2D1::HwndRenderTargetProperties(m_hWnd, size, D2D1_PRESENT_OPTIONS_IMMEDIATELY),
 			&m_pRenderTarget
 		);
 
@@ -146,6 +146,11 @@ void CM2DrawView::DiscardDeviceResources()
 	{
 		m_pSolidBrush->Release();
 		m_pSolidBrush = nullptr;
+	}
+	if (m_pCheckerBrush)
+	{
+		m_pCheckerBrush->Release();
+		m_pCheckerBrush = nullptr;
 	}
 	if (m_pRenderTarget)
 	{
@@ -840,8 +845,68 @@ void CM2DrawView::OnMButtonUp(UINT nFlags, CPoint point)
 	CView::OnMButtonUp(nFlags, point);
 }
 
+#ifdef _DEBUG
+// 6.23.1 성능 계측 (디버그 빌드 전용): OnDraw / OnMouseMove 소요 시간을 1초마다 평균·최대 한 줄로 출력 창에 남긴다.
+// 창 위치(전체 화면 안 / 일부 밖)도 함께 적어, 같은 작업을 조건별로 비교할 수 있다. 릴리스 빌드에는 들어가지 않는다
+namespace {
+struct PerfStat { double sumMs = 0.0, maxMs = 0.0; int n = 0; };
+PerfStat g_perfDraw, g_perfMove;
+ULONGLONG g_perfLastLog = 0;
+
+void PerfFlush()
+{
+	const ULONGLONG now = ::GetTickCount64();
+	if (g_perfLastLog == 0) g_perfLastLog = now;
+	if (now - g_perfLastLog < 1000) return;
+	g_perfLastLog = now;
+	if (g_perfDraw.n == 0 && g_perfMove.n == 0) return;
+
+	const wchar_t* where = L"?";
+	if (CWnd* mw = AfxGetMainWnd()) {
+		CRect wr;
+		mw->GetWindowRect(&wr);
+		MONITORINFO mi{ sizeof(mi) };
+		if (::GetMonitorInfo(::MonitorFromWindow(mw->GetSafeHwnd(), MONITOR_DEFAULTTONEAREST), &mi)) {
+			const int tol = 16;   // 최대화 때 창 가장자리가 작업 영역을 조금 넘는 것은 안으로 본다
+			const bool inside = wr.left >= mi.rcWork.left - tol && wr.top >= mi.rcWork.top - tol &&
+				wr.right <= mi.rcWork.right + tol && wr.bottom <= mi.rcWork.bottom + tol;
+			where = inside ? L"전체 안" : L"일부 밖";
+		}
+	}
+	CString line;
+	line.Format(_T("[성능] 창:%s | OnDraw 평균 %.2fms 최대 %.2fms (%d회) | OnMouseMove 평균 %.2fms 최대 %.2fms (%d회)"), where,
+		g_perfDraw.n ? g_perfDraw.sumMs / g_perfDraw.n : 0.0, g_perfDraw.maxMs, g_perfDraw.n,
+		g_perfMove.n ? g_perfMove.sumMs / g_perfMove.n : 0.0, g_perfMove.maxMs, g_perfMove.n);
+	LogAppEvent(line);
+	g_perfDraw = PerfStat{};
+	g_perfMove = PerfStat{};
+}
+
+struct PerfScope {
+	PerfStat& stat;
+	LARGE_INTEGER t0{};
+	explicit PerfScope(PerfStat& s) : stat(s) { ::QueryPerformanceCounter(&t0); }
+	~PerfScope()
+	{
+		LARGE_INTEGER t1, freq;
+		::QueryPerformanceCounter(&t1);
+		::QueryPerformanceFrequency(&freq);
+		const double ms = static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+		stat.sumMs += ms;
+		stat.n++;
+		if (ms > stat.maxMs) stat.maxMs = ms;
+		PerfFlush();
+	}
+};
+} // namespace
+#define M2_PERF_SCOPE(stat) PerfScope perfScope_(stat)
+#else
+#define M2_PERF_SCOPE(stat) ((void)0)
+#endif
+
 void CM2DrawView::OnMouseMove(UINT nFlags, CPoint point)
 {
+	M2_PERF_SCOPE(g_perfMove);   // 6.23.1 계측 (디버그 빌드 전용)
 	if (m_bIsPanning)
 	{
 		float dx = static_cast<float>(point.x - m_ptLastMouse.x);
@@ -1220,6 +1285,7 @@ BOOL CM2DrawView::PreCreateWindow(CREATESTRUCT& cs)
 
 void CM2DrawView::OnDraw(CDC* /*pDC*/)
 {
+	M2_PERF_SCOPE(g_perfDraw);   // 6.23.1 계측 (디버그 빌드 전용)
 	CM2DrawDoc* pDoc = GetDocument();
 	ASSERT_VALID(pDoc);
 	if (!pDoc)
@@ -1275,29 +1341,41 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 		m_pRenderTarget->FillRectangle(shadowRc, m_pSolidBrush);
 	}
 
-	// 투명도 있는 문서일 경우: 투명 체커보드(격자 무늬) 패턴 렌더링
+	// 투명도 있는 문서일 경우: 투명 체커보드(격자 무늬) 패턴 렌더링 — 24px 타일(2x2 칸)을 비트맵 브러시로 반복해 한 번에 채운다 (6.6.5)
 	if (geDoc.backgroundColor.a < 0.999f)
 	{
-		const float checkSize = 12.0f;
-		m_pRenderTarget->PushAxisAlignedClip(paperRc, D2D1_ANTIALIAS_MODE_ALIASED);
-		int c0 = static_cast<int>(floorf(paperLeft / checkSize));
-		int c1 = static_cast<int>(ceilf(paperRight / checkSize));
-		int r0 = static_cast<int>(floorf(paperTop / checkSize));
-		int r1 = static_cast<int>(ceilf(paperBottom / checkSize));
-		for (int r = r0; r < r1; ++r)
+		if (!m_pCheckerBrush)
 		{
-			for (int c = c0; c < c1; ++c)
+			ID2D1BitmapRenderTarget* tileRt = nullptr;
+			if (SUCCEEDED(m_pRenderTarget->CreateCompatibleRenderTarget(D2D1::SizeF(24.0f, 24.0f), D2D1::SizeU(24, 24), &tileRt)) && tileRt)
 			{
-				m_pSolidBrush->SetColor(((r + c) % 2 == 0)
-					? D2D1::ColorF(0.96f, 0.96f, 0.96f, 1.0f)
-					: D2D1::ColorF(0.86f, 0.86f, 0.88f, 1.0f));
-				m_pRenderTarget->FillRectangle(
-					D2D1::RectF(c * checkSize, r * checkSize, (c + 1) * checkSize, (r + 1) * checkSize),
-					m_pSolidBrush
-				);
+				ID2D1SolidColorBrush* tb = nullptr;
+				tileRt->CreateSolidColorBrush(D2D1::ColorF(0.96f, 0.96f, 0.96f, 1.0f), &tb);
+				if (tb)
+				{
+					tileRt->BeginDraw();
+					tileRt->Clear(D2D1::ColorF(0.96f, 0.96f, 0.96f, 1.0f));
+					tb->SetColor(D2D1::ColorF(0.86f, 0.86f, 0.88f, 1.0f));
+					tileRt->FillRectangle(D2D1::RectF(12.0f, 0.0f, 24.0f, 12.0f), tb);
+					tileRt->FillRectangle(D2D1::RectF(0.0f, 12.0f, 12.0f, 24.0f), tb);
+					tileRt->EndDraw();
+					tb->Release();
+					ID2D1Bitmap* tile = nullptr;
+					if (SUCCEEDED(tileRt->GetBitmap(&tile)) && tile)
+					{
+						m_pRenderTarget->CreateBitmapBrush(tile,
+							D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR),
+							&m_pCheckerBrush);
+						tile->Release();
+					}
+				}
+				tileRt->Release();
 			}
 		}
-		m_pRenderTarget->PopAxisAlignedClip();
+		if (m_pCheckerBrush)
+		{
+			m_pRenderTarget->FillRectangle(paperRc, m_pCheckerBrush);   // 화면 원점 기준으로 반복: 이전 루프(12px 칸, 화면 좌표)와 같은 모양
+		}
 	}
 
 	// 도큐멘트 본체 (Document Paper Background)

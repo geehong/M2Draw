@@ -277,6 +277,7 @@ void CM2DrawDoc::OnCloseDocument()
 		mf->GetLayerWnd().ReleaseDocument(this);
 		mf->GetPropertiesWnd().ReleaseDocument(this);
 		mf->GetOptionBar().ReleaseDocument(this);
+
 	}
 	CDocument::OnCloseDocument();
 }
@@ -1482,6 +1483,7 @@ void CM2DrawDoc::ResetToolInteraction()
 	SelectTool* pSelect = pApp ? pApp->GetToolManager().GetSelectTool() : nullptr;
 	if (pSelect) pSelect->ResetInteraction();
 	if (GradientTool* pGradient = pApp ? pApp->GetToolManager().GetGradientTool() : nullptr) pGradient->ResetInteraction();
+	if (NodeTool* pNode = pApp ? pApp->GetToolManager().GetNodeTool() : nullptr) pNode->ResetInteraction();
 }
 
 void CM2DrawDoc::OnEditUndo()

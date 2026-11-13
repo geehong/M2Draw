@@ -59,10 +59,16 @@ void AppendUtf8Code(std::string& out, unsigned cp)
 // JSON 의 "key":"값" 에서 값을 꺼낸다 (이스케이프와 유니코드 처리)
 bool JsonStringField(const std::string& json, const char* key, std::string& out)
 {
-	const std::string pat = std::string("\"") + key + "\":\"";
+	const std::string pat = std::string("\"") + key + "\"";
 	size_t p = json.find(pat);
 	if (p == std::string::npos) return false;
 	p += pat.size();
+	auto skipWs = [&]() { while (p < json.size() && (json[p] == ' ' || json[p] == '\t' || json[p] == '\r' || json[p] == '\n')) ++p; };
+	skipWs();
+	if (p >= json.size() || json[p] != ':') return false;
+	++p; skipWs();
+	if (p >= json.size() || json[p] != '"') return false;
+	++p;
 	out.clear();
 	for (; p < json.size(); ++p) {
 		const char c = json[p];
@@ -75,12 +81,21 @@ bool JsonStringField(const std::string& json, const char* key, std::string& out)
 		case 'r': break;
 		case 'u': {
 			if (p + 4 >= json.size()) return false;
-			unsigned cp = static_cast<unsigned>(std::stoul(json.substr(p + 1, 4), nullptr, 16));
+			auto hex4 = [&](size_t at, unsigned& v) {
+				char* end = nullptr;
+				const std::string s = json.substr(at, 4);
+				v = static_cast<unsigned>(std::strtoul(s.c_str(), &end, 16));
+				return s.size() == 4 && end == s.c_str() + 4;
+			};
+			unsigned cp = 0;
+			if (!hex4(p + 1, cp)) return false;   // 깨진 \u 이스케이프는 예외 없이 실패 처리
 			p += 4;
 			if (cp >= 0xD800 && cp <= 0xDBFF && p + 6 < json.size() && json[p + 1] == '\\' && json[p + 2] == 'u') {
-				const unsigned lo = static_cast<unsigned>(std::stoul(json.substr(p + 3, 4), nullptr, 16));
-				cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-				p += 6;
+				unsigned lo = 0;
+				if (hex4(p + 3, lo) && lo >= 0xDC00 && lo <= 0xDFFF) {
+					cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+					p += 6;
+				}
 			}
 			AppendUtf8Code(out, cp);
 			break;

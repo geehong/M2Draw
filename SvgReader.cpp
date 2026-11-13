@@ -3,6 +3,8 @@
 #include "HtmlComponents/UiComponents.h"
 #include "D2DGraphicEngine.h"
 #include "D2DLayer.h"
+#include "LineMarkers.h"
+#include "ImageRegistry.h"
 
 #include <xmllite.h>
 #include <shlwapi.h>
@@ -772,6 +774,9 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 
 	// <clipPath id>: 첫 번째 도형을 마스크로 보관했다가, clip-path="url(#id)" 를 가진 그룹이 닫힐 때 그룹의 마지막 자식(= 마스크 노드)으로 추가
 	bool inClipPath = false;
+	int inMarkerDef = 0;   // <marker> 정의 안의 도형은 화면에 그리지 않는 정의라서 노드로 만들지 않는다 (6.25.3)
+	std::unordered_map<std::wstring, MarkerKind> markerKinds;   // <marker id> -> 가까운 마커 종류 (외부 SVG 가져오기용 추정)
+	std::wstring curMarkerId;
 	std::wstring curClipId;
 	std::unordered_map<std::wstring, std::unique_ptr<PathNode>> clipMasks;
 	std::unordered_map<GroupNode*, std::wstring> pendingClipGroups;
@@ -790,6 +795,38 @@ bool ParseXmlStream(IStream* pStream, Document& outDoc) {
 			pReader->GetLocalName(&localName, &nameLen);
 			if (!localName) continue;
 			std::wstring elemName(localName, nameLen);
+			if (elemName == L"marker") {   // 선 마커 정의: 안쪽 도형은 노드로 만들지 않고, 첫 도형 모양으로 마커 종류를 추정해 둔다
+				if (pReader->IsEmptyElement() != TRUE) ++inMarkerDef;
+				curMarkerId.clear();
+				if (S_OK == pReader->MoveToFirstAttribute()) {
+					do {
+						LPCWSTR an = nullptr; UINT anl = 0;
+						pReader->GetLocalName(&an, &anl);
+						if (an && std::wstring(an, anl) == L"id") {
+							LPCWSTR av = nullptr; UINT avl = 0;
+							pReader->GetValue(&av, &avl);
+							if (av) curMarkerId.assign(av, avl);
+						}
+					} while (S_OK == pReader->MoveToNextAttribute());
+					pReader->MoveToElement();
+				}
+				if (curMarkerId.rfind(L"m2m-", 0) == 0) {   // 이 앱이 쓴 마커: id 에 종류가 들어 있다 (m2m-<종류>-<색>-<배율>)
+					const size_t e = curMarkerId.find(L'-', 4);
+					MarkerKind own = MarkerKind::None;
+					if (e != std::wstring::npos && Markers::KindFromId(UiComp::WideToUtf8(curMarkerId.substr(4, e - 4)), own)) markerKinds[curMarkerId] = own;
+				}
+				continue;
+			}
+			if (inMarkerDef > 0) {
+				if (!curMarkerId.empty() && !markerKinds.count(curMarkerId)) {
+					MarkerKind guess = MarkerKind::Arrow;
+					if (elemName == L"circle" || elemName == L"ellipse") guess = MarkerKind::Dot;
+					else if (elemName == L"rect") guess = MarkerKind::Square;
+					else if (elemName == L"line" || elemName == L"polyline") guess = MarkerKind::OpenArrow;
+					markerKinds[curMarkerId] = guess;
+				}
+				continue;
+			}
 
 			bool isEmpty = (pReader->IsEmptyElement() == TRUE);
 
@@ -895,17 +932,21 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 				const size_t comma = href.find(L',');
 				const bool isDataUri = href.compare(0, 5, L"data:") == 0 && comma != std::wstring::npos && href.find(L"base64") < comma;
 				// 연결 이미지: 그림 데이터 없이 경로만 있으면 나중에 프로젝트 폴더에서 그림을 붙인다
-				const bool isRefLink = !isDataUri && !href.empty();
-				if (isDataUri || isRefLink) {
+				const bool isMem = href.compare(0, 14, L"m2mem://image/") == 0;   // Undo 스냅샷의 리소스 참조 (6.3)
+				std::shared_ptr<const ImageData> memData;
+				if (isMem) memData = LookupImageResource(static_cast<uint64_t>(std::wcstoull(href.c_str() + 14, nullptr, 10)));
+				const bool isRefLink = !isDataUri && !isMem && !href.empty();
+				if (isDataUri || isRefLink || memData) {
 					auto data = std::make_shared<ImageData>();
+					if (memData) { data->mime = memData->mime; data->pixelW = memData->pixelW; data->pixelH = memData->pixelH; }   // 바이트는 복사하지 않고 memData 를 그대로 쓴다
 					std::string mime;
 					if (isDataUri) for (size_t i = 5; i < comma && href[i] != L';'; ++i) mime.push_back(static_cast<char>(href[i]));
 					if (!mime.empty()) data->mime = mime;
 					std::string b64;
 					if (isDataUri) for (size_t i = comma + 1; i < href.size(); ++i) b64.push_back(static_cast<char>(href[i] < 128 ? href[i] : '?'));
-					if (!isDataUri || Base64Decode(b64, data->bytes)) {
+					if (memData || !isDataUri || Base64Decode(b64, data->bytes)) {
 						int pw = 0, ph = 0;
-						if (PathOp::DecodeImageInfo(data->bytes, pw, ph)) { data->pixelW = pw; data->pixelH = ph; }
+						if (!memData && PathOp::DecodeImageInfo(data->bytes, pw, ph)) { data->pixelW = pw; data->pixelH = ph; }
 						auto im = std::make_unique<ImageNode>();
 						outDoc.RestoreNodeId(*im, ParseNodeId(attrs));
 						ApplyCommonState(*im, attrs);
@@ -923,7 +964,7 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 						} else {
 							im->SetFit(ImageFit::Fit);   // SVG 기본 preserveAspectRatio = xMidYMid meet
 						}
-						im->SetData(isDataUri ? std::shared_ptr<const ImageData>(data) : std::shared_ptr<const ImageData>());
+						im->SetData(memData ? memData : (isDataUri ? std::shared_ptr<const ImageData>(data) : std::shared_ptr<const ImageData>()));
 						if (isRefLink) im->SetLinkHref(WideToUtf8(href));
 						if (attrs.count(L"opacity")) im->SetOpacity(std::wcstof(attrs[L"opacity"].c_str(), nullptr));
 						const float x = attrs.count(L"x") ? ParseLength(attrs[L"x"], 0.0f) : 0.0f;
@@ -1133,6 +1174,7 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 							fn->SetLayoutMode(attrs[L"m2:layout"] == L"row" ? FrameLayoutMode::Row : attrs[L"m2:layout"] == L"column" ? FrameLayoutMode::Column : FrameLayoutMode::None);
 							if (attrs.count(L"m2:gap")) fn->SetGap(ParseLength(attrs[L"m2:gap"], 10.0f));
 							if (attrs.count(L"m2:pad")) fn->SetPadding(ParseLength(attrs[L"m2:pad"], 10.0f));
+							if (attrs.count(L"m2:wrap")) fn->SetWrapCount(_wtoi(attrs[L"m2:wrap"].c_str()));
 								if (attrs.count(L"m2:padding4")) {
 									const std::vector<float> v = ParseFloatList(attrs[L"m2:padding4"]);
 									if (v.size() == 4) fn->SetPaddingEdges(PaddingEdges{ v[0], v[1], v[2], v[3] });
@@ -1307,6 +1349,29 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 				if (attrs.count(L"stroke-dashoffset")) {
 					st.stroke.dashOffset = std::wcstof(attrs[L"stroke-dashoffset"].c_str(), nullptr);
 				}
+				// 선 마커 (6.25.3): 이 앱의 확장 속성
+				{
+					// 이 앱의 확장 속성이 우선, 없으면 표준 marker-* 의 url(#id) 가 가리키는 <marker> 로 종류를 추정한다
+					auto readMarker = [&](const wchar_t* key, const wchar_t* stdKey, MarkerKind& out) {
+						if (attrs.count(key)) {
+							Markers::KindFromId(UiComp::WideToUtf8(attrs[key]), out);
+							return;
+						}
+						if (!attrs.count(stdKey)) return;
+						const std::wstring& v = attrs[stdKey];
+						const size_t hash = v.find(L'#'), close = v.find(L')', hash == std::wstring::npos ? 0 : hash);
+						if (hash == std::wstring::npos || close == std::wstring::npos || close <= hash) return;
+						const auto it = markerKinds.find(v.substr(hash + 1, close - hash - 1));
+						if (it != markerKinds.end()) out = it->second;
+					};
+					readMarker(L"m2:marker-start", L"marker-start", st.stroke.markerStart);
+					readMarker(L"m2:marker-mid", L"marker-mid", st.stroke.markerMid);
+					readMarker(L"m2:marker-end", L"marker-end", st.stroke.markerEnd);
+					if (attrs.count(L"m2:marker-scale")) {
+						const float ms = std::wcstof(attrs[L"m2:marker-scale"].c_str(), nullptr);
+						if (ms > 0.0f) st.stroke.markerScale = ms;
+					}
+				}
 
 				pathNode->SetStyle(st);
 
@@ -1450,6 +1515,8 @@ if (attrs.count(L"m2:bstroke")) {   // partial borders: stroke style kept in sep
 			pReader->GetLocalName(&localName, &nameLen);
 			if (localName) {
 				std::wstring elemName(localName, nameLen);
+				if (elemName == L"marker") { if (inMarkerDef > 0) --inMarkerDef; continue; }
+				if (inMarkerDef > 0) continue;
 				if (elemName == L"text" && curText && curTextHasRaw) {
 					curText->SetText(curTextRaw);   // 영역 텍스트: 저장된 원본 문자열 복원 (줄바꿈은 다시 계산)
 					curTextHasRaw = false;

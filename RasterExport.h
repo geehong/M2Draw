@@ -23,5 +23,7 @@ bool RasterExportPixelSize(const Document& doc, const RasterExportOptions& opt, 
 
 // Debug 시작 시 실행되는 런타임 자체 검증 (D2D/WIC/클립보드 직렬화/페인트통). 실패하면 false + 사유
 bool RunRuntimeVerification(std::wstring* failure);
+// 선 마커 렌더 비용 측정 (6.25.3): 같은 선을 마커 없음 / 화살촉 / 점+화살촉 으로 내보낸 평균 시간 (실행: --bench-markers)
+std::wstring RunMarkerBenchmark();
 
 } // namespace ge

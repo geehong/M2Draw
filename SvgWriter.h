@@ -1,12 +1,16 @@
 #pragma once
 
 #include <map>
+#include <memory>
+#include <vector>
 
 #include "GeNodeVisitor.h"
 #include <string>
 #include <unordered_map>
 
 namespace ge {
+
+struct ImageData;
 
 class Document;
 class Node;
@@ -36,6 +40,8 @@ struct SvgWriteOptions {
 	// 연결 모드: 그림 데이터 대신 연결 경로(href)를 쓴다. 경로는 노드별로 주거나 노드가 가진 연결 경로를 쓴다
 	bool linkReferenceImages = false;
 	std::map<const Node*, std::string> linkedImagePaths;   // 노드 -> 연결 경로 (UTF-8)
+	// Snapshot 모드: 이미지 바이트 대신 m2mem://image/<id> 만 쓰고, 참조한 이미지를 여기에 모은다 (스냅샷이 수명을 보장)
+	std::vector<std::shared_ptr<const ImageData>>* keepImages = nullptr;
 
 	SvgWriteOptions() = default;
 	explicit SvgWriteOptions(SvgWriteMode m) : mode(m), nativeShapes(m == SvgWriteMode::Clean) {}

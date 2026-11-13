@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "UndoManager.h"
 #include "D2DGraphicEngine.h"
 #include "SvgWriter.h"
@@ -47,15 +47,18 @@ UndoManager::DocMeta UndoManager::CaptureMeta(const Document& doc) {
 	};
 }
 
-std::string UndoManager::SerializeDoc(Document& doc) {
+std::string UndoManager::SerializeDoc(Document& doc, std::vector<std::shared_ptr<const ImageData>>& images) {
 	++m_serializeCount;
 	SvgWriter writer;
 	// Snapshot: 이미지는 리소스 참조 ID 만 기록 (Undo 스택 50개에 이미지 데이터가 중복 보관되지 않도록)
-	return writer.WriteString(doc, SvgWriteOptions(SvgWriteMode::Snapshot));
+	SvgWriteOptions opt(SvgWriteMode::Snapshot);
+	opt.keepImages = &images;
+	return writer.WriteString(doc, opt);
 }
 
-void UndoManager::SetBaseline(Document& doc, std::string svg) {
+void UndoManager::SetBaseline(Document& doc, std::string svg, std::vector<std::shared_ptr<const ImageData>> images) {
 	m_baselineSvg = std::move(svg);
+	m_baselineImages = std::move(images);
 	m_baselineCounter = ChangeTracker::Value();
 	m_baselineMeta = CaptureMeta(doc);
 	m_hasBaseline = true;
@@ -70,7 +73,7 @@ void UndoManager::Trim(std::vector<DocumentSnapshot>& stack) const {
 void UndoManager::Reset(Document& doc) {
 	m_undoStack.clear();
 	m_redoStack.clear();
-	SetBaseline(doc, SerializeDoc(doc));
+	{ std::vector<std::shared_ptr<const ImageData>> im; std::string s = SerializeDoc(doc, im); SetBaseline(doc, std::move(s), std::move(im)); }
 }
 
 bool UndoManager::RestoreSnapshot(const DocumentSnapshot& snapshot, Document& doc) {
@@ -107,15 +110,17 @@ bool UndoManager::CommitChange(const std::wstring& actionName, Document& doc) {
 		return false;
 	}
 
-	std::string current = SerializeDoc(doc);
+	std::vector<std::shared_ptr<const ImageData>> currentImages;
+	std::string current = SerializeDoc(doc, currentImages);
 	if (!m_hasBaseline) {
-		SetBaseline(doc, std::move(current));
+		SetBaseline(doc, std::move(current), std::move(currentImages));
 		return false;
 	}
 	if (current == m_baselineSvg) {
 		// 카운터만 올라가고 내용은 같음(같은 값으로 setter 호출 등): 기준 시점만 갱신해 다음 호출의 직렬화를 피함
 		m_baselineCounter = ChangeTracker::Value();
 		m_baselineMeta = CaptureMeta(doc);
+		m_baselineImages = std::move(currentImages);
 		return false;
 	}
 
@@ -123,6 +128,7 @@ bool UndoManager::CommitChange(const std::wstring& actionName, Document& doc) {
 	// Undo 와 Redo 모두 변경 대상이 된 도형이 선택되도록 한다.
 	DocumentSnapshot entry;
 	entry.svgData = std::move(m_baselineSvg);
+	entry.images = std::move(m_baselineImages);
 	entry.selectionIds = SelectionIds(doc);
 	entry.activeLayer = doc.GetActiveLayerIndex();
 	entry.actionName = actionName;
@@ -131,7 +137,7 @@ bool UndoManager::CommitChange(const std::wstring& actionName, Document& doc) {
 	Trim(m_undoStack);
 	m_redoStack.clear();
 
-	SetBaseline(doc, std::move(current));
+	SetBaseline(doc, std::move(current), std::move(currentImages));
 	return true;
 }
 
@@ -142,7 +148,7 @@ bool UndoManager::Undo(Document& doc) {
 
 	// Redo 항목: 현재 상태 + 같은 선택/활성 레이어 힌트
 	DocumentSnapshot redoEntry;
-	redoEntry.svgData = SerializeDoc(doc);
+	redoEntry.svgData = SerializeDoc(doc, redoEntry.images);
 	redoEntry.selectionIds = target.selectionIds;
 	redoEntry.activeLayer = target.activeLayer;
 	redoEntry.actionName = target.actionName;
@@ -155,7 +161,7 @@ bool UndoManager::Undo(Document& doc) {
 	Trim(m_redoStack);
 	m_undoStack.pop_back();
 	// 복원 결과를 새 기준으로 삼음 (재직렬화해야 Reader 가 정규화한 형태와 이후 비교가 일치)
-	SetBaseline(doc, SerializeDoc(doc));
+	{ std::vector<std::shared_ptr<const ImageData>> im; std::string s = SerializeDoc(doc, im); SetBaseline(doc, std::move(s), std::move(im)); }
 	return true;
 }
 
@@ -165,7 +171,7 @@ bool UndoManager::Redo(Document& doc) {
 	const DocumentSnapshot& target = m_redoStack.back();
 
 	DocumentSnapshot undoEntry;
-	undoEntry.svgData = SerializeDoc(doc);
+	undoEntry.svgData = SerializeDoc(doc, undoEntry.images);
 	undoEntry.selectionIds = target.selectionIds;
 	undoEntry.activeLayer = target.activeLayer;
 	undoEntry.actionName = target.actionName;
@@ -177,7 +183,7 @@ bool UndoManager::Redo(Document& doc) {
 	m_undoStack.push_back(std::move(undoEntry));
 	Trim(m_undoStack);
 	m_redoStack.pop_back();
-	SetBaseline(doc, SerializeDoc(doc));
+	{ std::vector<std::shared_ptr<const ImageData>> im; std::string s = SerializeDoc(doc, im); SetBaseline(doc, std::move(s), std::move(im)); }
 	return true;
 }
 

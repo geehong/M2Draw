@@ -152,9 +152,14 @@ std::string HtmlExporter::RegisterCssRule(const std::string& desiredPrefix, cons
 	// 클래스 중복 방지 접미사
 	std::string uniqueCls = cls;
 	int dupSeq = 1;
-	for (const auto& pair : m_cssRules) {
-		if (pair.first == uniqueCls) {
-			uniqueCls = cls + "-" + std::to_string(++dupSeq);
+	for (bool clash = true; clash; ) {   // 새 이름이 앞선 룰과 또 겹칠 수 있으므로 겹치지 않을 때까지 반복
+		clash = false;
+		for (const auto& pair : m_cssRules) {
+			if (pair.first == uniqueCls) {
+				uniqueCls = cls + "-" + std::to_string(++dupSeq);
+				clash = true;
+				break;
+			}
 		}
 	}
 
@@ -169,7 +174,9 @@ std::string HtmlExporter::PositionDecls(const Node& node, bool& omitW, bool& omi
 	auto* parentNode = node.GetParent();
 	if (!parentNode) return "";
 	auto* pf = dynamic_cast<FrameNode*>(parentNode);
-	if (pf && pf->GetLayoutMode() != FrameLayoutMode::None) return "";   // 자동 배치 프레임 안은 흐름 배치
+	const auto* nodeFrame = dynamic_cast<const FrameNode*>(&node);
+	const bool fixedLandmark = nodeFrame && nodeFrame->IsFixedLandmark();   // header/aside/footer 는 자동 배치에서 빠지므로 절대 배치
+	if (pf && pf->GetLayoutMode() != FrameLayoutMode::None && !fixedLandmark) return "";   // 자동 배치 프레임 안은 흐름 배치
 
 	const Matrix2D& xf = node.GetTransform();
 	Rect2 lb{};
@@ -212,12 +219,7 @@ std::string HtmlExporter::BuildCommonStyleDecls(const Node& node) {
 		ss << "opacity: " << std::fixed << std::setprecision(2) << node.GetOpacity() << "; ";
 	}
 	if (node.GetBlendMode() != LayerBlendMode::Normal) {
-		static const char* kBlends[] = { "normal", "multiply", "screen", "overlay", "darken", "lighten",
-			"color-dodge", "color-burn", "hard-light", "soft-light", "difference", "exclusion", "hue", "saturation", "color", "luminosity" };
-		int bIdx = static_cast<int>(node.GetBlendMode());
-		if (bIdx >= 0 && bIdx < 16) {
-			ss << "mix-blend-mode: " << kBlends[bIdx] << "; ";
-		}
+		ss << "mix-blend-mode: " << BlendModeCssName(node.GetBlendMode()) << "; ";
 	}
 
 	// 그림자 (4.5.17): 요소 종류에 맞는 CSS 로 변환 — 글자 = text-shadow, 벡터 <svg> = filter: drop-shadow, 그 외(프레임/이미지/표/사각형/원) = box-shadow
@@ -378,7 +380,8 @@ void HtmlExporter::Visit(GroupNode& node) {
 			if (fillH) style << "height: 100%; ";
 		}
 		// 크기 및 클리핑
-		if (!omitW && !(fillW && (inFlex || pos.empty()))) style << "width: " << FormatUnit(frame->GetWidth()) << "; ";
+		const bool inWrapGrid = inFlex && parentFrame->GetWrapCount() > 0 && !parentFrame->IsUiComponent() && !frame->IsFixedLandmark();
+		if (!omitW && !inWrapGrid && !(fillW && (inFlex || pos.empty()))) style << "width: " << FormatUnit(frame->GetWidth()) << "; ";
 		if (!omitH && !(fillH && (inFlex || pos.empty()))) style << "height: " << FormatUnit(frame->GetHeight()) << "; ";
 		if (frame->IsClip()) style << "overflow: hidden; ";
 		if (!frame->GetCornerRadii().IsZero()) {
@@ -426,7 +429,13 @@ void HtmlExporter::Visit(GroupNode& node) {
 
 		// Flexbox Auto Layout 또는 Free Layout
 		if (frame->GetLayoutMode() != FrameLayoutMode::None) {
-			style << "display: flex; ";
+			const int wrapN = frame->IsUiComponent() ? 0 : frame->GetWrapCount();
+			style << (wrapN > 0 ? "display: grid; " : "display: flex; ");
+			if (pos.empty()) style << "position: relative; ";   // header/aside/footer 자식을 절대 배치할 기준 (자기가 절대 배치면 그대로 둔다)
+			if (wrapN > 0) {   // 줄바꿈 격자: Row = 한 행에 N 열(폭 1/N), Column = 한 열에 N 행
+				if (frame->GetLayoutMode() == FrameLayoutMode::Row) style << "grid-template-columns: repeat(" << wrapN << ", minmax(0, 1fr)); align-content: start; ";
+				else style << "grid-auto-flow: column; grid-template-rows: repeat(" << wrapN << ", auto); grid-auto-columns: minmax(0, 1fr); align-content: start; ";
+			} else
 			style << (frame->GetLayoutMode() == FrameLayoutMode::Row ? "flex-direction: row; " : "flex-direction: column; ");
 			style << "gap: " << FormatUnit(frame->GetGap()) << "; ";
 			const PaddingEdges& pe = frame->GetPaddingEdges();
@@ -452,7 +461,6 @@ void HtmlExporter::Visit(GroupNode& node) {
 		}
 
 		std::string cls = RegisterCssRule("frame", style.str(), frame);
-
 		AppendIndent();
 		bool isLink = !frame->GetHref().empty();
 		if (isLink) {
@@ -735,6 +743,55 @@ void HtmlExporter::ExportUiComponent(FrameNode& f)
 		line("</nav>");
 		return;
 	}
+	if (kind == "alert") {
+		const std::string ak = f.GetUiProp("kind", "info");
+		std::string fg = "#1f8fff", bg = "#e8f3ff", bd = "#a9d2ff";
+		if (ak == "success") { fg = "#1f9e59"; bg = "#e8f6ee"; bd = "#a6dcc0"; }
+		else if (ak == "warning") { fg = "#e0a100"; bg = "#fff6e0"; bd = "#f0d48a"; }
+		else if (ak == "danger") { fg = "#d9363e"; bg = "#fdecee"; bd = "#f0a9ad"; }
+		std::ostringstream d;
+		d << font << "font-size: 14px; background: " << bg << "; border: 1px solid " << bd << "; border-left: 4px solid " << fg
+			<< "; border-radius: 8px; padding: 12px 16px 12px 44px; color: " << ink << "; ";
+		line("<div role=\"alert\"" + attr(outer(false, d.str())) + ">");
+		++m_indent;
+		const std::string title = f.GetUiProp("title");
+		if (!title.empty()) line("<strong" + inner("display: block; font-size: 15px; margin-bottom: 2px;") + ">" + UiEsc(title) + "</strong>");
+		line("<span>" + UiEsc(f.GetUiProp("text")) + "</span>");
+		--m_indent;
+		line("</div>");
+		return;
+	}
+	if (kind == "accordion") {
+		std::ostringstream d;
+		d << "border: 1px solid " << border << "; border-radius: 8px; background: #ffffff; " << font << "color: " << ink << "; ";
+		line(std::string("<details") + (flag("open", true) ? " open" : "") + attr(outer(false, d.str())) + ">");
+		++m_indent;
+		line("<summary" + inner("padding: 0 16px; height: 44px; line-height: 44px; font-size: 15px; font-weight: 700; cursor: pointer;") + ">" + UiEsc(f.GetUiProp("title")) + "</summary>");
+		line("<div" + inner("padding: 12px 16px 16px; border-top: 1px solid " + border + "; font-size: 14px; color: #4d5159;") + ">" + UiEsc(f.GetUiProp("body")) + "</div>");
+		--m_indent;
+		line("</details>");
+		return;
+	}
+	if (kind == "navbar") {
+		const std::string col = UiHex(f, "color", "#1f8fff");
+		std::ostringstream d;
+		d << "display: flex; align-items: center; gap: 24px; padding: 0 20px; background: #ffffff; border-bottom: 1px solid " << border << "; " << font;
+		line("<nav aria-label=\"main\"" + attr(outer(true, d.str())) + ">");
+		++m_indent;
+		const std::string brand = f.GetUiProp("brand");
+		if (!brand.empty()) line("<a href=\"#\"" + inner("font-size: 18px; font-weight: 700; color: " + ink + "; text-decoration: none;") + ">" + UiEsc(brand) + "</a>");
+		line("<ul" + inner("display: flex; gap: 24px; margin: 0; padding: 0; list-style: none; flex: 1; font-size: 15px;") + ">");
+		++m_indent;
+		for (const auto& lk : UiComp::PropList(f, "links"))
+			line("<li><a href=\"#\"" + inner("color: #4d5159; text-decoration: none;") + ">" + UiEsc(lk) + "</a></li>");
+		--m_indent;
+		line("</ul>");
+		const std::string action = f.GetUiProp("action");
+		if (!action.empty()) line("<button" + inner("height: 36px; padding: 0 16px; border: 0; border-radius: 8px; background: " + col + "; color: #ffffff; font-size: 14px; font-weight: 700; cursor: pointer;") + ">" + UiEsc(action) + "</button>");
+		--m_indent;
+		line("</nav>");
+		return;
+	}
 	// 알 수 없는 종류: 일반 div
 	line("<div" + attr(outer(true, "")) + "></div>");
 }
@@ -907,7 +964,7 @@ void HtmlExporter::Visit(ImageNode& node) {
 	if (!omitW) style << "width: " << FormatUnit(node.GetWidth()) << "; ";
 	if (!omitH) style << "height: " << FormatUnit(node.GetHeight()) << "; ";
 
-	static const char* kFits[] = { "contain", "cover", "fill" };
+	static const char* kFits[] = { "fill", "contain", "cover" };   // ImageFit {Stretch, Fit, Fill} 순서
 	style << "object-fit: " << kFits[static_cast<int>(node.GetFit())] << "; ";
 
 	std::string cls = RegisterCssRule("img", style.str(), &node);
@@ -1055,12 +1112,24 @@ void HtmlExporter::Visit(PathNode& node) {
 	miniDoc.height = h;
 	miniDoc.AddLayer(L"TempLayer");
 	auto clone = node.Clone();
-	clone->SetTransform(Matrix2D::Translation(-b.left, -b.top)); // 원점 0,0 기준
+	clone->SetTransform(Matrix2D::Translation(-b.left, -b.top)); // 원점 0,0 기준 (회전/크기는 래퍼 CSS 가 처리)
+	// 투명도/블렌드/그림자는 래퍼 CSS(BuildCommonStyleDecls)가 이미 적용하므로 내부 SVG 에서는 끈다 (이중 적용 방지)
+	clone->SetOpacity(1.0f);
+	clone->SetBlendMode(LayerBlendMode::Normal);
+	clone->SetShadow(Shadow{});
 	miniDoc.GetActiveLayer()->AddChild(std::move(clone));
 
 	SvgWriteOptions svgOpt(SvgWriteMode::Clean);
 	SvgWriter writer;
 	std::string svgCode = writer.WriteString(miniDoc, svgOpt);
+	if (svgCode.compare(0, 5, "<?xml") == 0) {   // HTML 본문에는 XML 선언이 필요 없음
+		const size_t endDecl = svgCode.find("?>");
+		if (endDecl != std::string::npos) {
+			size_t s = endDecl + 2;
+			while (s < svgCode.size() && (svgCode[s] == '\n' || svgCode[s] == '\r')) ++s;
+			svgCode.erase(0, s);
+		}
+	}
 
 	// <svg> 태그에 클래스 적용
 	if (!cls.empty()) {

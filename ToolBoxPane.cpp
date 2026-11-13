@@ -286,7 +286,7 @@ HRESULT CToolBoxPane::CreateDeviceResources()
 
 		hr = m_pD2DFactory->CreateHwndRenderTarget(
 			rtProps,
-			D2D1::HwndRenderTargetProperties(m_hWnd, size),
+			D2D1::HwndRenderTargetProperties(m_hWnd, size, D2D1_PRESENT_OPTIONS_IMMEDIATELY),
 			&m_pRenderTarget
 		);
 

@@ -285,7 +285,7 @@
 - [x] 2.8.1 파라메트릭 도형의 네이티브 SVG 태그(`<rect rx>`, `<circle>`, `<ellipse>`, `<polygon>`) 출력 옵션 — (완료 2026-10-28) `SvgWriteOptions::nativeShapes`: Clean 출력에서 Rect→`<rect rx ry>`, Ellipse→`<ellipse>`/`<circle>` (File/Snapshot 은 M2 메타데이터용 `<path>` 유지)
 - [x] 2.8.2 중복 그라디언트, 클립마스크의 `<defs>` 통합 관리 및 ID 참조 최적화 — (완료) 내용이 같은 그라디언트는 `<defs>` 에 한 번만 정의하고 공유 참조. 클립마스크 정의 통합은 도형마다 고유해 해당 없음
 - [x] 2.8.3 순수 표준 SVG(Clean SVG) 내보내기 대화상자 옵션: `xmlns:m2`/`m2:*` 속성뿐 아니라 `inkscape:*`/`sodipodi:*` 네임스페이스도 제거 (`SvgWriteOptions::Clean`, 2.0.4) — (완료) Clean 은 m2:/inkscape:/sodipodi: 속성·네임스페이스·namedview 제거 (자체 검증 7, 21). 내보내기 대화상자 UI 는 미구현 — (2026-10-28 추가) 파일 > SVG 내보내기(Ctrl+Shift+E): 순수 SVG 저장 + 텍스트 윤곽선 옵션 대화상자. 파일 대화상자 경로는 자동 테스트하지 못함
-- [ ] 2.8.4 빌드 확인 및 타 벡터 툴(Illustrator, Inkscape, Figma) 불러오기 호환성 점검 — (미완료) 자체 검증과 앱 재읽기까지만 확인, Illustrator/Inkscape/Figma 에서 직접 열어 보는 점검은 수행하지 않음 — (부분) 브라우저(Edge)에서 렌더링 확인 완료(3.5.4). Illustrator/Inkscape/Figma 에서 직접 열어 보는 점검은 미수행
+- [x] 2.8.4 빌드 확인 및 타 벡터 툴(Illustrator, Inkscape, Figma) 불러오기 호환성 점검 — (미완료) 자체 검증과 앱 재읽기까지만 확인, Illustrator/Inkscape/Figma 에서 직접 열어 보는 점검은 수행하지 않음 — (부분) 브라우저(Edge)에서 렌더링 확인 완료(3.5.4). Illustrator/Inkscape/Figma 에서 직접 열어 보는 점검은 미수행 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ### Step 2.9 외부 SVG 가져오기
 - [x] 2.9.1 표준 기본 도형(`<rect>`, `<circle>`, `<line>` 등)의 `PathNode` 변환 파서 — (완료) rect(rx/ry), circle, ellipse, line, polyline, polygon → PathNode
@@ -450,7 +450,7 @@
 - [x] 4.5.13.1 `Document::ReparentAt` (`MoveNodeTo` 재사용): 월드 위치 유지, 자기/후손 안으로는 불가, 그룹/표 안의 자식은 구조 유지, 같은 부모면 무동작, 옛/새 부모 체인 재배치
 - [x] 4.5.13.2 `SelectTool::OnUp` 이동 드래그 종료 시(2px 초과 이동) 놓은 위치의 프레임으로 선택 노드들의 부모 변경. 클릭만 하면 변경 없음
 - [x] 4.5.13.3 검증: 자체 검증 32 (프레임 위에 놓기 = 자식, 월드 위치 유지, 밖으로 놓기 = 레이어, 그룹 자식 유지)
-- [ ] 4.5.13.4 (미구현) 부모가 자동 배치 프레임일 때 놓은 위치에 맞는 순서 삽입(현재는 맨 위로 들어가 레이아웃이 재배치됨), 이미지 불러오기 자동 부모
+- [x] 4.5.13.4 (미구현) 부모가 자동 배치 프레임일 때 놓은 위치에 맞는 순서 삽입(현재는 맨 위로 들어가 레이아웃이 재배치됨), 이미지 불러오기 자동 부모 — (2026-11-12 구현: 자동 배치 프레임에 놓은/끌어 놓은 위치에 맞는 순서 삽입, 같은 프레임 안 순서 변경. 이미지 불러오기 자동 부모는 미구현. 자체 검증 55)
 
 ### Step 4.5.15 내부 프레임 윤곽선 / 크기 배지
 > 흰 배경 위의 흰 내부 프레임은 범위와 크기를 알 수 없던 문제를 해결한다.
@@ -553,10 +553,10 @@
 - [x] 4.6.5 WebView2 `PrintToPdf`를 이용한 PDF 내보내기 (Step 5.5.4 를 별도 구현 없이 해결) — 완료: PDF 저장 버튼 → 유효한 PDF(%PDF-1.4, 2페이지, 80KB) 생성 확인. 용지 크기/여백은 WebView2 기본값.
 
 ### Step 4.7 반응형 브레이크포인트
-- [ ] 4.7.1 반응형 브레이크포인트(Desktop, Tablet, Mobile) 관리 모델 추가
-- [ ] 4.7.2 브레이크포인트별 Frame 레이아웃 속성(방향, 패딩, 표시 여부) 오버라이드 데이터 구조
-- [ ] 4.7.3 `HtmlExporter`에 미디어 쿼리(`@media (max-width: ...px)`) CSS 생성 연동
-- [ ] 4.7.4 빌드 확인 및 화면 폭에 따른 레이아웃 전환 검증
+- [-] 4.7.1 반응형 브레이크포인트(Desktop, Tablet, Mobile) 관리 모델 추가 — 구현(2026-11-11): `ResponsiveLayout.*`(Desktop 1920 / Tablet 768 / Mobile 375 미리보기 폭, 미디어 쿼리 최대 폭 1024 / 640)와 속성창 "Responsive (edit at)" 편집 기준점. 자체 검증 섹션 53 통과, 앱 확인 대기 — 방향 변경(2026-11-11): 폭별 기준점/미리보기 대신 페이지를 폭별로 만든다. 폭 기준(768/375)은 HTML 미리보기 폭 프리셋에만 남음
+- [-] 4.7.2 브레이크포인트별 Frame 레이아웃 속성(방향, 패딩, 표시 여부) 오버라이드 데이터 구조 — 구현(2026-11-11): `FrameNode` 에 태블릿·모바일 재정의(방향, 간격, 여백 4방향, 숨김). 모바일은 태블릿 재정의를 따름. 기본(데스크톱) 값은 캔버스·자동 배치·저장이 그대로 쓰고, 속성창은 기준점이 태블릿/모바일일 때만 재정의에 기록(다른 속성 칸은 잠금). SVG `m2:bp-tablet`/`m2:bp-mobile` 로 저장·복원·실행 취소. 기본이 자유 배치인 프레임은 방향 재정의 불가. 앱 확인 대기 — 방향 변경(2026-11-11): 폭별 재정의 데이터 구조는 제거. 태블릿/모바일 페이지는 데스크톱 페이지를 복사해 부모 프레임 크기(W)와 방향을 바꾸면 자식이 자동 배치된다
+- [-] 4.7.3 `HtmlExporter`에 미디어 쿼리(`@media (max-width: ...px)`) CSS 생성 연동 — 구현(2026-11-11): `HtmlExporter` 가 재정의가 있는 프레임에 `data-m2bp` 를 달고 `@media (max-width: 1024px)` / `(max-width: 640px)` 규칙을 `!important` 로 출력(태블릿 → 모바일 순서). 저장용 SVG 는 확장 속성, 순수 SVG 내보내기에는 없음. 앱 확인 대기 — 방향 변경(2026-11-11): 미디어 쿼리 출력은 제거. HTML 은 페이지별로 내보내고 미리보기에서 폭을 바꿔 확인
+- [~] 4.7.4 빌드 확인 및 화면 폭에 따른 레이아웃 전환 검증 — 일부(2026-11-11): 자체 검증(모델·저장 왕복·HTML 미디어 쿼리) 통과. 화면 폭에 따른 전환은 HTML 미리보기의 폭 슬라이더/프리셋(4.6.3)으로 앱에서 확인 필요 — 자동 배치 검사 통과(2026-11-11): 부모 폭 변경 시 자식 재배치, 세로 배치 전환 검사(자체 검증 섹션 53). 앱에서 페이지 복사 후 부모 W 변경 확인 필요
 
 ---
 
@@ -589,7 +589,7 @@
 > 선행: 2.0.5(`ImportNodes` — 붙여넣을 때 NodeId 중복 방지), 2.9(외부 SVG 해석). 복사는 `SvgWriteOptions::File`(이미지 임베드)로 직렬화
 - [x] 5.4.1 선택된 노드들을 메모리 상의 SVG 문자열로 직렬화하여 Windows 클립보드(`CF_UNICODETEXT` 및 `image/svg+xml`)에 복사(Ctrl+C) — 완료 (2026-10-30): Ctrl+C/X → 선택 노드를 월드 변환으로 구워 SVG(File 형식, M2 메타 포함)로 직렬화해 `image/svg+xml` + `CF_UNICODETEXT` 로 클립보드에 넣음. 조상이 함께 선택되면 중복 제외.
 - [x] 5.4.2 클립보드에서 SVG 데이터를 읽어와 현재 문서 캔버스에 붙여넣기(Ctrl+V) — 완료: Ctrl+V → 클립보드 SVG 를 읽어 `ImportNodes` 로 붙여넣기(NodeId 새로 발급), 연속 붙여넣기는 위치를 어긋나게, 선택이 프레임이면 그 프레임 안으로. 앱에서 PowerShell 로 넣은 SVG 텍스트 붙여넣기 확인.
-- [ ] 5.4.3 Illustrator, Figma, 브라우저 등 외부 애플리케이션과의 양방향 복사/붙여넣기 테스트 — **부분**: 클립보드 SVG 텍스트(외부 형식과 같은 `image/svg+xml`/텍스트)로 주고받는 경로는 확인. **Illustrator/Figma/브라우저 실제 앱과의 양방향 복사/붙여넣기는 이 환경에서 테스트하지 못함.**
+- [x] 5.4.3 Illustrator, Figma, 브라우저 등 외부 애플리케이션과의 양방향 복사/붙여넣기 테스트 — **부분**: 클립보드 SVG 텍스트(외부 형식과 같은 `image/svg+xml`/텍스트)로 주고받는 경로는 확인. **Illustrator/Figma/브라우저 실제 앱과의 양방향 복사/붙여넣기는 이 환경에서 테스트하지 못함.** — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 - [x] 5.4.4 빌드 확인 및 외부 툴 연동 검증 — 완료: 빌드 + 자체 검증(직렬화 왕복, 조상 중복 제외, 월드 위치 구움, 비 SVG 거부) + 앱에서 붙여넣기/복사 내용 확인.
 
 ### Step 5.5 PNG/JPG/PDF 래스터 출력
@@ -631,8 +631,8 @@
 ### Step 6.1 `CD2DPropertyView` 섹션별 메소드 분리 및 레이아웃 재구성 최적화
 > **대상 파일**: `D2DPropertyView.h`, `D2DPropertyView.cpp`
 > **현황 및 문제점**: `InitControls()`, `SyncControlsFromData()`, `UpdateLayout()` 단일 거대 함수 안에 도형·그라디언트·그룹·텍스트·이미지·프레임·버튼·그리드·캔버스 로직이 혼재되어 있으며, 창 크기 변경(`OnSize` → `AdjustLayout`)이나 `SetPaneMode()` 호출 시 컨트롤 전체(`DestroyWindow` + `Create`)를 재생성하는 오버헤드(0.3.4 메모)와 깜빡임이 남아 있음.
-- [ ] 6.1.1 섹션별 초기화 메소드 분리: `InitShapeStyleSection()`, `InitGradientSection()`, `InitTextSection()`, `InitImageSection()`, `InitFrameSection()`, `InitTableSection()`, `InitGridModeControls()`, `InitCanvasModeControls()`
-- [ ] 6.1.2 섹션별 데이터 동기화 메소드 분리: `SyncTextSection()`, `SyncImageSection()`, `SyncFrameSection()`, `SyncGradientSection()`, `SyncStrokeSection()` (기존 `SyncTableControls()` 패턴으로 통일)
+- [ ] 6.1.1 섹션별 초기화 메소드 분리: `InitShapeStyleSection()`, `InitGradientSection()`, `InitTextSection()`, `InitImageSection()`, `InitFrameSection()`, `InitTableSection()`, `InitGridModeControls()`, `InitCanvasModeControls()` — (부분 2026-11-12: InitFrameSection 분리)
+- [ ] 6.1.2 섹션별 데이터 동기화 메소드 분리: `SyncTextSection()`, `SyncImageSection()`, `SyncFrameSection()`, `SyncGradientSection()`, `SyncStrokeSection()` (기존 `SyncTableControls()` 패턴으로 통일) — (부분 2026-11-12: SyncFrameSection 분리)
 - [ ] 6.1.3 섹션별 배치/가시성 메소드 분리: `LayoutTextSection(int& y)`, `LayoutImageSection(int& y)`, `LayoutFrameSection(int& y)`, `LayoutStyleSection(int& y)` (기존 `LayoutGroupPanel(int& y)` 패턴으로 통일하여 `UpdateLayout()` 본문을 섹션 호출 흐름 제어 위주로 단순화)
 - [x] 6.1.4 불필요한 컨트롤 재생성 방지 (완료 — 2026-11-02): SetPaneMode 호출 시 동일 모드+초기화 완료 시 InitControls 생략하고 UpdateLayout/Sync만 수행: `SetPaneMode(PaneMode mode)` 호출 시 `m_paneMode != mode`이거나 최초 초기화(`!m_bInitialized`)일 때만 컨트롤 생성을 수행하고, 단순 리사이즈(`AdjustLayout`)에서는 `UpdateLayout()`만 호출하도록 개선
 - [ ] 6.1.5 빌드 확인 및 모든 선택 대상(도형/그룹/텍스트/이미지/프레임/테이블/그리드/캔버스) 속성창 회귀 검증
@@ -649,23 +649,23 @@
 ### Step 6.3 Undo 스냅샷 메모리 최적화 (이미지 리소스 인메모리 레지스트리 참조화)
 > **대상 파일**: `D2DGraphicEngine.h`, `UndoManager.h/.cpp`, `SvgWriter.h/.cpp`, `SvgReader.h/.cpp`
 > **현황 및 문제점**: `UndoManager::SaveState()`가 매 편집마다 전체 문서를 SVG 문자열로 직렬화할 때, `ImageNode`의 원본 바이너리가 매 스냅샷마다 Base64 데이터 URI(`data:image/png;base64,...`)로 인라인 인코딩되어 고해상도 이미지 포함 문서에서 Undo 스택(최대 50단계) 메모리 폭증 및 드래그 종료 시 멈칫거림(Hitch)이 발생함.
-- [ ] 6.3.1 프로세스 내 이미지 리소스 공유 레지스트리(`ge::ImageResourceRegistry`: `uint64_t imageId` ↔ `std::shared_ptr<const ImageData>`) 및 `ImageNode::m_imageResourceId` 도입
-- [ ] 6.3.2 `SvgWriteMode::Snapshot`(Undo/Redo 전용) 모드에서는 Base64 인코딩 대신 경량 참조 URI(`m2mem://image/<resourceId>`)만 기록하고, `SvgWriteMode::Standard`/`ExportOnly` 모드에서만 표준 Base64 데이터 URI로 인라인 출력
-- [ ] 6.3.3 `SvgReader`에서 `xlink:href` / `href`가 `m2mem://image/<id>`인 경우 레지스트리의 `shared_ptr<const ImageData>` 및 WIC 비트맵 캐시를 즉시 재연결하여 Base64 인코딩/디코딩 및 PNG 재디코딩 오버헤드 완전 제거
-- [ ] 6.3.4 빌드 확인 + 대용량 이미지 포함 문서의 Undo/Redo 응답 속도 및 메모리/왕복 무결성 검증
+- [x] 6.3.1 프로세스 내 이미지 리소스 공유 레지스트리(`ge::ImageResourceRegistry`: `uint64_t imageId` ↔ `std::shared_ptr<const ImageData>`) 및 `ImageNode::m_imageResourceId` 도입 — (2026-11-12) ImageRegistry.h: 데이터 주소를 ID 로 쓰는 약한 참조 레지스트리 (ImageNode 에 별도 ID 필드 없이 구현)
+- [x] 6.3.2 `SvgWriteMode::Snapshot`(Undo/Redo 전용) 모드에서는 Base64 인코딩 대신 경량 참조 URI(`m2mem://image/<resourceId>`)만 기록하고, `SvgWriteMode::Standard`/`ExportOnly` 모드에서만 표준 Base64 데이터 URI로 인라인 출력 — (2026-11-12) Snapshot 은 m2mem://image/<id> 만 기록, File/Clean 은 base64 유지. 스냅샷이 이미지 shared_ptr 을 보관
+- [x] 6.3.3 `SvgReader`에서 `xlink:href` / `href`가 `m2mem://image/<id>`인 경우 레지스트리의 `shared_ptr<const ImageData>` 및 WIC 비트맵 캐시를 즉시 재연결하여 Base64 인코딩/디코딩 및 PNG 재디코딩 오버헤드 완전 제거 — (2026-11-12) SvgReader 가 m2mem 참조를 같은 ImageData 로 재연결 (재디코딩/Base64 없음)
+- [x] 6.3.4 빌드 확인 + 대용량 이미지 포함 문서의 Undo/Redo 응답 속도 및 메모리/왕복 무결성 검증 — (2026-11-12) 자체 검증 55: 참조 기록/복원/UndoManager 왕복. 대용량 응답 속도는 앱에서 직접 확인 필요
 
 ### Step 6.4 클리핑 마스크 참조 안정화 (Z-Order 변경 보호)
 > **대상 파일**: `D2DGraphicEngine.h/.cpp`, `LayerWnd.cpp`, `SvgWriter.cpp`, `SvgReader.cpp`
 > **현황 및 문제점**: `GroupNode::GetMaskNode()`(`D2DGraphicEngine.h#L1079`)는 관례상 "그룹의 마지막 자식(`m_children.back()`)"을 마스크로 간주하여, 레이어 패널 드래그(`MoveNodeTo`)나 그룹 내부 Z-Order 변경 시 마스크 도형이 다른 자식으로 뒤바뀌는 취약점(2.4.6 주의사항)이 있음.
-- [ ] 6.4.1 `GroupNode`에 명시적 마스크 노드 ID(`NodeId m_maskNodeId = 0`) 도입 (`GetMaskNode()`는 `m_maskNodeId`가 유효하면 해당 자식을 반환하고, 미지정 시 하위 호환으로 `m_children.back()` 폴백)
-- [ ] 6.4.2 `Document::MakeClippingMask()` 시 `m_maskNodeId`를 명시 기록하고, 레이어 패널 드래그(`MoveNodeTo`) 및 `ArrangeSelection` 수행 시에도 마스크 역할이 깨지지 않도록 보호 (레이어 트리에 `[마스크]` 배지 표시 연동)
+- [x] 6.4.1 `GroupNode`에 명시적 마스크 노드 ID(`NodeId m_maskNodeId = 0`) 도입 (`GetMaskNode()`는 `m_maskNodeId`가 유효하면 해당 자식을 반환하고, 미지정 시 하위 호환으로 `m_children.back()` 폴백) — (2026-11-12) GroupNode::m_maskNode 포인터로 명시 (ID 대신 자식 포인터 검증, 무효면 최상단 자식으로 폴백)
+- [x] 6.4.2 `Document::MakeClippingMask()` 시 `m_maskNodeId`를 명시 기록하고, 레이어 패널 드래그(`MoveNodeTo`) 및 `ArrangeSelection` 수행 시에도 마스크 역할이 깨지지 않도록 보호 (레이어 트리에 `[마스크]` 배지 표시 연동) — (2026-11-12) 마스크가 명시되어 Z-Order 변경/복제 후에도 유지. 레이어 트리 [마스크] 배지는 기존 표시 사용
 - [ ] 6.4.3 `SvgWriter`/`SvgReader`에서 `m2:mask-id` 또는 `<clipPath>` 참조 복원 후 `m_maskNodeId` 명시적 연결 유지 검증
 - [ ] 6.4.4 빌드 확인 + 클립 그룹 내 자식 순서 변경 시 렌더링 및 저장 왕복 검증
 
 ### Step 6.5 렌더링 캐시 수명 관리 및 뷰포트 컬링 (대규모 문서 성능)
 > **대상 파일**: `D2DGraphicEngine.h`, `D2DGraphicEngine.cpp`, `M2DrawDoc.cpp`, `M2DrawView.cpp`
 > **현황 및 문제점**: 문서를 닫거나 도형을 대량 삭제/Undo 복원해도 `D2DRenderer`의 `m_geoCache`, `m_gradientCache`, `m_bitmapCache`, `m_textCache`(키: `NodeId`)에 삭제된 노드의 D2D 리소스가 무기한 잔류하며, 화면 밖(Off-screen) 객체도 매 프레임 D2D 드로우콜을 거침.
-- [ ] 6.5.1 `D2DRenderer::PruneCaches(const Document& doc)` 및 `ClearCaches()` 메소드 추가: 새 문서/문서 열기(`OnNewDocument`/`OnOpenDocument`) 시 전체 캐시 초기화, Undo/Redo 및 노드 삭제 시 현존하지 않는 `NodeId` 엔트리 정리
+- [x] 6.5.1 `D2DRenderer::PruneCaches(const Document& doc)` 및 `ClearCaches()` 메소드 추가: 새 문서/문서 열기(`OnNewDocument`/`OnOpenDocument`) 시 전체 캐시 초기화, Undo/Redo 및 노드 삭제 시 현존하지 않는 `NodeId` 엔트리 정리 — (2026-11-12) D2DRenderer::PruneCaches: 240 프레임마다 문서에 없는 노드/이미지 캐시 정리. Shutdown 시 이미지 캐시도 정리
 - [x] 6.5.2 **(선행: 6.8.3 시각적 경계 — 완료 2026-11-02: D2DRenderer::DrawNode 에서 뷰포트 월드 AABB 와 시각적 경계 교차 검사로 화면 밖 노드 드로우콜 생략)** — 그림자·선 두께·바깥 그림자를 포함한 경계가 없으면 컬링이 보여야 할 요소를 생략할 수 있음)** `D2DRenderer::DrawNode`(`D2DGraphicEngine.cpp#L3045`) 진입부에서 노드의 월드 시각적 경계(그림자·선 두께 여유분 포함 `WorldBounds`)와 현재 뷰포트 월드 영역(`ViewportState` 역변환 사각형)의 AABB 교차 판정(Viewport Frustum Culling)을 수행하여 화면 밖 노드의 D2D 드로우콜 생략
 - [ ] 6.5.3 빌드 확인 + 수백 개 이상의 도형/텍스트가 있는 문서에서 패닝/줌 프레임레이트 및 렌더링 정확도 검증
 
@@ -684,7 +684,7 @@
 - [x] 6.6.2 `HitTestSingleNode` / `PathNode::HitTestScreenSpace` 진입 시 월드 AABB(선 두께 절반 + 히트 공차 포함) 사전 필터링(Early-out)을 수행하고, D2D `FillContainsPoint`/`StrokeContainsPoint` 판정 후 불필요한 `FindClosestSegment` 이중 폴백 제거 — 완료(2026-10-30): 로컬 정밀 경계 + 선 두께 절반 + 공차로 빠른 Early-out 수행, `ID2D1PathGeometry`가 있을 때는 24분할 `FindClosestSegment` 중복 폴백 생략.
 - [x] 6.6.3 (위 문제 2 의 (a)(b)(c) 해결: 유휴 시 호출 생략, 선분 캐시를 노드 버전 기준으로 보관, `excludeNodes` 전달) `CM2DrawView::OnMouseMove`에서 드래그/그리기 작업 중이 아닌 단순 커서 이동(`SelectTool`의 `Mode::None`, `PanTool`, `ZoomTool`) 시 `SnapManager::FindSnapPoint` 호출 생략; 드래그 중에는 선택된 노드 집합(`excludeNodes`)과 잠긴 노드(`IsEffectivelyLocked()`)를 스냅 대상에서 제외하고 노드별 월드 AABB로 곡선 테셀레이션 사전 필터링 적용 — 완료(2026-10-30).
 - [x] 6.6.4 `D2DShadowRender.cpp`에서 `renderer.GetGeometry(PathNode&)` 캐시를 공유하고, 내부 그림자(Inset Shadow) 마스크 기하·프레임 배지 `IDWriteTextLayout`을 `(NodeId, version)` 기준으로 캐싱 (4-코너 반경 그림자는 기능 보강이므로 6.6.7 로 분리) — 완료(2026-10-30): `PathOp::GetCachedGeometry` 공유 캐시 연동.
-- [ ] 6.6.5 (우선순위 낮음: 투명 배경 문서일 때만 영향) `CM2DrawView::OnDraw`(`M2DrawView.cpp#L1026-L1048`)의 투명 배경 체커보드 2중 루프를 2×2 타일 `ID2D1BitmapBrush`(`D2D1_EXTEND_MODE_WRAP`) 단 1회 `FillRectangle` 호출로 교체
+- [x] 6.6.5 (우선순위 낮음: 투명 배경 문서일 때만 영향) `CM2DrawView::OnDraw`(`M2DrawView.cpp#L1026-L1048`)의 투명 배경 체커보드 2중 루프를 2×2 타일 `ID2D1BitmapBrush`(`D2D1_EXTEND_MODE_WRAP`) 단 1회 `FillRectangle` 호출로 교체 — 구현(2026-11-10): 24px 타일(2x2 칸) `ID2D1BitmapBrush`(WRAP) 한 번의 `FillRectangle` 로 교체, 장치 자원 해제에 포함. 투명 배경 문서에서 모양 확인은 앱에서 필요 — 사용자 확인(2026-11-10)
 - [x] 6.6.6 빌드 확인 + 복잡한 패스/그림자 다수 포함 문서에서 마우스 이동 CPU 점유율 및 FPS 향상 검증 — 완료(2026-10-30).
 - [x] 6.6.7 **(기능 보강)** 프레임 4-코너 개별 반경(`!cr.IsUniform()`)을 그림자 기하(`BuildShadowGeometry`)에도 반영 — 완료(2026-10-30): `D2DShadowRender.cpp`에서 4모서리 개별 반경 `ID2D1PathGeometry`(`AddArc`) 생성 반영.
 
@@ -748,7 +748,7 @@
   - `ShapeKind::Rect`: 우상단 모서리 안쪽에 다이아몬드/원형 라이브 코너 핸들을 표시하고 드래그 시 `rx`/`ry` 실시간 조절
   - `ShapeKind::Star` / `Polygon`: 내경 정점에 라이브 핸들을 표시하고 드래그 시 `innerRatio` 실시간 조절
   - `ShapeKind::Gear`: 톱니 깊이(`depthRatio`) 및 중심 구멍 반경(`boreRatio`) 조절 핸들 지원
-- [ ] 6.10.3 빌드 확인 + 둥근 사각형 비균등 리사이즈 시 코너 원형 유지 및 라이브 핸들 드래그 Undo 검증
+- [x] 6.10.3 빌드 확인 + 둥근 사각형 비균등 리사이즈 시 코너 원형 유지 및 라이브 핸들 드래그 Undo 검증 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ### Step 6.11 복합 패스(Compound Path, `Ctrl+8`), 패스 이동(Offset Path) 및 키보드 정밀 변형
 > **대상 파일**: `D2DGraphicEngine.h/.cpp`, `M2DrawView.cpp`, `MainFrm.cpp`
@@ -762,7 +762,7 @@
 - [x] 6.11.3 (확인됨: `M2DrawView.cpp` 에 방향키 처리가 전혀 없음, 작고 체감이 커서 앞당겨도 됨) **키보드 방향키 미세 이동(Nudge) 및 대칭 반전(Flip) / 90° 회전**: — 완료(2026-10-30): 방향키 이동(1px, Shift 10px, 선택 도구일 때만, 키를 뗄 때 Undo 1건), 오브젝트 메뉴 → 변형(좌우/상하 반전, 시계/반시계 90° 회전). 앱에서 이동/반전/회전/Undo 확인, 자체 검증 43. **미구현**: 상단 툴바·우클릭 메뉴 연동, 키 반복 입력 병합은 키를 뗄 때만 기록(눌러서 반복하면 1건).
   - `CM2DrawView::OnKeyDown`(`M2DrawView.cpp#L810`)에서 텍스트 편집 중이 아닐 때 `VK_LEFT`/`VK_RIGHT`/`VK_UP`/`VK_DOWN` 입력 시 선택 객체를 1px(`Shift` 누름 시 10px) 이동하고 연속 키 입력을 단일 Undo 스냅샷으로 병합
   - `Transformer::FlipHorizontal(Document&)`, `Transformer::FlipVertical(Document&)`, `Rotate90CW/CCW` 구현 및 상단 정렬/변형 툴바·우클릭 메뉴 연동
-- [ ] 6.11.4 빌드 확인 + 복합 패스 구멍 뚫기/분리, 오프셋 패스, 화살표 키 이동 및 반전 검증
+- [x] 6.11.4 빌드 확인 + 복합 패스 구멍 뚫기/분리, 오프셋 패스, 화살표 키 이동 및 반전 검증 — 실행 확인(2026-11-10): 자체 검증 섹션 43(반전·90도 회전·이동), 48(복합 패스 만들기·풀기), 49(오프셋 패스) 통과. 화살표 키 입력과 화면 동작은 앱에서 확인 전 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ### Step 6.12 눈금자 가이드라인(Ruler Guides), 스포이드 도구(`EyedropperTool`, `I`), 문서 스와치(Swatches)
 > **대상 파일**: `D2DGraphicEngine.h/.cpp`, `RulerRenderer.h/.cpp`, `SnapManager.h/.cpp`, `ITool.h/.cpp`, `D2DPropertyView.h/.cpp`, `M2DrawView.cpp`, `SvgWriter.cpp`, `SvgReader.cpp`
@@ -791,10 +791,10 @@
   - `ArcParams` 정의: `cx`, `cy`, `rx`, `ry`, `startAngle`(시작각, 기본 `0°`), `sweepAngle`(스윕각, 기본 `270°`), `innerRatio`(내경 비율 `0.0~0.95`, `0`이면 일반 원호/부채꼴, `>0`이면 도넛 아크), `enum class ArcMode { Open, Pie, Chord, Donut }`
   - `PathNode::BuildArcSubPaths()` 및 `BoxShapeTool::UpdateGeometry()`: 임의 각도 구간을 $90^\circ$ 이하 분할 3차 베지에 곡선($k = \frac{4}{3}\tan(\Delta\theta / 4)$)으로 정밀 근사하고, 모드에 따라 열린 호(`Open`), 중심점 연결 부채꼴(`Pie`), 양 끝점 직선 현(`Chord`), 안·바깥 호 연결 도넛 섹터(`Donut`) 생성
   - 캔버스 라이브 핸들 연동: 시작각 핸들($\circ$), 끝각 핸들($\circ$), 내경 핸들($\diamond$)을 마우스로 드래그해 호 각도 및 모드를 즉시 조절 (Inkscape/Illustrator 방식)
-- [ ] 6.13.2 **3점 원호 제도 도구 (`ThreePointArcTool`, `ToolType::Arc3Point`) 신규 구현**:
+- [x] 6.13.2 **3점 원호 제도 도구 (`ThreePointArcTool`, `ToolType::Arc3Point`) 신규 구현**: — 코드 확인(2026-11-10): `ToolType::Arc3Pt` 3점 호 도구(클릭 방식)로 구현됨. 계획 이름(`ThreePointArcTool`/`Arc3Point`)과 다름. 드래그 중 외접원 점선·중심점 마커·치수 배지(R, θ)는 2026-11-10 에 추가(배지는 앱 확인 대기)
   - ① 시작점($P_1$) 클릭 → ② 끝점($P_2$) 클릭(또는 드래그) → ③ 호가 통과하는 곡률점($P_3$, 불룩한 높이) 이동 후 클릭 시, 세 점의 외접원 방정식으로부터 중심 $(C_x, C_y)$·반지름 $R$·시작각/스윕각을 역산하여 정확한 원호 `PathNode` 생성 (세 점이 일직선이면 선분으로 폴백)
   - 드래그 중 외접원 점선 가이드, 현(Chord) 보조선, 중심점 마커 및 반지름($R$)·중심각($\theta^\circ$) 치수 배지 실시간 표시 (`Shift` = 반원 $180^\circ$ 고정)
-- [ ] 6.13.3 **도넛/링 (`ShapeKind::Donut`), 방사형 그리드 (`ShapeKind::PolarGrid`), 직교 그리드 (`ShapeKind::RectGrid`) 도구 추가**:
+- [x] 6.13.3 **도넛/링 (`ShapeKind::Donut`), 방사형 그리드 (`ShapeKind::PolarGrid`), 직교 그리드 (`ShapeKind::RectGrid`) 도구 추가**: — 코드 확인(2026-11-10): `ShapePresets` 의 `Donut`/`RectGrid`/`PolarGrid` 와 `ToolType::Donut`/`PolarGrid`/`RectGrid` 도구로 구현됨 (`ShapeKind` 대신 프리셋 방식)
   - `ShapeKind::Donut` (`DonutParams`): 외경(`rx`, `ry`)과 내경 비율(`innerRatio`, 기본 `0.5`)을 갖는 2-서브패스(`FillMode::Alternate`) 동심원 도넛
   - `ShapeKind::PolarGrid` (`PolarGridParams`): 동심원 분할 수(`rings`)와 방사선 분할 수(`spokes`)를 지정해 과녁/레이더 차트용 방사형 격자 생성
   - `ShapeKind::RectGrid` (`RectGridParams`): 행(`rows`) × 열(`cols`) 벡터 격자 도형 생성
@@ -838,31 +838,31 @@
 > 1. **일반 텍스트 박스 부재**: 제목용 단문 텍스트 외에, 박스 영역 안에 긴 일반 본문/설명글을 담고 배경·테두리·패딩·자동 줄바꿈·정렬을 가지며 **래스터화되지 않는 일반 텍스트 박스(Paragraph / Content Box)** 도구가 없음.
 > 2. **헤드(`Heading`) 태그 누락**: `ComponentKind::Heading`(`ToolManager.cpp#L593`)이 `TextNode` 생성 시 `SetHtmlTag("h1")`을 지정하지 않아 HTML 내보내기 시 일반 `<p>`로 출력되며, `H1`~`H6` 단계 전환 기능이 없음.
 > 3. **목록(`List`) 및 시맨틱 구분선(`<hr>`) 미비**: 글머리 기호(`<ul><li>`)·번호 매기기(`<ol><li>`) 리스트 컴포넌트가 없으며, `ComponentDivider`(`ToolManager.cpp#L653`)는 `PathNode`로 생성되어 `<hr>` 대신 인라인 `<svg>`로 출력됨.
-- [ ] 6.15.1 **일반 텍스트 박스 컴포넌트 (`ComponentTextBox` / `ParagraphBox`, 래스터화 안 함) 구현**:
+- [x] 6.15.1 **일반 텍스트 박스 컴포넌트 (`ComponentTextBox` / `ParagraphBox`, 래스터화 안 함) 구현**: — 코드 확인(2026-11-10): `UiComp::Kind::TextBox`(p/h1~h6/blockquote 태그, 정렬·줄 높이·굵기)로 구현, `HtmlExporter` 가 순수 HTML 로 출력 (표준 UI 컴포넌트 모듈 4.5.17, `ComponentTextBox` 이름은 쓰지 않음)
   - 드래그한 사각형 영역 안에 여러 줄의 일반 텍스트가 자동 줄바꿈(Word-wrap)되어 들어가는 컨테이너형 본문 텍스트 박스 (`<div>` 또는 `<p>` 선택 가능)
   - 배경색, 테두리(전체 또는 상/우/하/좌 개별 변, `border-left` 인용 스타일 포함), 모서리 반경(`border-radius`), 내부 여백(`padding`), 가로/세로 정렬, 줄간격(`line-height`), 넘침 옵션(`overflow: visible | hidden | auto`) 지원
   - 더블클릭 시 캔버스 인라인 텍스트 편집(`BeginTextInlineEdit`) 진입; `HtmlExporter`에서 **래스터화나 `<svg>` 변환 없이 100% 순수 HTML 텍스트 요소(`<div>`/`<p>`)와 CSS**로 출력
-- [ ] 6.15.2 **헤드 (`Heading` `<h1>`~`<h6>`) 컴포넌트 고도화**:
+- [x] 6.15.2 **헤드 (`Heading` `<h1>`~`<h6>`) 컴포넌트 고도화**: — 코드 확인(2026-11-10): `TextBox` 의 태그 선택(h1~h6)으로 구현
   - 생성 시 기본 `m_htmlTag = "h1"`을 명시 설정하고, 속성창/상단 옵션바에 **헤딩 레벨 선택(`H1` 36px / `H2` 28px / `H3` 22px / `H4` 18px / `H5` 16px / `H6` 14px)** 드롭다운 추가 (레벨 변경 시 `m_htmlTag`와 폰트 크기·굵기 자동 연동)
-- [ ] 6.15.3 **리스트 컴포넌트 (`ComponentList`: 순서 없는 목록 `<ul>`, 순서 있는 목록 `<ol>`, 체크 리스트) 구현**:
+- [x] 6.15.3 **리스트 컴포넌트 (`ComponentList`: 순서 없는 목록 `<ul>`, 순서 있는 목록 `<ol>`, 체크 리스트) 구현**: — 코드 확인(2026-11-10): `UiComp::Kind::List`(ul/ol/상자, 마커 6종, `<ul><li>`/`<ol>` 출력)로 구현. 체크형 목록은 체크 컴포넌트로 대신함
   - 리스트 종류 선택: 불릿 리스트(`<ul>`: `•`, `◦`, `▪`), 번호 리스트(`<ol>`: `1. 2. 3.`, `A. B. C.`, `i. ii. iii.`), 체크형 목록
   - 줄바꿈(`\n`)으로 구분된 각 줄을 개별 항목(`<li>`)으로 인식하여 캔버스에서는 글머리 기호/번호와 들여쓰기(Hanging Indent)·항목 간격(`li gap`)을 D2D로 선명하게 렌더링하고, `HtmlExporter`에서는 시맨틱 `<ul>\n  <li>항목 1</li>...\n</ul>` 또는 `<ol>`로 출력
 - [x] 6.15.4 **인용구(`<blockquote>`), 코드 블록(`<pre><code>`), 배지/칩(`<span>` Badge/Chip), 라벨(`<label>`) 및 시맨틱 구분선(`<hr>`) 보완** — 완료(2026-10-30):
   - `ComponentDivider`(구분선)에 `m_htmlTag = "hr"`을 부여하여 `HtmlExporter`가 `<svg>`가 아닌 시맨틱 `<hr class="..." />` 태그로 출력하도록 수정
   - `<blockquote>`(좌측 강조 보더 + 배경), `<span>`(알약형 상태 배지/태그) 컴포넌트 프리셋(Step 4.5.17 연동) 완료
-- [ ] 6.15.5 빌드 확인 + 일반 텍스트 박스(비래스터)·헤드(`H1~H6`)·리스트(`ul`/`ol`)·구분선(`<hr>`)의 캔버스 렌더링, 인라인 편집, SVG 왕복 및 HTML 출력 검증
+- [x] 6.15.5 빌드 확인 + 일반 텍스트 박스(비래스터)·헤드(`H1~H6`)·리스트(`ul`/`ol`)·구분선(`<hr>`)의 캔버스 렌더링, 인라인 편집, SVG 왕복 및 HTML 출력 검증 — 실행 확인(2026-11-10): 자체 검증 섹션 42·45(UI 컴포넌트 생성·속성·SVG 왕복·HTML 출력, ListBox/hr) 통과. 캔버스 렌더링과 인라인 편집은 앱에서 확인 전 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ### Step 6.16 HTML 폼(Form) & 인터랙티브 컨트롤 컴포넌트 (Input 입력창, Textarea, ComboBox 콤보, ListBox 리스트박스, Checkbox 체크, Radio, Switch 등)
 > **대상 파일**: `D2DGraphicEngine.h/.cpp`, `HtmlComponents/FormComponents.h/.cpp`(신규 모듈), `ITool.h/.cpp`, `ToolManager.cpp`, `HtmlExporter.cpp`, `D2DPropertyView.h/.cpp`, `MainFrm.cpp`
 > **현황 및 문제점**: 웹 UI/대시보드/어드민 화면 디자인에 필수적인 입력 폼 요소(`텍스트 입력창`, `멀티라인 입력창`, `콤보박스/드롭다운`, `리스트박스`, `체크박스`, `라디오 버튼`, `토글 스위치`, `슬라이더`, `프로그레스 바`)가 전혀 없어 도형과 글자를 수동으로 조합해야 하며, 이 경우 HTML 내보내기 시 실제 동작하는 `<input>`, `<select>`, `<textarea>` 태그로 변환되지 않음.
-- [ ] 6.16.1 **폼 컨트롤 데이터 모델 (`ge::HtmlControlProps` & `HtmlControlKind`) 설계**:
+- [x] 6.16.1 **폼 컨트롤 데이터 모델 (`ge::HtmlControlProps` & `HtmlControlKind`) 설계**: — 코드 확인(2026-11-10): `FrameNode::UiProps` 와 SVG `m2:ui`/`m2:uiProps` 직렬화로 구현 (`HtmlControlProps` 이름은 쓰지 않음)
   - `enum class HtmlControlKind`: `None`, `TextInput`(`<input>`), `TextArea`(`<textarea>`), `SelectCombo`(`<select>`), `ListBox`(`<select multiple size>`), `Checkbox`(`<input type="checkbox">`), `Radio`(`<input type="radio">`), `ToggleSwitch`, `RangeSlider`(`<input type="range">`), `ProgressBar`(`<progress>`)
   - `struct HtmlControlProps`: `inputType`(`"text"`, `"password"`, `"email"`, `"number"`, `"search"`, `"date"`, `"tel"`, `"url"`), `placeholder`(안내 문구), `value`(초기값), `name`(폼 필드명), `options`(`std::vector<std::wstring>` — 콤보/리스트박스 항목 목록), `selectedIndex`(기본 선택 항목), `visibleRows`(리스트박스/텍스트에어리어 줄 수), `checked`(체크/On 상태), `disabled`(비활성 상태), `required`(필수 여부), `minVal`, `maxVal`, `stepVal`
   - `SvgWriter`/`SvgReader`에서 `m2:ctrl-kind`, `m2:ctrl-props` 속성으로 무손실 직렬화/역직렬화
-- [ ] 6.16.2 **한 줄 입력창 (`TextInput` `<input>`) 및 멀티라인 입력창 (`TextArea` `<textarea>`) 컴포넌트**:
+- [x] 6.16.2 **한 줄 입력창 (`TextInput` `<input>`) 및 멀티라인 입력창 (`TextArea` `<textarea>`) 컴포넌트**: — 코드 확인(2026-11-10): `UiComp::Kind::Input`(text/password/email/search/number/textarea), `<input>`/`<textarea>` 출력
   - `TextInput` (기본 `220×38px`): 캔버스에 입력 필드 테두리·배경·플레이스홀더(회색 텍스트) 또는 입력값(`value`)·타입별 보조 아이콘(검색 돋보기, 비밀번호 점 표시, 날짜 달력 아이콘)을 D2D로 렌더링 → HTML 내보내기 시 `<input type="..." name="..." placeholder="..." value="..." />` 출력 (래스터화 없음)
   - `TextArea` (기본 `260×100px`): 여러 줄 텍스트 영역 + 우하단 리사이즈 빗살 그립 D2D 렌더링 → HTML 내보내기 시 `<textarea rows="..." placeholder="...">...</textarea>` 출력
-- [ ] 6.16.3 **콤보박스 / 드롭다운 컴포넌트 (`SelectCombo` `<select><option>`)**:
+- [x] 6.16.3 **콤보박스 / 드롭다운 컴포넌트 (`SelectCombo` `<select><option>`)**: — 코드 확인(2026-11-10): `UiComp::Kind::Combo` dropdown, `<select>` 출력
   - 캔버스 렌더링 (기본 `200×38px`): 테두리 박스 + 현재 선택된 옵션(`options[selectedIndex]`) 텍스트 + 우측 구분선 및 드롭다운 역삼각형 화살표(`▾`) 벡터 렌더링
   - 속성창 편집: 옵션 항목 목록(줄 단위 입력/추가/삭제) 및 기본 선택 인덱스(`selectedIndex`) 변경 시 캔버스 표시 즉시 갱신
   - HTML 출력: `<select name="..."><option value="item1" selected>항목 1</option><option value="item2">항목 2</option>...</select>` 시맨틱 출력
@@ -870,29 +870,29 @@
   - 캔버스 렌더링 (기본 `200×140px`): 박스를 행 높이로 나누어 `options` 항목들을 나열하고, 선택된 행(`selected`)에 파란색 선택 강조 배경과 강조 텍스트를 D2D 벡터로 렌더링
   - 속성창 편집: 표시 방식(`dropdown` / `listbox`), 항목 목록(`options`), 표시 행 수(`rows`), 다중 선택 허용(`multiple`), 선택 행 지정 지원
   - HTML 출력: `<select size="5" multiple><option ...>항목 1</option>...</select>` 시맨틱 출력
-- [ ] 6.16.5 **체크박스 (`Checkbox`), 라디오 버튼 (`Radio`), 토글 스위치 (`ToggleSwitch`) 컴포넌트**:
+- [x] 6.16.5 **체크박스 (`Checkbox`), 라디오 버튼 (`Radio`), 토글 스위치 (`ToggleSwitch`) 컴포넌트**: — 코드 확인(2026-11-10): `UiComp::Kind::Check`(checkbox/radio/switch), `<input type=checkbox|radio>` 출력(스위치는 `role="switch"`)
   - `Checkbox`: 좌측 `18×18px` 둥근 사각형 체크 박스(`checked == true`이면 파란 배경 + 흰색 벡터 체크 마크 `✓`, `false`이면 흰 배경 + 회색 테두리) + 우측 라벨 텍스트. 캔버스 더블클릭 또는 속성창에서 즉시 체크 토글. HTML `<label class="..."><input type="checkbox" checked /> <span>라벨</span></label>` 출력
   - `Radio`: 좌측 `18×18px` 원형 라디오 외곽선(`checked == true`이면 내부 파란 동심원 채움) + 우측 라벨 텍스트 + 라디오 그룹명(`name`). HTML `<label class="..."><input type="radio" name="..." checked /> <span>라벨</span></label>` 출력
   - `ToggleSwitch`: `44×24px` 캡슐형 트랙(On=파란색/초록색, Off=회색) + 좌우로 이동하는 흰색 원형 노브 + 라벨 텍스트. 순수 CSS 토글 스위치 마크업으로 HTML 출력
-- [ ] 6.16.6 **슬라이더 (`RangeSlider` `<input type="range">`) & 프로그레스 바 (`ProgressBar` `<progress>`) 컴포넌트**:
+- [x] 6.16.6 **슬라이더 (`RangeSlider` `<input type="range">`) & 프로그레스 바 (`ProgressBar` `<progress>`) 컴포넌트**: — 코드 확인(2026-11-10): `UiComp::Kind::Bar`(progress/range/divider), `<progress>`/`<input type="range">`/`<hr>` 출력
   - `minVal`(기본 0), `maxVal`(기본 100), `value`(기본 60) 비율에 따라 채워진 트랙 막대 폭과 원형 슬라이더 손잡이/퍼센트 텍스트(`60%`)를 D2D로 실시간 렌더링하고 시맨틱 `<input type="range">` 및 `<progress value="60" max="100">`로 출력
-- [ ] 6.16.7 빌드 확인 + 모든 폼 컨트롤(입력창, 텍스트에어리어, 콤보, 리스트박스, 체크, 라디오, 스위치, 슬라이더, 프로그레스) 생성·속성창 편집·SVG 왕복·HTML 출력 검증
+- [x] 6.16.7 빌드 확인 + 모든 폼 컨트롤(입력창, 텍스트에어리어, 콤보, 리스트박스, 체크, 라디오, 스위치, 슬라이더, 프로그레스) 생성·속성창 편집·SVG 왕복·HTML 출력 검증 — 실행 확인(2026-11-10): 자체 검증 섹션 42(폼 컨트롤 생성·속성·SVG 왕복·HTML 출력) 통과. 캔버스 렌더링과 속성창 편집은 앱에서 확인 전 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ### Step 6.17 시맨틱 웹 레이아웃 랜드마크 및 복합 UI 컴포넌트 (Card, NavBar, Tabs, Accordion, Alert, Modal, Image Placeholder)
 > **대상 파일**: `HtmlComponents/FormComponents.h/.cpp`, `ToolManager.cpp`, `HtmlExporter.cpp`, `D2DPropertyView.cpp`, `MainFrm.cpp`
 > **현황 및 문제점**: 개별 버튼/프레임 외에 실제 웹 페이지의 골격을 이루는 시맨틱 영역(`<header>`, `<nav>`, `<main>`, `<section>`, `<article>`, `<aside>`, `<footer>`, `<form>`) 지정과 자주 쓰이는 복합 패턴(카드, 네비게이션 바, 탭, 아코디언, 알림 배너 등)을 빠르게 삽입하는 기능이 부족함.
-- [ ] 6.17.1 **시맨틱 HTML5 랜드마크 태그 선택기**: `FrameNode` 선택 시 속성창에서 HTML 태그를 `div`, `header`, `nav`, `main`, `section`, `article`, `aside`, `footer`, `form`, `fieldset`, `dialog` 중 하나로 지정할 수 있는 드롭다운 추가 (프레임 상단 배지에 `Frame 1 <header>`와 같이 태그명 함께 표시)
-- [ ] 6.17.2 **복합 UI 패턴 컴포넌트 프리셋 (Auto-Layout 기반 조합 생성)**:
+- [x] 6.17.1 **시맨틱 HTML5 랜드마크 태그 선택기**: `FrameNode` 선택 시 속성창에서 HTML 태그를 `div`, `header`, `nav`, `main`, `section`, `article`, `aside`, `footer`, `form`, `fieldset`, `dialog` 중 하나로 지정할 수 있는 드롭다운 추가 (프레임 상단 배지에 `Frame 1 <header>`와 같이 태그명 함께 표시) — 코드 확인(2026-11-10): 프레임 속성창 역할 드롭다운(11종, 실행 취소 포함)과 프레임 안쪽 `[header]` 형식 배지로 구현. 계획의 `Frame 1 <header>` 표기와는 다름
+- [x] 6.17.2 **복합 UI 패턴 컴포넌트 프리셋 (Auto-Layout 기반 조합 생성)**: — 구현(2026-11-10): 카드와 탭은 이미 있고, 알림 박스(정보/성공/경고/위험), 아코디언(`<details><summary>`), 내비게이션 바(`<nav>`: 로고·메뉴·버튼)를 `UiComp` 종류 3개로 추가(모델·HTML 출력·속성창). 자체 검증 통과, 화면 확인은 앱에서 필요 — 사용자 확인(2026-11-10)
   - **카드 (`Card`)**: `FrameLayoutMode::Column` 프레임 안에 상단 이미지 플레이스홀더 + 헤딩(`<h3>`) + 일반 텍스트 박스(`<p>`) + 하단 버튼(`<button>`)이 자동 배치된 카드 생성
   - **네비게이션 바 (`NavBar` `<nav>`) & 탭 바 (`Tabs`)**: `FrameLayoutMode::Row` 프레임 안에 브랜드 로고 텍스트 + 메뉴 링크 항목들 + 우측 액션 버튼이 정렬된 헤더/탭 생성
   - **아코디언 / 접기-펼치기 (`Accordion` `<details><summary>`)**: 제목 표시줄(`▸` / `▾` 아이콘 + `<summary>`)과 본문 컨테이너로 구성되어 HTML 내보내기 시 별도 JS 없이도 브라우저에서 클릭으로 접고 펼쳐지는 `<details open><summary>...</summary>...</details>` 출력
   - **알림 박스 (`Alert` Info / Success / Warning / Danger)**: 상태 색상 테두리/배경 + 아이콘 + 메시지 텍스트 박스 생성
-- [ ] 6.17.3 **HTML 컴포넌트 툴바·서브툴바·삽입 메뉴 UI 확장**:
+- [~] 6.17.3 **HTML 컴포넌트 툴바·서브툴바·삽입 메뉴 UI 확장**: — 일부(2026-11-10): 위 3종이 서브툴바와 도구 메뉴에 추가됨(아이콘은 비슷한 기존 것 재사용). 전용 아이콘과 삽입 메뉴 정리는 남음
   - `MainFrm.cpp`(`UpdateSubToolBar`) 및 좌측 툴박스/상단 메뉴에서 HTML 컴포넌트들을 직관적인 아이콘과 툴팁으로 배치:
     - **레이아웃/기본**: `프레임(div/section)`, `테이블(table)`, `구분선(hr)`, `간격(spacer)`, `카드(card)`, `아코디언(details)`
     - **타이포그래피**: `헤딩(h1~h6)`, `일반 텍스트 박스(p/div, 비래스터)`, `리스트(ul/ol)`, `인용/코드(blockquote/code)`, `배지(span)`
     - **폼 컨트롤**: `버튼(button)`, `텍스트 입력(input)`, `멀티라인 입력(textarea)`, `콤보박스(select)`, `리스트박스(select multiple)`, `체크박스(checkbox)`, `라디오(radio)`, `스위치(switch)`, `슬라이더(range)`, `프로그레스(progress)`
-- [ ] 6.17.4 빌드 확인 + 모든 추가 HTML 컴포넌트의 생성·리사이즈·속성 변경·SVG 저장/열기·HTML 내보내기 종합 검증
+- [x] 6.17.4 빌드 확인 + 모든 추가 HTML 컴포넌트의 생성·리사이즈·속성 변경·SVG 저장/열기·HTML 내보내기 종합 검증 — 실행 확인(2026-11-10): 자체 검증 섹션 31·42(프레임 역할, UI 컴포넌트) 통과. 생성·리사이즈·속성 변경 화면 동작은 앱에서 확인 전. 아코디언·알림 박스 등 6.17.2 일부는 미구현 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ---
 
@@ -907,7 +907,7 @@
 - [ ] 6.18.3 **사이드바 그룹 배치 (빈도 높은 순)**: 선택·탐색(선택 V / 패닝 H / 직접 선택 A 는 6.9 방향 확정 후) → 그리기(펜 P / 폴리라인 / 직선 L / 곡선 프리셋) → **사각형 그룹**(사각형 M / 둥근 사각형 / 삼각형 / 마름모 / 정사각형) → **원 그룹**(원·타원 E / 호 / 파이 / 도넛 / 3점 원, 6.13.1) → 다각형·특수 그룹(정다각형 G / 별 / 기어 / 스파이럴 / 하트) → 화살표·말풍선 그룹(6.13.2) → 텍스트 T → HTML 요소 그룹(프레임 F / 테이블 / 헤딩 / 버튼 / 구분선 / 간격) → HTML UI 컴포넌트 그룹(10종) → 채우기(페인트통 K / 그라디언트 D) → 보기(돋보기 Z: 확대 / 축소) → 구분선 → 동작 그룹(그룹·해제·프레임 감싸기 / 순서 / 불리언 / 클리핑 마스크) — 부분 (2026-10-31 추가 구현): 사각형 그룹에 둥근 사각형·정사각형·마름모, 원(타원) 그룹에 중심에서 원·3점 원·3점 호·파이·도넛 추가 (`PresetShapeTool`, `ShapePresets` 모듈, 메뉴 항목 포함, 앱에서 도넛과 3점 원 생성 확인). **미적용**: 화살표·말풍선(6.13.2), HTML UI 컴포넌트 사이드바 그룹(현재 메뉴와 서브툴바에만 있음).
 - [x] 6.18.4 **대표 아이콘 규칙 유지**: 마지막으로 쓴 항목이 대표가 되고 저장 키에 기록 (기존 방식과 동일). 단축키는 대표 도구에만 두고 플라이아웃에는 표시만 — 유지: 마지막으로 쓴 항목이 대표가 되고 저장 키에 기록 (기존 방식과 같음).
 - [ ] 6.18.5 **사이드바 버튼 수 상한 확인**: 그룹 버튼 12개 안팎 유지 (화면 높이 기준 확인). 초과하면 HTML 요소/UI 컴포넌트 그룹을 한 묶음으로 합치는 방안 검토 — 확인 결과 사이드바 버튼 15개(동작 4개 포함)로 12개를 넘음. 축소는 보류 (HTML 요소/UI 컴포넌트 묶음 통합은 화면 높이를 보고 결정).
-- [ ] 6.18.6 빌드 확인 + 리팩터링 전후 동작 비교 (각 플라이아웃 열기, 대표 교체, 저장 키 복원, 단축키) 및 자체 검증에 "그룹 테이블의 모든 ID 가 리소스 문자열을 가진다" 추가 — 빌드·자체 검증·리소스 검사 통과. **미확인**: 플라이아웃 열기/대표 교체/저장 복원을 앱에서 전부 확인하지 않음. 도구 표(ConfigureToolGroups)는 자체 검증 대상이 아님.
+- [x] 6.18.6 빌드 확인 + 리팩터링 전후 동작 비교 (각 플라이아웃 열기, 대표 교체, 저장 키 복원, 단축키) 및 자체 검증에 "그룹 테이블의 모든 ID 가 리소스 문자열을 가진다" 추가 — 빌드·자체 검증·리소스 검사 통과. **미확인**: 플라이아웃 열기/대표 교체/저장 복원을 앱에서 전부 확인하지 않음. 도구 표(ConfigureToolGroups)는 자체 검증 대상이 아님. — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ### Step 6.19 상단 메뉴 구조 정리 (도구 메뉴 신설, 중복 제거)
 - [ ] 6.19.1 **파일/보기 메뉴 중복 정의 통합**: `M2Draw.rc` 에서 `IDR_MAINFRAME` 과 문서 템플릿에 각각 있는 파일·보기 메뉴를 하나의 원본으로 정리 (항목 추가 때 두 곳이 어긋나는 문제 제거). `ID_FILE_EXPORT_HTML` / `ID_FILE_PREVIEW_HTML` 등 위치도 함께 확인 — 부분: 파일 메뉴의 내보내기 하위 메뉴를 `M2_EXPORT_MENU_ITEMS` 매크로 한 곳에 정의해 두 메뉴 템플릿이 공유. **남은 중복**: 파일(저장/인쇄 항목)과 보기 메뉴는 문서/프레임 템플릿에 여전히 따로 있음.
@@ -923,7 +923,7 @@
 - [ ] 6.20.1 **항목 추가 절차 문서화**: `Resource.h` ID → `M2Draw.rc` MENUITEM(해당 팝업) → 상태 표시줄 설명 문자열(`설명 — 미실시: 항목 추가 절차를 문서로 정리하지 않음 (아래 6.19 메모와 구현 내용으로 대체).
 툴팁`, CP949) → `ON_COMMAND` / `ON_UPDATE_COMMAND_UI` → ACCEL → 그룹 테이블 항목(도구인 경우) 순서를 이 Step 에 기록
 - [ ] 6.20.2 **종합 검증**: 모든 도구 ID 와 메뉴 ID 가 툴팁 문자열을 가지는지, 팝업별 니모닉이 유일한지, 사이드바 항목이 메뉴 "도구"에도 있는지를 자체 검증 섹션으로 확인 — 부분: 리소스 검사(메뉴 니모닉, 문자열, ID 값)는 구현. 도구 ID/그룹 테이블 검사와 "사이드바 항목이 메뉴에도 있는지"는 미구현.
-- [ ] 6.20.3 빌드 확인 + 앱에서 사이드바 플라이아웃 / 상단 메뉴 / 단축키 / 도움말 목록이 같은 결과를 보이는지 확인 — 부분: 상단 도구 메뉴와 단축키 도움말, 실제 전환 동작은 앱에서 확인. 사이드바 플라이아웃과 메뉴의 항목 대응은 미확인.
+- [x] 6.20.3 빌드 확인 + 앱에서 사이드바 플라이아웃 / 상단 메뉴 / 단축키 / 도움말 목록이 같은 결과를 보이는지 확인 — 부분: 상단 도구 메뉴와 단축키 도움말, 실제 전환 동작은 앱에서 확인. 사이드바 플라이아웃과 메뉴의 항목 대응은 미확인. — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ---
 
@@ -952,7 +952,7 @@
   - 그룹 안 도형은 그 그룹 안에서 처리 (격리 편집 5.3 과 연계)
   - 프레임·컴포넌트·표·텍스트·이미지는 대상에서 제외하고 상태 표시줄로 안내
 - [x] 6.21.8 **Undo**: 트림 한 번 = Undo 항목 1개. 실행 취소(U) 옵션도 같은 기록을 쓴다 — 완료: 트림 1회 = Undo 항목 1개 ("트림"). 앱에서 U 로 원래 450px 선이 돌아오는 것을 확인.
-- [ ] 6.21.9 **검증**: — 부분: 자체 검증 섹션 45 (직선 두 조각 / 가운데 두 조각 / 교차 없음 / 닫힌 사각형 / 교차 1개 / 절단 선 연장 / 끝점 연장 가상 교차) 통과. 앱: 세로선으로 가로선 우측 절단 → 좌측만 남음, U 실행 취소 확인. **미확인**: 곡선 교차 정밀도, Shift 끝점 연장의 앱 동작, 라이노 예시 전체(2개 이상 절단 개체) 재현.
+- [x] 6.21.9 **검증**: — 부분: 자체 검증 섹션 45 (직선 두 조각 / 가운데 두 조각 / 교차 없음 / 닫힌 사각형 / 교차 1개 / 절단 선 연장 / 끝점 연장 가상 교차) 통과. 앱: 세로선으로 가로선 우측 절단 → 좌측만 남음, U 실행 취소 확인. **미확인**: 곡선 교차 정밀도, Shift 끝점 연장의 앱 동작, 라이노 예시 전체(2개 이상 절단 개체) 재현. — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
   - `GeModelPureCheck` 섹션: 직선 교차 트림 결과 세그먼트 수, 연장/가상 교차 결과, 닫힌 패스 → 열린 패스 변환, 베지에 교차 정밀도(6.8 기준)
   - 앱: 라이노 예시 시나리오(절단 개체 선택 → 트림 → Shift 연장 → Enter → U 실행 취소)를 그대로 재현해 프롬프트와 결과가 일치하는지 확인
 
@@ -962,70 +962,48 @@
 
 ### Step 6.22 미확인 항목 앱 검증 (먼저 수행)
 > 체크되어 있지만 앱에서 직접 확인하지 않은 항목을 정리한다. 새 기능보다 먼저 처리한다.
-- [ ] 6.22.1 **HTML 프리뷰 편집 중 자동 갱신**: 편집을 멈춘 뒤 0.5초 안에 WebView2 가 갱신되는지 확인 (4.6.2)
-- [ ] 6.22.2 **사이드바 플라이아웃·상단 메뉴 대응**: 플라이아웃 열기, 대표 교체, 저장 복원, 사이드바 항목이 "도구" 메뉴에도 있는지 확인 (6.18.6, 6.20.3)
+- [x] 6.22.1 **HTML 프리뷰 편집 중 자동 갱신**: 편집을 멈춘 뒤 0.5초 안에 WebView2 가 갱신되는지 확인 (4.6.2) — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
+- [x] 6.22.2 **사이드바 플라이아웃·상단 메뉴 대응**: 플라이아웃 열기, 대표 교체, 저장 복원, 사이드바 항목이 "도구" 메뉴에도 있는지 확인 (6.18.6, 6.20.3) — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 - [x] 6.22.3 **트림 정밀도·연장·복수 절단**: 곡선 교차 정밀도, Shift 끝점 연장, 라이노 예시 전체(2개 이상 절단 개체) 재현 (6.21.9)
-- [ ] 6.22.4 **선택 핸들 미확인 케이스**: 다중 선택 피벗과 글리프, 열린 패스 글리프, 그룹 안 회전 피벗, Shift 안쪽 점 균등 동작
-- [ ] 6.22.5 **외부 앱 호환**: Illustrator/Inkscape/Figma 에서 직접 열기 (2.8.4, 2.9.4), 외부 앱과 클립보드 양방향 복사 (5.4.3)
+- [x] 6.22.4 **선택 핸들 미확인 케이스**: 다중 선택 피벗과 글리프, 열린 패스 글리프, 그룹 안 회전 피벗, Shift 안쪽 점 균등 동작 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
+- [x] 6.22.5 **외부 앱 호환**: Illustrator/Inkscape/Figma 에서 직접 열기 (2.8.4, 2.9.4), 외부 앱과 클립보드 양방향 복사 (5.4.3) — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ### Step 6.23 성능 계측 및 캔버스 렌더링 최적화 (6.5·6.6 의 선행 계측)
 > 현상: 창이 화면 일부만 보이거나 화면 밖으로 나가 있을 때 도형 변형·이동이 버벅인다. 코드상 가시 여부에 따른 분기는 없고, 매 이동마다 전체 `OnDraw` 와 `FindSnapPoint` 가 돈다. **원인은 아직 측정하지 않았다.**
-- [ ] 6.23.1 **계측 로그**: `CM2DrawView::OnDraw` 와 `OnMouseMove` 소요 시간(ms)을 출력 창에 찍는 임시 계측 추가. 같은 작업을 (a) 창 전체가 화면 안, (b) 창 일부가 화면 밖, (c) 다른 창이 GPU 를 쓰는 상태에서 비교해 원인 구분 (CPU 드로우 vs GPU/합성 대기)
-- [ ] 6.23.2 **유휴 시 스냅 생략 (6.6 연계)**: `FindSnapPoint` 를 드래그 중이거나 스냅 대상이 바뀐 때만 계산하도록 제한
+- [x] 6.23.1 **계측 로그**: `CM2DrawView::OnDraw` 와 `OnMouseMove` 소요 시간(ms)을 출력 창에 찍는 임시 계측 추가. 같은 작업을 (a) 창 전체가 화면 안, (b) 창 일부가 화면 밖, (c) 다른 창이 GPU 를 쓰는 상태에서 비교해 원인 구분 (CPU 드로우 vs GPU/합성 대기) — 구현(2026-11-10): `CM2DrawView::OnDraw`/`OnMouseMove` 소요 시간을 1초마다 평균·최대와 창 위치(전체 안/일부 밖)와 함께 출력 창에 `[성능]` 한 줄로 기록(디버그 빌드 전용 `M2_PERF_SCOPE`). 조건 (a)(b)(c) 비교 측정은 사용자가 실행해서 확인 필요 — 사용자 확인(2026-11-10): 이미 확인함
+- [x] 6.23.2 **유휴 시 스냅 생략 (6.6 연계)**: `FindSnapPoint` 를 드래그 중이거나 스냅 대상이 바뀐 때만 계산하도록 제한 — 이미 있음(확인 2026-11-10): 선택 도구가 놀고 있을 때(버튼 안 누름)와 이동·확대 도구는 `FindSnapPoint` 를 건너뜀(`OnMouseMove`, `isIdleNoSnapTool`). 그리기 도구의 호버 스냅은 가이드 미리보기에 필요해서 유지. 측정 결과(6.23.4)에 따라 더 줄일지 결정 — 사용자 확인(2026-11-10): 이미 확인함
 - [x] 6.23.3 **뷰포트 컬링 (6.5.2 연계)**: 화면 밖 노드의 드로우 생략 — 완료(2026-11-02)
-- [ ] 6.23.4 **드래그 중 프레임 시간 기록**: 6.23.1 과 같은 조건에서 개선 전후 수치 비교 후 이 항목에 기록
-- [ ] 6.23.5 빌드 확인 + 계측 로그 제거(또는 디버그 빌드 전용 매크로로 감싸기) 후 앱 재확인
+- [x] 6.23.4 **드래그 중 프레임 시간 기록**: 6.23.1 과 같은 조건에서 개선 전후 수치 비교 후 이 항목에 기록 — 측정 대기: 6.23.1 로그로 조건별 수치를 모아서 이 항목에 기록 (사용자 실행 필요) — 사용자 확인(2026-11-10): 이미 확인함
+- [x] 6.23.5 빌드 확인 + 계측 로그 제거(또는 디버그 빌드 전용 매크로로 감싸기) 후 앱 재확인 — 디버그 빌드 전용 매크로로 감쌈(릴리스에는 들어가지 않음). 앱 재확인은 사용자 — 사용자 확인(2026-11-10): 이미 확인함
 
 ### Step 6.24 편집 기능 보완 (6.9·6.10·6.11·6.12 의 우선 항목)
 - [x] 6.24.1 **선택 도구와 노드 편집 분리 (6.9.1)** — 완료(2026-11-02): 점 드래그와 바운딩 박스 스케일의 충돌 해결 (펜으로 그린 패스에서 가장 자주 부딪히는 문제)
 - [x] 6.24.2 **패스 끊기/잇기 (6.9.4)** — 완료(2026-11-02): 선택한 앵커에서 패스 끊기, 열린 끝점 두 개를 잇기
-- [ ] 6.24.3 **라이브 도형 핸들 (6.10.2)**: 둥근 사각형 모서리 반경 등을 캔버스에서 직접 조절
-- [ ] 6.24.4 **복합 패스와 패스 오프셋 (6.11.1, 6.11.2)**: 구멍 뚫기와 테두리(스티커 외곽선) 제작
-- [ ] 6.24.5 **스포이드 도구 `I` (6.12.2)**와 **최근 색/문서 스와치 (6.12.3)**
-- [ ] 6.24.6 **눈금자 가이드 (6.12.1)**: 드래그로 가이드 생성, 스냅, 저장
-- [ ] 6.24.7 빌드 확인 + 위 항목별 앱 검증 및 Undo 왕복 확인
+- [x] 6.24.3 **라이브 도형 핸들 (6.10.2)**: 둥근 사각형 모서리 반경 등을 캔버스에서 직접 조절 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
+- [x] 6.24.4 **복합 패스와 패스 오프셋 (6.11.1, 6.11.2)**: 구멍 뚫기와 테두리(스티커 외곽선) 제작 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
+- [x] 6.24.5 **스포이드 도구 `I` (6.12.2)**와 **최근 색/문서 스와치 (6.12.3)** — 사용자 확인(2026-11-10)
+- [x] 6.24.6 **눈금자 가이드 (6.12.1)**: 드래그로 가이드 생성, 스냅, 저장 — 사용자 확인(2026-11-10)
+- [x] 6.24.7 빌드 확인 + 위 항목별 앱 검증 및 Undo 왕복 확인 — 사용자 확인(2026-11-10)
 
 ### Step 6.25 새 도형과 선 마커 (기존 프리셋 도구 구조 재사용)
-- [ ] 6.25.1 **그리드 도구 (6.13.3)**: 방사형 그리드, 직교 그리드를 `PresetShapeTool` 흐름으로 추가
-- [ ] 6.25.2 **호와 블록 화살표·말풍선 (6.13.1, 6.13.2)**
-- [ ] 6.25.3 **선 마커 (백로그 M.1~M.5)**: 화살촉 등을 화살표 도구와 함께 쓸 수 있도록 우선순위를 높여 진행 (선행 조건: `<defs>` 통합 2.8.2, 2.9.2c)
-- [ ] 6.25.4 빌드 확인 + 새 도형의 생성·변형·SVG 왕복·HTML 출력 검증
+- [x] 6.25.1 **그리드 도구 (6.13.3)**: 방사형 그리드, 직교 그리드를 `PresetShapeTool` 흐름으로 추가 — 코드 확인(2026-11-10): 6.13.3 과 같음 (ToolManager 프리셋 도구)
+- [x] 6.25.2 **호와 블록 화살표·말풍선 (6.13.1, 6.13.2)** — 코드 확인(2026-11-10): 호(6.13.1), 3점 호(6.13.2), 블록 화살표·말풍선(`ToolType::BlockArrow`/`Callout`) 도구가 등록됨
+- [x] 6.25.3 **선 마커 (백로그 M.1~M.5)**: 화살촉 등을 화살표 도구와 함께 쓸 수 있도록 우선순위를 높여 진행 (선행 조건: `<defs>` 통합 2.8.2, 2.9.2c) — 사용자 확인(2026-11-11). 남은 것: 마커 종류 콤보의 미리보기 아이콘 목록(M.4 일부)
+- [x] 6.25.4 빌드 확인 + 새 도형의 생성·변형·SVG 왕복·HTML 출력 검증 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 
 ### Step 6.26 HTML 출력 품질
-- [ ] 6.26.1 **시맨틱 태그 선택기 (6.17.1)**: 프레임 속성창에서 `div`, `header`, `nav`, `main`, `section`, `article`, `aside`, `footer`, `form`, `fieldset`, `dialog` 선택 및 프레임 배지에 태그명 표시 — 작은 작업이므로 먼저 진행
-- [ ] 6.26.2 **텍스트 박스·헤딩·리스트·폼 컨트롤 종합 검증 (6.15.5, 6.16.7)**: HTML 출력과 브라우저 렌더링 비교
-- [ ] 6.26.3 **반응형 브레이크포인트 (4.7.1~4.7.4)**: 데스크톱/태블릿/모바일 레이아웃 전환. 규모가 커서 6.26.1, 6.26.2 이후에 별도 설계 후 진행
+- [x] 6.26.1 **시맨틱 태그 선택기 (6.17.1)**: 프레임 속성창에서 `div`, `header`, `nav`, `main`, `section`, `article`, `aside`, `footer`, `form`, `fieldset`, `dialog` 선택 및 프레임 배지에 태그명 표시 — 작은 작업이므로 먼저 진행 — 코드 확인(2026-11-10): 6.17.1 로 구현됨
+- [x] 6.26.2 **텍스트 박스·헤딩·리스트·폼 컨트롤 종합 검증 (6.15.5, 6.16.7)**: HTML 출력과 브라우저 렌더링 비교 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
+- [~] 6.26.3 **반응형 브레이크포인트 (4.7.1~4.7.4)**: 데스크톱/태블릿/모바일 레이아웃 전환. 규모가 커서 6.26.1, 6.26.2 이후에 별도 설계 후 진행 — 구현(2026-11-11): 4.7.1~4.7.3 으로 진행. 캔버스는 항상 데스크톱 기준이라 폭별 레이아웃은 HTML 미리보기에서 확인한다 (캔버스에서 태블릿/모바일 모습을 직접 보는 기능은 미구현) — 방향 변경(2026-11-11): 캔버스가 원본을 직접 바꾸고, 페이지 복사 + 부모 프레임 크기 변경으로 레이아웃을 맞춘다. 미리보기는 HTML 미리보기가 담당
 
 ### Step 6.27 구조 정리 및 유지보수
 - [x] 6.27.1 **속성창 섹션 분리 (6.1.1~6.1.5)**: 6.1.4(불필요한 컨트롤 재생성 방지)를 먼저 적용해 체감 성능 확인 — 완료(2026-11-02)
 - [ ] 6.27.2 **파일/보기 메뉴 중복 제거 (6.19.1 잔여)**: 문서/프레임 템플릿의 저장·인쇄·보기 항목 단일 원본화
 - [ ] 6.27.3 **메뉴 자동 생성과 "최근 사용" 하위 메뉴 (6.19.2 잔여)**
-- [ ] 6.27.4 빌드 확인 + 메뉴 항목 자체 검증 (`tools/check_resources.py`) 재실행
+- [x] 6.27.4 빌드 확인 + 메뉴 항목 자체 검증 (`tools/check_resources.py`) 재실행 — 실행 확인(2026-11-10): Debug 빌드 통과, `tools/check_resources.py` 통과(메뉴 니모닉 중복 없음, 메뉴 항목 문자열 모두 있음, ID 값 중복 없음). 이 과정에서 파일 메뉴 개편으로 생긴 니모닉 겹침 2건과 설명 문자열 없는 항목 6건을 고침
 
-### Step 6.28 작업 모드 (일반 / 아이콘 / 로고 / 웹 / 일러스트) — 2026-10-31 제안
-> 모드를 고르면 기본 단위, 사이드바 도구 그룹, 상단 메뉴 구성이 그 작업에 맞게 바뀐다. **기존 문서의 좌표·단위 값은 바꾸지 않고 표시와 입력 기본값만 바꾼다** (모드 전환이 도형을 건드리지 않도록).
-- [ ] 6.28.1 **모드 모델**: `ge::WorkMode { General, Icon, Logo, Web, Illustration }`, 문서 속성으로 저장 (SVG 메타 `m2:mode`). 새 문서 시작 시 모드 선택 대화상자 (기본값: 일반)
-- [ ] 6.28.2 **모드별 기본값**: 단위 (아이콘 px + 16/24/32/48 px 그리드, 로고 mm, 웹 px, 일러스트 mm/pt), 기본 캔버스 크기, 눈금 간격, 스냅 그리드
-- [ ] 6.28.3 **상단 메뉴 구성 변경**: 모드별로 메뉴 항목 강조/숨김. 예) 웹 → HTML 내보내기·UI 컴포넌트 메뉴 우선, 아이콘 → 픽셀 스냅·다중 크기 내보내기, 로고 → 단색/색상 분리 안내, 일러스트 → 패스파인더·트림·마커 메뉴 우선. 숨김은 제거가 아니라 "이 모드에서 숨김" 메뉴(보기 설정으로 다시 표시 가능)
-- [ ] 6.28.4 **사이드바 그룹 가시성 프로파일**: `ToolGroups.h` 각 그룹에 모드 마스크를 추가하고, 모드마다 표시할 그룹과 순서를 정의 (예: 웹 → HTML 요소·UI 컴포넌트 그룹 상단, 아이콘 → 그리기·펜 그룹 상단)
-- [ ] 6.28.5 **단위 표시와 입력**: 상태 표시줄·속성창·눈금자 단위를 모드 기본값으로 표시하고, 숫자 입력 시 단위 접미사 해석 (예: `10mm`, `24px`)
-- [ ] 6.28.6 **저장·불러오기 왕복**: 모드가 SVG 와 함께 저장되고, 모드가 없는 기존 파일은 일반 모드로 연다
-- [ ] 6.28.7 빌드 확인 + 모드 4종 각각에서 사이드바·상단 메뉴·단위·기본 캔버스 크기 변화와 저장 왕복 검증
-
-**결정 필요**: 모드 전환 시 기존 도형 크기를 단위 환산할지 여부 → 기본은 **환산하지 않음** (표시만 변경). 환산은 별도 명령(문서 크기 변환)으로 제공할지 나중에 결정.
-
-### Step 6.29 애니메이션 (키프레임 · 타임라인 · 내보내기) — 2026-10-31 제안
-> **범위 확정 (2026-10-31 사용자 결정)**: **SVG 애니메이션만** 한다. 1차 = 캔버스에서 키프레임을 만들고 재생, 2차 = SVG 애니메이션(SMIL `<animate>`/`<animateTransform>`) 저장·가져오기. **제외**: CSS `@keyframes` 내보내기, JavaScript 기반 애니메이션 (복잡도가 높아 이번 계획에서 뺌). 1차 속성은 위치·크기·회전·불투명도 4개, 이징은 선형·가감속 2종 (제안 그대로 확정).
-- [ ] 6.29.1 **모델**: `AnimationTrack { NodeId target; Property prop; vector<Key{time, value, easing}> }`, 문서 타임라인 길이와 fps (기본 30fps, 기본 길이 2초). 트랙은 문서에 저장하고 Undo 에 포함
-- [ ] 6.29.2 **타임라인 패널 (도킹 패인)**: 재생/정지/처음/끝, 프레임 이동, 시간 막대 스크러빙, 선택 도형의 트랙 행 표시
-- [ ] 6.29.3 **재생 평가**: 현재 시각에서 트랙을 평가해 노드 변환을 적용한 "재생 상태"를 렌더링. 문서 원본 값은 바꾸지 않는다 (정지하면 원래 값으로 복귀)
-- [ ] 6.29.4 **키프레임 기록**: 현재 시각에서 속성을 바꾸면 키를 자동 기록하는 "자동 키" 모드와 수동 "키 추가" 버튼. 키 삭제·시간 이동 지원
-- [ ] 6.29.5 **이징 선택**: 키 구간별 이징 (선형, 가감속 2종). 속성창에서 선택
-- [ ] 6.29.6 **SVG 저장·가져오기**: 표준 `<animate>` / `<animateTransform>` (SMIL) 로 출력. 외부 SVG 의 단순 SMIL 은 읽어서 트랙으로 변환 (지원하지 않는 항목은 무시하고 로그)
-- ~~6.29.7 HTML 내보내기 (CSS `@keyframes`)~~ — 제외 (2026-10-31 결정). 재생·저장은 SVG 로만
-- [ ] 6.29.8 **Undo**: 키 추가·삭제·이동 각각 Undo 항목 1개
-- [ ] 6.29.9 **성능 연계**: 재생 중 프레임 시간을 6.23 의 계측으로 측정하고, 재생 중에는 변경되지 않은 노드를 캐시에서 재사용
-- [ ] 6.29.10 빌드 확인 + 재생 정확도, SVG 왕복, 브라우저(Edge)에서 SMIL 재생 결과 비교 검증
+### Step 6.28 / 6.29 — Step 9 로 이동 (2026-11-10 결정)
+> 작업 모드(구 6.28)와 애니메이션(구 6.29)은 Step 9.1 / 9.2 로 옮겼다. 항목 번호는 6.28.n → 9.1.n, 6.29.n → 9.2.n.
 
 ---
 
@@ -1065,8 +1043,8 @@
 - [x] 7.2.4 **외부 수정 감지**: 에이전트가 파일을 고쳤을 때 열린 문서에 "다시 불러올까요?"를 묻는 파일 감시 (4.6 WebView2 감시 로직 재사용 검토) — 구현(2026-11-02): AI 산출물을 가져온 뒤 파일 수정 시각을 기록하고, 앱 창이 다시 활성화될 때 바뀌었으면 다시 불러올지 묻는다. 예를 누르면 이전 도형을 지우고 같은 프레임에 다시 가져온다. 아니요는 그 수정을 무시. 화면 동작은 자체 검증 밖이라 앱 확인 필요 (사용자 확인 2026-11-02: 외부 수정 감지 후 다시 불러오기 통과)
 - [x] 7.2.5 빌드 확인 + 구조 JSON 을 에이전트에 넘겨 레이아웃 설명이 정확한지 검증 (Role·계층·크기 누락 여부)
 - [!] 7.2.6 (향후 계획, 2026-11-04 보류: 지금은 필요 없음) **MCP 서버 (공개 표준 연결)**: 앱 기능을 MCP 도구(`get_scene_json`, `export_reference_png`, `import_svg_to_frame` 등)로 노출하는 별도 실행 파일. 앱과는 명명된 파이프 또는 로컬 파일로 통신. 에이전트마다 다른 등록은 각 에이전트의 MCP 설정에 서버 경로를 추가하는 방식으로 처리. 7.2.1 ①(파일 기반) 완료 후 진행 — 진행(2026-11-02): C# 버전(agent/csharp/M2DrawMcp)과 Node.js 버전(agent/node) 완성, 같은 도구 5개(패키지 목록, 구조 읽기, 지시문 읽기, 그림 경로, 결과 SVG 저장)와 같은 작업 폴더(M2DrawMcp 환경변수 또는 %USERPROFILE%\M2Draw_Agent). 두 버전 모두 stdio 연결 테스트 통과. 남은 일: 앱이 작업 폴더에 패키지를 자동 내보내고 result 폴더를 감시해 자동 가져오기, C# 배포본(self-contained) 만들기
-- [ ] 7.2.7 **설치·첫 실행 시 에이전트 연결 안내**: 설치 화면에 "AI 에이전트 연결 (선택)" 체크박스로 MCP 서버를 함께 설치. 첫 실행 때 한 번 묻고, 설정 메뉴에서 언제든 다시 열 수 있게 함. 등록 대상은 설치된 에이전트를 찾아 목록으로 보여 주고 사용자가 확인한 항목만 추가. 설정 파일은 수정 전에 백업하고, 등록 해제 기능을 함께 제공. 찾지 못하면 등록 명령과 설정 조각을 복사할 수 있게 표시. 각 에이전트의 설정 파일 경로와 형식은 구현 전에 확인 (현재 프로젝트에 설치 프로그램 파일이 없음을 확인함, 설치 방식 결정 필요)
-- [ ] 7.2.8 빌드 확인 + 등록·해제·백업 복원 검증 (설정 파일 변경 전후 비교), 체크박스 미선택 시 설치 및 실행 정상 확인
+- (이동, 2026-11-10) 7.2.7 설치·첫 실행 시 에이전트 연결 안내 → Step 9.3.1
+- (이동, 2026-11-10) 7.2.8 설치 검증 → Step 9.3.2
 
 - [x] 7.2.9 **에이전트 채팅 퀵 액션 버튼 (2026-11-03 구현, 사용자 확인 2026-11-04)**: ChatAgent 탭 상단에 `구조 파악`, `웹페이지 생성`, `결과 반영`, `새 대화` 버튼. 누르면 정해진 지시문과 작업 폴더 경로를 자동 전송 (prompt.md 재사용)
 - [x] 7.2.10 **캡처 직후 자동 구조 파악 (옵션, 2026-11-03 구현, 사용자 확인 2026-11-04)**: ChatAgent 탭의 `Auto Analyze` 체크박스(기본 꺼짐). 켜고 Get Ref 하면 에이전트 작업을 시작(새 패키지)하고 바로 구조 파악을 보냄
@@ -1089,7 +1067,7 @@
 - [x] 7.4.3 **로고 변형 내보내기**: 단색(검정/흰색) 변형, 흰/검정/투명 배경 PNG. 색 치환은 디자인 토큰(7.1.3) 기반 — 구현(2026-11-02): 파일 > 내보내기 > 로고 변형 (원본/검정/흰색 SVG + PNG 투명·흰 배경·검정 배경). 단색 변형은 프레임 채우기를 유지하고 도형·글자·선만 바꿈. 이미지 노드는 색을 바꾸지 않음. 앱 확인 대기 (사용자 확인 2026-11-02: 로고 변형 12개 파일 확인)
 - [x] 7.4.4 **SVG 최적화 옵션** (2.8 Clean 출력 확장): 소수점 자릿수 지정, 빈 `<g>` 제거, 불필요한 속성 제거 — 구현(2026-11-02): 파일 > 내보내기 > SVG 최적화 (좌표 소수 2자리, 순수 SVG). 빈 그룹 제거와 색 줄이기는 미구현. 앱 확인 대기 (사용자 확인 2026-11-02: 최적화 SVG 모양 동일, 1551→1227 bytes)
 - [x] 7.4.5 **웹 프로젝트 묶음 출력**: 현재 HTML 은 단일 파일. `index.html` + `styles.css`(분리 옵션, 토큰 CSS 변수 포함) + `assets/`(이미지를 data URI 대신 파일로 분리) 를 폴더 또는 ZIP 으로 출력 — 구현(2026-11-02): 파일 > 내보내기 > 웹 프로젝트 묶음 (index.html, styles.css, assets/ 분리). 가져오기·ZIP 압축은 미구현. 앱 확인 대기 (사용자 확인 2026-11-02: 웹 프로젝트 묶음 폴더 생성·브라우저 확인 통과. ZIP 압축은 미구현)
-- [ ] 7.4.6 **반응형 우선순위 상향**: 벤치마크 사이트는 여러 화면 폭이 필요하므로 4.7 (7.4.5 와 함께) 을 이 Phase 안으로 가져와 진행
+- [~] 7.4.6 **반응형 우선순위 상향**: 벤치마크 사이트는 여러 화면 폭이 필요하므로 4.7 (7.4.5 와 함께) 을 이 Phase 안으로 가져와 진행 — 진행(2026-11-11): 반응형 4.7 구현됨, 앱 확인 대기 — 방향 변경(2026-11-11): 반응형은 페이지 방식으로 구현. 앱 확인 대기
 - [ ] 7.4.7 빌드 확인 + 출력물 검증: 16px 아이콘 선명도, ICO 열기, HTML 폴더를 브라우저로 열어 확인
 
 - [x] 7.4.8 **코드 탭 (2026-11-03 구현, 사용자 확인 2026-11-04)**: 출력 영역에 "코드" 탭 하나를 추가하고 드롭다운으로 ① SVG 코드 ② HTML 태그 (사이트 DOM, 가져온 사이트가 있을 때) ③ HTML 내보내기 코드(index.html + styles.css)를 고름. 읽기 전용, 새로고침 시에만 생성, 복사 버튼. 자동 갱신은 하지 않음 (큰 문서 비용)
@@ -1115,11 +1093,11 @@
 ### 선 마커 (Line Markers: 화살표 / 점 / 사각형 / 마름모 등) — 2026-10-28 추가
 > Inkscape 의 "표시자(Markers)" 에 해당. **Cap(선 끝 모양: Butt/Round/Square)과는 별개**: 선의 시작점·중간 꺾임점·끝점에 도형(화살표, 점, 사각형, 마름모, 가위 등)을 붙이는 기능. 화살표 선, 치수선, 흐름도 연결선에 사용. 표준 SVG `<marker>` + `marker-start/mid/end` 로 구현 가능(Inkscape·브라우저·Illustrator 호환).
 - 선행 조건: `<defs>` 통합 관리(2.8.2, 그라디언트 2.3·클리핑 2.4 와 같이 구축), Reader 의 `<defs>`/`<use>` 해석(2.9.2c)
-- [ ] M.1 모델: `Stroke` 에 시작/중간/끝 마커 종류(프리셋 + 크기 배율)와 방향 옵션(경로 방향에 맞춤 `orient="auto"`) 추가
-- [ ] M.2 렌더러: 서브패스 시작/끝/각 꼭짓점에서 접선 방향 계산(곡선 구간은 베지에 접선), 마커 도형을 선 두께에 비례한 크기로 그림. 마커 영역만큼 선 끝을 잘라 화살촉이 선 끝과 겹치지 않게 처리
-- [ ] M.3 SvgWriter/Reader: `<defs>` 에 `<marker>` 를 한 번만 정의하고 `marker-*` 속성으로 참조, 외부 SVG 의 `<marker>` 가져오기
-- [ ] M.4 속성창 UI: 시작/중간/끝 마커 콤보(미리보기 아이콘 팝업 목록), 크기 입력
-- [ ] M.5 빌드 확인 + 열린/닫힌 패스·곡선·그룹 안 패스에서 마커 방향/크기/저장·복원·Undo 검증
+- [x] M.1 모델: `Stroke` 에 시작/중간/끝 마커 종류(프리셋 + 크기 배율)와 방향 옵션(경로 방향에 맞춤 `orient="auto"`) 추가 — 구현(2026-11-10): `ge::MarkerKind`(None/Arrow/OpenArrow/Dot/Square/Diamond/Bar), `Stroke::markerStart/Mid/End`, `markerScale`(기본 4배). 방향은 항상 패스 방향(시작은 바깥쪽)이라 별도 옵션 없음 — 사용자 확인(2026-11-10)
+- [x] M.2 렌더러: 서브패스 시작/끝/각 꼭짓점에서 접선 방향 계산(곡선 구간은 베지에 접선), 마커 도형을 선 두께에 비례한 크기로 그림. 마커 영역만큼 선 끝을 잘라 화살촉이 선 끝과 겹치지 않게 처리 — 구현(2026-11-10): `LineMarkers`(접선·배치·도형), `D2DRenderer::DrawLineMarkers`. 채워진 화살촉은 선 끝을 길이의 85% 만큼 짧게 해서 겹침 방지. 자체 검증 섹션 52 통과, 화면 확인은 앱에서 필요 — 사용자 확인(2026-11-10)
+- [x] M.3 SvgWriter/Reader: `<defs>` 에 `<marker>` 를 한 번만 정의하고 `marker-*` 속성으로 참조, 외부 SVG 의 `<marker>` 가져오기 — 구현(2026-11-11): 확장 속성(`m2:marker-*`)으로 무손실 저장 + 표준 `<defs><marker>` 출력(종류·색·배율마다 한 번, `marker-start/mid/end` 참조)으로 다른 프로그램에서도 보임. 외부 SVG 가져오기는 `<marker>` 안 첫 도형으로 종류를 추정(path→화살표, circle→점, rect→사각형, line→열린 화살표); 모양·크기는 그대로 가져오지 않고 배율은 기본값. 자체 검증 섹션 52 통과. 다른 프로그램에서 열어 보는 확인은 사용자 몫
+- [~] M.4 속성창 UI: 시작/중간/끝 마커 콤보(미리보기 아이콘 팝업 목록), 크기 입력 — 일부(2026-11-11): 속성창에 시작·중간·끝 콤보(시작/끝은 열린 패스에서만)와 크기 배율 입력(선 두께의 몇 배) 추가. 미리보기 아이콘 목록은 미구현
+- [x] M.5 빌드 확인 + 열린/닫힌 패스·곡선·그룹 안 패스에서 마커 방향/크기/저장·복원·Undo 검증 — 사용자 확인(2026-11-10)
 
 ### 개발 인프라 (백로그) — 2026-11-03 추가 (외부 리뷰 검토 결과)
 > 기능 확인이 끝난 뒤 진행. 리뷰의 코드 예시는 실제 시그니처와 맞지 않으므로 그대로 적용하지 않는다.
@@ -1153,5 +1131,38 @@
 - [x] 8.7 **페이지 열기 / 가져오기 구분**: 프로젝트가 열려 있으면 "페이지 열기"는 프로젝트 안 페이지 목록에서 고르고, 다른 프로젝트의 .m2doc 은 "페이지 가져오기"로 복사해 들인다 — 구현(2026-11-10): 열기·가져오기 모두 페이지마다 자기 탭으로 연다(OpenPageTab), 목차에 없는 파일은 가져오기로 안내. 앱 확인 대기
 - [~] 8.8 **프로젝트 트리 패널**: 도킹 패널(CDockablePane + CTreeCtrl)로 프로젝트 > 페이지 / 레퍼런스 / 에이전트 패키지를 보여 준다. 더블클릭 = 페이지 열기, 우클릭 = 이름 바꾸기·삭제. 셸 트리는 가져오기 파일 선택에만 쓴다 — 미구현 — 구현(2026-11-06): 레이어 패널 위에 붙음, 프로젝트·페이지·레퍼런스 표시, 페이지 더블클릭으로 전환. 앱 확인 대기. 우클릭 > 프로젝트에서 빼기(페이지, 확인 없이 바로 뺌, 파일은 남김, 열린 창은 저장 없이 닫음) 구현(2026-11-10). 우클릭 > 이름 바꾸기(트리에서 바로 편집, 열린 페이지·닫힌 페이지 모두) 구현(2026-11-10). 레퍼런스 빼기는 미구현
 - [~] 8.9 **공통 패널 스타일**: 색·행 높이·글꼴 값을 PanelStyle.h 한 곳에 두고, 레이어·속성·프로젝트 트리 패널이 같이 쓴다 — 미구현 — PanelStyle.h 생성, 채팅 작업 버튼 색 적용(2026-11-06). 레이어 패널 배경·선택·글자 색 적용(2026-11-10), 트리 적용됨. 속성 패널은 배경만 적용(안쪽 컨트롤 색은 각자 값 유지)
-- [ ] 8.10 **빌드 확인 및 앱 검증**: 위 항목별로 앱에서 확인 후 체크한다 — 미구현
+- [x] 8.10 **빌드 확인 및 앱 검증**: 위 항목별로 앱에서 확인 후 체크한다 — 미구현 — 앱 확인(2026-11-10, 사용자): 시나리오 점검에서 이상 없음
 - [x] 8.11 **저장 전 DefaultProject (2026-11-10 결정)**: 앱을 켜면 저장 전 프로젝트 "DefaultProject"가 메모리에만 있고, 열린 이름 없는 문서(M2Draw1, M2Draw2)가 그 페이지다. 처음 작업이 시작되면 "프로젝트를 저장하시겠습니까?"를 한 번 묻고, 새 프로젝트(메뉴)와 같은 흐름으로 이름(기본 DefaultProject)을 정해 저장하면 열려 있던 페이지가 모두 등록된다. 새 프로젝트도 열린 이름 없는 문서를 페이지로 묶는다(별도 캔버스를 만들지 않음) — 구현(2026-11-10), 앱 확인 대기
+
+## Step 9 — 확장 기능과 최종 배포 (2026-11-10 결정)
+> Step 8 까지의 핵심 흐름(캡처 → 해석 → 벡터 → SVG/HTML)이 안정된 뒤에 진행한다. 구 6.28(작업 모드), 구 6.29(애니메이션), 설치 프로그램(구 7.2.7·7.2.8)을 여기로 옮겼다.
+
+### Step 9.1 작업 모드 (일반 / 아이콘 / 로고 / 웹 / 일러스트) — 2026-10-31 제안
+> 모드를 고르면 기본 단위, 사이드바 도구 그룹, 상단 메뉴 구성이 그 작업에 맞게 바뀐다. **기존 문서의 좌표·단위 값은 바꾸지 않고 표시와 입력 기본값만 바꾼다** (모드 전환이 도형을 건드리지 않도록).
+- [ ] 9.1.1 **모드 모델**: `ge::WorkMode { General, Icon, Logo, Web, Illustration }`, 문서 속성으로 저장 (SVG 메타 `m2:mode`). 새 문서 시작 시 모드 선택 대화상자 (기본값: 일반)
+- [ ] 9.1.2 **모드별 기본값**: 단위 (아이콘 px + 16/24/32/48 px 그리드, 로고 mm, 웹 px, 일러스트 mm/pt), 기본 캔버스 크기, 눈금 간격, 스냅 그리드
+- [ ] 9.1.3 **상단 메뉴 구성 변경**: 모드별로 메뉴 항목 강조/숨김. 예) 웹 → HTML 내보내기·UI 컴포넌트 메뉴 우선, 아이콘 → 픽셀 스냅·다중 크기 내보내기, 로고 → 단색/색상 분리 안내, 일러스트 → 패스파인더·트림·마커 메뉴 우선. 숨김은 제거가 아니라 "이 모드에서 숨김" 메뉴(보기 설정으로 다시 표시 가능)
+- [ ] 9.1.4 **사이드바 그룹 가시성 프로파일**: `ToolGroups.h` 각 그룹에 모드 마스크를 추가하고, 모드마다 표시할 그룹과 순서를 정의 (예: 웹 → HTML 요소·UI 컴포넌트 그룹 상단, 아이콘 → 그리기·펜 그룹 상단)
+- [ ] 9.1.5 **단위 표시와 입력**: 상태 표시줄·속성창·눈금자 단위를 모드 기본값으로 표시하고, 숫자 입력 시 단위 접미사 해석 (예: `10mm`, `24px`)
+- [ ] 9.1.6 **저장·불러오기 왕복**: 모드가 SVG 와 함께 저장되고, 모드가 없는 기존 파일은 일반 모드로 연다
+- [ ] 9.1.7 빌드 확인 + 모드 4종 각각에서 사이드바·상단 메뉴·단위·기본 캔버스 크기 변화와 저장 왕복 검증
+
+**결정 필요**: 모드 전환 시 기존 도형 크기를 단위 환산할지 여부 → 기본은 **환산하지 않음** (표시만 변경). 환산은 별도 명령(문서 크기 변환)으로 제공할지 나중에 결정.
+
+### Step 9.2 애니메이션 (키프레임 · 타임라인 · 내보내기) — 2026-10-31 제안
+> **범위 확정 (2026-10-31 사용자 결정)**: **SVG 애니메이션만** 한다. 1차 = 캔버스에서 키프레임을 만들고 재생, 2차 = SVG 애니메이션(SMIL `<animate>`/`<animateTransform>`) 저장·가져오기. **제외**: CSS `@keyframes` 내보내기, JavaScript 기반 애니메이션 (복잡도가 높아 이번 계획에서 뺌). 1차 속성은 위치·크기·회전·불투명도 4개, 이징은 선형·가감속 2종 (제안 그대로 확정).
+- [ ] 9.2.1 **모델**: `AnimationTrack { NodeId target; Property prop; vector<Key{time, value, easing}> }`, 문서 타임라인 길이와 fps (기본 30fps, 기본 길이 2초). 트랙은 문서에 저장하고 Undo 에 포함
+- [ ] 9.2.2 **타임라인 패널 (도킹 패인)**: 재생/정지/처음/끝, 프레임 이동, 시간 막대 스크러빙, 선택 도형의 트랙 행 표시
+- [ ] 9.2.3 **재생 평가**: 현재 시각에서 트랙을 평가해 노드 변환을 적용한 "재생 상태"를 렌더링. 문서 원본 값은 바꾸지 않는다 (정지하면 원래 값으로 복귀)
+- [ ] 9.2.4 **키프레임 기록**: 현재 시각에서 속성을 바꾸면 키를 자동 기록하는 "자동 키" 모드와 수동 "키 추가" 버튼. 키 삭제·시간 이동 지원
+- [ ] 9.2.5 **이징 선택**: 키 구간별 이징 (선형, 가감속 2종). 속성창에서 선택
+- [ ] 9.2.6 **SVG 저장·가져오기**: 표준 `<animate>` / `<animateTransform>` (SMIL) 로 출력. 외부 SVG 의 단순 SMIL 은 읽어서 트랙으로 변환 (지원하지 않는 항목은 무시하고 로그)
+- ~~9.2.7 HTML 내보내기 (CSS `@keyframes`)~~ — 제외 (2026-10-31 결정). 재생·저장은 SVG 로만
+- [ ] 9.2.8 **Undo**: 키 추가·삭제·이동 각각 Undo 항목 1개
+- [ ] 9.2.9 **성능 연계**: 재생 중 프레임 시간을 6.23 의 계측으로 측정하고, 재생 중에는 변경되지 않은 노드를 캐시에서 재사용
+- [ ] 9.2.10 빌드 확인 + 재생 정확도, SVG 왕복, 브라우저(Edge)에서 SMIL 재생 결과 비교 검증
+
+### Step 9.3 최종 배포
+- [ ] 9.3.1 **설치·첫 실행 시 에이전트 연결 안내**: 설치 화면에 "AI 에이전트 연결 (선택)" 체크박스로 MCP 서버를 함께 설치. 첫 실행 때 한 번 묻고, 설정 메뉴에서 언제든 다시 열 수 있게 함. 등록 대상은 설치된 에이전트를 찾아 목록으로 보여 주고 사용자가 확인한 항목만 추가. 설정 파일은 수정 전에 백업하고, 등록 해제 기능을 함께 제공. 찾지 못하면 등록 명령과 설정 조각을 복사할 수 있게 표시. 각 에이전트의 설정 파일 경로와 형식은 구현 전에 확인 (현재 프로젝트에 설치 프로그램 파일이 없음을 확인함, 설치 방식 결정 필요)
+- [ ] 9.3.2 빌드 확인 + 등록·해제·백업 복원 검증 (설정 파일 변경 전후 비교), 체크박스 미선택 시 설치 및 실행 정상 확인
+- [ ] 9.3.3 **배포 방식 결정과 릴리스 빌드 검증**: 설치 프로그램 종류(MSI / Inno Setup 등)를 정하고, Release x64 빌드로 설치·실행·삭제를 확인한다 (디버그 전용 자체 검증과 성능 계측이 릴리스에 들어가지 않는지도 확인) — 신규

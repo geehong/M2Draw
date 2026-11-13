@@ -2,9 +2,11 @@
 #include "SvgWriter.h"
 #include "HtmlComponents/UiComponents.h"
 #include "D2DGraphicEngine.h"
+#include "ImageRegistry.h"
 #include "D2DLayer.h"
 #include "ReferenceImport.h"
 #include "AnnotationNote.h"
+#include "LineMarkers.h"
 
 #include <charconv>
 #include <functional>
@@ -383,8 +385,18 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 	// defs 블록 출력: 그라디언트 정의 및 클리핑 마스크 정의
 	std::vector<const Node*> gradUsers;
 	std::vector<const GroupNode*> maskGroups;
+	const bool cleanExport = (m_options.mode == SvgWriteMode::Clean);   // 순수 내보내기에서는 화살촉 아래 선 끝을 짧게 쓰므로 기준점을 민 마커를 쓴다   // 선 마커 <marker> 정의 (id -> 정의). 같은 종류·색·배율은 한 번만 (6.25.3)
+	std::map<std::string, std::string> markerDefs;   // 선 마커 <marker> 정의 (id -> 정의). 같은 종류·색·배율은 한 번만 (6.25.3)
 	std::function<void(const Node&)> collect = [&](const Node& n) {
 		if (UsesGradientDef(n)) gradUsers.push_back(&n);
+		if (const auto* pn = dynamic_cast<const PathNode*>(&n)) {
+			const Stroke& sk = pn->GetStyle().stroke;
+			if (sk.HasMarkers() && sk.width > 0.0001f && sk.color.a > 0.0001f) {
+				const std::string hex = ColorToHex(sk.color);
+				for (MarkerKind mk : { sk.markerStart, sk.markerMid, sk.markerEnd })
+					if (mk != MarkerKind::None) markerDefs[Markers::SvgMarkerId(mk, hex, sk.markerScale, cleanExport)] = Markers::SvgMarkerDef(mk, hex, sk.markerScale, cleanExport);
+			}
+		}
 		if (const auto* g = dynamic_cast<const GroupNode*>(&n)) {
 			if (g->IsClippingMask() && g->GetMaskNode() != nullptr) {
 				maskGroups.push_back(g);
@@ -394,12 +406,16 @@ std::string SvgWriter::WriteString(Document& doc, const SvgWriteOptions& options
 	};
 	for (const auto& layer : doc.GetLayers()) if (layer) collect(*layer);
 
-	if (!gradUsers.empty() || !maskGroups.empty()) {
+	if (!gradUsers.empty() || !maskGroups.empty() || !markerDefs.empty()) {
 		AppendIndent();
 		m_output += "<defs>\n";
 		++m_indent;
 		WriteGradientDefs(doc);
 		WriteClipPathDefs(doc);
+		for (const auto& md : markerDefs) {
+			AppendIndent();
+			m_output += md.second + "\n";
+		}
 		--m_indent;
 		AppendIndent();
 		m_output += "</defs>\n";
@@ -525,9 +541,11 @@ void SvgWriter::Visit(GroupNode& node) {
 				if (frame->GetBorderSides() != BorderAll) m_output += " m2:borderSides=\"" + std::to_string(static_cast<int>(frame->GetBorderSides())) + "\"";
 				if (frame->GetSizingW() == FrameSizingMode::Fill) m_output += " m2:sizingW=\"fill\"";
 				if (frame->GetSizingH() == FrameSizingMode::Fill) m_output += " m2:sizingH=\"fill\"";
+			// 반응형 폭별 재정의 (6.26.3): 태블릿/모바일에서 바뀌는 항목만 (확장 속성이라 저장 모드에서만)
 			if (frame->GetLayoutMode() != FrameLayoutMode::None) {
 				m_output += " m2:layout=\"" + std::string(frame->GetLayoutMode() == FrameLayoutMode::Row ? "row" : "column") + "\" m2:gap=\"" +
 					FormatFloat(frame->GetGap()) + "\" m2:pad=\"" + FormatFloat(frame->GetPadding()) + "\"";
+					if (frame->GetWrapCount() > 0) m_output += " m2:wrap=\"" + std::to_string(frame->GetWrapCount()) + "\"";
 					if (!frame->GetPaddingEdges().IsUniform()) {
 						const PaddingEdges& pe = frame->GetPaddingEdges();
 						m_output += " m2:padding4=\"" + FormatFloat(pe.top) + "," + FormatFloat(pe.right) + "," + FormatFloat(pe.bottom) + "," + FormatFloat(pe.left) + "\"";
@@ -678,7 +696,7 @@ static std::string Base64Encode(const std::vector<uint8_t>& in)
 }
 
 void SvgWriter::Visit(ImageNode& node) {
-	if (!node.GetData()) return;   // 데이터가 없는 이미지는 출력하지 않음
+	if (!node.GetData() && node.GetLinkHref().empty() && m_options.linkedImagePaths.find(&node) == m_options.linkedImagePaths.end()) return;   // 데이터도 링크도 없는 이미지는 출력하지 않음
 	AppendIndent();
 	m_output += "<image id=\"image_" + std::to_string(node.GetId()) + "\"";
 	if (Meta()) {
@@ -700,6 +718,10 @@ void SvgWriter::Visit(ImageNode& node) {
 	else if (m_options.linkReferenceImages && !node.GetLinkHref().empty()) linkPath = node.GetLinkHref();
 	if (!linkPath.empty()) {
 		m_output += " xlink:href=\"" + EscapeXml(linkPath) + "\" />\n";
+	} else if (node.GetData() && m_options.mode == SvgWriteMode::Snapshot && m_options.keepImages) {
+		// Undo 스냅샷: 바이트 대신 리소스 참조만 (6.3). 스냅샷이 이미지 수명을 보장하도록 목록에 모은다
+		m_options.keepImages->push_back(node.GetData());
+		m_output += " xlink:href=\"" + std::string(kImageMemScheme) + std::to_string(RegisterImageResource(node.GetData())) + "\" />\n";
 	} else if (node.GetData()) {
 		m_output += " xlink:href=\"data:" + node.GetData()->mime + ";base64," + Base64Encode(node.GetData()->bytes) + "\" />\n";
 	} else {
@@ -855,7 +877,18 @@ void SvgWriter::Visit(PathNode& node) {
 	if (nativeTag) {
 		m_output += nativeAttrs;
 	} else {
-		std::string d = BuildPathData(node);
+		std::string d;
+		const Stroke& ms = node.GetStyle().stroke;
+		if (m_options.mode == SvgWriteMode::Clean && ms.width > 0.0001f && ms.color.a > 0.0001f &&
+			(ms.markerStart == MarkerKind::Arrow || ms.markerEnd == MarkerKind::Arrow)) {
+			// 순수 내보내기: 화면과 같게 채워진 화살촉 길이만큼 선 끝을 짧게 써서, 선이 화살촉 밖으로 삐져나오지 않게 한다
+			// (저장/실행 취소에서는 원래 길이를 유지해야 하므로 순수 내보내기에서만)
+			PathNode trimmed;
+			trimmed.SetPaths(Markers::TrimEnds(node.GetPaths(), ms));
+			d = BuildPathData(trimmed);
+		} else {
+			d = BuildPathData(node);
+		}
 		m_output += " d=\"" + d + "\"";
 	}
 
@@ -903,6 +936,20 @@ void SvgWriter::Visit(PathNode& node) {
 			if (std::abs(strk.dashOffset) > 0.0001f) {
 				m_output += " stroke-dashoffset=\"" + FormatFloat(strk.dashOffset) + "\"";
 			}
+		}
+		// 선 마커 (6.25.3): 이 앱의 확장 속성으로 무손실 저장 (표준 <marker> 출력은 M.3 에서 추가)
+		if (strk.HasMarkers()) {
+			if (Meta()) {   // m2: 확장 속성은 xmlns:m2 를 선언하는 저장 모드에서만 (순수 SVG 내보내기에 넣으면 브라우저가 XML 오류를 낸다)
+				if (strk.markerStart != MarkerKind::None) m_output += std::string(" m2:marker-start=\"") + Markers::KindId(strk.markerStart) + "\"";
+				if (strk.markerMid != MarkerKind::None)   m_output += std::string(" m2:marker-mid=\"") + Markers::KindId(strk.markerMid) + "\"";
+				if (strk.markerEnd != MarkerKind::None)   m_output += std::string(" m2:marker-end=\"") + Markers::KindId(strk.markerEnd) + "\"";
+				if (std::abs(strk.markerScale - 4.0f) > 0.0001f) m_output += " m2:marker-scale=\"" + FormatFloat(strk.markerScale) + "\"";
+			}
+			// 표준 속성: 다른 프로그램에서도 마커가 보이도록 <defs> 의 <marker> 를 참조한다
+			const std::string hex = ColorToHex(strk.color);
+			if (strk.markerStart != MarkerKind::None) m_output += " marker-start=\"url(#" + Markers::SvgMarkerId(strk.markerStart, hex, strk.markerScale, m_options.mode == SvgWriteMode::Clean) + ")\"";
+			if (strk.markerMid != MarkerKind::None)   m_output += " marker-mid=\"url(#" + Markers::SvgMarkerId(strk.markerMid, hex, strk.markerScale, m_options.mode == SvgWriteMode::Clean) + ")\"";
+			if (strk.markerEnd != MarkerKind::None)   m_output += " marker-end=\"url(#" + Markers::SvgMarkerId(strk.markerEnd, hex, strk.markerScale, m_options.mode == SvgWriteMode::Clean) + ")\"";
 		}
 	} else {
 		m_output += " stroke=\"none\"";

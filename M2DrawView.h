@@ -92,6 +92,7 @@ protected:
 	ID2D1Factory*          m_pD2DFactory;
 	ID2D1HwndRenderTarget* m_pRenderTarget;
 	ID2D1SolidColorBrush*  m_pSolidBrush;
+	ID2D1BitmapBrush*      m_pCheckerBrush = nullptr;   // 투명 배경 체커보드 (24px 타일을 반복해서 한 번에 채운다, 6.6.5)
 	ge::D2DRenderer        m_renderer;      // 신엔진 일원화 렌더러
 
 public:

@@ -12,8 +12,8 @@ namespace UiComp {
 // 컴포넌트 = FrameNode(uiKind + uiProps) 하나. 자식 도형은 Rebuild 가 속성으로 다시 만든다 (모델 코드, D2D 의존 없음).
 // 도구/속성창/내보내기는 속성(GetUiProp)만 읽고 쓰며, 그리기는 일반 도형 렌더러가 자식을 그린다.
 
-enum class Kind { TextBox, Input, Check, Combo, List, Bar, Tabs, Badge, Card, Pager };
-constexpr int kKindCount = 10;
+enum class Kind { TextBox, Input, Check, Combo, List, Bar, Tabs, Badge, Card, Pager, Alert, Accordion, NavBar };
+constexpr int kKindCount = 13;
 
 const char*    KindId(Kind k);                       // "textbox" ...
 bool           KindFromId(const std::string& id, Kind& out);

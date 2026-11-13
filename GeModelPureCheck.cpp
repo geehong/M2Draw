@@ -17,6 +17,8 @@
 #include "HtmlComponents/TableComponent.h"
 #include "HtmlComponents/UiComponents.h"
 #include "PathTrim.h"
+#include "LineMarkers.h"
+#include "ResponsiveLayout.h"
 #include "ShapePresets.h"
 #include "UndoManager.h"
 #include "GeModelPureCheck.h"
@@ -2980,6 +2982,370 @@ bool RunPureModelVerification(std::wstring* failure)
 		FrameNode fn;
 		fn.SetHtmlTag("form");
 		GE_CHECK(fn.GetHtmlTag() == "form", L"프레임 노드 Form 역할 설정");
+	}
+
+	// ------------------------------------------------------------------------
+	// [Section 52] 선 마커 (6.25.3): 배치, 방향, 끝 단축, SVG 왕복
+	// ------------------------------------------------------------------------
+	{
+		Stroke st;
+		st.width = 2.0f;
+		st.markerScale = 4.0f;   // 마커 크기 8
+
+		// 1. 직선: 시작 점(바깥쪽), 끝 화살표(진행 방향)
+		SubPath line; line.closed = false;
+		{ BezierNode a; a.anchor = Vec2{ 0, 0 }; BezierNode b; b.anchor = Vec2{ 100, 0 }; line.nodes = { a, b }; }
+		st.markerStart = MarkerKind::Dot;
+		st.markerEnd = MarkerKind::Arrow;
+		auto pl = Markers::Compute({ line }, st);
+		GE_CHECK(pl.size() == 2, L"열린 직선: 시작·끝 마커 2개");
+		GE_CHECK(pl[0].role == Markers::Placement::Start && std::abs(pl[0].dir.x + 1.0f) < 1e-4f, L"시작 마커는 선 바깥쪽(-x)을 향함");
+		GE_CHECK(pl[1].role == Markers::Placement::End && std::abs(pl[1].pos.x - 100.0f) < 1e-4f && std::abs(pl[1].dir.x - 1.0f) < 1e-4f, L"끝 마커는 끝점에서 진행 방향(+x)");
+		GE_CHECK(std::abs(pl[1].size - 8.0f) < 1e-4f, L"마커 크기 = 선 두께 x 배율");
+
+		// 2. 채워진 화살촉은 선 끝을 단축한다 (100 - 8 * 0.85 = 93.2). 시작(점)은 그대로
+		auto trimmed = Markers::TrimEnds({ line }, st);
+		GE_CHECK(trimmed.size() == 1 && trimmed[0].nodes.size() == 2, L"단축 후에도 노드 2개");
+		GE_CHECK(std::abs(trimmed[0].nodes.back().anchor.x - 93.2f) < 0.05f, L"끝 화살촉만큼 선이 짧아짐");
+		GE_CHECK(std::abs(trimmed[0].nodes.front().anchor.x) < 1e-4f, L"점 마커는 선 시작을 자르지 않음");
+
+		// 3. 곡선 끝의 진행 방향은 제어점에서 끝점으로 향하는 단위 벡터
+		SubPath curve; curve.closed = false;
+		{
+			BezierNode a; a.anchor = Vec2{ 0, 0 }; a.hOut = Vec2{ 0, 50 };
+			BezierNode b; b.anchor = Vec2{ 100, 100 }; b.hIn = Vec2{ -50, 0 };
+			curve.nodes = { a, b };
+		}
+		Stroke endOnly; endOnly.markerEnd = MarkerKind::OpenArrow;
+		auto pc = Markers::Compute({ curve }, endOnly);
+		GE_CHECK(pc.size() == 1 && std::abs(pc[0].dir.x - 1.0f) < 1e-3f && std::abs(pc[0].dir.y) < 1e-3f, L"곡선 끝 접선 방향(+x)");
+
+		// 4. 닫힌 패스는 시작/끝 마커가 없고, 중간 마커는 모든 꼭짓점에
+		SubPath box; box.closed = true;
+		{ BezierNode n0, n1, n2, n3; n0.anchor = Vec2{ 0, 0 }; n1.anchor = Vec2{ 10, 0 }; n2.anchor = Vec2{ 10, 10 }; n3.anchor = Vec2{ 0, 10 }; box.nodes = { n0, n1, n2, n3 }; }
+		Stroke all; all.markerStart = MarkerKind::Arrow; all.markerEnd = MarkerKind::Arrow; all.markerMid = MarkerKind::Square;
+		auto pb = Markers::Compute({ box }, all);
+		GE_CHECK(pb.size() == 4, L"닫힌 패스: 중간 마커만 4개");
+		for (const auto& p : pb) GE_CHECK(p.role == Markers::Placement::Mid, L"닫힌 패스에는 시작/끝 마커가 없음");
+
+		// 5. 열린 세 점 패스의 중간 마커는 안쪽 앵커 하나
+		SubPath three; three.closed = false;
+		{ BezierNode n0, n1, n2; n0.anchor = Vec2{ 0, 0 }; n1.anchor = Vec2{ 10, 0 }; n2.anchor = Vec2{ 10, 10 }; three.nodes = { n0, n1, n2 }; }
+		Stroke midOnly; midOnly.markerMid = MarkerKind::Diamond;
+		auto pm = Markers::Compute({ three }, midOnly);
+		GE_CHECK(pm.size() == 1 && std::abs(pm[0].pos.x - 10.0f) < 1e-4f && std::abs(pm[0].pos.y) < 1e-4f, L"열린 패스: 안쪽 앵커에만 중간 마커");
+		GE_CHECK(!Markers::HasOpenSubPath({ box }) && Markers::HasOpenSubPath({ line }), L"열린 서브패스 판정");
+
+		// 6. SVG 왕복: 마커 종류와 배율이 보존됨
+		Document md;
+		auto mp = std::make_unique<PathNode>();
+		mp->SetPaths({ line });
+		Style ms = mp->GetStyle();
+		ms.stroke = st;
+		ms.stroke.markerMid = MarkerKind::Bar;
+		ms.stroke.markerScale = 5.0f;
+		mp->SetStyle(ms);
+		md.AddShape(std::move(mp));   // ID 를 발급받아야 읽고 다시 쓴 결과가 같다
+		SvgWriter mw;
+		const std::string msvg = mw.WriteString(md);
+		GE_CHECK(msvg.find("<marker id=\"m2m-arrow-") != std::string::npos && msvg.find("<marker id=\"m2m-dot-") != std::string::npos &&
+			msvg.find("<marker id=\"m2m-bar-") != std::string::npos, L"표준 <defs><marker> 정의가 종류별로 출력됨");
+		GE_CHECK(msvg.find("marker-end=\"url(#m2m-arrow-") != std::string::npos && msvg.find("marker-start=\"url(#m2m-dot-") != std::string::npos, L"표준 marker-start/end 속성 출력");
+		Document md2;
+		SvgReader mr;
+		GE_CHECK(mr.ReadFromString(msvg, md2), L"마커가 있는 SVG 를 다시 읽음");
+		Node* back = (!md2.GetLayers().empty() && !md2.GetLayers().front()->GetChildren().empty()) ? md2.GetLayers().front()->GetChildren().front().get() : nullptr;
+		GE_CHECK(back != nullptr, L"마커 노드가 SVG 왕복 후 남아 있음");
+		if (back) {
+			const Stroke& bs = back->GetStyle().stroke;
+			GE_CHECK(bs.markerStart == MarkerKind::Dot && bs.markerMid == MarkerKind::Bar && bs.markerEnd == MarkerKind::Arrow, L"마커 종류가 SVG 왕복 후 보존됨");
+			GE_CHECK(std::abs(bs.markerScale - 5.0f) < 1e-4f, L"마커 배율이 SVG 왕복 후 보존됨");
+		}
+		GE_CHECK(mw.WriteString(md2) == msvg, L"마커 SVG 를 읽고 다시 쓴 결과가 같음");
+		// 순수 SVG 내보내기(Clean): 표준 marker 속성만 있고 m2: 확장 속성은 없어야 한다 (xmlns:m2 가 없어서 브라우저가 XML 오류를 낸다)
+		const std::string cleanM = mw.WriteString(md, SvgWriteOptions(SvgWriteMode::Clean));
+		GE_CHECK(cleanM.find("m2:") == std::string::npos, L"순수 SVG 내보내기에는 m2: 속성이 없음 (마커 포함)");
+		// 채워진 화살촉은 순수 내보내기에서 선 끝을 짧게 쓴다: 선 두께 2 x 배율 5 = 10, 85% = 8.5 → 100 - 8.5 = 91.5. 저장용 SVG 의 선 길이는 그대로
+		GE_CHECK(cleanM.find("91.5") != std::string::npos && cleanM.find("L 100") == std::string::npos, L"순수 내보내기: 화살촉 아래 선 끝이 단축됨");
+		GE_CHECK(msvg.find("L 100") != std::string::npos && msvg.find("91.5") == std::string::npos, L"저장용 SVG 의 선 길이는 원래대로");
+		// 단축한 선 끝에 마커가 붙으므로 순수 내보내기의 화살촉은 기준점을 앞으로 밀어(refX 10 - 8.5 = 1.5) 꼭짓점이 원래 끝점에 오게 한다
+		GE_CHECK(cleanM.find("m2m-arrow-") != std::string::npos && cleanM.find("-t\"") != std::string::npos && cleanM.find("refX=\"1.5\"") != std::string::npos, L"순수 내보내기 화살촉은 기준점을 앞으로 민 마커를 씀");
+		GE_CHECK(msvg.find("-t\"") == std::string::npos && msvg.find("<marker id=\"m2m-arrow-") != std::string::npos && msvg.find("refX=\"10\"") != std::string::npos, L"저장용 SVG 의 화살촉은 꼭짓점 기준");
+		GE_CHECK(cleanM.find("marker-end=\"url(#m2m-arrow-") != std::string::npos && cleanM.find("<marker id=\"m2m-arrow-") != std::string::npos, L"순수 SVG 내보내기에도 표준 마커는 들어감");
+
+		// 7. 외부 SVG 의 <marker> 가져오기: 정의 안의 도형은 노드가 되지 않고, 표준 marker-* 참조로 종류를 추정한다
+		const std::string ext =
+			"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"100\">"
+			"<defs><marker id=\"tri\" markerWidth=\"6\" markerHeight=\"6\" refX=\"5\" refY=\"3\" orient=\"auto\"><path d=\"M0,0 L6,3 L0,6 z\" /></marker>"
+			"<marker id=\"ball\" markerWidth=\"4\" markerHeight=\"4\"><circle cx=\"2\" cy=\"2\" r=\"2\" /></marker></defs>"
+			"<path d=\"M10,10 L150,10\" fill=\"none\" stroke=\"#000000\" stroke-width=\"2\" marker-start=\"url(#ball)\" marker-end=\"url(#tri)\" />"
+			"</svg>";
+		Document ed;
+		SvgReader er;
+		GE_CHECK(er.ReadFromString(ext, ed), L"외부 마커 SVG 읽기");
+		int pathCount = 0;
+		Node* extPath = nullptr;
+		for (const auto& ly : ed.GetLayers())
+			for (const auto& ch : ly->GetChildren()) { ++pathCount; if (!extPath) extPath = ch.get(); }
+		GE_CHECK(pathCount == 1, L"<marker> 안의 도형은 노드가 되지 않음 (패스 1개만)");
+		if (extPath) {
+			const Stroke& es = extPath->GetStyle().stroke;
+			GE_CHECK(es.markerEnd == MarkerKind::Arrow && es.markerStart == MarkerKind::Dot && es.markerMid == MarkerKind::None, L"외부 마커 종류 추정 (path→화살표, circle→점)");
+		}
+	}
+
+	// ------------------------------------------------------------------------
+	// [Section 53] 자동 배치: 부모 프레임 크기를 바꾸면 자식이 다시 배치된다 (태블릿/모바일 페이지는 부모 크기 변경으로 만든다)
+	// ------------------------------------------------------------------------
+	{
+		Document rd;
+		auto frameOwner = std::make_unique<FrameNode>();
+		frameOwner->SetFrameSize(1000.0f, 400.0f);
+		frameOwner->SetLayoutMode(FrameLayoutMode::Row);
+		frameOwner->SetGap(20.0f);
+		frameOwner->SetPadding(10.0f);
+		frameOwner->SetMainAlign(LayoutMainAlign::SpaceBetween);
+		FrameNode* fr = static_cast<FrameNode*>(rd.AddShape(std::move(frameOwner)));
+		for (int i = 0; i < 2; ++i) {
+			auto child = std::make_unique<FrameNode>();
+			child->SetFrameSize(300.0f, 100.0f);
+			fr->AddChild(std::move(child));
+		}
+		fr->ApplyLayout();
+		Rect2 lb0{}, lb1{};
+		Node* c0 = fr->GetChildren()[0].get();
+		Node* c1 = fr->GetChildren()[1].get();
+		c0->GetLocalBounds(lb0); c1->GetLocalBounds(lb1);
+		const float x1Wide = c1->GetTransform().TransformRect(lb1).left;
+		GE_CHECK(x1Wide > 600.0f, L"가로 배치: 두 번째 자식이 오른쪽 끝 쪽에 있음 (space-between, 폭 1000)");
+
+		// 부모 폭을 태블릿(768)으로 줄이면 두 번째 자식이 안쪽으로 다시 배치된다
+		fr->ResizeFrame(768.0f, 400.0f);
+		const float x1Tablet = c1->GetTransform().TransformRect(lb1).left;
+		GE_CHECK(x1Tablet < x1Wide - 200.0f && std::abs(x1Tablet - (768.0f - 10.0f - 300.0f)) < 1e-2f, L"부모 폭 변경 후 자식이 다시 배치됨");
+
+		// 세로로 바꾸면 두 자식이 아래로 쌓인다 (페이지 레이아웃 변경)
+		fr->SetLayoutMode(FrameLayoutMode::Column);
+		fr->ApplyLayout();
+		const Rect2 b0 = c0->GetTransform().TransformRect(lb0), b1 = c1->GetTransform().TransformRect(lb1);
+		GE_CHECK(b1.top > b0.top + 100.0f && std::abs(b1.left - b0.left) < 1e-3f, L"세로 배치로 바꾸면 자식이 아래로 쌓임");
+
+		// header / footer 역할 프레임은 자동 배치가 옮기지 않는다 (제자리), 나머지만 흐름에 들어간다
+		{
+			Document ld;
+			auto page = std::make_unique<FrameNode>();
+			page->SetFrameSize(800.0f, 900.0f);
+			page->SetLayoutMode(FrameLayoutMode::Column);
+			page->SetGap(10.0f);
+			page->SetPadding(10.0f);
+			FrameNode* pf = static_cast<FrameNode*>(ld.AddShape(std::move(page)));
+			auto mk = [&](const char* role, float y, float h) {
+				auto c = std::make_unique<FrameNode>();
+				c->SetFrameSize(780.0f, h);
+				c->SetHtmlTag(role);
+				c->SetTransform(Matrix2D::Translation(0.0f, y));
+				return pf->AddChild(std::move(c));
+			};
+			Node* headerN = mk("header", 0.0f, 80.0f);
+			Node* bodyN = mk("div", 500.0f, 200.0f);
+			Node* footerN = mk("footer", 800.0f, 100.0f);
+			pf->ApplyLayout();
+			GE_CHECK(std::abs(headerN->GetTransform().dy - 0.0f) < 1e-3f && std::abs(footerN->GetTransform().dy - 800.0f) < 1e-3f, L"header/footer 프레임은 자동 배치에서 제자리를 유지");
+			GE_CHECK(std::abs(bodyN->GetTransform().dy - 10.0f) < 1e-3f, L"일반 프레임은 흐름에 들어가 위쪽 여백 위치로 배치됨");
+		}
+
+		// 줄바꿈 격자: Row 2열 = 폭 1/2, header 아래에서 시작, 부모 폭을 넘지 않음 / Column 2행 = 두 번째 열로 넘어감
+		{
+			Document gd;
+			auto page = std::make_unique<FrameNode>();
+			page->SetFrameSize(1000.0f, 900.0f);
+			page->SetLayoutMode(FrameLayoutMode::Row);
+			page->SetWrapCount(2);
+			page->SetGap(10.0f);
+			page->SetPadding(10.0f);
+			FrameNode* gp = static_cast<FrameNode*>(gd.AddShape(std::move(page)));
+			auto mk = [&](const char* role, float h) {
+				auto c = std::make_unique<FrameNode>();
+				c->SetFrameSize(300.0f, h);
+				c->SetHtmlTag(role);
+				return static_cast<FrameNode*>(gp->AddChild(std::move(c)));
+			};
+			FrameNode* hd = mk("header", 60.0f);
+			hd->SetFrameSize(980.0f, 60.0f);
+			FrameNode* k0 = mk("div", 100.0f); FrameNode* k1 = mk("div", 100.0f); FrameNode* k2 = mk("div", 100.0f);
+			gp->ApplyLayout();
+			auto bd = [](Node* n) { Rect2 l; n->GetLocalBounds(l); return n->GetTransform().TransformRect(l); };
+			const Rect2 r0 = bd(k0), r1 = bd(k1), r2 = bd(k2);
+			GE_CHECK(std::abs(r0.Width() - 485.0f) < 1e-2f && std::abs(r1.Width() - 485.0f) < 1e-2f, L"Row 2열: 각 프레임 폭이 가용 폭의 1/2");
+			GE_CHECK(r1.right <= 990.0f + 1e-2f && r1.left > r0.right, L"Row 2열: 부모 폭을 벗어나지 않고 옆으로 배치");
+			GE_CHECK(r0.top >= 60.0f && std::abs(r0.top - r1.top) < 1e-3f && r2.top > r0.bottom && std::abs(r2.left - r0.left) < 1e-3f, L"Row 2열: header 아래에서 시작하고 3번째는 다음 줄");
+			gp->SetLayoutMode(FrameLayoutMode::Column);
+			gp->ApplyLayout();
+			const Rect2 c0 = bd(k0), c1 = bd(k1), c2 = bd(k2);
+			GE_CHECK(c1.top > c0.bottom && std::abs(c1.left - c0.left) < 1e-3f && c2.left > c0.right && std::abs(c2.top - c0.top) < 1e-3f, L"Column 2행: 2개는 아래로, 3번째는 오른쪽 열 맨 위");
+		}
+
+		// 자체 검사: 순수 계산 모듈 (ResponsiveLayout.cpp)
+		std::wstring rlFail;
+		GE_CHECK(RunResponsiveLayoutChecks(&rlFail), L"ResponsiveLayout 순수 계산 검사 실패: " + rlFail);
+	}
+
+	// [Section 54] 코드 검토 반영: 이미지 맞춤/블렌드 CSS 이름, 링크 전용 이미지 SVG, 인라인 SVG 이중 적용 방지
+	{
+		Document rd;
+		auto img = std::make_unique<ImageNode>();
+		img->SetSize(100.0f, 50.0f);
+		img->SetFit(ImageFit::Stretch);
+		img->SetLinkHref("assets/pic.png");
+		ImageNode* imgRaw = img.get();
+		rd.AddShape(std::move(img));
+		SvgWriteOptions lo;
+		lo.linkReferenceImages = true;
+		const std::string linkSvg = SvgWriter().WriteString(rd, lo);
+		GE_CHECK(linkSvg.find("<image ") != std::string::npos && linkSvg.find("assets/pic.png") != std::string::npos, L"데이터 없이 링크만 있는 이미지도 SVG 에 출력됨");
+
+		HtmlExporter hx;
+		std::string h1 = hx.ExportToString(rd);
+		GE_CHECK(h1.find("object-fit: fill") != std::string::npos, L"ImageFit::Stretch -> object-fit: fill");
+		imgRaw->SetFit(ImageFit::Fit);
+		h1 = HtmlExporter().ExportToString(rd);
+		GE_CHECK(h1.find("object-fit: contain") != std::string::npos, L"ImageFit::Fit -> object-fit: contain");
+		imgRaw->SetFit(ImageFit::Fill);
+		h1 = HtmlExporter().ExportToString(rd);
+		GE_CHECK(h1.find("object-fit: cover") != std::string::npos, L"ImageFit::Fill -> object-fit: cover");
+		imgRaw->SetBlendMode(LayerBlendMode::Darken);
+		h1 = HtmlExporter().ExportToString(rd);
+		GE_CHECK(h1.find("mix-blend-mode: darken") != std::string::npos, L"블렌드 모드 CSS 이름이 enum 순서와 일치 (Darken)");
+	}
+
+	// [Section 55] 6.3 Undo 스냅샷 이미지 참조화 / 6.4 클리핑 마스크 명시 / 4.5.13.4 자동 배치 삽입 순서
+	{
+		Document id;
+		auto img = std::make_unique<ImageNode>();
+		auto data = std::make_shared<ImageData>();
+		data->bytes.assign(5000, 0x5A);
+		data->pixelW = 20; data->pixelH = 10;
+		img->SetData(data);
+		img->SetSize(20.0f, 10.0f);
+		ImageNode* imgRaw = static_cast<ImageNode*>(id.AddShape(std::move(img)));
+		std::vector<std::shared_ptr<const ImageData>> keep;
+		SvgWriteOptions so(SvgWriteMode::Snapshot);
+		so.keepImages = &keep;
+		const std::string snap = SvgWriter().WriteString(id, so);
+		GE_CHECK(snap.find("m2mem://image/") != std::string::npos && snap.find("base64") == std::string::npos && snap.size() < 3000, L"Snapshot SVG 는 이미지 바이트 대신 참조만 기록");
+		GE_CHECK(keep.size() == 1, L"Snapshot 이 참조한 이미지가 보관 목록에 모임");
+		Document back;
+		GE_CHECK(SvgReader().ReadFromString(snap, back), L"이미지 참조 Snapshot 읽기");
+		const Node* bn = (!back.GetLayers().empty() && !back.GetLayers().front()->GetChildren().empty()) ? back.GetLayers().front()->GetChildren().front().get() : nullptr;
+		const auto* bi = dynamic_cast<const ImageNode*>(bn);
+		GE_CHECK(bi && bi->GetData().get() == data.get(), L"Snapshot 복원 시 같은 이미지 데이터를 그대로 재연결");
+		const std::string fileSvg = SvgWriter().WriteString(id);
+		GE_CHECK(fileSvg.find("base64") != std::string::npos, L"저장 파일은 여전히 base64 로 임베드");
+
+		// UndoManager 왕복: 이미지가 있는 문서에서 이동 -> Undo
+		UndoManager um;
+		um.Reset(id);
+		imgRaw->SetTransform(Matrix2D::Translation(30.0f, 0.0f));
+		GE_CHECK(um.CommitChange(L"이동", id), L"이미지 이동이 Undo 항목으로 기록됨");
+		data.reset();   // 노드가 데이터를 유지하므로 문서가 살아 있는 동안 안전
+		GE_CHECK(um.Undo(id), L"이미지 문서 Undo");
+		const Node* un = (!id.GetLayers().empty() && !id.GetLayers().front()->GetChildren().empty()) ? id.GetLayers().front()->GetChildren().front().get() : nullptr;
+		const auto* ui = dynamic_cast<const ImageNode*>(un);
+		GE_CHECK(ui && ui->GetData() && ui->GetData()->bytes.size() == 5000 && std::abs(ui->GetTransform().dx) < 1e-3f, L"Undo 후 이미지 데이터와 위치가 복원됨");
+	}
+	{
+		Document md;
+		auto a = std::make_unique<PathNode>(); auto b = std::make_unique<PathNode>(); auto c = std::make_unique<PathNode>();
+		Node* na = md.AddShape(std::move(a)); Node* nb = md.AddShape(std::move(b)); Node* nc = md.AddShape(std::move(c));
+		md.SetSelection({ na, nb, nc });
+		GroupNode* g = md.MakeClipMask();
+		GE_CHECK(g && g->IsClippingMask(), L"클리핑 마스크 만들기");
+		if (g) {
+			Node* mask = g->GetMaskNode();
+			Node* other = (g->GetChildren().front().get() == mask) ? g->GetChildren().back().get() : g->GetChildren().front().get();
+			g->BringToFront(other);   // 다른 자식을 맨 위로 올려도
+			GE_CHECK(g->GetMaskNode() == mask, L"마스크가 명시되어 Z-Order 변경 후에도 같은 노드");
+			auto cl = g->Clone();
+			auto* cg = static_cast<GroupNode*>(cl.get());
+			GE_CHECK(cg->GetMaskNode() && cg->GetMaskNode() != mask && cg->IndexOf(cg->GetMaskNode()) == g->IndexOf(mask), L"복제본도 같은 순번의 자식이 마스크");
+		}
+	}
+	{
+		Document fd;
+		auto page = std::make_unique<FrameNode>();
+		page->SetFrameSize(1000.0f, 800.0f);
+		page->SetLayoutMode(FrameLayoutMode::Column);
+		page->SetGap(10.0f);
+		page->SetPadding(10.0f);
+		FrameNode* pg = static_cast<FrameNode*>(fd.AddShape(std::move(page)));
+		auto mk = [&](float h) {
+			auto c = std::make_unique<FrameNode>();
+			c->SetFrameSize(200.0f, h);
+			return static_cast<FrameNode*>(pg->AddChild(std::move(c)));
+		};
+		FrameNode* f0 = mk(100.0f); FrameNode* f1 = mk(100.0f);
+		pg->ApplyLayout();   // f0: y 10~110, f1: y 120~220
+		auto ni = std::make_unique<FrameNode>();
+		ni->SetFrameSize(200.0f, 100.0f);
+		ni->SetTransform(Matrix2D::Translation(10.0f, 115.0f));
+		Node* inserted = fd.AddShapeAt(std::move(ni), Vec2{ 100.0f, 118.0f });   // f0 와 f1 사이
+		GE_CHECK(pg->IndexOf(f0) == 0 && pg->IndexOf(inserted) == 1 && pg->IndexOf(f1) == 2, L"자동 배치 프레임에 놓은 위치에 맞는 순서로 삽입");
+		// 같은 프레임 안에서 끌어 놓으면 순서만 바뀜 (f0 를 맨 아래로)
+		const bool moved = fd.ReparentAt(f0, Vec2{ 100.0f, 700.0f });
+		GE_CHECK(moved && pg->IndexOf(f0) == 2, L"같은 자동 배치 프레임 안에서 끌어 놓으면 순서가 바뀜");
+	}
+	{
+		// 데스크탑 -> 모바일 -> 데스크탑: 가로 전체 띠는 부모 폭을 따라 줄었다 다시 커진다
+		Document rd2;
+		auto page = std::make_unique<FrameNode>();
+		page->SetFrameSize(1396.0f, 974.0f);
+		FrameNode* pg = static_cast<FrameNode*>(rd2.AddShape(std::move(page)));
+		auto band = std::make_unique<FrameNode>();
+		band->SetFrameSize(1396.0f, 157.0f);
+		FrameNode* bn = static_cast<FrameNode*>(pg->AddChild(std::move(band)));
+		pg->ResizeFrame(375.0f, 974.0f);
+		GE_CHECK(std::abs(bn->GetWidth() - 375.0f) < 1e-2f, L"모바일 폭으로 줄이면 가로 띠도 부모 폭에 맞음");
+		pg->ResizeFrame(1920.0f, 974.0f);
+		GE_CHECK(std::abs(bn->GetWidth() - 1920.0f) < 1e-2f, L"다시 데스크탑 폭으로 키우면 가로 띠도 원래대로 커짐");
+
+		// header 가 좁아도 자동 배치 부모는 header 를 부모 폭으로 맞추고 그 아래에서 흐름을 시작한다
+		auto host = std::make_unique<FrameNode>();
+		host->SetFrameSize(1920.0f, 900.0f);
+		host->SetLayoutMode(FrameLayoutMode::Row);
+		host->SetWrapCount(2);
+		host->SetGap(10.0f);
+		host->SetPadding(10.0f);
+		FrameNode* hp = static_cast<FrameNode*>(rd2.AddShape(std::move(host)));
+		auto hd = std::make_unique<FrameNode>();
+		hd->SetFrameSize(375.0f, 69.0f);
+		hd->SetHtmlTag("header");
+		FrameNode* hdr = static_cast<FrameNode*>(hp->AddChild(std::move(hd)));
+		auto ch = std::make_unique<FrameNode>();
+		ch->SetFrameSize(300.0f, 100.0f);
+		FrameNode* kid = static_cast<FrameNode*>(hp->AddChild(std::move(ch)));
+		hp->ApplyLayout();
+		Rect2 kl; kid->GetLocalBounds(kl);
+		const Rect2 kb = kid->GetTransform().TransformRect(kl);
+		GE_CHECK(std::abs(hdr->GetWidth() - 1920.0f) < 1e-2f, L"자동 배치 부모 안의 header 는 부모 폭에 맞춰짐");
+		GE_CHECK(kb.top >= 69.0f, L"자식 프레임은 header 아래에서 시작함");
+
+		// footer 는 부모 높이가 바뀌어도 아래쪽 간격을 유지 (자유 배치 / 자동 배치 모두)
+		auto ft = std::make_unique<FrameNode>();
+		ft->SetFrameSize(1920.0f, 100.0f);
+		ft->SetHtmlTag("footer");
+		ft->SetTransform(Matrix2D::Translation(0.0f, 780.0f));   // 부모 높이 974 기준 아래 간격 94
+		FrameNode* fo = static_cast<FrameNode*>(pg->AddChild(std::move(ft)));
+		pg->ResizeFrame(1920.0f, 1200.0f);
+		Rect2 fl; fo->GetLocalBounds(fl);
+		GE_CHECK(std::abs(fo->GetTransform().TransformRect(fl).bottom - (1200.0f - 94.0f)) < 1e-2f, L"자유 배치: footer 는 부모 아래쪽 간격을 유지");
+		auto ft2 = std::make_unique<FrameNode>();
+		ft2->SetFrameSize(1920.0f, 100.0f);
+		ft2->SetHtmlTag("footer");
+		ft2->SetTransform(Matrix2D::Translation(0.0f, 780.0f));
+		FrameNode* fo2 = static_cast<FrameNode*>(hp->AddChild(std::move(ft2)));
+		hp->ResizeFrame(1920.0f, 1100.0f);
+		Rect2 fl2; fo2->GetLocalBounds(fl2);
+		GE_CHECK(std::abs(fo2->GetTransform().TransformRect(fl2).bottom - (1100.0f - 20.0f)) < 1e-2f, L"자동 배치: footer 는 부모 아래쪽 간격을 유지");
 	}
 
 #undef GE_CHECK

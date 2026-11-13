@@ -4,7 +4,10 @@
 #include "D2DGraphicEngine.h"
 #include "GeNodeVisitor.h"
 #include "ReferenceImport.h"
+#include "LineMarkers.h"
 #include "AnnotationNote.h"
+#include <unordered_set>
+#include <functional>
 
 namespace ge {
 
@@ -661,8 +664,13 @@ std::unique_ptr<Node> GroupNode::Clone() const
 {
 	auto copy = std::make_unique<GroupNode>();
 	copy->CopyNodePropsFrom(*this);
-	copy->m_bClippingMask = m_bClippingMask;
 	for (const auto& c : m_children) copy->AddChild(c->Clone());
+	copy->SetClippingMask(m_bClippingMask);
+	if (m_bClippingMask) {   // 같은 순번의 복제 자식을 마스크로 (6.4.1)
+		const Node* mk = GetMaskNode();
+		for (size_t i = 0; i < m_children.size(); ++i)
+			if (m_children[i].get() == mk) { copy->m_maskNode = copy->m_children[i].get(); break; }
+	}
 	return copy;
 }
 
@@ -671,7 +679,7 @@ std::unique_ptr<Node> FrameNode::Clone() const
 	auto copy = std::make_unique<FrameNode>();
 	copy->CopyNodePropsFrom(*this);
 	copy->m_w = m_w; copy->m_h = m_h; copy->m_clip = m_clip; copy->m_radii = m_radii; copy->m_borderSides = m_borderSides;
-	copy->m_layoutMode = m_layoutMode; copy->m_gap = m_gap; copy->m_pad = m_pad;
+	copy->m_layoutMode = m_layoutMode; copy->m_gap = m_gap; copy->m_wrapCount = m_wrapCount; copy->m_pad = m_pad;
 	copy->m_mainAlign = m_mainAlign; copy->m_crossAlign = m_crossAlign;
 	copy->m_sizingW = m_sizingW; copy->m_sizingH = m_sizingH;
 	copy->m_uiKind = m_uiKind; copy->m_uiProps = m_uiProps;
@@ -931,6 +939,22 @@ bool FrameNode::ApplyLayout()
 {
 	if (m_layoutMode == FrameLayoutMode::None) return false;
 	bool changed = false;
+	// 역할이 header/aside/footer 인 자식 프레임은 흐름에 넣지 않는다 (제자리 유지)
+	auto isFixed = [](const Node* c) { const auto* f = dynamic_cast<const FrameNode*>(c); return f && f->IsFixedLandmark(); };
+
+	// header/footer 는 위치는 그대로 두되 폭은 항상 부모 폭에 맞춘다 (부모 크기가 바뀌어도 위/아래 띠가 끝까지 이어지도록)
+	for (const auto& c : m_children) {
+		auto* f = dynamic_cast<FrameNode*>(c.get());
+		if (!f || !f->IsVisible() || !f->IsFixedLandmark() || f->IsUiComponent()) continue;
+		const std::string tag = f->GetHtmlTag();
+		if (tag != "header" && tag != "footer") continue;
+		Rect2 lb;
+		if (!f->GetLocalBounds(lb)) continue;
+		const Rect2 b = f->GetTransform().TransformRect(lb);
+		const float margin = (std::max)(0.0f, b.left);
+		const float want = (std::max)(1.0f, m_w - 2.0f * margin);
+		if (std::fabs(f->GetWidth() - want) > 1e-3f) { f->ResizeFrame(want, f->GetHeight()); changed = true; }
+	}
 
 	const bool isRow = (m_layoutMode == FrameLayoutMode::Row);
 	// 주축/교차축 기준 안쪽 여백 (Row: 주축=가로, Column: 주축=세로)
@@ -949,7 +973,7 @@ bool FrameNode::ApplyLayout()
 
 	// 0) Column 모드 등에서 TextNode 가 영역 텍스트인 경우, 프레임 가용 폭에 맞춰 자동 측정/줄바꿈 갱신
 	for (const auto& c : m_children) {
-		if (!c || !c->IsVisible()) continue;
+		if (!c || !c->IsVisible() || isFixed(c.get())) continue;
 		if (auto* tn = dynamic_cast<TextNode*>(c.get())) {
 			if (!isRow && tn->IsAreaText()) {
 				const float availW = (std::max)(20.0f, m_w - m_pad.left - m_pad.right);
@@ -962,6 +986,67 @@ bool FrameNode::ApplyLayout()
 		}
 	}
 
+	// 0.2) 줄바꿈 격자: Row = 한 행에 N 열(폭 1/N), Column = 한 열에 N 행. 부모 폭을 넘지 않고, 위/아래 고정 프레임(header/footer)을 피해 배치
+	if (m_wrapCount > 0 && !IsUiComponent()) {
+		float topInset = 0.0f, botInset = 0.0f;
+		for (const auto& c : m_children) {
+			auto* f = dynamic_cast<FrameNode*>(c.get());
+			if (!f || !f->IsFixedLandmark() || !f->IsVisible()) continue;
+			Rect2 lb;
+			if (!f->GetLocalBounds(lb)) continue;
+			const Rect2 b = f->GetTransform().TransformRect(lb);
+			if (b.Width() < m_w * 0.6f) continue;   // 가로로 넓은 header/footer 만 (aside 는 제외)
+			if ((b.top + b.bottom) * 0.5f < m_h * 0.5f) topInset = (std::max)(topInset, b.bottom);
+			else botInset = (std::max)(botInset, m_h - b.top);
+		}
+		const float startY = (std::max)(m_pad.top, topInset + (topInset > 0.0f ? m_gap : 0.0f));
+		const float endPad = (std::max)(m_pad.bottom, botInset + (botInset > 0.0f ? m_gap : 0.0f));
+		std::vector<Node*> items;
+		for (const auto& c : m_children) {
+			Rect2 lb;
+			if (!c || !c->IsVisible() || isFixed(c.get()) || !c->GetLocalBounds(lb)) continue;
+			items.push_back(c.get());
+		}
+		const int n = static_cast<int>(items.size());
+		const int perLine = m_wrapCount;
+		const int lines = (n + perLine - 1) / perLine;   // Row: 행 수, Column: 열 수
+		const int tracks = isRow ? (std::min)(perLine, (std::max)(1, n)) : (std::max)(1, lines);   // 가로로 나란한 칸 수
+		const float availW = (std::max)(1.0f, m_w - m_pad.left - m_pad.right);
+		const float cellW = (std::max)(1.0f, (availW - m_gap * (tracks - 1)) / static_cast<float>(tracks));
+
+		for (Node* c : items) {   // 프레임은 칸 폭에 맞춘다
+			if (auto* fr = dynamic_cast<FrameNode*>(c)) {
+				if (std::fabs(fr->GetWidth() - cellW) > 1e-3f) { fr->ResizeFrame(cellW, fr->GetHeight()); changed = true; }
+				else if (fr->ApplyLayout()) changed = true;
+			}
+		}
+		float lineY = startY, lineH = 0.0f, maxBottom = startY;
+		for (int i = 0; i < n; ++i) {
+			Node* c = items[i];
+			Rect2 lb;
+			c->GetLocalBounds(lb);
+			const Rect2 b = c->GetTransform().TransformRect(lb);
+			int col, row;
+			if (isRow) { col = i % perLine; row = i / perLine; if (col == 0 && i > 0) { lineY += lineH + m_gap; lineH = 0.0f; } }
+			else       { col = i / perLine; row = i % perLine; if (row == 0 && i > 0) { lineY = startY; } }
+			(void)row;
+			const float tx = m_pad.left + col * (cellW + m_gap);
+			const float dx = tx - b.left, dy = lineY - b.top;
+			if (std::fabs(dx) > 1e-4f || std::fabs(dy) > 1e-4f) {
+				c->SetTransform(c->GetTransform() * Matrix2D::Translation(dx, dy));
+				changed = true;
+			}
+			maxBottom = (std::max)(maxBottom, lineY + b.Height());
+			if (isRow) lineH = (std::max)(lineH, b.Height());
+			else lineY += b.Height() + m_gap;
+		}
+		if (m_sizingH == FrameSizingMode::Hug) {
+			const float newH = (std::max)(1.0f, maxBottom + endPad);
+			if (std::fabs(m_h - newH) > 1e-3f) { m_h = newH; changed = true; }
+		}
+		return changed;
+	}
+
 	// 0.5) Fill 크기 규칙 (4.5.9): 자식 프레임이 부모의 가용 공간을 채움.
 	//      부모가 해당 축에서 Hug 이면 순환을 피하려고 자식의 현재 크기(Fixed 취급)를 유지한다.
 	{
@@ -971,7 +1056,7 @@ bool FrameNode::ApplyLayout()
 		float fixedMain = 0.0f;
 		int visCount = 0;
 		for (const auto& c : m_children) {
-			if (!c || !c->IsVisible()) continue;
+			if (!c || !c->IsVisible() || isFixed(c.get())) continue;
 			Rect2 lb;
 			if (!c->GetLocalBounds(lb)) continue;
 			++visCount;
@@ -988,7 +1073,7 @@ bool FrameNode::ApplyLayout()
 
 		for (const auto& c : m_children) {
 			auto* fr = dynamic_cast<FrameNode*>(c.get());
-			if (!fr || !fr->IsVisible()) continue;
+			if (!fr || !fr->IsVisible() || fr->IsFixedLandmark()) continue;
 			const FrameSizingMode sMain = isRow ? fr->GetSizingW() : fr->GetSizingH();
 			const FrameSizingMode sCross = isRow ? fr->GetSizingH() : fr->GetSizingW();
 			float nw = fr->GetWidth(), nh = fr->GetHeight();
@@ -1010,7 +1095,7 @@ bool FrameNode::ApplyLayout()
 	float maxCross = 0.0f;
 
 	for (const auto& c : m_children) {
-		if (!c || !c->IsVisible()) continue;
+		if (!c || !c->IsVisible() || isFixed(c.get())) continue;
 		Rect2 lb;
 		if (!c->GetLocalBounds(lb)) continue;
 		const Rect2 b = c->GetTransform().TransformRect(lb);
@@ -1141,6 +1226,12 @@ void FrameNode::ResizeFrame(float w, float h)
 	}
 	const float dw = w - m_w, dh = h - m_h;
 	const bool free = (m_layoutMode == FrameLayoutMode::None);
+	// footer 는 부모 높이가 바뀌면 아래쪽 간격을 유지하며 따라 내려간다 (위쪽 기준이면 바닥에서 떨어지거나 잘림)
+	auto isFooter = [](const Node* c) { const auto* f = dynamic_cast<const FrameNode*>(c); return f && !f->IsUiComponent() && f->GetHtmlTag() == "footer"; };
+	if (!free && std::fabs(dh) > 1e-4f) {
+		for (const auto& c : m_children)
+			if (c && isFooter(c.get())) c->SetTransform(c->GetTransform() * Matrix2D::Translation(0.0f, dh));
+	}
 	if (free && (std::fabs(dw) > 1e-4f || std::fabs(dh) > 1e-4f)) {
 		for (const auto& c : m_children) {
 			if (!c) continue;
@@ -1165,10 +1256,20 @@ void FrameNode::ResizeFrame(float w, float h)
 			case ConstraintV::TopBottom: stretchH = true; newCH = (std::max)(1.0f, b.Height() + dh); break;
 			}
 
+			if (isFooter(c.get()) && c->GetConstraintV() == ConstraintV::Top) shiftY = dh;
+
 			// 글자/표는 늘리지 않고 위치만 보정 (왼쪽/위 기준)
 			if (c->Kind() == NodeKind::Text || dynamic_cast<TableNode*>(c.get())) { stretchW = stretchH = false; }
 
 			if (auto* child = dynamic_cast<FrameNode*>(c.get())) {
+				// 부모 폭을 거의 채우는 띠(가로 전체 프레임)는 부모 폭을 따라간다: 줄었다가 다시 커져도 원래대로 돌아오도록
+				if (!stretchW && !child->IsUiComponent() && m_w > 1.0f && b.Width() >= m_w * 0.8f) {
+					const float lm = b.left, rm = m_w - b.right;
+					if (lm >= -0.5f && rm >= -0.5f && lm <= 40.0f && rm <= 40.0f && std::fabs(lm - rm) <= 1.0f) {
+						stretchW = true;
+						newCW = (std::max)(1.0f, b.Width() + dw);
+					}
+				}
 				if (stretchW || stretchH) {
 					child->ResizeFrame(stretchW ? newCW : child->GetWidth(), stretchH ? newCH : child->GetHeight());
 				}
@@ -1561,6 +1662,38 @@ void Document::RelayoutFrameChain(GroupNode* from)
 		if (auto* f = dynamic_cast<FrameNode*>(p)) f->ApplyLayout();
 }
 
+// 자동 배치 프레임에 놓은 위치(월드)에 맞는 자식 삽입 순서 (4.5.13.4). 자동 배치가 아니면 -1 (맨 위)
+// 읽는 순서 기준: Row/Column 줄바꿈 격자와 Row 는 행 우선, Column 은 위→아래 (줄바꿈 격자면 열 우선)
+static int FlowInsertIndex(FrameNode* f, Vec2 worldPt, const Node* exclude)
+{
+	if (!f || f->GetLayoutMode() == FrameLayoutMode::None) return -1;
+	Matrix2D inv = f->GetWorldTransform();
+	if (!inv.Invert()) return -1;
+	const Vec2 p = inv.TransformPoint(worldPt);
+	const bool rowMajor = f->GetLayoutMode() == FrameLayoutMode::Row;
+	const bool wrapped = f->GetWrapCount() > 0 && !f->IsUiComponent();
+	const auto& kids = f->GetChildren();
+	for (size_t i = 0; i < kids.size(); ++i) {
+		Node* c = kids[i].get();
+		if (!c || c == exclude || !c->IsVisible()) continue;
+		if (const auto* cf = dynamic_cast<const FrameNode*>(c)) if (cf->IsFixedLandmark()) continue;
+		Rect2 lb;
+		if (!c->GetLocalBounds(lb)) continue;
+		const Rect2 b = c->GetTransform().TransformRect(lb);
+		const float cx = (b.left + b.right) * 0.5f, cy = (b.top + b.bottom) * 0.5f;
+		bool before;   // 이 자식이 놓은 위치보다 앞(읽는 순서)에 있는가
+		if (rowMajor) {
+			if (!wrapped) before = cx < p.x;
+			else before = b.bottom <= p.y || (p.y < b.bottom && p.y >= b.top && cx < p.x);
+		} else {
+			if (!wrapped) before = cy < p.y;
+			else before = b.right <= p.x || (p.x < b.right && p.x >= b.left && cy < p.y);
+		}
+		if (!before) return static_cast<int>(i);
+	}
+	return -1;   // 모두 앞에 있음 = 맨 뒤(위)
+}
+
 Node* Document::AddShapeAt(std::unique_ptr<Node> node, Vec2 worldPt)
 {
 	if (!node) return nullptr;
@@ -1570,7 +1703,7 @@ Node* Document::AddShapeAt(std::unique_ptr<Node> node, Vec2 worldPt)
 	const Matrix2D world = node->GetTransform();   // 아직 부모가 없으므로 월드 좌표 기준
 	Matrix2D inv = parent->GetWorldTransform();
 	if (inv.Invert()) node->SetTransform(world * inv);
-	Node* added = parent->AddChild(std::move(node));
+	Node* added = parent->AddChild(std::move(node), FlowInsertIndex(parent, worldPt, nullptr));
 	parent->ClampChild(added, false);   // 부모 범위를 넘지 않게
 	RelayoutFrameChain(parent);
 	return added;
@@ -1606,8 +1739,19 @@ bool Document::ReparentAt(Node* node, Vec2 worldPt)
 		while (p && p->Kind() != NodeKind::Layer) p = p->GetParent();
 		dest = p;
 	}
-	if (!dest || dest == oldParent) return false;
-	if (!MoveNodeTo(node, dest, -1)) return false;
+	if (!dest) return false;
+	const int flowIdx = FlowInsertIndex(target, worldPt, node);
+	if (dest == oldParent) {
+		// 같은 자동 배치 프레임 안에서 끌어 놓으면 놓은 위치에 맞게 순서만 바꾼다
+		if (!target || target->GetLayoutMode() == FrameLayoutMode::None) return false;
+		const int from = oldParent->IndexOf(node);
+		const int to = flowIdx < 0 ? static_cast<int>(oldParent->GetChildren().size()) : flowIdx;
+		if (to == from || to == from + 1) return false;   // 순서 변화 없음
+		if (!MoveNodeTo(node, dest, to)) return false;
+		RelayoutFrameChain(dest);
+		return true;
+	}
+	if (!MoveNodeTo(node, dest, dest == target ? flowIdx : -1)) return false;
 	FrameNode::ClampNode(node, false);
 	RelayoutFrameChain(oldParent);
 	RelayoutFrameChain(dest);
@@ -3568,6 +3712,7 @@ void D2DRenderer::Shutdown()
 	m_geoCache.clear();
 	m_strokeStyleCache.clear();
 	m_gradientCache.clear();
+	m_imageCache.clear();
 	m_brush.Reset();
 	m_rt = nullptr;
 	m_factory = nullptr;
@@ -3576,8 +3721,25 @@ void D2DRenderer::Shutdown()
 void D2DRenderer::BeginDraw() { if (m_rt) m_rt->BeginDraw(); }
 void D2DRenderer::EndDraw()   { if (m_rt) m_rt->EndDraw(); }
 
+void D2DRenderer::PruneCaches(const Document& doc)
+{
+	std::unordered_set<NodeId> ids;
+	std::unordered_set<const ImageData*> images;
+	std::function<void(const Node&)> walk = [&](const Node& n) {
+		ids.insert(n.GetId());
+		if (const auto* im = dynamic_cast<const ImageNode*>(&n)) if (im->GetData()) images.insert(im->GetData().get());
+		if (const auto* g = dynamic_cast<const GroupNode*>(&n)) for (const auto& c : g->GetChildren()) if (c) walk(*c);
+	};
+	for (const auto& l : doc.GetLayers()) if (l) walk(*l);
+	for (auto it = m_geoCache.begin(); it != m_geoCache.end();) it = ids.count(it->first) ? std::next(it) : m_geoCache.erase(it);
+	for (auto it = m_gradientCache.begin(); it != m_gradientCache.end();) it = ids.count(it->first) ? std::next(it) : m_gradientCache.erase(it);
+	for (auto it = m_imageCache.begin(); it != m_imageCache.end();) it = images.count(it->first) ? std::next(it) : m_imageCache.erase(it);
+}
+
 void D2DRenderer::DrawDocument(Document& doc, const Viewport& view)
 {
+	// 삭제/Undo 로 사라진 노드의 D2D 리소스가 남지 않도록 가끔 정리 (6.5.1)
+	if ((++m_pruneTick % 240) == 0) PruneCaches(doc);
 	// 레이어 0 -> N-1 (Painter's Algorithm)
 	for (auto& layer : doc.GetLayers()) {
 		if (!layer->IsVisible()) continue;
@@ -4214,9 +4376,46 @@ void D2DRenderer::DrawPath(PathNode& node, const Matrix2D& worldXf, const Viewpo
 
 	if (st.stroke.width > 0.0f && st.stroke.color.a > 0.0f) {
 		m_brush->SetColor(ToD2D(st.stroke.color, op));
-		m_rt->DrawGeometry(geo, m_brush.Get(), st.stroke.width, GetStrokeStyle(st.stroke));
+		ID2D1Geometry* strokeGeo = geo;
+		ComPtr<ID2D1PathGeometry> trimmedGeo;
+		// 채워진 화살촉은 선 끝을 그 길이만큼 짧게 해서 선이 화살촉 밖으로 삐져나오지 않게 한다 (6.25.3)
+		if (st.stroke.markerStart == MarkerKind::Arrow || st.stroke.markerEnd == MarkerKind::Arrow) {
+			PathNode tmp;
+			tmp.SetPaths(Markers::TrimEnds(node.GetPaths(), st.stroke));
+			trimmedGeo = PathOp::BuildGeometry(tmp, m_factory);
+			if (trimmedGeo) strokeGeo = trimmedGeo.Get();
+		}
+		m_rt->DrawGeometry(strokeGeo, m_brush.Get(), st.stroke.width, GetStrokeStyle(st.stroke));
+		if (st.stroke.HasMarkers()) DrawLineMarkers(node, st.stroke);
 	}
 	m_rt->SetTransform(D2D1::Matrix3x2F::Identity());
+}
+
+// 선 마커 그리기 (6.25.3): 변환은 DrawPath 가 이미 맞춰 둠(경로 로컬 좌표). 채운 도형은 선 색으로, 열린 화살표는 선으로
+void D2DRenderer::DrawLineMarkers(PathNode& node, const Stroke& stroke)
+{
+	const std::vector<Markers::Placement> placements = Markers::Compute(node.GetPaths(), stroke);
+	if (placements.empty()) return;
+	m_brush->SetColor(ToD2D(stroke.color, 1.0f));
+	for (const Markers::Placement& p : placements) {
+		const Markers::Shape sh = Markers::MakeShape(p);
+		if (sh.pts.empty()) continue;
+		if (sh.circle) {
+			m_rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(sh.pts[0].x, sh.pts[0].y), sh.radius, sh.radius), m_brush.Get());
+			continue;
+		}
+		if (sh.pts.size() < 2) continue;
+		ComPtr<ID2D1PathGeometry> g;
+		if (FAILED(m_factory->CreatePathGeometry(&g))) continue;
+		ComPtr<ID2D1GeometrySink> sink;
+		if (FAILED(g->Open(&sink))) continue;
+		sink->BeginFigure(D2D1::Point2F(sh.pts[0].x, sh.pts[0].y), sh.filled ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
+		for (size_t i = 1; i < sh.pts.size(); ++i) sink->AddLine(D2D1::Point2F(sh.pts[i].x, sh.pts[i].y));
+		sink->EndFigure(sh.closed ? D2D1_FIGURE_END_CLOSED : D2D1_FIGURE_END_OPEN);
+		if (FAILED(sink->Close())) continue;
+		if (sh.filled) m_rt->FillGeometry(g.Get(), m_brush.Get());
+		else m_rt->DrawGeometry(g.Get(), m_brush.Get(), stroke.width);
+	}
 }
 
 ID2D1Geometry* D2DRenderer::GetGeometry(PathNode& node)

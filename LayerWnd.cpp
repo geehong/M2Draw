@@ -99,7 +99,7 @@ void COpacityPopupWnd::ShowPopup(CPoint ptScreen, ge::Node* pTargetNode, CM2Draw
 		D2D1_SIZE_U size = D2D1::SizeU(rc.Width(), rc.Height());
 		m_pD2DFactory->CreateHwndRenderTarget(
 			D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96.0f, 96.0f),
-			D2D1::HwndRenderTargetProperties(GetSafeHwnd(), size),
+			D2D1::HwndRenderTargetProperties(GetSafeHwnd(), size, D2D1_PRESENT_OPTIONS_IMMEDIATELY),
 			&m_pRenderTarget
 		);
 	}
@@ -516,7 +516,7 @@ HRESULT CLayerView::CreateDeviceResources()
 				D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
 				96.0f, 96.0f // 마우스 좌표(픽셀)와 D2D 좌표(DIP)를 1:1로 일치시킴 (High-DPI 히트테스트 어긋남 방지)
 			),
-			D2D1::HwndRenderTargetProperties(GetSafeHwnd(), size),
+			D2D1::HwndRenderTargetProperties(GetSafeHwnd(), size, D2D1_PRESENT_OPTIONS_IMMEDIATELY),
 			&m_pRenderTarget
 		);
 

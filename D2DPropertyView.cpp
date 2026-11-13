@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "D2DPropertyView.h"
 #include "HtmlComponents/UiComponents.h"
 #include "M2DrawDoc.h"
@@ -6,6 +6,7 @@
 #include "MainFrm.h"
 #include "HtmlComponents/TableComponent.h"
 #include "PanelStyle.h"
+#include "LineMarkers.h"
 #include <cmath>
 
 #ifndef M_PI
@@ -118,6 +119,7 @@ BEGIN_MESSAGE_MAP(CD2DPropertyView, CWnd)
 	ON_WM_ERASEBKGND()
 	ON_WM_LBUTTONDOWN()
 	ON_WM_MOUSEMOVE()
+	ON_WM_TIMER()
 	ON_WM_LBUTTONUP()
 	ON_WM_MOUSEWHEEL()
 	ON_WM_KEYDOWN()
@@ -488,6 +490,12 @@ void CD2DPropertyView::SyncAppearanceControls()
 			}
 			m_cboLineKind->SetCurSel(idx, false);
 		}
+		if (dynamic_cast<ge::PathNode*>(n)) {   // 선 마커 선택 상태
+			if (m_cboMarkerStart) m_cboMarkerStart->SetCurSel(static_cast<int>(sk.markerStart), false);
+			if (m_cboMarkerMid) m_cboMarkerMid->SetCurSel(static_cast<int>(sk.markerMid), false);
+			if (m_cboMarkerEnd) m_cboMarkerEnd->SetCurSel(static_cast<int>(sk.markerEnd), false);
+			if (m_spinMarkerScale) m_spinMarkerScale->SetValue(sk.markerScale, false);
+		}
 	}
 	m_bUpdating = prev;
 }
@@ -521,6 +529,10 @@ void CD2DPropertyView::SyncFrameExtraControls()
 		if (m_spinRadBL) m_spinRadBL->SetValue(cr.bl, false);
 		if (m_spinFrameRadius) m_spinFrameRadius->SetValue(cr.IsUniform() ? cr.tl : 0.0, false);
 		const ge::PaddingEdges& pe = fr->GetPaddingEdges();
+		if (m_cboResp) {   // 최상위 프레임 폭이 프리셋과 같으면 그 항목을 보여 준다
+			const float fw = fr->GetWidth();
+			m_cboResp->SetCurSel(std::fabs(fw - 1920.0f) < 0.5f ? 0 : std::fabs(fw - 768.0f) < 0.5f ? 1 : std::fabs(fw - 375.0f) < 0.5f ? 2 : 3, false);
+		}
 		if (m_spinPadT) m_spinPadT->SetValue(pe.top, false);
 		if (m_spinPadR) m_spinPadR->SetValue(pe.right, false);
 		if (m_spinPadB) m_spinPadB->SetValue(pe.bottom, false);
@@ -799,8 +811,92 @@ std::vector<float> CD2DPropertyView::EffectiveDashArray() const
 	}
 }
 
+namespace { const UINT_PTR kApplyTimerId = 0x4A50; }   // ApplyToShape 모아 적용용 타이머
+
+#ifdef _DEBUG
+// 속성창 성능 계측 (디버그 빌드 전용, 6.23.1 과 같은 방식): 선 굵기 등을 움직일 때 속성창 OnPaint / ApplyToShape 가 얼마나 걸리는지 1초마다 출력 창에 한 줄로 남긴다
+namespace {
+struct PropPerfStat { double sumMs = 0.0, maxMs = 0.0; int n = 0; };
+PropPerfStat g_propPaint, g_propApply;
+ULONGLONG g_propPerfLast = 0;
+
+void PropPerfFlush()
+{
+	const ULONGLONG now = ::GetTickCount64();
+	if (g_propPerfLast == 0) g_propPerfLast = now;
+	if (now - g_propPerfLast < 1000) return;
+	g_propPerfLast = now;
+	if (g_propPaint.n == 0 && g_propApply.n == 0) return;
+	CString line;
+	line.Format(_T("[성능] 속성창 OnPaint 평균 %.2fms 최대 %.2fms (%d회) | ApplyToShape 평균 %.2fms 최대 %.2fms (%d회)"),
+		g_propPaint.n ? g_propPaint.sumMs / g_propPaint.n : 0.0, g_propPaint.maxMs, g_propPaint.n,
+		g_propApply.n ? g_propApply.sumMs / g_propApply.n : 0.0, g_propApply.maxMs, g_propApply.n);
+	LogAppEvent(line);
+	g_propPaint = PropPerfStat{};
+	g_propApply = PropPerfStat{};
+}
+
+struct PropPerfScope {
+	PropPerfStat& stat;
+	LARGE_INTEGER t0{};
+	explicit PropPerfScope(PropPerfStat& s) : stat(s) { ::QueryPerformanceCounter(&t0); }
+	~PropPerfScope()
+	{
+		LARGE_INTEGER t1, freq;
+		::QueryPerformanceCounter(&t1);
+		::QueryPerformanceFrequency(&freq);
+		const double ms = static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart);
+		stat.sumMs += ms;
+		stat.n++;
+		if (ms > stat.maxMs) stat.maxMs = ms;
+		PropPerfFlush();
+	}
+};
+} // namespace
+#define M2_PROP_PERF(stat) PropPerfScope propPerfScope_(stat)
+#else
+#define M2_PROP_PERF(stat) ((void)0)
+#endif
+
+// 슬라이더/색상환 드래그처럼 이벤트가 매우 자주 오는 입력은 16ms(약 60회/초) 간격으로 모아서 적용한다.
+// 마우스 이동 메시지가 쌓이면 그리기(WM_PAINT)가 뒤로 밀려 화면이 버벅이므로, 이벤트마다 도형을 고치고 다시 그리지 않는다
 void CD2DPropertyView::ApplyToShape()
 {
+	ge::Node* shape = GetSelectedShape();
+	if (!shape) return;
+	const ULONGLONG now = ::GetTickCount64();
+	if (now - m_lastApplyTick >= 16) {
+		m_lastApplyTick = now;
+		m_applyPending = false;
+		ApplyToShapeNow();
+		return;
+	}
+	m_applyPending = true;
+	m_applyTargetId = shape->GetId();
+	if (GetSafeHwnd()) SetTimer(kApplyTimerId, 16, nullptr);
+}
+
+void CD2DPropertyView::FlushPendingApply()
+{
+	if (!m_applyPending) return;
+	m_applyPending = false;
+	if (GetSafeHwnd()) KillTimer(kApplyTimerId);
+	ge::Node* shape = GetSelectedShape();
+	if (shape && shape->GetId() == m_applyTargetId) {   // 그 사이 선택이 바뀌었으면 옛 값을 새 도형에 쓰지 않는다
+		m_lastApplyTick = ::GetTickCount64();
+		ApplyToShapeNow();
+	}
+}
+
+void CD2DPropertyView::OnTimer(UINT_PTR nIDEvent)
+{
+	if (nIDEvent == kApplyTimerId) { FlushPendingApply(); return; }
+	CWnd::OnTimer(nIDEvent);
+}
+
+void CD2DPropertyView::ApplyToShapeNow()
+{
+	M2_PROP_PERF(g_propApply);   // 속성창 계측 (디버그 빌드 전용)
 	if (!GetSelectedShape())
 		return;
 
@@ -1024,6 +1120,233 @@ void CD2DPropertyView::ApplyCanvasSettings(bool bLive, bool bForceCommit)
 			objPropView.SafeInvalidate(FALSE);
 		}
 	}
+}
+
+// 프레임 속성 컨트롤 생성 (6.1.1: InitControls 에서 분리)
+void CD2DPropertyView::InitFrameSection()
+{
+		// 프레임 속성 (프레임이 선택되었을 때만 표시)
+		m_lblFrame = std::make_shared<M2DrawLabel>(L"● Frame (Layout, Clip, Radius)");
+		m_pCurrentPanel->AddChild(m_lblFrame);
+
+		m_chkFrameClip = std::make_shared<M2DrawCheckBox>(L"Clip content", true);
+		m_chkFrameClip->SetOnChanged([this](M2DrawCheckBox*, bool b) {
+			ApplyFrameProps([b](ge::FrameNode& fr) { fr.SetClip(b); });
+		});
+		m_pCurrentPanel->AddChild(m_chkFrameClip);
+
+		m_lblFrameRadius = std::make_shared<M2DrawLabel>(L"Corner Radius");
+		m_pCurrentPanel->AddChild(m_lblFrameRadius);
+
+		m_spinFrameRadius = std::make_shared<M2DrawNumericInput>(0.0, 1000.0, 0.0, 1.0);
+		m_spinFrameRadius->SetSuffix(L" px");
+		m_spinFrameRadius->SetOnChanged([this](M2DrawNumericInput*, double v) {
+			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetCornerRadius(static_cast<float>(v)); }, L"프레임 모서리");
+		});
+		m_pCurrentPanel->AddChild(m_spinFrameRadius);
+
+		// 페이지 폭 프리셋 (6.26.3): 최상위 프레임의 폭을 Desktop / Tablet / Mobile 로 바꾸면 자식이 자동으로 다시 배치된다
+		m_lblResp = std::make_shared<M2DrawLabel>(L"Responsive  (page width)");
+		m_pCurrentPanel->AddChild(m_lblResp);
+		m_cboResp = std::make_shared<M2DrawComboBox>();
+		m_cboResp->SetItemHeight(20.0f);
+		m_cboResp->AddItem(L"Desktop (1920)");
+		m_cboResp->AddItem(L"Tablet (768)");
+		m_cboResp->AddItem(L"Mobile (375)");
+		m_cboResp->AddItem(L"Custom");
+		m_cboResp->SetCurSel(3, false);
+		m_cboResp->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			static const float kWidths[] = { 1920.0f, 768.0f, 375.0f };
+			if (sel < 0 || sel > 2) return;
+			const float w = kWidths[sel];
+			ApplyFrameProps([w](ge::FrameNode& fr) { fr.ResizeFrame(w, fr.GetHeight()); }, L"페이지 폭 변경");
+			UpdateShapePropertiesLight(GetSelectedShape(), m_pActiveDoc);   // W 칸 갱신
+		});
+		m_pCurrentPanel->AddChild(m_cboResp);
+
+		m_lblFrameLayout = std::make_shared<M2DrawLabel>(L"Layout  (Gap | Padding)");
+		m_pCurrentPanel->AddChild(m_lblFrameLayout);
+
+		m_cboFrameLayout = std::make_shared<M2DrawComboBox>();
+		m_cboFrameLayout->SetItemHeight(20.0f);
+		m_cboFrameLayout->AddItem(L"None (Free)");
+		m_cboFrameLayout->AddItem(L"Row (Horizontal)");
+		m_cboFrameLayout->AddItem(L"Column (Vertical)");
+		m_cboFrameLayout->SetCurSel(0, false);
+		m_cboFrameLayout->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 2) return;
+			ApplyFrameProps([sel](ge::FrameNode& fr) {
+				fr.SetLayoutMode(static_cast<ge::FrameLayoutMode>(sel));
+				if (sel != 0 && fr.GetWrapCount() == 0) fr.SetWrapCount(2);   // 기본: 한 줄에 2개 (1/2 폭)
+			});
+			UpdateShapePropertiesLight(GetSelectedShape(), m_pActiveDoc);
+		});
+		m_pCurrentPanel->AddChild(m_cboFrameLayout);
+
+		m_spinFrameWrap = std::make_shared<M2DrawNumericInput>(0.0, 50.0, 2.0, 1.0);
+		m_spinFrameWrap->SetSuffix(L" 열");
+		m_spinFrameWrap->SetOnChanged([this](M2DrawNumericInput*, double v) {
+			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetWrapCount(static_cast<int>(v + 0.5)); }, L"줄바꿈 수");
+		});
+		m_pCurrentPanel->AddChild(m_spinFrameWrap);
+
+		m_lblFrameGap = std::make_shared<M2DrawLabel>(L"Gap");
+		m_pCurrentPanel->AddChild(m_lblFrameGap);
+
+		m_spinFrameGap = std::make_shared<M2DrawNumericInput>(0.0, 500.0, 10.0, 1.0);
+		m_spinFrameGap->SetSuffix(L" px");
+		m_spinFrameGap->SetOnChanged([this](M2DrawNumericInput*, double v) {
+			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetGap(static_cast<float>(v)); });
+		});
+		m_pCurrentPanel->AddChild(m_spinFrameGap);
+
+		m_lblFramePadding = std::make_shared<M2DrawLabel>(L"Padding");
+		m_pCurrentPanel->AddChild(m_lblFramePadding);
+
+		m_spinFramePadding = std::make_shared<M2DrawNumericInput>(0.0, 500.0, 10.0, 1.0);
+		m_spinFramePadding->SetSuffix(L" px");
+		m_spinFramePadding->SetOnChanged([this](M2DrawNumericInput*, double v) {
+			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetPadding(static_cast<float>(v)); }, L"프레임 여백");
+		});
+		m_pCurrentPanel->AddChild(m_spinFramePadding);
+
+		m_lblFrameAlign = std::make_shared<M2DrawLabel>(L"Align (Main | Cross)");
+		m_pCurrentPanel->AddChild(m_lblFrameAlign);
+
+		m_cboFrameMainAlign = std::make_shared<M2DrawComboBox>();
+		m_cboFrameMainAlign->SetItemHeight(20.0f);
+		m_cboFrameMainAlign->AddItem(L"Main: Start");
+		m_cboFrameMainAlign->AddItem(L"Main: Center");
+		m_cboFrameMainAlign->AddItem(L"Main: End");
+		m_cboFrameMainAlign->AddItem(L"Main: Space-Between");
+		m_cboFrameMainAlign->SetCurSel(0, false);
+		m_cboFrameMainAlign->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 3) return;
+			ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetMainAlign(static_cast<ge::LayoutMainAlign>(sel)); });
+		});
+		m_pCurrentPanel->AddChild(m_cboFrameMainAlign);
+
+		m_cboFrameCrossAlign = std::make_shared<M2DrawComboBox>();
+		m_cboFrameCrossAlign->SetItemHeight(20.0f);
+		m_cboFrameCrossAlign->AddItem(L"Cross: Start");
+		m_cboFrameCrossAlign->AddItem(L"Cross: Center");
+		m_cboFrameCrossAlign->AddItem(L"Cross: End");
+		m_cboFrameCrossAlign->SetCurSel(0, false);
+		m_cboFrameCrossAlign->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 2) return;
+			ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetCrossAlign(static_cast<ge::LayoutCrossAlign>(sel)); });
+		});
+		m_pCurrentPanel->AddChild(m_cboFrameCrossAlign);
+
+		m_lblFrameSizing = std::make_shared<M2DrawLabel>(L"Sizing (Width | Height)");
+		m_pCurrentPanel->AddChild(m_lblFrameSizing);
+
+		m_cboFrameSizingW = std::make_shared<M2DrawComboBox>();
+		m_cboFrameSizingW->SetItemHeight(20.0f);
+		m_cboFrameSizingW->AddItem(L"W: Fixed");
+		m_cboFrameSizingW->AddItem(L"W: Hug");
+			m_cboFrameSizingW->AddItem(L"W: Fill");
+		m_cboFrameSizingW->SetCurSel(0, false);
+		m_cboFrameSizingW->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 2) return;
+				ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetSizingW(static_cast<ge::FrameSizingMode>(sel)); }, L"프레임 크기 규칙");
+		});
+		m_pCurrentPanel->AddChild(m_cboFrameSizingW);
+
+		m_cboFrameSizingH = std::make_shared<M2DrawComboBox>();
+		m_cboFrameSizingH->SetItemHeight(20.0f);
+		m_cboFrameSizingH->AddItem(L"H: Fixed");
+		m_cboFrameSizingH->AddItem(L"H: Hug");
+			m_cboFrameSizingH->AddItem(L"H: Fill");
+		m_cboFrameSizingH->SetCurSel(0, false);
+		m_cboFrameSizingH->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 2) return;
+				ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetSizingH(static_cast<ge::FrameSizingMode>(sel)); }, L"프레임 크기 규칙");
+		});
+		m_pCurrentPanel->AddChild(m_cboFrameSizingH);
+
+		// ---- 프레임 역할 / 4방향 모서리·여백·테두리 변 / 제약 (4.5.8, 4.5.10, 4.5.11) ----
+		m_cboFrameRole = std::make_shared<M2DrawComboBox>();
+		m_cboFrameRole->SetItemHeight(20.0f);
+		m_cboFrameRole->AddItem(L"Role: div (기본)");
+		m_cboFrameRole->AddItem(L"Role: header (상단 헤더)");
+		m_cboFrameRole->AddItem(L"Role: nav (네비게이션)");
+		m_cboFrameRole->AddItem(L"Role: main (본문)");
+		m_cboFrameRole->AddItem(L"Role: aside (사이드바)");
+		m_cboFrameRole->AddItem(L"Role: section (섹션)");
+		m_cboFrameRole->AddItem(L"Role: article (글)");
+		m_cboFrameRole->AddItem(L"Role: footer (하단 푸터)");
+		m_cboFrameRole->AddItem(L"Role: form (양식 폼)");
+		m_cboFrameRole->AddItem(L"Role: fieldset (필드셋)");
+		m_cboFrameRole->AddItem(L"Role: dialog (모달 대화상자)");
+		m_cboFrameRole->SetCurSel(0, false);
+		m_cboFrameRole->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			static const char* kRoles[] = { "", "header", "nav", "main", "aside", "section", "article", "footer", "form", "fieldset", "dialog" };
+			if (sel < 0 || sel > 10) return;
+			const std::string tag = kRoles[sel];
+			ApplyFrameProps([tag](ge::FrameNode& fr) { fr.SetHtmlTag(tag); }, L"프레임 역할 변경");
+		});
+		m_pCurrentPanel->AddChild(m_cboFrameRole);
+
+		auto mkSpin = [this](std::shared_ptr<M2DrawNumericInput>& sp, const wchar_t* suffix, double mx, std::function<void(ge::FrameNode&, float)> setter, const wchar_t* undo) {
+			sp = std::make_shared<M2DrawNumericInput>(0.0, mx, 0.0, 1.0);
+			sp->SetSuffix(suffix);
+			sp->SetOnChanged([this, setter, undo](M2DrawNumericInput*, double v) {
+				ApplyFrameProps([setter, v](ge::FrameNode& fr) { setter(fr, static_cast<float>(v)); }, undo);
+			});
+			m_pCurrentPanel->AddChild(sp);
+		};
+		mkSpin(m_spinRadTL, L" ◤", 1000.0, [](ge::FrameNode& f, float v) { auto r = f.GetCornerRadii(); r.tl = v; f.SetCornerRadii(r); }, L"프레임 모서리");
+		mkSpin(m_spinRadTR, L" ◥", 1000.0, [](ge::FrameNode& f, float v) { auto r = f.GetCornerRadii(); r.tr = v; f.SetCornerRadii(r); }, L"프레임 모서리");
+		mkSpin(m_spinRadBR, L" ◢", 1000.0, [](ge::FrameNode& f, float v) { auto r = f.GetCornerRadii(); r.br = v; f.SetCornerRadii(r); }, L"프레임 모서리");
+		mkSpin(m_spinRadBL, L" ◣", 1000.0, [](ge::FrameNode& f, float v) { auto r = f.GetCornerRadii(); r.bl = v; f.SetCornerRadii(r); }, L"프레임 모서리");
+		mkSpin(m_spinPadT, L" T", 500.0, [](ge::FrameNode& f, float v) { auto e = f.GetPaddingEdges(); e.top = v; f.SetPaddingEdges(e); }, L"프레임 여백");
+		mkSpin(m_spinPadR, L" R", 500.0, [](ge::FrameNode& f, float v) { auto e = f.GetPaddingEdges(); e.right = v; f.SetPaddingEdges(e); }, L"프레임 여백");
+		mkSpin(m_spinPadB, L" B", 500.0, [](ge::FrameNode& f, float v) { auto e = f.GetPaddingEdges(); e.bottom = v; f.SetPaddingEdges(e); }, L"프레임 여백");
+		mkSpin(m_spinPadL, L" L", 500.0, [](ge::FrameNode& f, float v) { auto e = f.GetPaddingEdges(); e.left = v; f.SetPaddingEdges(e); }, L"프레임 여백");
+
+		auto mkChk = [this](std::shared_ptr<M2DrawCheckBox>& ck, const wchar_t* label, uint8_t bit) {
+			ck = std::make_shared<M2DrawCheckBox>(label, true);
+			ck->SetOnChanged([this, bit](M2DrawCheckBox*, bool on) {
+				ApplyFrameProps([bit, on](ge::FrameNode& fr) {
+					uint8_t s = fr.GetBorderSides();
+					s = on ? static_cast<uint8_t>(s | bit) : static_cast<uint8_t>(s & ~bit);
+					fr.SetBorderSides(s);
+				}, L"프레임 테두리 변");
+			});
+			m_pCurrentPanel->AddChild(ck);
+		};
+		mkChk(m_chkBdrT, L"T", ge::BorderTop);
+		mkChk(m_chkBdrR, L"R", ge::BorderRight);
+		mkChk(m_chkBdrB, L"B", ge::BorderBottom);
+		mkChk(m_chkBdrL, L"L", ge::BorderLeft);
+
+		m_lblConstraint = std::make_shared<M2DrawLabel>(L"Constraints (H | V)");
+		m_pCurrentPanel->AddChild(m_lblConstraint);
+		m_cboConstraintH = std::make_shared<M2DrawComboBox>();
+		m_cboConstraintH->SetItemHeight(20.0f);
+		m_cboConstraintH->AddItem(L"H: Left");
+		m_cboConstraintH->AddItem(L"H: Right");
+		m_cboConstraintH->AddItem(L"H: Left+Right");
+		m_cboConstraintH->AddItem(L"H: Center");
+		m_cboConstraintH->SetCurSel(0, false);
+		m_cboConstraintH->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 3) return;
+			ApplyConstraintProps([sel](ge::Node& n) { n.SetConstraintH(static_cast<ge::ConstraintH>(sel)); });
+		});
+		m_pCurrentPanel->AddChild(m_cboConstraintH);
+		m_cboConstraintV = std::make_shared<M2DrawComboBox>();
+		m_cboConstraintV->SetItemHeight(20.0f);
+		m_cboConstraintV->AddItem(L"V: Top");
+		m_cboConstraintV->AddItem(L"V: Bottom");
+		m_cboConstraintV->AddItem(L"V: Top+Bottom");
+		m_cboConstraintV->AddItem(L"V: Center");
+		m_cboConstraintV->SetCurSel(0, false);
+		m_cboConstraintV->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
+			if (sel < 0 || sel > 3) return;
+			ApplyConstraintProps([sel](ge::Node& n) { n.SetConstraintV(static_cast<ge::ConstraintV>(sel)); });
+		});
+		m_pCurrentPanel->AddChild(m_cboConstraintV);
 }
 
 void CD2DPropertyView::InitControls()
@@ -1575,198 +1898,7 @@ void CD2DPropertyView::InitControls()
 		});
 		m_pCurrentPanel->AddChild(m_cboTextAlign);
 
-		// 프레임 속성 (프레임이 선택되었을 때만 표시)
-		m_lblFrame = std::make_shared<M2DrawLabel>(L"● Frame (Layout, Clip, Radius)");
-		m_pCurrentPanel->AddChild(m_lblFrame);
-
-		m_chkFrameClip = std::make_shared<M2DrawCheckBox>(L"Clip content", true);
-		m_chkFrameClip->SetOnChanged([this](M2DrawCheckBox*, bool b) {
-			ApplyFrameProps([b](ge::FrameNode& fr) { fr.SetClip(b); });
-		});
-		m_pCurrentPanel->AddChild(m_chkFrameClip);
-
-		m_lblFrameRadius = std::make_shared<M2DrawLabel>(L"Corner Radius");
-		m_pCurrentPanel->AddChild(m_lblFrameRadius);
-
-		m_spinFrameRadius = std::make_shared<M2DrawNumericInput>(0.0, 1000.0, 0.0, 1.0);
-		m_spinFrameRadius->SetSuffix(L" px");
-		m_spinFrameRadius->SetOnChanged([this](M2DrawNumericInput*, double v) {
-			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetCornerRadius(static_cast<float>(v)); }, L"프레임 모서리");
-		});
-		m_pCurrentPanel->AddChild(m_spinFrameRadius);
-
-		m_lblFrameLayout = std::make_shared<M2DrawLabel>(L"Layout  (Gap | Padding)");
-		m_pCurrentPanel->AddChild(m_lblFrameLayout);
-
-		m_cboFrameLayout = std::make_shared<M2DrawComboBox>();
-		m_cboFrameLayout->SetItemHeight(20.0f);
-		m_cboFrameLayout->AddItem(L"None (Free)");
-		m_cboFrameLayout->AddItem(L"Row (Horizontal)");
-		m_cboFrameLayout->AddItem(L"Column (Vertical)");
-		m_cboFrameLayout->SetCurSel(0, false);
-		m_cboFrameLayout->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
-			if (sel < 0 || sel > 2) return;
-			ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetLayoutMode(static_cast<ge::FrameLayoutMode>(sel)); });
-		});
-		m_pCurrentPanel->AddChild(m_cboFrameLayout);
-
-		m_lblFrameGap = std::make_shared<M2DrawLabel>(L"Gap");
-		m_pCurrentPanel->AddChild(m_lblFrameGap);
-
-		m_spinFrameGap = std::make_shared<M2DrawNumericInput>(0.0, 500.0, 10.0, 1.0);
-		m_spinFrameGap->SetSuffix(L" px");
-		m_spinFrameGap->SetOnChanged([this](M2DrawNumericInput*, double v) {
-			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetGap(static_cast<float>(v)); });
-		});
-		m_pCurrentPanel->AddChild(m_spinFrameGap);
-
-		m_lblFramePadding = std::make_shared<M2DrawLabel>(L"Padding");
-		m_pCurrentPanel->AddChild(m_lblFramePadding);
-
-		m_spinFramePadding = std::make_shared<M2DrawNumericInput>(0.0, 500.0, 10.0, 1.0);
-		m_spinFramePadding->SetSuffix(L" px");
-		m_spinFramePadding->SetOnChanged([this](M2DrawNumericInput*, double v) {
-			ApplyFrameProps([v](ge::FrameNode& fr) { fr.SetPadding(static_cast<float>(v)); }, L"프레임 여백");
-		});
-		m_pCurrentPanel->AddChild(m_spinFramePadding);
-
-		m_lblFrameAlign = std::make_shared<M2DrawLabel>(L"Align (Main | Cross)");
-		m_pCurrentPanel->AddChild(m_lblFrameAlign);
-
-		m_cboFrameMainAlign = std::make_shared<M2DrawComboBox>();
-		m_cboFrameMainAlign->SetItemHeight(20.0f);
-		m_cboFrameMainAlign->AddItem(L"Main: Start");
-		m_cboFrameMainAlign->AddItem(L"Main: Center");
-		m_cboFrameMainAlign->AddItem(L"Main: End");
-		m_cboFrameMainAlign->AddItem(L"Main: Space-Between");
-		m_cboFrameMainAlign->SetCurSel(0, false);
-		m_cboFrameMainAlign->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
-			if (sel < 0 || sel > 3) return;
-			ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetMainAlign(static_cast<ge::LayoutMainAlign>(sel)); });
-		});
-		m_pCurrentPanel->AddChild(m_cboFrameMainAlign);
-
-		m_cboFrameCrossAlign = std::make_shared<M2DrawComboBox>();
-		m_cboFrameCrossAlign->SetItemHeight(20.0f);
-		m_cboFrameCrossAlign->AddItem(L"Cross: Start");
-		m_cboFrameCrossAlign->AddItem(L"Cross: Center");
-		m_cboFrameCrossAlign->AddItem(L"Cross: End");
-		m_cboFrameCrossAlign->SetCurSel(0, false);
-		m_cboFrameCrossAlign->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
-			if (sel < 0 || sel > 2) return;
-			ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetCrossAlign(static_cast<ge::LayoutCrossAlign>(sel)); });
-		});
-		m_pCurrentPanel->AddChild(m_cboFrameCrossAlign);
-
-		m_lblFrameSizing = std::make_shared<M2DrawLabel>(L"Sizing (Width | Height)");
-		m_pCurrentPanel->AddChild(m_lblFrameSizing);
-
-		m_cboFrameSizingW = std::make_shared<M2DrawComboBox>();
-		m_cboFrameSizingW->SetItemHeight(20.0f);
-		m_cboFrameSizingW->AddItem(L"W: Fixed");
-		m_cboFrameSizingW->AddItem(L"W: Hug");
-			m_cboFrameSizingW->AddItem(L"W: Fill");
-		m_cboFrameSizingW->SetCurSel(0, false);
-		m_cboFrameSizingW->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
-			if (sel < 0 || sel > 2) return;
-				ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetSizingW(static_cast<ge::FrameSizingMode>(sel)); }, L"프레임 크기 규칙");
-		});
-		m_pCurrentPanel->AddChild(m_cboFrameSizingW);
-
-		m_cboFrameSizingH = std::make_shared<M2DrawComboBox>();
-		m_cboFrameSizingH->SetItemHeight(20.0f);
-		m_cboFrameSizingH->AddItem(L"H: Fixed");
-		m_cboFrameSizingH->AddItem(L"H: Hug");
-			m_cboFrameSizingH->AddItem(L"H: Fill");
-		m_cboFrameSizingH->SetCurSel(0, false);
-		m_cboFrameSizingH->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
-			if (sel < 0 || sel > 2) return;
-				ApplyFrameProps([sel](ge::FrameNode& fr) { fr.SetSizingH(static_cast<ge::FrameSizingMode>(sel)); }, L"프레임 크기 규칙");
-		});
-		m_pCurrentPanel->AddChild(m_cboFrameSizingH);
-
-		// ---- 프레임 역할 / 4방향 모서리·여백·테두리 변 / 제약 (4.5.8, 4.5.10, 4.5.11) ----
-		m_cboFrameRole = std::make_shared<M2DrawComboBox>();
-		m_cboFrameRole->SetItemHeight(20.0f);
-		m_cboFrameRole->AddItem(L"Role: div (기본)");
-		m_cboFrameRole->AddItem(L"Role: header (상단 헤더)");
-		m_cboFrameRole->AddItem(L"Role: nav (네비게이션)");
-		m_cboFrameRole->AddItem(L"Role: main (본문)");
-		m_cboFrameRole->AddItem(L"Role: aside (사이드바)");
-		m_cboFrameRole->AddItem(L"Role: section (섹션)");
-		m_cboFrameRole->AddItem(L"Role: article (글)");
-		m_cboFrameRole->AddItem(L"Role: footer (하단 푸터)");
-		m_cboFrameRole->AddItem(L"Role: form (양식 폼)");
-		m_cboFrameRole->AddItem(L"Role: fieldset (필드셋)");
-		m_cboFrameRole->AddItem(L"Role: dialog (모달 대화상자)");
-		m_cboFrameRole->SetCurSel(0, false);
-		m_cboFrameRole->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
-			static const char* kRoles[] = { "", "header", "nav", "main", "aside", "section", "article", "footer", "form", "fieldset", "dialog" };
-			if (sel < 0 || sel > 10) return;
-			const std::string tag = kRoles[sel];
-			ApplyFrameProps([tag](ge::FrameNode& fr) { fr.SetHtmlTag(tag); }, L"프레임 역할 변경");
-		});
-		m_pCurrentPanel->AddChild(m_cboFrameRole);
-
-		auto mkSpin = [this](std::shared_ptr<M2DrawNumericInput>& sp, const wchar_t* suffix, double mx, std::function<void(ge::FrameNode&, float)> setter, const wchar_t* undo) {
-			sp = std::make_shared<M2DrawNumericInput>(0.0, mx, 0.0, 1.0);
-			sp->SetSuffix(suffix);
-			sp->SetOnChanged([this, setter, undo](M2DrawNumericInput*, double v) {
-				ApplyFrameProps([setter, v](ge::FrameNode& fr) { setter(fr, static_cast<float>(v)); }, undo);
-			});
-			m_pCurrentPanel->AddChild(sp);
-		};
-		mkSpin(m_spinRadTL, L" ◤", 1000.0, [](ge::FrameNode& f, float v) { auto r = f.GetCornerRadii(); r.tl = v; f.SetCornerRadii(r); }, L"프레임 모서리");
-		mkSpin(m_spinRadTR, L" ◥", 1000.0, [](ge::FrameNode& f, float v) { auto r = f.GetCornerRadii(); r.tr = v; f.SetCornerRadii(r); }, L"프레임 모서리");
-		mkSpin(m_spinRadBR, L" ◢", 1000.0, [](ge::FrameNode& f, float v) { auto r = f.GetCornerRadii(); r.br = v; f.SetCornerRadii(r); }, L"프레임 모서리");
-		mkSpin(m_spinRadBL, L" ◣", 1000.0, [](ge::FrameNode& f, float v) { auto r = f.GetCornerRadii(); r.bl = v; f.SetCornerRadii(r); }, L"프레임 모서리");
-		mkSpin(m_spinPadT, L" T", 500.0, [](ge::FrameNode& f, float v) { auto e = f.GetPaddingEdges(); e.top = v; f.SetPaddingEdges(e); }, L"프레임 여백");
-		mkSpin(m_spinPadR, L" R", 500.0, [](ge::FrameNode& f, float v) { auto e = f.GetPaddingEdges(); e.right = v; f.SetPaddingEdges(e); }, L"프레임 여백");
-		mkSpin(m_spinPadB, L" B", 500.0, [](ge::FrameNode& f, float v) { auto e = f.GetPaddingEdges(); e.bottom = v; f.SetPaddingEdges(e); }, L"프레임 여백");
-		mkSpin(m_spinPadL, L" L", 500.0, [](ge::FrameNode& f, float v) { auto e = f.GetPaddingEdges(); e.left = v; f.SetPaddingEdges(e); }, L"프레임 여백");
-
-		auto mkChk = [this](std::shared_ptr<M2DrawCheckBox>& ck, const wchar_t* label, uint8_t bit) {
-			ck = std::make_shared<M2DrawCheckBox>(label, true);
-			ck->SetOnChanged([this, bit](M2DrawCheckBox*, bool on) {
-				ApplyFrameProps([bit, on](ge::FrameNode& fr) {
-					uint8_t s = fr.GetBorderSides();
-					s = on ? static_cast<uint8_t>(s | bit) : static_cast<uint8_t>(s & ~bit);
-					fr.SetBorderSides(s);
-				}, L"프레임 테두리 변");
-			});
-			m_pCurrentPanel->AddChild(ck);
-		};
-		mkChk(m_chkBdrT, L"T", ge::BorderTop);
-		mkChk(m_chkBdrR, L"R", ge::BorderRight);
-		mkChk(m_chkBdrB, L"B", ge::BorderBottom);
-		mkChk(m_chkBdrL, L"L", ge::BorderLeft);
-
-		m_lblConstraint = std::make_shared<M2DrawLabel>(L"Constraints (H | V)");
-		m_pCurrentPanel->AddChild(m_lblConstraint);
-		m_cboConstraintH = std::make_shared<M2DrawComboBox>();
-		m_cboConstraintH->SetItemHeight(20.0f);
-		m_cboConstraintH->AddItem(L"H: Left");
-		m_cboConstraintH->AddItem(L"H: Right");
-		m_cboConstraintH->AddItem(L"H: Left+Right");
-		m_cboConstraintH->AddItem(L"H: Center");
-		m_cboConstraintH->SetCurSel(0, false);
-		m_cboConstraintH->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
-			if (sel < 0 || sel > 3) return;
-			ApplyConstraintProps([sel](ge::Node& n) { n.SetConstraintH(static_cast<ge::ConstraintH>(sel)); });
-		});
-		m_pCurrentPanel->AddChild(m_cboConstraintH);
-		m_cboConstraintV = std::make_shared<M2DrawComboBox>();
-		m_cboConstraintV->SetItemHeight(20.0f);
-		m_cboConstraintV->AddItem(L"V: Top");
-		m_cboConstraintV->AddItem(L"V: Bottom");
-		m_cboConstraintV->AddItem(L"V: Top+Bottom");
-		m_cboConstraintV->AddItem(L"V: Center");
-		m_cboConstraintV->SetCurSel(0, false);
-		m_cboConstraintV->SetOnSelectionChanged([this](M2DrawComboBox*, int sel) {
-			if (sel < 0 || sel > 3) return;
-			ApplyConstraintProps([sel](ge::Node& n) { n.SetConstraintV(static_cast<ge::ConstraintV>(sel)); });
-		});
-		m_pCurrentPanel->AddChild(m_cboConstraintV);
+		InitFrameSection();
 
 		// ---- 공통 외형(Appearance): 그림자 + 선 (4.5.17.4, 4.5.18) ----
 		m_lblShadow = std::make_shared<M2DrawLabel>(L"● Appearance (Shadow, Line)");
@@ -1843,6 +1975,42 @@ void CD2DPropertyView::InitControls()
 			});
 		});
 		m_pCurrentPanel->AddChild(m_cboLineKind);
+
+		// 선 마커 (6.25.3): 시작 | 중간 | 끝. 시작/끝은 열린 패스에만 보이고 중간은 모든 패스에 보인다
+		m_lblMarker = std::make_shared<M2DrawLabel>(L"Marker (Start | Mid | End)");
+		m_pCurrentPanel->AddChild(m_lblMarker);
+		auto makeMarkerCombo = [this](std::shared_ptr<M2DrawComboBox>& cbo, ge::MarkerKind ge::Stroke::* field) {
+			cbo = std::make_shared<M2DrawComboBox>();
+			cbo->SetItemHeight(20.0f);
+			for (int i = 0; i < ge::Markers::kKindCount; ++i) cbo->AddItem(ge::Markers::KindLabel(static_cast<ge::MarkerKind>(i)));
+			cbo->SetCurSel(0, false);
+			cbo->SetOnSelectionChanged([this, field](M2DrawComboBox*, int idx) {
+				if (idx < 0 || idx >= ge::Markers::kKindCount) return;
+				ApplyLineProps([field, idx](ge::Node& n) {
+					if (!dynamic_cast<ge::PathNode*>(&n)) return;
+					ge::Style st = n.GetStyle();
+					st.stroke.*field = static_cast<ge::MarkerKind>(idx);
+					if (st.stroke.width <= 0.0f) st.stroke.width = 1.0f;   // 선이 없으면 마커도 안 보이므로 1px 선을 준다
+					n.SetStyle(st);
+				});
+			});
+			m_pCurrentPanel->AddChild(cbo);
+		};
+		makeMarkerCombo(m_cboMarkerStart, &ge::Stroke::markerStart);
+		makeMarkerCombo(m_cboMarkerMid, &ge::Stroke::markerMid);
+		makeMarkerCombo(m_cboMarkerEnd, &ge::Stroke::markerEnd);
+		m_spinMarkerScale = std::make_shared<M2DrawNumericInput>(0.5, 20.0, 4.0, 0.5);
+		m_spinMarkerScale->SetSuffix(L" x width");
+		m_spinMarkerScale->SetOnChanged([this](M2DrawNumericInput*, double v) {
+			const float scale = static_cast<float>(v);
+			ApplyLineProps([scale](ge::Node& n) {
+				if (!dynamic_cast<ge::PathNode*>(&n)) return;
+				ge::Style st = n.GetStyle();
+				st.stroke.markerScale = scale;
+				n.SetStyle(st);
+			});
+		});
+		m_pCurrentPanel->AddChild(m_spinMarkerScale);
 
 		// 테이블 속성 위젯 (4.5.7.7): 행/열 수, 여백, 테두리, 머리글, 정렬, 행/열 삽입·삭제, 병합/분할
 		m_lblTable = std::make_shared<M2DrawLabel>(L"● Table (Rows | Cols)");
@@ -1997,7 +2165,7 @@ void CD2DPropertyView::InitControls()
 		m_sliderStrokeWidth = std::make_shared<M2DrawSlider>(0.1f, initMaxSlider, m_fStrokeWidth);
 		m_sliderStrokeWidth->SetOnChanged([this](M2DrawSlider* /*pSlider*/, float val) {
 			m_fStrokeWidth = val;
-			if (m_spinStrokeWidth) m_spinStrokeWidth->SetValue(val);
+			if (m_spinStrokeWidth) m_spinStrokeWidth->SetValue(val, false);   // 숫자 칸만 갱신 (콜백이 같은 값을 한 번 더 적용하지 않게)
 			ApplyToShape();
 			SafeInvalidate(FALSE);
 		});
@@ -2435,6 +2603,29 @@ void CD2DPropertyView::InitControls()
 	SyncControlsFromData();
 }
 
+// 프레임: 컨트롤 값을 노드 현재 값으로 맞춤 (콜백 억제) (6.1.2: SyncControlsFromData 에서 분리)
+void CD2DPropertyView::SyncFrameSection()
+{
+	auto* fr = dynamic_cast<ge::FrameNode*>(GetSelectedShape());
+	if (!fr) return;
+	const bool prevUpdating = m_bUpdating;
+	m_bUpdating = true;
+	if (m_chkFrameClip) m_chkFrameClip->SetChecked(fr->IsClip());
+	if (m_spinFrameRadius) m_spinFrameRadius->SetValue(fr->GetCornerRadius(), false);
+	if (m_cboFrameLayout) m_cboFrameLayout->SetCurSel(static_cast<int>(fr->GetLayoutMode()), false);
+	if (m_spinFrameGap) m_spinFrameGap->SetValue(fr->GetGap(), false);
+	if (m_spinFrameWrap) {
+		m_spinFrameWrap->SetSuffix(fr->GetLayoutMode() == ge::FrameLayoutMode::Column ? L" 행" : L" 열");
+		m_spinFrameWrap->SetValue(fr->GetWrapCount(), false);
+	}
+	if (m_spinFramePadding) m_spinFramePadding->SetValue(fr->GetPadding(), false);
+	if (m_cboFrameMainAlign) m_cboFrameMainAlign->SetCurSel(static_cast<int>(fr->GetMainAlign()), false);
+	if (m_cboFrameCrossAlign) m_cboFrameCrossAlign->SetCurSel(static_cast<int>(fr->GetCrossAlign()), false);
+	if (m_cboFrameSizingW) m_cboFrameSizingW->SetCurSel(static_cast<int>(fr->GetSizingW()), false);
+	if (m_cboFrameSizingH) m_cboFrameSizingH->SetCurSel(static_cast<int>(fr->GetSizingH()), false);
+	m_bUpdating = prevUpdating;
+}
+
 void CD2DPropertyView::SyncControlsFromData()
 {
 	if (m_paneMode == MODE_SHAPE)
@@ -2528,22 +2719,8 @@ void CD2DPropertyView::SyncControlsFromData()
 			m_bUpdating = prevUpdating;
 		}
 
-		// 프레임: 컨트롤 값을 노드 현재 값으로 맞춤 (콜백 억제)
-		if (auto* fr = dynamic_cast<ge::FrameNode*>(GetSelectedShape()))
-		{
-			const bool prevUpdating = m_bUpdating;
-			m_bUpdating = true;
-			if (m_chkFrameClip) m_chkFrameClip->SetChecked(fr->IsClip());
-			if (m_spinFrameRadius) m_spinFrameRadius->SetValue(fr->GetCornerRadius(), false);
-			if (m_cboFrameLayout) m_cboFrameLayout->SetCurSel(static_cast<int>(fr->GetLayoutMode()), false);
-			if (m_spinFrameGap) m_spinFrameGap->SetValue(fr->GetGap(), false);
-			if (m_spinFramePadding) m_spinFramePadding->SetValue(fr->GetPadding(), false);
-			if (m_cboFrameMainAlign) m_cboFrameMainAlign->SetCurSel(static_cast<int>(fr->GetMainAlign()), false);
-			if (m_cboFrameCrossAlign) m_cboFrameCrossAlign->SetCurSel(static_cast<int>(fr->GetCrossAlign()), false);
-			if (m_cboFrameSizingW) m_cboFrameSizingW->SetCurSel(static_cast<int>(fr->GetSizingW()), false);
-			if (m_cboFrameSizingH) m_cboFrameSizingH->SetCurSel(static_cast<int>(fr->GetSizingH()), false);
-			m_bUpdating = prevUpdating;
-		}
+		// 프레임
+		SyncFrameSection();
 
 		// 테이블: 컨트롤 값을 노드 현재 값으로 맞춤
 		if (dynamic_cast<ge::TableNode*>(GetSelectedShape())) SyncTableControls();
@@ -3003,10 +3180,14 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			if (m_chkFrameClip)         m_chkFrameClip->SetVisible(isFrame);
 			if (m_lblFrameRadius)       m_lblFrameRadius->SetVisible(false);   // 보조 라벨 숨김
 			if (m_spinFrameRadius)      m_spinFrameRadius->SetVisible(isFrame);
+			const bool topFrame = isFrame && frNode && frNode->GetParent() && frNode->GetParent()->Kind() == ge::NodeKind::Layer;   // 페이지 폭 프리셋은 최상위 프레임만
+			if (m_lblResp)              m_lblResp->SetVisible(topFrame);
+			if (m_cboResp)              m_cboResp->SetVisible(topFrame);
 			if (m_lblFrameLayout)       m_lblFrameLayout->SetVisible(isFrame);
 			if (m_cboFrameLayout)       m_cboFrameLayout->SetVisible(isFrame);
 			if (m_lblFrameGap)          m_lblFrameGap->SetVisible(false);
 			if (m_spinFrameGap)         m_spinFrameGap->SetVisible(hasAutoLayout);
+			if (m_spinFrameWrap)        m_spinFrameWrap->SetVisible(hasAutoLayout);
 			if (m_lblFramePadding)      m_lblFramePadding->SetVisible(false);
 			if (m_spinFramePadding)     m_spinFramePadding->SetVisible(hasAutoLayout);
 			if (m_lblFrameAlign)        m_lblFrameAlign->SetVisible(hasAutoLayout);
@@ -3039,6 +3220,11 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 						for (int k = 0; k < 4; ++k) if (bb[k]) bb[k]->SetBounds(left + k * (q + 6.0f), y, left + k * (q + 6.0f) + q, y + 24.0f);
 						y += 28.0f;
 					}
+				if (topFrame)
+				{
+					if (m_lblResp) { m_lblResp->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+					if (m_cboResp) { m_cboResp->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+				}
 				if (m_lblFrameLayout)   { m_lblFrameLayout->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
 				if (m_cboFrameLayout)   { m_cboFrameLayout->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
 
@@ -3047,8 +3233,10 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 					if (m_spinFrameGap)     m_spinFrameGap->SetBounds(left, y, left + halfFW, y + 24.0f);
 					if (m_spinFramePadding) m_spinFramePadding->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
 					y += 28.0f;
+					if (m_spinFrameWrap) m_spinFrameWrap->SetBounds(left, y, left + halfFW, y + 24.0f);
+					y += 28.0f;
 						{
-							const float q = (contentW - 18.0f) * 0.25f;
+							const float q =(contentW - 18.0f) * 0.25f;
 							const std::shared_ptr<M2DrawControl> pp[] = { m_spinPadT, m_spinPadR, m_spinPadB, m_spinPadL };
 							for (int k = 0; k < 4; ++k) if (pp[k]) pp[k]->SetBounds(left + k * (q + 6.0f), y, left + k * (q + 6.0f) + q, y + 24.0f);
 							y += 28.0f;
@@ -3156,6 +3344,13 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			for (const auto& c : shCtrls) if (c) c->SetVisible(hasSel);
 			const std::shared_ptr<M2DrawControl> lnCtrls[] = { m_lblLine, m_spinLineW, m_cboLineKind };
 			for (const auto& c : lnCtrls) if (c) c->SetVisible(hasLine);
+			// 선 마커: 패스에만. 시작/끝은 열린 서브패스가 있을 때만 보인다
+			ge::PathNode* markerPath = selN ? dynamic_cast<ge::PathNode*>(selN) : nullptr;
+			const bool markerOpen = markerPath && ge::Markers::HasOpenSubPath(markerPath->GetPaths());
+			const std::shared_ptr<M2DrawControl> markerAlways[] = { m_lblMarker, m_cboMarkerMid, m_spinMarkerScale };
+			const std::shared_ptr<M2DrawControl> markerOpenOnly[] = { m_cboMarkerStart, m_cboMarkerEnd };
+			for (const auto& c : markerAlways) if (c) c->SetVisible(markerPath != nullptr);
+			for (const auto& c : markerOpenOnly) if (c) c->SetVisible(markerOpen);
 			if (hasSel)
 			{
 				const float hs = (contentW - 6.0f) * 0.5f;
@@ -3179,6 +3374,21 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 					if (m_spinLineW) m_spinLineW->SetBounds(left, y, left + hs, y + 24.0f);
 					if (m_cboLineKind) m_cboLineKind->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
 					y += 34.0f;
+					if (markerPath)
+					{
+						if (m_lblMarker) { m_lblMarker->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+						if (markerOpen)
+						{
+							const float w3 = (contentW - 12.0f) / 3.0f;
+							if (m_cboMarkerStart) m_cboMarkerStart->SetBounds(left, y, left + w3, y + 24.0f);
+							if (m_cboMarkerMid) m_cboMarkerMid->SetBounds(left + w3 + 6.0f, y, left + 2.0f * w3 + 6.0f, y + 24.0f);
+							if (m_cboMarkerEnd) m_cboMarkerEnd->SetBounds(left + 2.0f * w3 + 12.0f, y, right, y + 24.0f);
+						}
+						else if (m_cboMarkerMid) m_cboMarkerMid->SetBounds(left, y, right, y + 24.0f);
+						y += 28.0f;
+						if (m_spinMarkerScale) m_spinMarkerScale->SetBounds(left, y, left + hs, y + 24.0f);
+						y += 34.0f;
+					}
 				}
 				else y += 6.0f;
 			}
@@ -3750,7 +3960,7 @@ HRESULT CD2DPropertyView::CreateDeviceResources()
 
 		hr = m_pD2DFactory->CreateHwndRenderTarget(
 			rtProps,
-			D2D1::HwndRenderTargetProperties(m_hWnd, size),
+			D2D1::HwndRenderTargetProperties(m_hWnd, size, D2D1_PRESENT_OPTIONS_IMMEDIATELY),
 			&m_pRenderTarget
 		);
 
@@ -3787,6 +3997,7 @@ void CD2DPropertyView::OnSize(UINT nType, int cx, int cy)
 
 void CD2DPropertyView::OnPaint()
 {
+	M2_PROP_PERF(g_propPaint);   // 속성창 계측 (디버그 빌드 전용)
 	CPaintDC dc(this);
 
 	if (FAILED(CreateDeviceResources()) || !m_pRenderTarget)
@@ -3877,6 +4088,7 @@ void CD2DPropertyView::OnLButtonUp(UINT /*nFlags*/, CPoint point)
 	{
 		panel->OnLButtonUp(ptD2D);
 		// 슬라이더/스핀/체크박스 등 한 번의 조작이 끝난 시점에 변경이 있었으면 Undo 이력에 기록 (드래그 중에는 기록하지 않음)
+		FlushPendingApply();
 		CommitActiveDocUndo(L"속성 변경");
 	}
 
@@ -3911,7 +4123,8 @@ void CD2DPropertyView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	{
 		if (panel->OnKeyDown(nChar))
 		{
-			CommitActiveDocUndo(L"속성 변경");
+			FlushPendingApply();
+		CommitActiveDocUndo(L"속성 변경");
 			SafeInvalidate(FALSE);
 			return;
 		}
@@ -3926,7 +4139,8 @@ void CD2DPropertyView::OnChar(UINT nChar, UINT nRepCnt, UINT nFlags)
 	{
 		if (panel->OnChar(nChar))
 		{
-			CommitActiveDocUndo(L"속성 변경");
+			FlushPendingApply();
+		CommitActiveDocUndo(L"속성 변경");
 			SafeInvalidate(FALSE);
 			return;
 		}

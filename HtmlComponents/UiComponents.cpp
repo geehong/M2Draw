@@ -29,6 +29,9 @@ const KindInfo kInfo[kKindCount] = {
 	{ "badge",   L"배지",        90.0f, 28.0f },
 	{ "card",    L"카드",        280.0f, 300.0f },
 	{ "pager",   L"페이지/경로", 300.0f, 36.0f },
+	{ "alert",   L"알림 박스",   360.0f, 64.0f },
+	{ "accordion", L"아코디언",  320.0f, 150.0f },
+	{ "navbar",  L"내비게이션 바", 640.0f, 56.0f },
 };
 
 Kind KindOf(const FrameNode& f)
@@ -413,6 +416,100 @@ void BuildPager(FrameNode& f, float /*w*/, float h)
 	}
 }
 
+// ---- 알림 박스 / 아코디언 / 내비게이션 바 (6.17.2) ----
+Color MixColor(const Color& a, const Color& b, float t)
+{
+	return Color(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1.0f);
+}
+
+Color AlertAccent(const std::string& kind)
+{
+	if (kind == "success") return Color(0.12f, 0.62f, 0.35f, 1.0f);
+	if (kind == "warning") return Color(0.88f, 0.63f, 0.0f, 1.0f);
+	if (kind == "danger")  return Color(0.85f, 0.21f, 0.24f, 1.0f);
+	return kAccent;
+}
+
+// 글 내용에 맞는 높이 (제목 + 내용 + 위아래 여백)
+float AlertHeight(const FrameNode& f)
+{
+	const std::wstring title = Utf8ToWide(Prop(f, "title", "")), body = Utf8ToWide(Prop(f, "text", ""));
+	const float bw = (std::max)(2.0f, f.GetWidth() - 56.0f);
+	float h = 12.0f;
+	if (!title.empty()) h += EstimateTextHeight(title, 15.0f, bw) + 2.0f;
+	if (!body.empty()) h += EstimateTextHeight(body, 14.0f, bw);
+	return (std::max)(44.0f, h + 12.0f);
+}
+
+void FitAlertHeight(FrameNode& f) { f.SetFrameSize(f.GetWidth(), AlertHeight(f)); }
+
+void BuildAlert(FrameNode& f, float w, float h)
+{
+	const std::string kind = Prop(f, "kind", "info");
+	const Color ac = AlertAccent(kind);
+	AddRRect(f, 0.5f, 0.5f, w - 1.0f, h - 1.0f, 8.0f, MixColor(kWhite, ac, 0.10f), MixColor(kWhite, ac, 0.45f), 1.0f, L"알림 바탕");
+	AddRRect(f, 0.5f, 0.5f, 5.0f, h - 1.0f, 2.5f, ac, kClear, 0.0f, L"알림 강조선");
+	const float cx = 28.0f, cy = 21.0f;
+	AddCircle(f, cx, cy, 9.0f, ac, kClear, 0.0f, L"알림 아이콘");
+	const wchar_t* glyph = (kind == "success") ? L"✓" : (kind == "warning") ? L"!" : (kind == "danger") ? L"×" : L"i";
+	AddText(f, glyph, cx, (cy - 9.0f) + MidY(18.0f, 12.0f), 12.0f, true, kWhite, TextAlign::Center, 0.0f, L"알림 아이콘 글자");
+	const std::wstring title = Utf8ToWide(Prop(f, "title", "")), body = Utf8ToWide(Prop(f, "text", ""));
+	const float bw = (std::max)(2.0f, w - 56.0f);
+	float y = 12.0f;
+	if (!title.empty()) {
+		AddText(f, title, 44.0f, y, 15.0f, true, kInk, TextAlign::Left, bw, L"알림 제목");
+		y += EstimateTextHeight(title, 15.0f, bw) + 2.0f;
+	}
+	if (!body.empty()) AddText(f, body, 44.0f, y, 14.0f, false, Color(0.30f, 0.32f, 0.37f, 1.0f), TextAlign::Left, bw, L"알림 내용");
+}
+
+float AccordionHeight(const FrameNode& f)
+{
+	const float head = 44.0f;
+	if (!PropBool(f, "open", true)) return head;
+	const std::wstring body = Utf8ToWide(Prop(f, "body", ""));
+	return head + 12.0f + (std::max)(18.0f, EstimateTextHeight(body, 14.0f, (std::max)(2.0f, f.GetWidth() - 32.0f))) + 16.0f;
+}
+
+void FitAccordionHeight(FrameNode& f) { f.SetFrameSize(f.GetWidth(), AccordionHeight(f)); }
+
+void BuildAccordion(FrameNode& f, float w, float h)
+{
+	const bool open = PropBool(f, "open", true);
+	AddRRect(f, 0.5f, 0.5f, w - 1.0f, h - 1.0f, 8.0f, kWhite, kBorder, 1.0f, L"아코디언 바탕");
+	const float cx = 20.0f, cy = 22.0f;
+	if (open) AddPoly(f, { Vec2{ cx - 5.0f, cy - 3.0f }, Vec2{ cx + 5.0f, cy - 3.0f }, Vec2{ cx, cy + 4.0f } }, true, kMuted, kClear, 0.0f, L"펼침 화살표");
+	else AddPoly(f, { Vec2{ cx - 3.0f, cy - 5.0f }, Vec2{ cx - 3.0f, cy + 5.0f }, Vec2{ cx + 4.0f, cy } }, true, kMuted, kClear, 0.0f, L"접힘 화살표");
+	AddText(f, Utf8ToWide(Prop(f, "title", "")), 38.0f, MidY(44.0f, 15.0f), 15.0f, true, kInk, TextAlign::Left, 0.0f, L"아코디언 제목");
+	if (open) {
+		AddPoly(f, { Vec2{ 0.0f, 44.0f }, Vec2{ w, 44.0f } }, false, kClear, kBorder, 1.0f, L"아코디언 구분선");
+		AddText(f, Utf8ToWide(Prop(f, "body", "")), 16.0f, 56.0f, 14.0f, false, Color(0.30f, 0.32f, 0.37f, 1.0f), TextAlign::Left, (std::max)(2.0f, w - 32.0f), L"아코디언 본문");
+	}
+}
+
+void BuildNavBar(FrameNode& f, float w, float h)
+{
+	const Color ac = ColorFromHex(Prop(f, "color", "#1f8fff"), kAccent);
+	AddRRect(f, 0.5f, 0.5f, w - 1.0f, h - 1.0f, 0.0f, kWhite, kBorder, 1.0f, L"내비게이션 바탕");
+	float x = 20.0f;
+	const std::wstring brand = Utf8ToWide(Prop(f, "brand", ""));
+	if (!brand.empty()) {
+		AddText(f, brand, x, MidY(h, 18.0f), 18.0f, true, kInk, TextAlign::Left, 0.0f, L"로고 글자");
+		x += TextWidth(brand, 18.0f) + 32.0f;
+	}
+	for (const auto& link : WideList(f, "links")) {
+		AddText(f, link, x, MidY(h, 15.0f), 15.0f, false, Color(0.30f, 0.32f, 0.37f, 1.0f), TextAlign::Left, 0.0f, L"메뉴 링크");
+		x += TextWidth(link, 15.0f) + 24.0f;
+	}
+	const std::wstring action = Utf8ToWide(Prop(f, "action", ""));
+	if (!action.empty()) {
+		const float bw = TextWidth(action, 14.0f) + 32.0f, bh = (std::min)(36.0f, h - 12.0f);
+		const float bx = (std::max)(x, w - 20.0f - bw), by = (h - bh) * 0.5f;
+		AddRRect(f, bx, by, bw, bh, 8.0f, ac, kClear, 0.0f, L"액션 버튼");
+		AddText(f, action, bx + bw * 0.5f, by + MidY(bh, 14.0f), 14.0f, true, kWhite, TextAlign::Center, 0.0f, L"액션 버튼 글자");
+	}
+}
+
 void RebuildHook(FrameNode& f) { Rebuild(f); }
 
 struct HookRegistrar {
@@ -435,6 +532,9 @@ FrameNode::UiProps Defaults(Kind k)
 	case Kind::Badge:   return P{ {"text","NEW"}, {"color","#1f8fff"}, {"closable","0"} };
 	case Kind::Card:    return P{ {"title","카드 제목"}, {"body","카드 내용을 입력하세요."}, {"button","자세히"}, {"imageH","120"} };
 	case Kind::Pager:   return P{ {"kind","pagination"}, {"items","1|2|3|4|5"}, {"active","0"} };
+	case Kind::Alert:   return P{ {"kind","info"}, {"title","알림"}, {"text","내용을 입력하세요."} };
+	case Kind::Accordion: return P{ {"title","제목"}, {"body","본문 내용을 입력하세요."}, {"open","1"} };
+	case Kind::NavBar:  return P{ {"brand","로고"}, {"links","홈|소개|연락처"}, {"action","시작하기"}, {"color","#1f8fff"} };
 	}
 	return P{};
 }
@@ -499,6 +599,8 @@ std::unique_ptr<FrameNode> Create(Kind k, float x, float y, float w, float h)
 		const float bw = TextWidth(Utf8ToWide(fr->GetUiProp("text")), 13.0f) + 28.0f;
 		if (w == dw) fr->SetFrameSize(bw, h);
 	}
+	if (k == Kind::Alert && h == dh) FitAlertHeight(*fr);          // 높이는 글 내용에 맞춤 (끌어서 정한 크기는 유지)
+	if (k == Kind::Accordion && h == dh) FitAccordionHeight(*fr);
 	Rebuild(*fr);
 	return fr;
 }
@@ -519,6 +621,9 @@ void Rebuild(FrameNode& root)
 	case Kind::Badge:   BuildBadge(root, w, h); break;
 	case Kind::Card:    BuildCard(root, w, h); break;
 	case Kind::Pager:   BuildPager(root, w, h); break;
+	case Kind::Alert:   BuildAlert(root, w, h); break;
+	case Kind::Accordion: BuildAccordion(root, w, h); break;
+	case Kind::NavBar:  BuildNavBar(root, w, h); break;
 	}
 	root.Invalidate();
 }
@@ -537,6 +642,8 @@ bool SetProperty(FrameNode& root, const std::string& key, const std::string& val
 	if (k == Kind::Check && key == "kind") {
 		float dw, dh; DefaultSize(k, dw, dh);
 	}
+	if (k == Kind::Alert && (key == "title" || key == "text")) FitAlertHeight(root);
+	if (k == Kind::Accordion && (key == "open" || key == "body")) FitAccordionHeight(root);
 	if (k == Kind::Badge && (key == "text" || key == "closable")) {
 		const float bw = TextWidth(Utf8ToWide(root.GetUiProp("text")), 13.0f) + 28.0f + (PropBool(root, "closable") ? 16.0f : 0.0f);
 		root.SetFrameSize(bw, root.GetHeight());
@@ -626,6 +733,22 @@ std::vector<PropDesc> Describe(const FrameNode& f)
 		choice("kind", L"종류", { {"pagination", L"페이지 번호"}, {"breadcrumb", L"경로 (breadcrumb)"} });
 		multi("items", L"항목(| 로 구분)");
 		num("active", L"활성 번호", 0.0f, 99.0f, 1.0f);
+		break;
+	case Kind::Alert:
+		choice("kind", L"종류", { {"info", L"정보 (파랑)"}, {"success", L"성공 (초록)"}, {"warning", L"경고 (노랑)"}, {"danger", L"위험 (빨강)"} });
+		text("title", L"제목(빈칸=없음)");
+		text("text", L"내용");
+		break;
+	case Kind::Accordion:
+		text("title", L"제목");
+		text("body", L"본문");
+		flag("open", L"펼침");
+		break;
+	case Kind::NavBar:
+		text("brand", L"로고 글자");
+		multi("links", L"메뉴(| 로 구분)");
+		text("action", L"버튼 문구(빈칸=없음)");
+		color("color", L"강조 색");
 		break;
 	}
 	return out;

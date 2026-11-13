@@ -1,13 +1,15 @@
-#pragma once
+﻿#pragma once
 
 #include <string>
 #include <vector>
 #include <array>
 #include <cstdint>
+#include <memory>
 
 namespace ge {
 
 class Document;
+struct ImageData;
 
 // 문서 스냅샷 (SVG 직렬화 데이터 + Undo/Redo 후 복원할 선택/활성 레이어)
 struct DocumentSnapshot {
@@ -15,6 +17,7 @@ struct DocumentSnapshot {
 	std::vector<uint64_t> selectionIds;   // 복원 후 선택할 노드 ID (NodeId 는 SVG 에 보존되므로 안정적)
 	int                   activeLayer = 0;
 	std::wstring          actionName;
+	std::vector<std::shared_ptr<const ImageData>> images;   // svgData 가 m2mem 참조로 가리키는 이미지 (수명 보장, 6.3)
 };
 
 // 스냅샷 기반 Undo / Redo 관리자
@@ -55,15 +58,16 @@ private:
 	using DocMeta = std::array<float, 11>;
 	static DocMeta CaptureMeta(const Document& doc);
 	// 문서 직렬화 (Snapshot 모드) + 직렬화 횟수 집계
-	std::string SerializeDoc(Document& doc);
+	std::string SerializeDoc(Document& doc, std::vector<std::shared_ptr<const ImageData>>& images);
 	// 현재 문서 상태를 기준 시점으로 기록 (직렬화 결과 + 변경 카운터 + 메타)
-	void SetBaseline(Document& doc, std::string svg);
+	void SetBaseline(Document& doc, std::string svg, std::vector<std::shared_ptr<const ImageData>> images);
 	static bool RestoreSnapshot(const DocumentSnapshot& snapshot, Document& doc);
 	void Trim(std::vector<DocumentSnapshot>& stack) const;
 
 	std::vector<DocumentSnapshot> m_undoStack;
 	std::vector<DocumentSnapshot> m_redoStack;
 	std::string                   m_baselineSvg;      // 마지막으로 확정된 문서 상태
+	std::vector<std::shared_ptr<const ImageData>> m_baselineImages;
 	bool                          m_hasBaseline = false;
 	uint64_t                      m_baselineCounter = 0;   // 기준 확정 시점의 ChangeTracker 값
 	DocMeta                       m_baselineMeta{};

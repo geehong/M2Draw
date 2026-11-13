@@ -1312,6 +1312,35 @@ void PresetShapeTool::DrawPaths(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* bru
 	}
 }
 
+// 파란 알약 모양 치수 배지: 3점 호/원 미리보기의 반지름·중심각 표시
+static void DrawDimBadge(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, D2D1_POINT_2F at, const wchar_t* text)
+{
+	static IDWriteFactory* s_dw = nullptr;
+	static IDWriteTextFormat* s_fmt = nullptr;
+	if (!s_dw)
+	{
+		DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&s_dw));
+		if (s_dw)
+		{
+			s_dw->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL,
+				DWRITE_FONT_STRETCH_NORMAL, 11.0f, L"ko-kr", &s_fmt);
+			if (s_fmt)
+			{
+				s_fmt->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+				s_fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+				s_fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+			}
+		}
+	}
+	if (!s_fmt) return;
+	const float tw = static_cast<float>(wcslen(text)) * 6.8f + 14.0f;
+	const D2D1_RECT_F pill = D2D1::RectF(at.x, at.y, at.x + tw, at.y + 18.0f);
+	brush->SetColor(D2D1::ColorF(0.10f, 0.55f, 0.98f, 1.0f));
+	rt->FillRoundedRectangle(D2D1::RoundedRect(pill, 3.0f, 3.0f), brush);
+	brush->SetColor(D2D1::ColorF(D2D1::ColorF::White));
+	rt->DrawText(text, static_cast<UINT32>(wcslen(text)), s_fmt, pill, brush);
+}
+
 void PresetShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* /*pDoc*/)
 {
 	if (!rt || !brush) return;
@@ -1330,16 +1359,50 @@ void PresetShapeTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 		}
 		else if (pts.size() == 3)
 		{
+			ge::Vec2 c{};
+			float r = 0.0f;
+			const bool hasCircle = ge::Shapes::CircleThrough3(pts[0], pts[1], pts[2], c, r);
 			if (m_type == ToolType::Circle3Pt)
 			{
-				ge::Vec2 c{};
-				float r = 0.0f;
-				if (ge::Shapes::CircleThrough3(pts[0], pts[1], pts[2], c, r))
-					rt->DrawEllipse(D2D1::Ellipse(toScreen(c), r * zoom, r * zoom), brush, 1.0f);
+				if (hasCircle) rt->DrawEllipse(D2D1::Ellipse(toScreen(c), r * zoom, r * zoom), brush, 1.0f);
 			}
 			else
 			{
 				DrawPaths(rt, brush, ge::Shapes::ArcThrough3(pts[0], pts[2], pts[1]), zoom, pan);
+			}
+			if (hasCircle)
+			{
+				// 중심점 마커 + (호일 때) 외접원 점선 + 반지름 R / 중심각 θ 치수 배지
+				const D2D1_POINT_2F cs = toScreen(c);
+				brush->SetColor(D2D1::ColorF(0.10f, 0.55f, 0.98f, 0.9f));
+				rt->DrawLine(D2D1::Point2F(cs.x - 4.0f, cs.y), D2D1::Point2F(cs.x + 4.0f, cs.y), brush, 1.0f);
+				rt->DrawLine(D2D1::Point2F(cs.x, cs.y - 4.0f), D2D1::Point2F(cs.x, cs.y + 4.0f), brush, 1.0f);
+				wchar_t buf[64];
+				if (m_type == ToolType::Arc3Pt)
+				{
+					ID2D1Factory* factory = nullptr;
+					rt->GetFactory(&factory);
+					static ID2D1StrokeStyle* s_dash = nullptr;
+					if (!s_dash && factory)
+						factory->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+							D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_DASH, 0.0f), nullptr, 0, &s_dash);
+					if (factory) factory->Release();
+					brush->SetColor(D2D1::ColorF(0.10f, 0.55f, 0.98f, 0.45f));
+					rt->DrawEllipse(D2D1::Ellipse(cs, r * zoom, r * zoom), brush, 1.0f, s_dash);
+					// 중심각: 시작점에서 끝점까지, 호 위의 점을 지나는 방향의 각도
+					const float kTwoPi = 6.28318530718f;
+					auto ang = [&](ge::Vec2 p) { return std::atan2(p.y - c.y, p.x - c.x); };
+					auto ccw = [&](float from, float to) { float d = std::fmod(to - from, kTwoPi); return d < 0.0f ? d + kTwoPi : d; };
+					const float a0 = ang(pts[0]), sab = ccw(a0, ang(pts[1])), sam = ccw(a0, ang(pts[2]));
+					const float sweep = (sam < sab) ? sab : (kTwoPi - sab);
+					swprintf_s(buf, L"R %.1f   θ %.1f°", r, sweep * (180.0f / 3.14159265358979f));
+				}
+				else
+				{
+					swprintf_s(buf, L"R %.1f", r);
+				}
+				const D2D1_POINT_2F cur = toScreen(pts[2]);
+				DrawDimBadge(rt, brush, D2D1::Point2F(cur.x + 16.0f, cur.y + 16.0f), buf);
 			}
 		}
 		return;
@@ -1429,6 +1492,16 @@ ITool* ToolManager::GetActiveTool()
 			return tool.get();
 	}
 	return m_tools.empty() ? nullptr : m_tools[0].get();
+}
+
+NodeTool* ToolManager::GetNodeTool()
+{
+	for (auto& tool : m_tools)
+	{
+		if (tool->GetType() == ToolType::Node)
+			return dynamic_cast<NodeTool*>(tool.get());
+	}
+	return nullptr;
 }
 
 SelectTool* ToolManager::GetSelectTool()

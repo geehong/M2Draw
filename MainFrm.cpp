@@ -57,6 +57,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_HTML_FRAME, ID_HTML_SPACER, &CMainFrame::OnUpdateSubToolCommand)
 	ON_COMMAND_RANGE(ID_HTML_UI_TEXTBOX, ID_HTML_UI_PAGER, &CMainFrame::OnSubToolCommand)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_HTML_UI_TEXTBOX, ID_HTML_UI_PAGER, &CMainFrame::OnUpdateSubToolCommand)
+	ON_COMMAND_RANGE(ID_HTML_UI_ALERT, ID_HTML_UI_NAVBAR, &CMainFrame::OnSubToolCommand)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_HTML_UI_ALERT, ID_HTML_UI_NAVBAR, &CMainFrame::OnUpdateSubToolCommand)
 END_MESSAGE_MAP()
 
 static UINT indicators[] =
@@ -702,7 +704,8 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 	{
 		btnIds = { ID_HTML_FRAME, ID_HTML_TABLE, ID_HTML_HEADING, ID_HTML_BUTTON, ID_HTML_DIVIDER, ID_HTML_SPACER,
 			ID_HTML_UI_TEXTBOX, ID_HTML_UI_INPUT, ID_HTML_UI_CHECK, ID_HTML_UI_COMBO, ID_HTML_UI_LIST,
-			ID_HTML_UI_BAR, ID_HTML_UI_TABS, ID_HTML_UI_BADGE, ID_HTML_UI_CARD, ID_HTML_UI_PAGER };   // 프레임/테이블 도구 및 HTML 요소 선택 시: HTML 요소 아이콘 모음
+			ID_HTML_UI_BAR, ID_HTML_UI_TABS, ID_HTML_UI_BADGE, ID_HTML_UI_CARD, ID_HTML_UI_PAGER,
+			ID_HTML_UI_ALERT, ID_HTML_UI_ACCORDION, ID_HTML_UI_NAVBAR };   // 프레임/테이블 도구 및 HTML 요소 선택 시: HTML 요소 아이콘 모음
 	}
 	else if (m_subInputMode != SubInputMode::None)
 	{
@@ -870,6 +873,9 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 		case ID_HTML_UI_BADGE: imgIdx = 46; break;
 		case ID_HTML_UI_CARD: imgIdx = 47; break;
 		case ID_HTML_UI_PAGER: imgIdx = 48; break;
+		case ID_HTML_UI_ALERT: imgIdx = 46; break;       // 새 아이콘 전까지 비슷한 모양(배지·목록·탭)을 쓴다
+		case ID_HTML_UI_ACCORDION: imgIdx = 43; break;
+		case ID_HTML_UI_NAVBAR: imgIdx = 45; break;
 		case ID_ALIGN_LEFT:         imgIdx = 23; break;
 		case ID_ALIGN_CENTERH:      imgIdx = 24; break;
 		case ID_ALIGN_RIGHT:        imgIdx = 25; break;
@@ -1124,6 +1130,9 @@ static const ToolMenuEntry kToolMenu[] = {
 	{ ID_TOOLMENU_UI_BADGE, ToolType::UiComponent, 7 },
 	{ ID_TOOLMENU_UI_CARD, ToolType::UiComponent, 8 },
 	{ ID_TOOLMENU_UI_PAGER, ToolType::UiComponent, 9 },
+	{ ID_TOOLMENU_UI_ALERT, ToolType::UiComponent, 10 },
+	{ ID_TOOLMENU_UI_ACCORDION, ToolType::UiComponent, 11 },
+	{ ID_TOOLMENU_UI_NAVBAR, ToolType::UiComponent, 12 },
 	{ ID_TOOLMENU_TRIM, ToolType::Trim, -1 },
 	{ ID_TOOLMENU_ROUNDRECT, ToolType::RoundRect, -1 },
 	{ ID_TOOLMENU_SQUARE, ToolType::Square, -1 },
@@ -1204,6 +1213,11 @@ void CMainFrame::OnSubToolCommand(UINT nID)
 				targetTool = ToolType::UiComponent;
 				break;
 			}
+			if (nID >= ID_HTML_UI_ALERT && nID <= ID_HTML_UI_NAVBAR) {   // 알림 박스 / 아코디언 / 내비게이션 바 (6.17.2): 종류 번호 10~12
+				UiComponentTool::SetPending(10 + static_cast<int>(nID - ID_HTML_UI_ALERT));
+				targetTool = ToolType::UiComponent;
+				break;
+			}
 			return;
 	}
 
@@ -1234,6 +1248,8 @@ void CMainFrame::OnUpdateSubToolCommand(CCmdUI* pCmdUI)
 		default:
 			if (pCmdUI->m_nID >= ID_HTML_UI_TEXTBOX && pCmdUI->m_nID <= ID_HTML_UI_PAGER)
 				isCur = (active == ToolType::UiComponent && UiComponentTool::Pending() == static_cast<int>(pCmdUI->m_nID - ID_HTML_UI_TEXTBOX));
+			else if (pCmdUI->m_nID >= ID_HTML_UI_ALERT && pCmdUI->m_nID <= ID_HTML_UI_NAVBAR)
+				isCur = (active == ToolType::UiComponent && UiComponentTool::Pending() == 10 + static_cast<int>(pCmdUI->m_nID - ID_HTML_UI_ALERT));
 			break;
 	}
 	pCmdUI->Enable(TRUE);

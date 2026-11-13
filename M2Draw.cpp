@@ -122,6 +122,43 @@ BOOL CM2DrawApp::InitInstance()
 		return FALSE;   // 창을 띄우지 않고 종료
 	}
 
+	// 선 마커 렌더 비용 측정 (실행: M2Draw.exe --bench-markers). 결과는 %TEMP%\m2draw_bench_markers.txt
+	if (m_lpCmdLine && wcsstr(m_lpCmdLine, L"--bench-markers")) {
+		const std::wstring result = ge::RunMarkerBenchmark();
+		const int n = ::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), nullptr, 0, nullptr, nullptr);
+		std::string bytes(static_cast<size_t>(n), '\0');
+		::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), bytes.data(), n, nullptr, nullptr);
+		wchar_t tmpDir[MAX_PATH] = {};
+		::GetTempPathW(MAX_PATH, tmpDir);
+		FILE* fp = nullptr;
+		if (_wfopen_s(&fp, (std::wstring(tmpDir) + L"m2draw_bench_markers.txt").c_str(), L"wb") == 0 && fp) {
+			fwrite(bytes.data(), 1, bytes.size(), fp);
+			fclose(fp);
+		}
+		return FALSE;
+	}
+
+	// 창 없이 순수 모델 + 런타임(D2D/WIC) 자체 검증 (실행: M2Draw.exe --selftest-model). 결과는 %TEMP%\m2draw_selftest_model.txt
+	if (m_lpCmdLine && wcsstr(m_lpCmdLine, L"--selftest-model")) {
+		std::wstring pureFailure, runtimeFailure;
+		const bool pureOk = ge::test::RunPureModelVerification(&pureFailure);
+		const bool runtimeOk = ge::RunRuntimeVerification(&runtimeFailure);
+		std::wstring result = (pureOk && runtimeOk) ? L"ALL PASS\r\n" : L"FAIL\r\n";
+		result += pureOk ? L"[PASS] 순수 모델 검증\r\n" : (L"[FAIL] 순수 모델 검증: " + pureFailure + L"\r\n");
+		result += runtimeOk ? L"[PASS] 런타임 검증\r\n" : (L"[FAIL] 런타임 검증: " + runtimeFailure + L"\r\n");
+		const int n = ::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), nullptr, 0, nullptr, nullptr);
+		std::string bytes(static_cast<size_t>(n), '\0');
+		::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), bytes.data(), n, nullptr, nullptr);
+		wchar_t tmpDir[MAX_PATH] = {};
+		::GetTempPathW(MAX_PATH, tmpDir);
+		FILE* fp = nullptr;
+		if (_wfopen_s(&fp, (std::wstring(tmpDir) + L"m2draw_selftest_model.txt").c_str(), L"wb") == 0 && fp) {
+			fwrite(bytes.data(), 1, bytes.size(), fp);
+			fclose(fp);
+		}
+		return FALSE;   // 창을 띄우지 않고 종료
+	}
+
 	// 웹 캡처 진단 (창 없이): M2Draw.exe --capture-url <주소>
 		// 결과는 %TEMP%\m2draw_capture.png (그림), m2draw_capture.txt (상태·크기), m2draw_capture_dom.json (DOM 요약)
 		if (m_lpCmdLine && wcsstr(m_lpCmdLine, L"--capture-url")) {

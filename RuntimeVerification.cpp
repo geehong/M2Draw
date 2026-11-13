@@ -251,3 +251,50 @@ bool RunRuntimeVerification(std::wstring* failure)
 }
 
 } // namespace ge
+
+// 6.25.3 선 마커 렌더 비용 측정 (실행: M2Draw.exe --bench-markers, 결과는 %TEMP%\m2draw_bench_markers.txt).
+// 같은 선을 마커 없음 / 화살촉 / 화살촉 + 중간 점 으로 같은 크기(영역)로 여러 번 내보내서 한 번당 평균 시간을 비교한다
+namespace ge {
+std::wstring RunMarkerBenchmark()
+{
+	namespace fs = std::filesystem;
+	const HRESULT coHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+	const std::wstring path = (fs::temp_directory_path() / L"m2_bench_markers.png").wstring();
+	auto timeIt = [&](MarkerKind start, MarkerKind mid, MarkerKind end, float width, int iterations) -> double {
+		Document d;
+		d.width = 1920.0f; d.height = 1080.0f;
+		auto pn = std::make_unique<PathNode>();
+		SubPath sp; sp.closed = false;
+		BezierNode a; a.anchor = Vec2{ 444, 97 }; BezierNode m; m.anchor = Vec2{ 600, 250 }; BezierNode b; b.anchor = Vec2{ 781, 382 };
+		sp.nodes = { a, m, b };
+		pn->SetPaths({ sp });
+		Style st = pn->GetStyle();
+		st.fill.type = PaintType::None;
+		st.stroke.width = width;
+		st.stroke.markerStart = start; st.stroke.markerMid = mid; st.stroke.markerEnd = end;
+		pn->SetStyle(st);
+		d.AddShape(std::move(pn));
+		RasterExportOptions o; o.scale = 1.0f; o.transparent = true;
+		const Rect2 region{ 300.0f, 50.0f, 900.0f, 450.0f };
+		std::wstring err;
+		ExportRaster(d, path, o, &region, &err);   // 예열 (장치/인코더 초기화 비용 제외)
+		LARGE_INTEGER t0, t1, f;
+		QueryPerformanceFrequency(&f);
+		QueryPerformanceCounter(&t0);
+		for (int i = 0; i < iterations; ++i) ExportRaster(d, path, o, &region, &err);
+		QueryPerformanceCounter(&t1);
+		return static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 / static_cast<double>(f.QuadPart) / iterations;
+	};
+	wchar_t line[256];
+	std::wstring out;
+	for (float w : { 2.0f, 36.8f }) {
+		const double none = timeIt(MarkerKind::None, MarkerKind::None, MarkerKind::None, w, 20);
+		const double arrow = timeIt(MarkerKind::None, MarkerKind::None, MarkerKind::Arrow, w, 20);
+		const double all = timeIt(MarkerKind::Dot, MarkerKind::Dot, MarkerKind::Arrow, w, 20);
+		swprintf_s(line, L"선 두께 %.1f: 마커 없음 %.2f ms / 끝 화살촉 %.2f ms / 시작·중간 점 + 끝 화살촉 %.2f ms (한 번 내보내기 평균)\r\n", w, none, arrow, all);
+		out += line;
+	}
+	if (SUCCEEDED(coHr)) CoUninitialize();
+	return out;
+}
+} // namespace ge

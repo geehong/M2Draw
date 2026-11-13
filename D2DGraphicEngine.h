@@ -278,6 +278,9 @@ struct Paint {
 	Gradient  gradient;                              // Gradient
 };
 
+// 선 마커 (6.25.3): 열린 패스의 시작/끝과 꼭짓점(중간)에 붙는 장식. 방향은 항상 패스 방향에 맞춘다 (시작은 바깥쪽)
+enum class MarkerKind : uint8_t { None = 0, Arrow, OpenArrow, Dot, Square, Diamond, Bar };
+
 struct Stroke {
 	Color    color      = { 0.12f, 0.56f, 1.0f, 1.0f };
 	float    width      = 2.0f;
@@ -288,8 +291,14 @@ struct Stroke {
 	// 비어 있으면 실선. (D2D 는 선 두께 배수를 요구하므로 렌더러가 width 로 나눠서 넘김)
 	std::vector<float> dashArray;
 	float    dashOffset = 0.0f;
+	// 선 마커: 크기 = 선 두께 x markerScale (SVG markerUnits=strokeWidth 와 같은 뜻, 기본 4배)
+	MarkerKind markerStart = MarkerKind::None;
+	MarkerKind markerMid   = MarkerKind::None;
+	MarkerKind markerEnd   = MarkerKind::None;
+	float    markerScale = 4.0f;
 
 	bool HasDash() const { return !dashArray.empty(); }
+	bool HasMarkers() const { return markerStart != MarkerKind::None || markerMid != MarkerKind::None || markerEnd != MarkerKind::None; }
 };
 
 struct Style {
@@ -916,15 +925,23 @@ public:
 
 	// 클리핑 마스크 (SVG <clipPath> / D2D geometricMask)
 	bool  IsClippingMask() const noexcept { return m_bClippingMask; }
-	void  SetClippingMask(bool bClip) noexcept { m_bClippingMask = bClip; }
+	// 켤 때 그 시점의 최상단 자식을 마스크로 명시 기록한다 (이후 Z-Order 변경/이동으로 다른 자식이 마스크가 되지 않음)
+	void  SetClippingMask(bool bClip) noexcept {
+		m_bClippingMask = bClip;
+		m_maskNode = (bClip && !m_children.empty()) ? m_children.back().get() : nullptr;
+	}
 	Node* GetMaskNode() const noexcept {
-		// 마스크 노드는 관례상 자식 중 최상단(맨 뒤 인덱스) 도형
-		return (m_bClippingMask && !m_children.empty()) ? m_children.back().get() : nullptr;
+		if (!m_bClippingMask || m_children.empty()) return nullptr;
+		if (m_maskNode) {   // 기록된 마스크가 아직 자식이면 그것 (복제/다시 읽기 등으로 무효가 되면 관례대로 최상단 자식)
+			for (const auto& c : m_children) if (c.get() == m_maskNode) return m_maskNode;
+		}
+		return m_children.back().get();
 	}
 
 protected:
 	std::vector<std::unique_ptr<Node>> m_children;   // 0 = 최하단
 	bool m_bClippingMask = false;
+	Node* m_maskNode = nullptr;                      // 명시된 마스크 자식 (6.4.1)
 };
 
 // ---- 프레임 / 아트보드 (Step 4.1~4.2) ---------------------------------------------
@@ -981,6 +998,9 @@ public:
 		return L"프레임";
 	}
 
+	// 역할이 header / aside / footer 인 프레임은 자동 배치(Row/Column)의 흐름에서 빠지고 제자리에 둔다 (위치는 자동으로 바뀌지 않음)
+	bool IsFixedLandmark() const { const std::string& t = GetHtmlTag(); return t == "header" || t == "footer" || t == "aside"; }
+
 	float GetWidth() const  { return m_w; }
 	float GetHeight() const { return m_h; }
 	void  SetFrameSize(float w, float h) { m_w = (std::max)(1.0f, w); m_h = (std::max)(1.0f, h); Invalidate(); }
@@ -1003,6 +1023,9 @@ public:
 	void SetLayoutMode(FrameLayoutMode m) { m_layoutMode = m; Invalidate(); }
 	float GetGap() const { return m_gap; }
 	void SetGap(float g) { m_gap = (std::max)(0.0f, g); Invalidate(); }
+	// 줄바꿈 격자 수 (0 = 끔). Row: 한 행의 열 수 (각 자식 폭 = 가용 폭 / 열 수), Column: 한 열의 행 수 (넘치면 오른쪽 열로)
+	int  GetWrapCount() const { return m_wrapCount; }
+	void SetWrapCount(int n) { m_wrapCount = (std::clamp)(n, 0, 50); Invalidate(); }
 	// 여백: GetPadding()은 대표값(위), SetPadding()은 4방향 모두 설정 (기존 호환)
 	float GetPadding() const { return m_pad.top; }
 	void SetPadding(float p) { p = (std::max)(0.0f, p); m_pad = PaddingEdges{ p, p, p, p }; Invalidate(); }
@@ -1065,6 +1088,7 @@ private:
 	uint8_t m_borderSides = BorderAll;
 	FrameLayoutMode m_layoutMode = FrameLayoutMode::None;
 	float m_gap = 10.0f;
+	int   m_wrapCount = 0;
 	PaddingEdges m_pad;
 	LayoutMainAlign m_mainAlign = LayoutMainAlign::Start;
 	LayoutCrossAlign m_crossAlign = LayoutCrossAlign::Start;
@@ -1568,11 +1592,14 @@ public:
 	ID2D1Geometry* GetGeometry(PathNode& node);
 	// 도형의 실제 지오메트리 경계 (컨트롤 포인트 제외). 그라디언트 objectBoundingBox 의 기준 - 렌더러/기즈모/SVG 가 같은 박스를 쓴다
 	bool GetFillBounds(PathNode& node, Rect2& out);
-		void ClearCache() { m_geoCache.clear(); m_strokeStyleCache.clear(); m_gradientCache.clear(); }
+		void ClearCache() { m_geoCache.clear(); m_strokeStyleCache.clear(); m_gradientCache.clear(); m_imageCache.clear(); }
+		// 문서에 더 이상 없는 노드/이미지의 캐시 항목을 지운다 (DrawDocument 가 주기적으로 호출)
+		void PruneCaches(const Document& doc);
 		ID2D1Factory* GetFactory() const { return m_factory; }
 
 private:
 	void DrawPath(PathNode& node, const Matrix2D& worldXf, const Viewport& view);
+	void DrawLineMarkers(PathNode& node, const Stroke& stroke);   // 선 마커 (6.25.3)
 	void DrawGroup(GroupNode& node, const Matrix2D& worldXf, const Viewport& view);
 	void DrawTextNode(TextNode& node, const Matrix2D& worldXf, const Viewport& view);
 	void DrawImageNode(ImageNode& node, const Matrix2D& worldXf, const Viewport& view);
@@ -1586,6 +1613,7 @@ private:
 	// 디코딩한 비트맵 캐시 (렌더 타깃에 종속이라 Initialize/Shutdown 에서 비움). 키 데이터를 함께 잡아 주소 재사용을 막음
 	struct ImageCacheEntry { std::shared_ptr<const ImageData> keep; ComPtr<ID2D1Bitmap> bitmap; };
 	std::unordered_map<const ImageData*, ImageCacheEntry> m_imageCache;
+	unsigned m_pruneTick = 0;
 	ComPtr<ID2D1PathGeometry> BuildGeometry(const PathNode& node);
 	// 기본값(Butt/Miter/실선)이면 nullptr, 아니면 캐시된 스트로크 스타일
 	ID2D1StrokeStyle* GetStrokeStyle(const Stroke& stroke);

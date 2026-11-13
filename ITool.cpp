@@ -578,6 +578,8 @@ static bool GetLiveCornerHandles(ge::Node* shape, const ViewportTransform& view,
 	const bool isFrame = dynamic_cast<ge::FrameNode*>(shape) != nullptr;
 	ge::PathNode* pn = dynamic_cast<ge::PathNode*>(shape);
 	if (!isFrame && (!pn || pn->GetShapeKind() != ge::ShapeKind::Rect)) return false;
+	// UI 컴포넌트(입력창·체크·목록 상자 등)는 모양을 속성으로 다시 만들기 때문에 프레임 모서리 반경이 쓰이지 않는다: 핸들을 보이지 않는다
+	if (isFrame && static_cast<ge::FrameNode*>(shape)->IsUiComponent()) return false;
 
 	D2D1_RECT_F lb;
 	if (isFrame)
@@ -1693,7 +1695,9 @@ ge::Vec2 SelectTool::PivotWorld(const std::vector<ge::Node*>& sel)
 	return xf.TransformPoint(ge::Vec2{ r.left + m_pivotFrac.x * r.Width(), r.top + m_pivotFrac.y * r.Height() });
 }
 
-// 피봇 드래그: 자동 스냅(중심, 네 모서리, 각 변 가운데; 화면 8px 이내)이 우선, 아니면 커서 위치
+// 피봇 드래그: 자동 스냅 (화면 8px 이내). 우선순위: 점 → 선 → 커서 위치
+//  점: 도형 상자의 중심·네 모서리·각 변 가운데, 패스의 앵커 점, 월드 (0,0)
+//  선: 월드 X/Y 축(0), 도형 중심을 지나는 수평·수직선(0°/90°/180°/270° 방향), 도형 면(상자의 네 변)
 void SelectTool::UpdatePivotDrag(const ToolEvent& e)
 {
 	if (!e.pDoc) return;
@@ -1704,32 +1708,73 @@ void SelectTool::UpdatePivotDrag(const ToolEvent& e)
 	m_pivotSel = sel;
 	const float w = r.Width(), h = r.Height();
 	const D2D1_POINT_2F sp = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
-	bool snapped = false;
-	float bestD = 64.0f;   // 8px 의 제곱
+	const ge::Vec2 cursor{ e.worldPt.x, e.worldPt.y };
+	auto toScreen = [&](ge::Vec2 p) { return e.view.WorldToScreen(D2D1::Point2F(p.x, p.y)); };
+	const float kSnapPx = 8.0f;
+
+	// 1) 점 스냅
+	std::vector<ge::Vec2> pts;
 	for (int iy = 0; iy < 3; ++iy)
-	{
 		for (int ix = 0; ix < 3; ++ix)
-		{
-			const float fx = ix * 0.5f, fy = iy * 0.5f;
-			const ge::Vec2 wp = xf.TransformPoint(ge::Vec2{ r.left + fx * w, r.top + fy * h });
-			const D2D1_POINT_2F ps = e.view.WorldToScreen(D2D1::Point2F(wp.x, wp.y));
-			const float dx = ps.x - sp.x, dy = ps.y - sp.y;
-			if (dx * dx + dy * dy < bestD)
-			{
-				bestD = dx * dx + dy * dy;
-				m_pivotFrac = ge::Vec2{ fx, fy };
-				snapped = true;
+			pts.push_back(xf.TransformPoint(ge::Vec2{ r.left + ix * 0.5f * w, r.top + iy * 0.5f * h }));
+	pts.push_back(ge::Vec2{ 0.0f, 0.0f });
+	for (ge::Node* n : sel)
+		if (auto* ps = dynamic_cast<ge::PathNode*>(n)) {
+			const ge::Matrix2D nx = n->GetWorldTransform();
+			for (const auto& sub : ps->GetPaths())
+				for (const auto& bn : sub.nodes) pts.push_back(nx.TransformPoint(bn.anchor));
+		}
+	ge::Vec2 pivot = cursor;
+	bool snapped = false;
+	float bestD = kSnapPx * kSnapPx;
+	for (const ge::Vec2& p : pts) {
+		const D2D1_POINT_2F ps = toScreen(p);
+		const float dx = ps.x - sp.x, dy = ps.y - sp.y;
+		if (dx * dx + dy * dy < bestD) { bestD = dx * dx + dy * dy; pivot = p; snapped = true; }
+	}
+
+	// 2) 선 스냅: 월드 축과 중심 수평·수직선은 좌표 한쪽씩, 도형 면은 변 위의 가장 가까운 점
+	if (!snapped) {
+		const ge::Vec2 c = xf.TransformPoint(ge::Vec2{ r.left + 0.5f * w, r.top + 0.5f * h });
+		const float xs[] = { 0.0f, c.x }, ys[] = { 0.0f, c.y };
+		bool lockX = false, lockY = false;
+		float bx = kSnapPx, by = kSnapPx;
+		for (float lx : xs) {
+			const float d = std::fabs(toScreen(ge::Vec2{ lx, cursor.y }).x - sp.x);
+			if (d <= bx) { bx = d; pivot.x = lx; lockX = true; }
+		}
+		for (float ly : ys) {
+			const float d = std::fabs(toScreen(ge::Vec2{ cursor.x, ly }).y - sp.y);
+			if (d <= by) { by = d; pivot.y = ly; lockY = true; }
+		}
+		if (!(lockX && lockY)) {
+			const ge::Vec2 corner[4] = { xf.TransformPoint(ge::Vec2{ r.left, r.top }), xf.TransformPoint(ge::Vec2{ r.right, r.top }),
+				xf.TransformPoint(ge::Vec2{ r.right, r.bottom }), xf.TransformPoint(ge::Vec2{ r.left, r.bottom }) };
+			float bestFace = kSnapPx * kSnapPx;
+			ge::Vec2 facePt{};
+			bool faceHit = false;
+			for (int i = 0; i < 4; ++i) {
+				const ge::Vec2 a = corner[i], b = corner[(i + 1) % 4];
+				const float abx = b.x - a.x, aby = b.y - a.y;
+				const float len2 = abx * abx + aby * aby;
+				if (len2 < 1e-6f) continue;
+				float t = ((pivot.x - a.x) * abx + (pivot.y - a.y) * aby) / len2;
+				t = (std::max)(0.0f, (std::min)(1.0f, t));
+				const ge::Vec2 q{ a.x + abx * t, a.y + aby * t };
+				const D2D1_POINT_2F qs = toScreen(q);
+				const float dx = qs.x - sp.x, dy = qs.y - sp.y;
+				if (dx * dx + dy * dy < bestFace) { bestFace = dx * dx + dy * dy; facePt = q; faceHit = true; }
 			}
+			if (faceHit) pivot = facePt;
 		}
 	}
-	if (!snapped)
-	{
-		ge::Matrix2D inv = xf;
-		if (!inv.Invert()) return;
-		const ge::Vec2 lp = inv.TransformPoint(ge::Vec2{ e.worldPt.x, e.worldPt.y });
-		if (w > 1e-3f) m_pivotFrac.x = (lp.x - r.left) / w;
-		if (h > 1e-3f) m_pivotFrac.y = (lp.y - r.top) / h;
-	}
+
+	// 3) 월드 위치 → 도형 상자 기준 비율 (상자 밖도 허용)
+	ge::Matrix2D inv = xf;
+	if (!inv.Invert()) return;
+	const ge::Vec2 lp = inv.TransformPoint(pivot);
+	if (w > 1e-3f) m_pivotFrac.x = (lp.x - r.left) / w;
+	if (h > 1e-3f) m_pivotFrac.y = (lp.y - r.top) / h;
 	e.pDoc->UpdateAllViews(nullptr);
 }
 
