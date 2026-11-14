@@ -32,6 +32,9 @@ inline const std::vector<ToolGroupDef>& GetToolGroups()
 	return kGroups;
 }
 
+// 도구 타입 -> 상단 "도구" 메뉴 명령 ID (MainFrm.cpp). 메뉴에 없는 타입(동작 명령 등)은 0
+UINT ToolMenuIdOf(ToolType t);
+
 // 도구가 속한 그룹 (없으면 nullptr)
 inline const ToolGroupDef* FindToolGroup(ToolType t)
 {

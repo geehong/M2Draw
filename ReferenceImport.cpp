@@ -81,20 +81,29 @@ bool DecodeImagePixel(const ImageData& data, unsigned x, unsigned y, Color& out)
 
 bool SampleReferenceColor(Document& doc, Vec2 worldPt, Color& out)
 {
-	LayerNode* layer = FindReferenceLayer(doc);
-	if (!layer) return false;
-	const auto& kids = layer->GetChildren();
-	for (auto it = kids.rbegin(); it != kids.rend(); ++it) {   // 위에 있는 것부터
-		auto* im = dynamic_cast<ImageNode*>(it->get());
-		if (!im || !im->GetData() || im->GetData()->pixelW <= 0 || im->GetData()->pixelH <= 0) continue;
-		Matrix2D inv = im->GetWorldTransform();
-		if (!inv.Invert()) continue;
-		const Vec2 local = inv.TransformPoint(worldPt);
-		if (local.x < 0.0f || local.y < 0.0f || local.x > im->GetWidth() || local.y > im->GetHeight()) continue;
-		const ImageData& d = *im->GetData();
-		const unsigned px = (std::min)(static_cast<unsigned>(d.pixelW) - 1, static_cast<unsigned>(local.x / im->GetWidth() * d.pixelW));
-		const unsigned py = (std::min)(static_cast<unsigned>(d.pixelH) - 1, static_cast<unsigned>(local.y / im->GetHeight() * d.pixelH));
-		return DecodeImagePixel(d, px, py, out);
+	// 레퍼런스 레이어를 먼저 보고, 그다음 일반 레이어의 이미지도 위에서부터 찾는다 (사진을 그냥 가져온 경우도 스포이드로 색을 뽑을 수 있게)
+	std::vector<LayerNode*> order;
+	if (LayerNode* ref = FindReferenceLayer(doc)) order.push_back(ref);
+	const auto& layers = doc.GetLayers();
+	for (size_t i = layers.size(); i-- > 0;) {
+		LayerNode* l = layers[i].get();
+		if (l && std::find(order.begin(), order.end(), l) == order.end()) order.push_back(l);
+	}
+	for (LayerNode* layer : order) {
+		if (!layer || !layer->IsVisible()) continue;
+		const auto& kids = layer->GetChildren();
+		for (auto it = kids.rbegin(); it != kids.rend(); ++it) {   // 위에 있는 것부터
+			auto* im = dynamic_cast<ImageNode*>(it->get());
+			if (!im || !im->IsVisible() || !im->GetData() || im->GetData()->pixelW <= 0 || im->GetData()->pixelH <= 0) continue;
+			Matrix2D inv = im->GetWorldTransform();
+			if (!inv.Invert()) continue;
+			const Vec2 local = inv.TransformPoint(worldPt);
+			if (local.x < 0.0f || local.y < 0.0f || local.x > im->GetWidth() || local.y > im->GetHeight()) continue;
+			const ImageData& d = *im->GetData();
+			const unsigned px = (std::min)(static_cast<unsigned>(d.pixelW) - 1, static_cast<unsigned>(local.x / im->GetWidth() * d.pixelW));
+			const unsigned py = (std::min)(static_cast<unsigned>(d.pixelH) - 1, static_cast<unsigned>(local.y / im->GetHeight() * d.pixelH));
+			return DecodeImagePixel(d, px, py, out);
+		}
 	}
 	return false;
 }

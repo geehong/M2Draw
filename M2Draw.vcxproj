@@ -271,6 +271,8 @@
     <ClInclude Include="PathTrim.h" />
     <ClInclude Include="ResponsiveLayout.h" />
     <ClInclude Include="LineMarkers.h" />
+    <ClInclude Include="RecentColors.h" />
+    <ClInclude Include="ImageRegistry.h" />
     <ClInclude Include="ProjectTreeWnd.h" />
     <ClInclude Include="PanelStyle.h" />
     <ClInclude Include="ShapePresets.h" />

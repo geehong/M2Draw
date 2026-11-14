@@ -1691,6 +1691,22 @@ M2DrawColorPalette::M2DrawColorPalette()
 	m_colors.push_back(D2D1::ColorF(0.6f, 0.3f, 0.9f));       // 보라
 }
 
+void M2DrawColorPalette::EnableRecentRow(const std::vector<D2D1_COLOR_F>& defaults8)
+{
+	m_hasRecentRow = true;
+	m_defaultRow = defaults8;
+	m_defaultRow.resize(8, D2D1::ColorF(0.0f, 0.0f, 0.0f, 1.0f));
+	m_colors.assign(16, D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
+	for (int i = 0; i < 8; ++i) m_colors[8 + i] = m_defaultRow[i];
+}
+
+void M2DrawColorPalette::SetRecentColors(const std::vector<D2D1_COLOR_F>& recent)
+{
+	if (!m_hasRecentRow) return;
+	for (int i = 0; i < 8; ++i)
+		m_colors[i] = (static_cast<size_t>(i) < recent.size()) ? recent[i] : D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
 D2D1_RECT_F M2DrawColorPalette::GetBoxRect(int index) const
 {
 	int count = static_cast<int>(m_colors.size());
@@ -1722,6 +1738,13 @@ void M2DrawColorPalette::Draw(
 	{
 		D2D1_RECT_F rBox = GetBoxRect(i);
 		D2D1_COLOR_F clr = m_colors[i];
+
+		if (IsEmptySlot(i))   // 최근 색이 아직 없는 칸: 빈 자리 표시만
+		{
+			pBrush->SetColor(D2D1::ColorF(0.35f, 0.35f, 0.4f, 0.6f));
+			pRT->DrawRoundedRectangle(D2D1::RoundedRect(rBox, 3.0f, 3.0f), pBrush, 1.0f);
+			continue;
+		}
 
 		// 색상 채움
 		pBrush->SetColor(clr);
@@ -1765,6 +1788,7 @@ bool M2DrawColorPalette::OnLButtonDown(D2D1_POINT_2F pt)
 		D2D1_RECT_F rBox = GetBoxRect(i);
 		if (pt.x >= rBox.left && pt.x <= rBox.right && pt.y >= rBox.top && pt.y <= rBox.bottom)
 		{
+			if (IsEmptySlot(i)) return false;   // 빈 최근 색 칸은 선택되지 않음
 			m_selectedColor = m_colors[i];
 			if (m_onColorSelected)
 			{

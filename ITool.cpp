@@ -4,6 +4,7 @@
 #include "M2DrawDoc.h"
 #include "M2DrawView.h"
 #include "ReferenceImport.h"
+#include "RecentColors.h"
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -4113,6 +4114,7 @@ static void PickReferenceColor(const ToolEvent& e)
 	const int r = static_cast<int>(std::lround(c.r * 255.0f)), g = static_cast<int>(std::lround(c.g * 255.0f)), b = static_cast<int>(std::lround(c.b * 255.0f));
 	CString hex;
 	hex.Format(_T("#%02X%02X%02X"), r, g, b);
+	RecentColors::Add(D2D1::ColorF(c.r, c.g, c.b, 1.0f));   // 최근 사용 색 줄에 등록 (검정·흰색은 제외됨)
 
 	bool applied = false;
 	for (ge::Node* n : e.pDoc->GetDoc().GetSelection()) {
@@ -4126,6 +4128,8 @@ static void PickReferenceColor(const ToolEvent& e)
 	if (applied) {
 		e.pDoc->CommitUndoPoint(L"레퍼런스 색 적용");
 		e.pDoc->UpdateAllViews(nullptr);
+		// 속성창(색 휠·색 칸·hex)을 적용된 값으로 다시 맞춘다. 안 하면 예전 색이 남아 있다가 다음 동기화 때 되돌아간다
+		UpdateShapePropertiesSelection(e.pDoc->GetPrimarySelection(), e.pDoc);
 	}
 	CString msg;
 	msg.Format(_T("[스포이드] 레퍼런스 색 %s %s"), (LPCTSTR)hex, applied ? _T("을 선택 도형에 적용") : _T("추출 (선택한 도형 없음)"));
@@ -4296,7 +4300,12 @@ void EyedropperTool::OnDown(const ToolEvent& e)
 	}
 	ge::PathNode* srcPath = dynamic_cast<ge::PathNode*>(targetNode);
 	ge::TextNode* srcText = dynamic_cast<ge::TextNode*>(targetNode);
-	if (!srcPath && !srcText) return;
+	if (!srcPath && !srcText) {
+		// 이미지 등 스타일을 가진 도형이 아니면 화면의 이미지 픽셀 색을 추출 (클릭은 색 추출, 드래그는 거리 측정)
+		m_pendingPick = true;
+		m_startWorld = e.worldPt;
+		return;
+	}
 
 	const ge::Style& srcStyle = targetNode->GetStyle();
 	const float srcOpacity = targetNode->GetOpacity();

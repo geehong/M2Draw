@@ -3,6 +3,9 @@
 #include "ClipboardSvg.h"
 #include "SnapManager.h"
 #include "RegionFill.h"
+#include "Resource.h"
+#include "ToolGroups.h"
+#include <functional>
 #include <wincodec.h>
 #include <wrl/client.h>
 #include <filesystem>
@@ -245,6 +248,102 @@ bool RunRuntimeVerification(std::wstring* failure)
 
 	std::error_code ec;
 	fs::remove(png, ec); fs::remove(jpg, ec);
+
+	// ---- N. 메뉴 템플릿 (6.27.2): 기본(IDR_MAINFRAME)과 문서(IDR_M2DrawTYPE) 템플릿의 파일/보기 메뉴는 같은 명령을 같은 순서로 가진다 ----
+	{
+		// 메뉴 항목 중 이름이 prefix 로 시작하는 최상위 팝업을 찾는다
+		auto findPopup = [](HMENU menu, const wchar_t* prefix) -> HMENU {
+			wchar_t buf[256] = {};
+			for (int i = 0, n = GetMenuItemCount(menu); i < n; ++i) {
+				GetMenuStringW(menu, i, buf, 256, MF_BYPOSITION);
+				if (wcsncmp(buf, prefix, wcslen(prefix)) == 0) return GetSubMenu(menu, i);
+			}
+			return nullptr;
+		};
+		// 명령 ID 를 순서대로 모은다 (팝업은 재귀, 구분선은 제외)
+		std::function<void(HMENU, std::vector<UINT>&)> collect = [&](HMENU menu, std::vector<UINT>& out) {
+			for (int i = 0, n = GetMenuItemCount(menu); i < n; ++i) {
+				const UINT id = GetMenuItemID(menu, i);
+				if (id == static_cast<UINT>(-1)) { collect(GetSubMenu(menu, i), out); continue; }   // 하위 팝업
+				if (id == 0) continue;   // 구분선
+				out.push_back(id);
+			}
+		};
+		HINSTANCE hInst = GetModuleHandleW(nullptr);
+		HMENU mainMenu = LoadMenuW(hInst, MAKEINTRESOURCEW(IDR_MAINFRAME));
+		HMENU docMenu = LoadMenuW(hInst, MAKEINTRESOURCEW(IDR_M2DrawTYPE));
+		bool same = false;
+		if (mainMenu && docMenu) {
+			for (const wchar_t* label : { L"파일", L"보기" }) {
+				std::vector<UINT> a, b;
+				if (HMENU ma = findPopup(mainMenu, label)) collect(ma, a);
+				if (HMENU db = findPopup(docMenu, label)) collect(db, b);
+				same = !a.empty() && a == b;
+				if (!same) break;
+			}
+		}
+		if (mainMenu) DestroyMenu(mainMenu);
+		if (docMenu) DestroyMenu(docMenu);
+		if (!same) {
+			if (failure) *failure = L"기본/문서 템플릿의 파일·보기 메뉴 명령이 다름 (6.27.2)";
+			CoUninitialize();
+			return false;
+		}
+	}
+
+	// ---- O. 사이드바 그룹 ↔ "도구" 메뉴 (6.20.2): 그룹의 도구 타입은 중복 없이 한 그룹에만 속하고, 대표는 자기 그룹 항목이며,
+	//          도구 타입(동작 명령 그룹 제외)은 모두 상단 "도구" 메뉴 명령을 가진다 ----
+	{
+		const std::wstring toolProblem = [] () -> std::wstring {
+			// 동작 명령 그룹(그룹/정렬/불리언/마스크)은 "오브젝트" 메뉴에 있으므로 여기서는 제외
+			auto isActionGroup = [](ToolType head) {
+				return head == ToolType::ActionGroup || head == ToolType::ActionToFront ||
+					head == ToolType::ActionBooleanUnion || head == ToolType::ActionClipMask;
+			};
+			std::vector<ToolType> seen;
+			for (const ToolGroupDef& g : GetToolGroups()) {
+				bool headInItems = false;
+				for (ToolType it : g.items) {
+					if (it == g.head) headInItems = true;
+					if (std::find(seen.begin(), seen.end(), it) != seen.end()) return L"사이드바 그룹에서 같은 도구가 두 번 나옴";
+					seen.push_back(it);
+				}
+				if (!headInItems) return L"그룹 대표가 자기 그룹 항목에 없음";
+			}
+			HMENU docMenu = LoadMenuW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDR_M2DrawTYPE));
+			if (!docMenu) return L"문서 메뉴를 불러오지 못함";
+			std::vector<UINT> toolMenuIds;
+			std::function<void(HMENU)> collect = [&](HMENU m) {
+				for (int i = 0, n = GetMenuItemCount(m); i < n; ++i) {
+					const UINT id = GetMenuItemID(m, i);
+					if (id == static_cast<UINT>(-1)) { collect(GetSubMenu(m, i)); continue; }
+					if (id) toolMenuIds.push_back(id);
+				}
+			};
+			wchar_t buf[256] = {};
+			for (int i = 0, n = GetMenuItemCount(docMenu); i < n; ++i) {
+				GetMenuStringW(docMenu, i, buf, 256, MF_BYPOSITION);
+				if (wcsncmp(buf, L"도구", 2) == 0) { collect(GetSubMenu(docMenu, i)); break; }
+			}
+			DestroyMenu(docMenu);
+			for (const ToolGroupDef& g : GetToolGroups()) {
+				if (isActionGroup(g.head)) continue;
+				for (ToolType it : g.items) {
+					const UINT id = ToolMenuIdOf(it);
+					if (id == 0) return L"사이드바 도구에 '도구' 메뉴 명령 ID 가 없음";
+					if (std::find(toolMenuIds.begin(), toolMenuIds.end(), id) == toolMenuIds.end())
+						return L"사이드바 도구의 메뉴 명령이 '도구' 메뉴에 없음";
+				}
+			}
+			return L"";
+		}();
+		if (!toolProblem.empty()) {
+			if (failure) *failure = L"사이드바 ↔ 도구 메뉴 (6.20.2): " + toolProblem;
+			CoUninitialize();
+			return false;
+		}
+	}
+
 	CoUninitialize();
 	return true;
 #undef RT_CHECK

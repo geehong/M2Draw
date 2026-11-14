@@ -37,6 +37,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWndEx)
 	ON_COMMAND(ID_FILE_PREVIEW_HTML, &CMainFrame::OnFilePreviewHtml)
 	ON_COMMAND_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_RECTGRID, &CMainFrame::OnToolMenuCommand)
 	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOLMENU_SELECT, ID_TOOLMENU_RECTGRID, &CMainFrame::OnUpdateToolMenuCommand)
+	ON_COMMAND_RANGE(ID_TOOLMENU_RECENT_1, ID_TOOLMENU_RECENT_8, &CMainFrame::OnRecentToolCommand)
+	ON_UPDATE_COMMAND_UI_RANGE(ID_TOOLMENU_RECENT_1, ID_TOOLMENU_RECENT_8, &CMainFrame::OnUpdateRecentToolCommand)
 	ON_COMMAND(ID_HELP_SHORTCUTS, &CMainFrame::OnHelpShortcuts)
 	ON_REGISTERED_MESSAGE(AFX_WM_CREATETOOLBAR, &CMainFrame::OnToolbarCreateNew)
 	ON_WM_SETTINGCHANGE()
@@ -154,6 +156,14 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	m_wndSubToolBar.SetWindowText(_T("서브 도구"));
 	m_wndSubToolBar.LoadBitmap(IDB_SUBTOOLS, 0, 0, TRUE /* 잠금 */);
 
+	// 최근 사용 도구 바: 서브도구 바와 따로 자기 줄에 도킹. 최근 도구가 없으면 숨긴다
+	if (!m_wndRecentToolBar.CreateEx(this, TBSTYLE_FLAT, WS_CHILD | CBRS_TOP | CBRS_TOOLTIPS | CBRS_FLYBY | CBRS_SIZE_DYNAMIC, CRect(1, 1, 1, 1), AFX_IDW_CONTROLBAR_FIRST + 62))
+	{
+		TRACE0("최근 사용 도구 모음을 만들지 못했습니다.\n");
+		return -1;
+	}
+	m_wndRecentToolBar.SetWindowText(_T("최근 도구"));
+	m_wndRecentToolBar.LoadBitmap(IDB_SUBTOOLS, 0, 0, TRUE /* 잠금 */);
 	if (!m_wndStatusBar.Create(this))
 	{
 		TRACE0("상태 표시줄을 만들지 못했습니다.\n");
@@ -170,12 +180,15 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	DockPane(&m_wndMenuBar);
 	DockPane(&m_wndToolBar);
 	DockPane(&m_wndSubToolBar);   // 서브도구 바는 버튼 수가 많아 메인 툴바 옆이 아니라 자기 줄에 도킹
+	m_wndRecentToolBar.EnableDocking(CBRS_ALIGN_TOP | CBRS_ALIGN_BOTTOM);
+	DockPane(&m_wndRecentToolBar);
 	DockPane(&m_wndOptionBar);
 	m_wndOptionBar.Attach();
 
 	// 도구 변경 리스너 등록 및 초기 서브도구 툴바 구성
 	GetApp()->GetToolManager().AddListener(this);
 	UpdateSubToolBar(GetApp()->GetToolManager().GetActiveType());
+	UpdateRecentToolBar();
 
 
 	// Visual Studio 2005 스타일 도킹 창 동작을 활성화합니다.
@@ -586,12 +599,16 @@ void CMainFrame::OnDestroy()
 	CMDIFrameWndEx::OnDestroy();
 }
 
+static void RecordRecentToolType(ToolType t);
+
 void CMainFrame::OnToolChanged(ToolType newTool)
 {
+	RecordRecentToolType(newTool);   // 메뉴/사이드바/단축키 어디로 바꾸었든 최근 사용에 기록
+	UpdateRecentToolBar();
 	UpdateSubToolBar(newTool);
 }
 
-static UINT ToolMenuIdOf(ToolType t)
+UINT ToolMenuIdOf(ToolType t)
 {
 	switch (t)
 	{
@@ -630,6 +647,121 @@ static UINT ToolMenuIdOf(ToolType t)
 	case ToolType::RectGrid: return ID_TOOLMENU_RECTGRID;
 	default: return 0;
 	}
+}
+
+static std::vector<UINT>& RecentToolCache();
+static CString RecentToolLabel(UINT id);
+
+// 도구 명령 ID -> 서브도구 아이콘 번호 (-1: 아이콘 없음). 서브도구 바와 최근 도구 바가 함께 쓴다
+static int SubToolImageIndex(UINT id)
+{
+	int imgIdx = -1;
+	switch (id)
+	{
+	case ID_TOOLMENU_RECT: imgIdx = 0; break;
+	case ID_TOOLMENU_TRIANGLE: imgIdx = 1; break;
+	case ID_TOOLMENU_POLYGON: imgIdx = 2; break;
+	case ID_TOOLMENU_STAR: imgIdx = 3; break;
+	case ID_TOOLMENU_GEAR: imgIdx = 4; break;
+	case ID_TOOLMENU_SPIRAL: imgIdx = 5; break;
+	case ID_TOOLMENU_HEART: imgIdx = 6; break;
+	case ID_TOOLMENU_ZOOMIN: imgIdx = 7; break;
+	case ID_TOOLMENU_ZOOMOUT: imgIdx = 8; break;
+	case ID_TOOLMENU_POLYLINE: imgIdx = 22; break;
+	case ID_TOOLMENU_FRAME: imgIdx = 33; break;
+	case ID_TOOLMENU_TABLE: imgIdx = 34; break;
+	case ID_TOOLMENU_HEADING: imgIdx = 35; break;
+	case ID_TOOLMENU_BUTTON: imgIdx = 36; break;
+	case ID_TOOLMENU_DIVIDER: imgIdx = 37; break;
+	case ID_TOOLMENU_SPACER: imgIdx = 38; break;
+	case ID_TOOLMENU_PEN: imgIdx = 49; break;
+	case ID_TOOLMENU_LINE: imgIdx = 50; break;
+	case ID_TOOLMENU_ELLIPSE: imgIdx = 51; break;
+	case ID_TOOLMENU_ROUNDRECT: imgIdx = 52; break;
+	case ID_TOOLMENU_SQUARE: imgIdx = 53; break;
+	case ID_TOOLMENU_DIAMOND: imgIdx = 54; break;
+	case ID_TOOLMENU_CIRCLECENTER: imgIdx = 55; break;
+	case ID_TOOLMENU_CIRCLE3PT: imgIdx = 56; break;
+	case ID_TOOLMENU_ARC3PT: imgIdx = 57; break;
+	case ID_TOOLMENU_PIE: imgIdx = 58; break;
+	case ID_TOOLMENU_DONUT: imgIdx = 59; break;
+	case ID_TOOLMENU_PAINTBUCKET: imgIdx = 60; break;
+	case ID_TOOLMENU_GRADIENT: imgIdx = 61; break;
+	case ID_TOOLMENU_TRIM: imgIdx = 62; break;
+	case ID_TOOLMENU_EYEDROPPER: imgIdx = 60; break;
+	case ID_TOOLMENU_POLARGRID: imgIdx = 59; break;
+	case ID_TOOLMENU_RECTGRID: imgIdx = 0; break;
+	case ID_TOOL_RECT:          imgIdx = 0; break;
+	case ID_TOOL_TRIANGLE:      imgIdx = 1; break;
+	case ID_TOOL_POLYGON:       imgIdx = 2; break;
+	case ID_TOOL_STAR:          imgIdx = 3; break;
+	case ID_TOOL_GEAR:          imgIdx = 4; break;
+	case ID_TOOL_SPIRAL:        imgIdx = 5; break;
+	case ID_TOOL_HEART:         imgIdx = 6; break;
+	case ID_TOOL_ZOOMIN:        imgIdx = 7; break;
+	case ID_TOOL_ZOOMOUT:       imgIdx = 8; break;
+	case ID_OBJECT_GROUP:       imgIdx = 9; break;
+	case ID_OBJECT_UNGROUP:     imgIdx = 10; break;
+	case ID_OBJECT_WRAP_FRAME:  imgIdx = 0; break;
+	case ID_BOOLEAN_UNION:      imgIdx = 11; break;
+	case ID_BOOLEAN_SUBTRACT:   imgIdx = 12; break;
+	case ID_BOOLEAN_INTERSECT:  imgIdx = 13; break;
+	case ID_BOOLEAN_EXCLUDE:    imgIdx = 14; break;
+	case ID_BOOLEAN_TRIM:       imgIdx = 15; break;
+	case ID_OBJECT_CLIP_MASK:   imgIdx = 16; break;
+	case ID_OBJECT_RELEASE_MASK:imgIdx = 17; break;
+	case ID_PATH_OUTLINE:
+	case ID_SUB_OUTLINE:        imgIdx = 18; break;
+	case ID_PATH_SIMPLIFY:
+	case ID_SUB_SIMPLIFY:       imgIdx = 19; break;
+	case ID_PATH_REVERSE:       imgIdx = 20; break;
+	case ID_PATH_JOIN:          imgIdx = 21; break;
+	case ID_TOOL_POLYLINE:      imgIdx = 22; break;
+	case ID_SUB_SMOOTH:         imgIdx = 31; break;
+	case ID_TEXT_TO_PATH:       imgIdx = 32; break;
+	case ID_HTML_FRAME:         imgIdx = 33; break;
+	case ID_HTML_TABLE:         imgIdx = 34; break;
+	case ID_HTML_HEADING:       imgIdx = 35; break;
+	case ID_HTML_BUTTON:        imgIdx = 36; break;
+	case ID_HTML_DIVIDER:       imgIdx = 37; break;
+	case ID_HTML_SPACER:        imgIdx = 38; break;
+	case ID_HTML_UI_TEXTBOX: imgIdx = 39; break;
+	case ID_HTML_UI_INPUT: imgIdx = 40; break;
+	case ID_HTML_UI_CHECK: imgIdx = 41; break;
+	case ID_HTML_UI_COMBO: imgIdx = 42; break;
+	case ID_HTML_UI_LIST: imgIdx = 43; break;
+	case ID_HTML_UI_BAR: imgIdx = 44; break;
+	case ID_HTML_UI_TABS: imgIdx = 45; break;
+	case ID_HTML_UI_BADGE: imgIdx = 46; break;
+	case ID_HTML_UI_CARD: imgIdx = 47; break;
+	case ID_HTML_UI_PAGER: imgIdx = 48; break;
+	case ID_HTML_UI_ALERT: imgIdx = 46; break;       // 새 아이콘 전까지 비슷한 모양(배지·목록·탭)을 쓴다
+	case ID_HTML_UI_ACCORDION: imgIdx = 43; break;
+	case ID_HTML_UI_NAVBAR: imgIdx = 45; break;
+	case ID_ALIGN_LEFT:         imgIdx = 23; break;
+	case ID_ALIGN_CENTERH:      imgIdx = 24; break;
+	case ID_ALIGN_RIGHT:        imgIdx = 25; break;
+	case ID_ALIGN_TOP:          imgIdx = 26; break;
+	case ID_ALIGN_CENTERV:      imgIdx = 27; break;
+	case ID_ALIGN_BOTTOM:       imgIdx = 28; break;
+	case ID_DISTRIBUTE_H:       imgIdx = 29; break;
+	case ID_DISTRIBUTE_V:       imgIdx = 30; break;
+	case ID_TOOLMENU_UI_TEXTBOX: imgIdx = 39; break;
+	case ID_TOOLMENU_UI_INPUT: imgIdx = 40; break;
+	case ID_TOOLMENU_UI_CHECK: imgIdx = 41; break;
+	case ID_TOOLMENU_UI_COMBO: imgIdx = 42; break;
+	case ID_TOOLMENU_UI_LIST: imgIdx = 43; break;
+	case ID_TOOLMENU_UI_BAR: imgIdx = 44; break;
+	case ID_TOOLMENU_UI_TABS: imgIdx = 45; break;
+	case ID_TOOLMENU_UI_BADGE: imgIdx = 46; break;
+	case ID_TOOLMENU_UI_CARD: imgIdx = 47; break;
+	case ID_TOOLMENU_UI_PAGER: imgIdx = 48; break;
+	case ID_TOOLMENU_UI_ALERT: imgIdx = 46; break;
+	case ID_TOOLMENU_UI_ACCORDION: imgIdx = 43; break;
+	case ID_TOOLMENU_UI_NAVBAR: imgIdx = 45; break;
+	default: break;
+	}
+	return imgIdx;
 }
 
 void CMainFrame::UpdateSubToolBar(ToolType curTool)
@@ -676,12 +808,6 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 			}
 			// FrameNode 안의 자식이거나 HTML 태그가 지정된 경우
 			if (!n->GetHtmlTag().empty() || (n->GetParent() && dynamic_cast<ge::FrameNode*>(n->GetParent()) != nullptr))
-			{
-				bHtmlContextSelected = true;
-				break;
-			}
-			const std::wstring& name = n->GetName();
-			if (name == L"헤딩" || name == L"구분선" || name == L"간격")   // 프레임/표/버튼은 위에서 종류로 판별되므로 이름 비교는 프레임이 아닌 간단 요소만
 			{
 				bHtmlContextSelected = true;
 				break;
@@ -793,99 +919,7 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 
 	for (UINT id : btnIds)
 	{
-		int imgIdx = -1;
-		switch (id)
-		{
-		case ID_TOOLMENU_RECT: imgIdx = 0; break;
-		case ID_TOOLMENU_TRIANGLE: imgIdx = 1; break;
-		case ID_TOOLMENU_POLYGON: imgIdx = 2; break;
-		case ID_TOOLMENU_STAR: imgIdx = 3; break;
-		case ID_TOOLMENU_GEAR: imgIdx = 4; break;
-		case ID_TOOLMENU_SPIRAL: imgIdx = 5; break;
-		case ID_TOOLMENU_HEART: imgIdx = 6; break;
-		case ID_TOOLMENU_ZOOMIN: imgIdx = 7; break;
-		case ID_TOOLMENU_ZOOMOUT: imgIdx = 8; break;
-		case ID_TOOLMENU_POLYLINE: imgIdx = 22; break;
-		case ID_TOOLMENU_FRAME: imgIdx = 33; break;
-		case ID_TOOLMENU_TABLE: imgIdx = 34; break;
-		case ID_TOOLMENU_HEADING: imgIdx = 35; break;
-		case ID_TOOLMENU_BUTTON: imgIdx = 36; break;
-		case ID_TOOLMENU_DIVIDER: imgIdx = 37; break;
-		case ID_TOOLMENU_SPACER: imgIdx = 38; break;
-		case ID_TOOLMENU_PEN: imgIdx = 49; break;
-		case ID_TOOLMENU_LINE: imgIdx = 50; break;
-		case ID_TOOLMENU_ELLIPSE: imgIdx = 51; break;
-		case ID_TOOLMENU_ROUNDRECT: imgIdx = 52; break;
-		case ID_TOOLMENU_SQUARE: imgIdx = 53; break;
-		case ID_TOOLMENU_DIAMOND: imgIdx = 54; break;
-		case ID_TOOLMENU_CIRCLECENTER: imgIdx = 55; break;
-		case ID_TOOLMENU_CIRCLE3PT: imgIdx = 56; break;
-		case ID_TOOLMENU_ARC3PT: imgIdx = 57; break;
-		case ID_TOOLMENU_PIE: imgIdx = 58; break;
-		case ID_TOOLMENU_DONUT: imgIdx = 59; break;
-		case ID_TOOLMENU_PAINTBUCKET: imgIdx = 60; break;
-		case ID_TOOLMENU_GRADIENT: imgIdx = 61; break;
-		case ID_TOOLMENU_TRIM: imgIdx = 62; break;
-		case ID_TOOLMENU_EYEDROPPER: imgIdx = 60; break;
-		case ID_TOOLMENU_POLARGRID: imgIdx = 59; break;
-		case ID_TOOLMENU_RECTGRID: imgIdx = 0; break;
-		case ID_TOOL_RECT:          imgIdx = 0; break;
-		case ID_TOOL_TRIANGLE:      imgIdx = 1; break;
-		case ID_TOOL_POLYGON:       imgIdx = 2; break;
-		case ID_TOOL_STAR:          imgIdx = 3; break;
-		case ID_TOOL_GEAR:          imgIdx = 4; break;
-		case ID_TOOL_SPIRAL:        imgIdx = 5; break;
-		case ID_TOOL_HEART:         imgIdx = 6; break;
-		case ID_TOOL_ZOOMIN:        imgIdx = 7; break;
-		case ID_TOOL_ZOOMOUT:       imgIdx = 8; break;
-		case ID_OBJECT_GROUP:       imgIdx = 9; break;
-		case ID_OBJECT_UNGROUP:     imgIdx = 10; break;
-		case ID_OBJECT_WRAP_FRAME:  imgIdx = 0; break;
-		case ID_BOOLEAN_UNION:      imgIdx = 11; break;
-		case ID_BOOLEAN_SUBTRACT:   imgIdx = 12; break;
-		case ID_BOOLEAN_INTERSECT:  imgIdx = 13; break;
-		case ID_BOOLEAN_EXCLUDE:    imgIdx = 14; break;
-		case ID_BOOLEAN_TRIM:       imgIdx = 15; break;
-		case ID_OBJECT_CLIP_MASK:   imgIdx = 16; break;
-		case ID_OBJECT_RELEASE_MASK:imgIdx = 17; break;
-		case ID_PATH_OUTLINE:
-		case ID_SUB_OUTLINE:        imgIdx = 18; break;
-		case ID_PATH_SIMPLIFY:
-		case ID_SUB_SIMPLIFY:       imgIdx = 19; break;
-		case ID_PATH_REVERSE:       imgIdx = 20; break;
-		case ID_PATH_JOIN:          imgIdx = 21; break;
-		case ID_TOOL_POLYLINE:      imgIdx = 22; break;
-		case ID_SUB_SMOOTH:         imgIdx = 31; break;
-		case ID_TEXT_TO_PATH:       imgIdx = 32; break;
-		case ID_HTML_FRAME:         imgIdx = 33; break;
-		case ID_HTML_TABLE:         imgIdx = 34; break;
-		case ID_HTML_HEADING:       imgIdx = 35; break;
-		case ID_HTML_BUTTON:        imgIdx = 36; break;
-		case ID_HTML_DIVIDER:       imgIdx = 37; break;
-		case ID_HTML_SPACER:        imgIdx = 38; break;
-		case ID_HTML_UI_TEXTBOX: imgIdx = 39; break;
-		case ID_HTML_UI_INPUT: imgIdx = 40; break;
-		case ID_HTML_UI_CHECK: imgIdx = 41; break;
-		case ID_HTML_UI_COMBO: imgIdx = 42; break;
-		case ID_HTML_UI_LIST: imgIdx = 43; break;
-		case ID_HTML_UI_BAR: imgIdx = 44; break;
-		case ID_HTML_UI_TABS: imgIdx = 45; break;
-		case ID_HTML_UI_BADGE: imgIdx = 46; break;
-		case ID_HTML_UI_CARD: imgIdx = 47; break;
-		case ID_HTML_UI_PAGER: imgIdx = 48; break;
-		case ID_HTML_UI_ALERT: imgIdx = 46; break;       // 새 아이콘 전까지 비슷한 모양(배지·목록·탭)을 쓴다
-		case ID_HTML_UI_ACCORDION: imgIdx = 43; break;
-		case ID_HTML_UI_NAVBAR: imgIdx = 45; break;
-		case ID_ALIGN_LEFT:         imgIdx = 23; break;
-		case ID_ALIGN_CENTERH:      imgIdx = 24; break;
-		case ID_ALIGN_RIGHT:        imgIdx = 25; break;
-		case ID_ALIGN_TOP:          imgIdx = 26; break;
-		case ID_ALIGN_CENTERV:      imgIdx = 27; break;
-		case ID_ALIGN_BOTTOM:       imgIdx = 28; break;
-		case ID_DISTRIBUTE_H:       imgIdx = 29; break;
-		case ID_DISTRIBUTE_V:       imgIdx = 30; break;
-		default: break;
-		}
+		const int imgIdx = SubToolImageIndex(id);
 
 		if (id == ID_SUB_VALUE)
 		{
@@ -900,6 +934,12 @@ void CMainFrame::UpdateSubToolBar(ToolType curTool)
 			continue;
 		}
 
+		if (imgIdx < 0)   // 아이콘이 없는 도구(선택, 손도구 등)는 빈 칸 대신 메뉴 이름을 글자로 보인다
+		{
+			CMFCToolBarButton txt(id, -1, RecentToolLabel(id));
+			m_wndSubToolBar.InsertButton(txt);
+			continue;
+		}
 		CMFCToolBarButton btn(id, imgIdx);
 		m_wndSubToolBar.InsertButton(btn);
 
@@ -1154,12 +1194,141 @@ static const ToolMenuEntry* FindToolMenu(UINT nID)
 	return nullptr;
 }
 
+// ---- 도구 > 최근 사용 (6.27.3): 메뉴로 고른 도구 명령 ID 를 앱 설정에 최대 8개 기록 ----
+static std::vector<UINT>& RecentToolCache()
+{
+	static std::vector<UINT> cache;
+	static bool loaded = false;
+	if (!loaded) {
+		loaded = true;
+		CString s = AfxGetApp()->GetProfileString(_T("Tools"), _T("Recent"), _T(""));
+		int pos = 0;
+		while (pos < s.GetLength() && cache.size() < 8) {
+			CString tok = s.Tokenize(_T(","), pos);
+			unsigned v = 0;
+			if (!tok.IsEmpty() && _stscanf_s(tok, _T("%u"), &v) == 1 && FindToolMenu(v)) cache.push_back(v);
+		}
+	}
+	return cache;
+}
+
+static void RecordRecentTool(UINT id)
+{
+	if (id == ID_TOOLMENU_SELECT) return;   // 선택은 기본 도구라 작업 뒤 자동으로 돌아온다 (기록하면 최근 목록이 선택으로 채워진다)
+	std::vector<UINT>& ids = RecentToolCache();
+	ids.erase(std::remove(ids.begin(), ids.end(), id), ids.end());
+	ids.insert(ids.begin(), id);
+	if (ids.size() > 8) ids.resize(8);
+	CString out;
+	for (size_t i = 0; i < ids.size(); ++i) {
+		CString one;
+		one.Format(_T("%u"), ids[i]);
+		if (i) out += _T(",");
+		out += one;
+	}
+	AfxGetApp()->WriteProfileString(_T("Tools"), _T("Recent"), out);
+}
+
+// 도구 타입 -> 메뉴 명령 ID. UI 컴포넌트는 지금 고른 종류(Pending)와 맞는 항목을 우선한다
+static void RecordRecentToolType(ToolType t)
+{
+	UINT found = 0;
+	for (const ToolMenuEntry& e : kToolMenu) {
+		if (e.type != t) continue;
+		if (e.ui >= 0 && e.ui == UiComponentTool::Pending()) { found = e.id; break; }
+		if (!found) found = e.id;
+	}
+	if (found) RecordRecentTool(found);
+}
+
+// 메뉴 리소스에서 명령 ID 의 표시 이름 ("선택(&V)\tV" -> "선택")
+static bool FindMenuLabel(HMENU menu, UINT id, CString& out)
+{
+	for (int i = 0, n = GetMenuItemCount(menu); i < n; ++i) {
+		const UINT cur = GetMenuItemID(menu, i);
+		if (cur == static_cast<UINT>(-1)) {
+			if (FindMenuLabel(GetSubMenu(menu, i), id, out)) return true;
+		} else if (cur == id) {
+			wchar_t buf[256] = {};
+			GetMenuStringW(menu, i, buf, 256, MF_BYPOSITION);
+			CString s(buf);
+			if (int tab = s.Find(_T('\t')); tab >= 0) s = s.Left(tab);
+			s.Remove(_T('&'));
+			out = s;
+			return true;
+		}
+	}
+	return false;
+}
+
+static CString RecentToolLabel(UINT id)
+{
+	static std::map<UINT, CString> labels;
+	auto it = labels.find(id);
+	if (it != labels.end()) return it->second;
+	CString out;
+	if (HMENU docMenu = LoadMenuW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDR_M2DrawTYPE))) {
+		FindMenuLabel(docMenu, id, out);
+		DestroyMenu(docMenu);
+	}
+	labels[id] = out;
+	return out;
+}
+
+// 최근 사용 도구 바: 최근 도구 N개 = 아이콘 N개, 0개면 바를 숨긴다
+void CMainFrame::UpdateRecentToolBar()
+{
+	if (m_bClosing || !m_wndRecentToolBar.GetSafeHwnd())
+		return;
+	const std::vector<UINT>& ids = RecentToolCache();
+	m_wndRecentToolBar.RemoveAllButtons();
+	for (UINT id : ids)
+	{
+		const int imgIdx = SubToolImageIndex(id);
+		if (imgIdx < 0)
+		{
+			CMFCToolBarButton txt(id, -1, RecentToolLabel(id));
+			m_wndRecentToolBar.InsertButton(txt);
+		}
+		else
+		{
+			CMFCToolBarButton btn(id, imgIdx);
+			m_wndRecentToolBar.InsertButton(btn);
+		}
+	}
+	ShowPane(&m_wndRecentToolBar, !ids.empty(), FALSE, FALSE);
+}
+
+void CMainFrame::OnRecentToolCommand(UINT nID)
+{
+	const std::vector<UINT>& ids = RecentToolCache();
+	const size_t k = nID - ID_TOOLMENU_RECENT_1;
+	if (k < ids.size()) OnToolMenuCommand(ids[k]);
+}
+
+void CMainFrame::OnUpdateRecentToolCommand(CCmdUI* pCmdUI)
+{
+	const std::vector<UINT>& ids = RecentToolCache();
+	const size_t k = pCmdUI->m_nID - ID_TOOLMENU_RECENT_1;
+	if (k < ids.size()) {
+		const CString label = RecentToolLabel(ids[k]);
+		pCmdUI->SetText(label.IsEmpty() ? _T("(최근 도구)") : label);
+		pCmdUI->Enable(TRUE);
+	} else {
+		pCmdUI->SetText(_T("(없음)"));
+		pCmdUI->Enable(FALSE);
+	}
+}
+
 void CMainFrame::OnToolMenuCommand(UINT nID)
 {
 	const ToolMenuEntry* e = FindToolMenu(nID);
 	if (!e) return;
+	RecordRecentTool(nID);
 	if (e->ui >= 0) UiComponentTool::SetPending(e->ui);
 	GetApp()->GetToolManager().SetActiveTool(e->type);
+	UpdateSubToolBar(e->type);   // 같은 도구를 다시 골라도 최근 사용 아이콘 순서가 바뀔 수 있으므로 갱신
+	UpdateRecentToolBar();
 }
 
 void CMainFrame::OnUpdateToolMenuCommand(CCmdUI* pCmdUI)

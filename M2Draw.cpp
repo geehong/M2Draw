@@ -179,7 +179,9 @@ BOOL CM2DrawApp::InitInstance()
 				FILE* fp = nullptr;
 				if (_wfopen_s(&fp, path.c_str(), L"wb") == 0 && fp) { fwrite(data, 1, n, fp); fclose(fp); }
 			};
-			const std::string statusUtf8(status.begin(), status.end());
+			const int u8len = ::WideCharToMultiByte(CP_UTF8, 0, status.c_str(), static_cast<int>(status.size()), nullptr, 0, nullptr, nullptr);
+			std::string statusUtf8(static_cast<size_t>(u8len > 0 ? u8len : 0), '\0');
+			if (u8len > 0) ::WideCharToMultiByte(CP_UTF8, 0, status.c_str(), static_cast<int>(status.size()), statusUtf8.data(), u8len, nullptr, nullptr);
 			writeFile(base + L"m2draw_capture.txt", statusUtf8.data(), statusUtf8.size());
 			if (ok) {
 				writeFile(base + L"m2draw_capture.png", res.png.data(), res.png.size());

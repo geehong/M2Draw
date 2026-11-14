@@ -3348,6 +3348,42 @@ bool RunPureModelVerification(std::wstring* failure)
 		GE_CHECK(std::abs(fo2->GetTransform().TransformRect(fl2).bottom - (1100.0f - 20.0f)) < 1e-2f, L"자동 배치: footer 는 부모 아래쪽 간격을 유지");
 	}
 
+	// [Section 56] 6.4.3 클리핑 마스크 저장/읽기 왕복: 마스크가 맨 위가 아닐 때도 같은 도형이 마스크로 남아야 한다
+	{
+		auto mkSeg = [](float x0, float y0, float x1, float y1) {
+			SubPath sp; BezierNode a, b; a.anchor = Vec2{ x0, y0 }; b.anchor = Vec2{ x1, y1 }; sp.nodes = { a, b }; sp.closed = false; return sp;
+		};
+		Document cd;
+		auto p0 = std::make_unique<PathNode>(); p0->SetPaths({ mkSeg(0, 0, 10, 0) }); p0->SetTransform(Matrix2D::Translation(0.0f, 0.0f));
+		auto p1 = std::make_unique<PathNode>(); p1->SetPaths({ mkSeg(0, 0, 20, 0) }); p1->SetTransform(Matrix2D::Translation(100.0f, 0.0f));
+		auto p2 = std::make_unique<PathNode>(); p2->SetPaths({ mkSeg(0, 0, 30, 0) }); p2->SetTransform(Matrix2D::Translation(200.0f, 0.0f));
+		Node* n0 = cd.AddShape(std::move(p0));
+		Node* n1 = cd.AddShape(std::move(p1));
+		Node* n2 = cd.AddShape(std::move(p2));
+		cd.SetSelection({ n0, n1, n2 });
+		GroupNode* cg = cd.MakeClipMask();
+		GE_CHECK(cg != nullptr, L"6.4.3: 마스크 그룹 만들기");
+		if (cg) {
+			// 마스크를 맨 위가 아닌 자리로 내린다 (맨 위 자식이 마스크가 아니게 됨)
+			Node* origMask = cg->GetMaskNode();
+			cg->SendToBack(origMask);
+			const Node* beforeMask = cg->GetMaskNode();
+			const float beforeDx = beforeMask ? beforeMask->GetTransform().dx : -1.0f;
+			const size_t beforeCount = cg->GetChildren().size();
+			const std::string saved = SvgWriter().WriteString(cd);
+			Document rd;
+			GE_CHECK(SvgReader().ReadFromString(saved, rd), L"6.4.3: 마스크 그룹이 있는 SVG 읽기");
+			const Node* top = (!rd.GetLayers().empty() && !rd.GetLayers().front()->GetChildren().empty()) ? rd.GetLayers().front()->GetChildren().front().get() : nullptr;
+			const auto* rg = dynamic_cast<const GroupNode*>(top);
+			GE_CHECK(rg && rg->IsClippingMask(), L"6.4.3: 다시 읽은 그룹이 클리핑 마스크");
+			if (rg) {
+				GE_CHECK(rg->GetChildren().size() == beforeCount, L"6.4.3: 저장/읽기 뒤 자식 수가 늘거나 줄지 않음 (마스크 중복 없음)");
+				const Node* rm = rg->GetMaskNode();
+				GE_CHECK(rm && std::abs(rm->GetTransform().dx - beforeDx) < 1e-3f, L"6.4.3: 저장/읽기 뒤에도 같은 도형(위치로 확인)이 마스크");
+			}
+		}
+	}
+
 #undef GE_CHECK
 
 	return true;

@@ -38,6 +38,8 @@ protected:  // 컨트롤 모음이 포함된 멤버입니다.
 	CMFCMenuBar       m_wndMenuBar;
 	CMFCToolBar       m_wndToolBar;
 	CMFCToolBar       m_wndSubToolBar;
+	CMFCToolBar       m_wndRecentToolBar;   // 최근 사용 도구 전용 바 (서브도구 바와 분리)
+	void UpdateRecentToolBar();
 	CToolOptionBar    m_wndOptionBar;
 	CMFCStatusBar     m_wndStatusBar;
 	CMFCToolBarImages m_UserImages;
@@ -91,6 +93,8 @@ protected:
 	afx_msg void OnFilePreviewHtml();
 	afx_msg void OnToolMenuCommand(UINT nID);
 	afx_msg void OnUpdateToolMenuCommand(CCmdUI* pCmdUI);
+	afx_msg void OnRecentToolCommand(UINT nID);             // 도구 > 최근 사용 (6.27.3)
+	afx_msg void OnUpdateRecentToolCommand(CCmdUI* pCmdUI);
 	afx_msg void OnHelpShortcuts();
 	afx_msg LRESULT OnToolbarCreateNew(WPARAM wp, LPARAM lp);
 	afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);

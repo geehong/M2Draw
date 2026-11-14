@@ -7,6 +7,7 @@
 #include "HtmlComponents/TableComponent.h"
 #include "PanelStyle.h"
 #include "LineMarkers.h"
+#include "RecentColors.h"
 #include <cmath>
 
 #ifndef M_PI
@@ -1617,7 +1618,16 @@ void CD2DPropertyView::InitControls()
 
 		// 4. Standard 16-Color Palette
 		m_palette16 = std::make_shared<M2DrawColorPalette>();
+		// 위 줄 = 최근 사용 색 (스포이드·팔레트에서 고른 색), 아래 줄 = 기본 색 (검정·흰색·빨주노초…)
+		m_palette16->EnableRecentRow({
+			D2D1::ColorF(0.0f, 0.0f, 0.0f), D2D1::ColorF(1.0f, 1.0f, 1.0f),
+			D2D1::ColorF(0.9f, 0.1f, 0.1f), D2D1::ColorF(1.0f, 0.5f, 0.0f),
+			D2D1::ColorF(1.0f, 0.85f, 0.0f), D2D1::ColorF(0.1f, 0.75f, 0.2f),
+			D2D1::ColorF(0.1f, 0.5f, 0.95f), D2D1::ColorF(0.6f, 0.3f, 0.9f) });
+		m_palette16->SetRecentColors(RecentColors::Load());
 		m_palette16->SetOnColorSelected([this](M2DrawColorPalette* /*pPal*/, D2D1_COLOR_F clr) {
+			RecentColors::Add(clr);   // 고른 색을 최근 색 맨 앞으로
+			if (m_palette16) m_palette16->SetRecentColors(RecentColors::Load());
 			if (m_colorTarget == 0) // Fill
 			{
 				m_fillColor = D2D1::ColorF(clr.r, clr.g, clr.b, m_fOpacity / 100.0f);
@@ -2802,7 +2812,7 @@ void CD2DPropertyView::SyncControlsFromData()
 		}
 
 		D2D1_COLOR_F curActiveClr = (m_colorTarget == 0) ? m_fillColor : m_strokeColor;
-		if (m_palette16) m_palette16->SetSelectedColor(curActiveClr);
+		if (m_palette16) { m_palette16->SetSelectedColor(curActiveClr); m_palette16->SetRecentColors(RecentColors::Load()); }
 
 		if (m_shapeWheel)
 		{

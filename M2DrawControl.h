@@ -455,6 +455,10 @@ public:
 
 	void SetOnColorSelected(ColorSelectCallback cb) { m_onColorSelected = cb; }
 
+	// 최근 색 줄 (위 8칸) + 기본 줄 (아래 8칸). 메인 색 팔레트에서만 쓴다 (다른 팔레트는 기존 16색 그대로)
+	void EnableRecentRow(const std::vector<D2D1_COLOR_F>& defaults8);
+	void SetRecentColors(const std::vector<D2D1_COLOR_F>& recent);   // 최대 8개. 빈 칸은 빈 자리로 보이고 선택되지 않음
+
 	void Draw(ID2D1RenderTarget* pRT, ID2D1SolidColorBrush* pBrush,
 		IDWriteFactory* pDWFactory, IDWriteTextFormat* pTextFormat) override;
 
@@ -466,7 +470,10 @@ private:
 	D2D1_COLOR_F              m_selectedColor = D2D1::ColorF(D2D1::ColorF::DodgerBlue);
 	int                       m_hoverIndex = -1;
 	ColorSelectCallback       m_onColorSelected;
+	bool                      m_hasRecentRow = false;   // 위 줄이 최근 색 (빈 칸 = alpha 0)
+	std::vector<D2D1_COLOR_F> m_defaultRow;             // 아래 줄 8칸
 
+	bool IsEmptySlot(int index) const { return m_hasRecentRow && index < 8 && m_colors[index].a <= 0.001f; }
 	D2D1_RECT_F GetBoxRect(int index) const;
 };
 

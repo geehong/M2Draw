@@ -325,6 +325,23 @@ bool RunReferenceAgentVerification(std::wstring* failure, std::wstring* log)
 		REF_CHECK(!SampleReferenceColor(doc, Vec2(-500.0f, -500.0f), c), L"이미지 밖 점에서 색이 추출됨");
 		AppendLog(log, L"레퍼런스 색 추출: 왼쪽 위 픽셀과 일치, 밖은 거부");
 	}
+	// 12b. 일반 레이어의 이미지도 스포이드 대상 (사진을 그냥 가져온 경우): 1 world 단위 = 1 픽셀로 놓고 (300,300) 픽셀과 비교
+	{
+		Document photoDoc;   // 별도 문서: 뒤의 로고/SVG 검사가 이 사진을 보지 않도록
+		LayerNode* photoLayer = photoDoc.AddLayer(L"사진 레이어");
+		auto photo = std::make_unique<ImageNode>();
+		photo->SetData(data);
+		photo->SetSize(static_cast<float>(sw), static_cast<float>(sh));
+		photo->SetTransform(Matrix2D::Translation(5000.0f, 0.0f));   // 레퍼런스 영역과 겹치지 않는 곳
+		photoLayer->AddChild(std::move(photo));
+		const unsigned u = (std::min)(sw - 1, 300u), v = (std::min)(sh - 1, 300u);
+		Px src{};
+		REF_CHECK(ReadPixel(samplePath, u, v, src), L"샘플 픽셀 읽기 실패 (일반 레이어)");
+		Color c;
+		REF_CHECK(SampleReferenceColor(photoDoc, Vec2(5000.0f + u + 0.5f, v + 0.5f), c), L"일반 레이어 이미지에서 색을 추출하지 못함");
+		REF_CHECK(std::abs(c.r * 255.0f - src.r) <= 6 && std::abs(c.g * 255.0f - src.g) <= 6 && std::abs(c.b * 255.0f - src.b) <= 6, L"일반 레이어 이미지의 추출 색이 원본 픽셀과 다름");
+		AppendLog(log, L"일반 레이어 이미지 색 추출: 원본 픽셀과 일치");
+	}
 
 	// 13. 로고 색 변형 (7.4.3): 검정 변형에는 원래 색이 없고, 레퍼런스는 없으며, 끝나면 원래 색으로 돌아온다
 	{
