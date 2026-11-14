@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "WebCapture.h"
 
 #include <wrl.h>
@@ -286,11 +287,7 @@ private:
 
 	static std::string ToUtf8(const std::wstring& w)
 	{
-		if (w.empty()) return {};
-		const int n = ::WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-		std::string out(static_cast<size_t>(n), '\0');
-		::WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
-		return out;
+		return WideToUtf8(w);
 	}
 
 	void Cleanup()

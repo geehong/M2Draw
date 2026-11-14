@@ -59,26 +59,38 @@ using Microsoft::WRL::ComPtr;
 
 bool DecodeImagePixel(const ImageData& data, unsigned x, unsigned y, Color& out)
 {
+	// 같은 이미지의 픽셀을 여러 번 읽을 때(마우스를 움직이는 동안의 색 미리보기) 전체를 한 번만 디코딩해 둔다
+	static struct { const uint8_t* src = nullptr; size_t size = 0; unsigned w = 0, h = 0; std::vector<uint8_t> px; } cache;
 	if (data.bytes.empty()) return false;
-	ComPtr<IWICImagingFactory> factory;
-	if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) return false;
-	ComPtr<IWICStream> stream;
-	if (FAILED(factory->CreateStream(&stream))) return false;
-	if (FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(data.bytes.data()), static_cast<DWORD>(data.bytes.size())))) return false;
-	ComPtr<IWICBitmapDecoder> decoder;
-	if (FAILED(factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder))) return false;
-	ComPtr<IWICBitmapFrameDecode> frame;
-	if (FAILED(decoder->GetFrame(0, &frame))) return false;
-	ComPtr<IWICFormatConverter> conv;
-	if (FAILED(factory->CreateFormatConverter(&conv))) return false;
-	if (FAILED(conv->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) return false;
-	WICRect rc{ static_cast<INT>(x), static_cast<INT>(y), 1, 1 };
-	BYTE px[4] = { 0, 0, 0, 0 };
-	if (FAILED(conv->CopyPixels(&rc, 4, 4, px))) return false;
-	out = Color(px[2] / 255.0f, px[1] / 255.0f, px[0] / 255.0f, 1.0f);
+	if (cache.src != data.bytes.data() || cache.size != data.bytes.size()) {
+		cache = {};
+		ComPtr<IWICImagingFactory> factory;
+		if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) return false;
+		ComPtr<IWICStream> stream;
+		if (FAILED(factory->CreateStream(&stream))) return false;
+		if (FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(data.bytes.data()), static_cast<DWORD>(data.bytes.size())))) return false;
+		ComPtr<IWICBitmapDecoder> decoder;
+		if (FAILED(factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder))) return false;
+		ComPtr<IWICBitmapFrameDecode> frame;
+		if (FAILED(decoder->GetFrame(0, &frame))) return false;
+		ComPtr<IWICFormatConverter> conv;
+		if (FAILED(factory->CreateFormatConverter(&conv))) return false;
+		if (FAILED(conv->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) return false;
+		UINT w = 0, h = 0;
+		if (FAILED(conv->GetSize(&w, &h)) || w == 0 || h == 0) return false;
+		std::vector<uint8_t> px(static_cast<size_t>(w) * h * 4);
+		if (FAILED(conv->CopyPixels(nullptr, w * 4, static_cast<UINT>(px.size()), px.data()))) return false;
+		cache.src = data.bytes.data();
+		cache.size = data.bytes.size();
+		cache.w = w;
+		cache.h = h;
+		cache.px = std::move(px);
+	}
+	if (x >= cache.w || y >= cache.h) return false;
+	const uint8_t* p = &cache.px[(static_cast<size_t>(y) * cache.w + x) * 4];
+	out = Color(p[2] / 255.0f, p[1] / 255.0f, p[0] / 255.0f, 1.0f);
 	return true;
 }
-
 bool SampleReferenceColor(Document& doc, Vec2 worldPt, Color& out)
 {
 	// 레퍼런스 레이어를 먼저 보고, 그다음 일반 레이어의 이미지도 위에서부터 찾는다 (사진을 그냥 가져온 경우도 스포이드로 색을 뽑을 수 있게)

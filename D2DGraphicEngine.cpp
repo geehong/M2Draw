@@ -4071,7 +4071,7 @@ void D2DRenderer::DrawGroup(GroupNode& node, const Matrix2D& worldXf, const View
 		PathNode& pathMask = static_cast<PathNode&>(*maskNode);
 		// 마스크 노드의 화면 변환 = maskNode 로컬 변환 * 그룹 월드 변환 * 뷰포트 (DrawPath 와 동일하게 뷰 변환까지 포함해야 패닝/줌에서 마스크가 도형과 같이 움직임)
 		Matrix2D maskWorldXf = pathMask.GetTransform() * worldXf * view.ToMatrix();
-		ComPtr<ID2D1PathGeometry> localGeo = PathOp::BuildGeometry(pathMask, m_factory);
+		ComPtr<ID2D1PathGeometry> localGeo = PathOp::GetCachedGeometry(pathMask, m_factory);   // 노드 버전이 같으면 캐시 재사용 (그릴 때마다 새로 만들지 않음)
 		if (localGeo) {
 			if (maskWorldXf.IsIdentity()) {
 				maskGeo = localGeo;
@@ -4229,6 +4229,36 @@ static D2D1_COLOR_F ToD2D(const Color& c, float opacity)
 static D2D1_MATRIX_3X2_F ToD2D(const Matrix2D& m)
 {
 	return D2D1::Matrix3x2F(m.m11, m.m12, m.m21, m.m22, m.dx, m.dy);
+}
+
+ID2D1StrokeStyle* OverlayDashStyle(ID2D1Factory* factory)
+{
+	static ComPtr<ID2D1StrokeStyle> s_dash;
+	static ID2D1Factory* s_owner = nullptr;
+	if (!factory) return nullptr;
+	if (!s_dash || s_owner != factory) {
+		s_dash.Reset();
+		s_owner = factory;
+		const D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
+			D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_DASH, 0.0f);
+		factory->CreateStrokeStyle(sp, nullptr, 0, s_dash.GetAddressOf());
+	}
+	return s_dash.Get();
+}
+
+ID2D1StrokeStyle* OverlayDotStyle(ID2D1Factory* factory)
+{
+	static ComPtr<ID2D1StrokeStyle> s_dot;
+	static ID2D1Factory* s_owner = nullptr;
+	if (!factory) return nullptr;
+	if (!s_dot || s_owner != factory) {
+		s_dot.Reset();
+		s_owner = factory;
+		const D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND,
+			D2D1_LINE_JOIN_ROUND, 10.0f, D2D1_DASH_STYLE_DOT, 0.0f);
+		factory->CreateStrokeStyle(sp, nullptr, 0, s_dot.GetAddressOf());
+	}
+	return s_dot.Get();
 }
 
 ID2D1StrokeStyle* D2DRenderer::GetStrokeStyle(const Stroke& stroke)
@@ -4498,12 +4528,9 @@ HitResult PathNode::HitTestScreenSpace(D2D1_POINT_2F screenPt, float tolPx, cons
 			return { HitPart::Stroke, -1, -1, this };
 		}
 
-		// 닫힌 도형이거나 채우기 스타일이 지정된 경우 내부 클릭 히트 허용
-		bool isClosed = false;
-		for (const auto& sp : m_paths) {
-			if (sp.closed) { isClosed = true; break; }
-		}
-		const bool checkFill = (m_style.fill.type != PaintType::None) || (m_style.fill.color.a > 0.0f) || isClosed;
+		// 실제로 칠해진 도형만 내부 클릭을 받는다. 닫힌 도형이라도 채우기가 없으면 안쪽은 통과시켜 뒤의 도형을 고를 수 있게 한다
+		const bool checkFill = (m_style.fill.type == PaintType::Gradient) ||
+		                       (m_style.fill.type == PaintType::Solid && m_style.fill.color.a > 0.0f);
 		if (checkFill) {
 			hit = FALSE;
 			if (SUCCEEDED(g->FillContainsPoint(screenPt, &m, 0.25f, &hit)) && hit) {

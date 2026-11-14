@@ -408,6 +408,8 @@ BEGIN
         MENUITEM "페인트 통(&J)\tK",                    ID_TOOLMENU_PAINTBUCKET
         MENUITEM "그라디언트(&Y)\tD",                   ID_TOOLMENU_GRADIENT
          MENUITEM "스포이드(&K)\tI",                     ID_TOOLMENU_EYEDROPPER
+        MENUITEM "직교 그리드",  ID_TOOLMENU_RECTGRID
+        MENUITEM "방사형 그리드",  ID_TOOLMENU_POLARGRID
         MENUITEM SEPARATOR
         MENUITEM "확대(&Z)\tZ",                        ID_TOOLMENU_ZOOMIN
         MENUITEM "축소(&X)\tX",                        ID_TOOLMENU_ZOOMOUT
@@ -752,6 +754,8 @@ BEGIN
     ID_TOOLMENU_PAINTBUCKET "페인트 통 도구 (K)로 전환합니다.\n페인트 통"
     ID_TOOLMENU_GRADIENT "그라디언트 도구 (D)로 전환합니다.\n그라디언트"
     ID_TOOLMENU_EYEDROPPER "스포이드 도구 (I)로 전환합니다.\n스포이드"
+    ID_TOOLMENU_RECTGRID "직교 그리드 도구로 전환합니다.\n직교 그리드"
+    ID_TOOLMENU_POLARGRID "방사형 그리드 도구로 전환합니다.\n방사형 그리드"
     ID_TOOLMENU_RECENT_1 "최근 사용 도구 1 로 전환합니다.\n최근 사용 도구 1"
     ID_TOOLMENU_RECENT_2 "최근 사용 도구 2 로 전환합니다.\n최근 사용 도구 2"
     ID_TOOLMENU_RECENT_3 "최근 사용 도구 3 로 전환합니다.\n최근 사용 도구 3"

@@ -6,21 +6,7 @@
 class CM2DrawDoc;
 namespace ge { class Node; }
 
-class CPropertiesToolBar : public CMFCToolBar
-{
-public:
-	virtual void OnUpdateCmdUI(CFrameWnd* /*pTarget*/, BOOL bDisableIfNoHndler)
-	{
-		CFrameWnd* pFrame = DYNAMIC_DOWNCAST(CFrameWnd, AfxGetMainWnd());
-		if (pFrame != nullptr)
-		{
-			CMFCToolBar::OnUpdateCmdUI(pFrame, bDisableIfNoHndler);
-		}
-	}
-
-	virtual BOOL AllowShowOnList() const { return FALSE; }
-};
-
+// 우측 속성 도킹 창. 실제 내용은 D2D 속성 뷰(CD2DPropertyView)가 그리며, 옛 속성 목록(CMFCPropertyGridCtrl)은 제거했다 (Step 6.20 리뷰 2단계)
 class CPropertiesWnd : public CDockablePane
 {
 public:
@@ -33,26 +19,6 @@ public:
 	CD2DPropertyView::PaneMode GetPaneMode() const { return m_paneMode; }
 	CD2DPropertyView& GetD2DPropView() { return m_wndD2DProp; }
 
-public:
-	void SetVSDotNetLook(BOOL bSet)
-	{
-		m_wndPropList.SetVSDotNetLook(bSet);
-		m_wndPropList.SetGroupNameFullWidth(bSet);
-	}
-
-protected:
-	CD2DPropertyView::PaneMode m_paneMode;
-	CFont m_fntPropList;
-	CComboBox m_wndObjectCombo;
-	CPropertiesToolBar m_wndToolBar;
-	CMFCPropertyGridCtrl m_wndPropList;
-	CD2DPropertyView m_wndD2DProp;
-
-	uint64_t m_selectedNodeId = 0;          // 대상 도형 NodeId (0 = 없음)
-	CM2DrawDoc* m_pActiveDoc = nullptr;
-	ge::Node* GetSelectedShape() const;
-
-public:
 	virtual ~CPropertiesWnd();
 
 	// 최소/최대 도킹 크기 제약
@@ -63,30 +29,19 @@ public:
 	}
 
 protected:
+	CD2DPropertyView::PaneMode m_paneMode;
+	CD2DPropertyView m_wndD2DProp;
+
+	uint64_t m_selectedNodeId = 0;          // 대상 도형 NodeId (0 = 없음)
+	CM2DrawDoc* m_pActiveDoc = nullptr;
+	ge::Node* GetSelectedShape() const;
+
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnWindowPosChanging(WINDOWPOS* lpwndpos);
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
-	afx_msg void OnExpandAllProperties();
-	afx_msg void OnUpdateExpandAllProperties(CCmdUI* pCmdUI);
-	afx_msg void OnSortProperties();
-	afx_msg void OnUpdateSortProperties(CCmdUI* pCmdUI);
-	afx_msg void OnProperties1();
-	afx_msg void OnUpdateProperties1(CCmdUI* pCmdUI);
-	afx_msg void OnProperties2();
-	afx_msg void OnUpdateProperties2(CCmdUI* pCmdUI);
 	afx_msg void OnSetFocus(CWnd* pOldWnd);
-	afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
-	afx_msg void OnComboSelectChanged();
 	afx_msg LRESULT OnTabChanged(WPARAM wParam, LPARAM lParam);
-	afx_msg LRESULT OnPropertyChanged(WPARAM wParam, LPARAM lParam);
 
 	DECLARE_MESSAGE_MAP()
-
-	void InitCanvasPropList();
-	void InitShapePropList();
-	void InitTestPropList();
-	void SetPropListFont();
-
-	int m_nComboHeight;
 };

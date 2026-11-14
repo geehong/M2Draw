@@ -335,6 +335,10 @@ bool RunRuntimeVerification(std::wstring* failure)
 						return L"사이드바 도구의 메뉴 명령이 '도구' 메뉴에 없음";
 				}
 			}
+			// 격자 도구는 사이드바 그룹에는 없지만 도구 메뉴에서 고를 수 있어야 한다
+			for (UINT gid : { static_cast<UINT>(ID_TOOLMENU_RECTGRID), static_cast<UINT>(ID_TOOLMENU_POLARGRID) })
+				if (std::find(toolMenuIds.begin(), toolMenuIds.end(), gid) == toolMenuIds.end())
+					return L"격자 도구가 '도구' 메뉴에 없음";
 			return L"";
 		}();
 		if (!toolProblem.empty()) {

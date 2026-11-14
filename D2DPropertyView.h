@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <afxwin.h>
 #include <d2d1.h>
 #include <dwrite.h>
@@ -14,6 +14,7 @@ namespace ge { class Node; }
 class CD2DPropertyView : public CWnd
 {
 public:
+	int GetColorTarget() const { return m_colorTarget; }   // 현재 색 대상: 0 = 채우기(Fill), 1 = 윤곽선(Stroke)
 	enum PaneMode
 	{
 		MODE_SHAPE = 0,    // Object Settings (Fill / Stroke / Opacity / Close etc.)

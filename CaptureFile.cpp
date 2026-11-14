@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "CaptureFile.h"
 
 #include <cstdio>
@@ -10,34 +11,6 @@ namespace ge {
 
 namespace {
 
-const char kB64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-std::string Base64Encode(const std::vector<uint8_t>& in)
-{
-	std::string out;
-	out.reserve((in.size() + 2) / 3 * 4);
-	size_t i = 0;
-	for (; i + 2 < in.size(); i += 3) {
-		const uint32_t v = (in[i] << 16) | (in[i + 1] << 8) | in[i + 2];
-		out += kB64[(v >> 18) & 63];
-		out += kB64[(v >> 12) & 63];
-		out += kB64[(v >> 6) & 63];
-		out += kB64[v & 63];
-	}
-	if (i + 1 == in.size()) {
-		const uint32_t v = in[i] << 16;
-		out += kB64[(v >> 18) & 63];
-		out += kB64[(v >> 12) & 63];
-		out += "==";
-	} else if (i + 2 == in.size()) {
-		const uint32_t v = (in[i] << 16) | (in[i + 1] << 8);
-		out += kB64[(v >> 18) & 63];
-		out += kB64[(v >> 12) & 63];
-		out += kB64[(v >> 6) & 63];
-		out += '=';
-	}
-	return out;
-}
 
 int B64Value(char c)
 {

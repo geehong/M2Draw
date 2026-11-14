@@ -118,6 +118,7 @@ CToolBoxPane::CToolBoxPane() noexcept
 		{ ToolType::PaintBucket, L"페인트 통 (K)",   L'K', CRect() },   // 채우기 그룹: 페인트 통 / 그라디언트
 		{ ToolType::Trim,        L"트림 (R)",      L'R', CRect() },   // 편집 도구: 절단 개체 선택 후 조각 클릭 (라이노식)
 		{ ToolType::ZoomIn,      L"돋보기 (확대 Z / 축소 X)", L'Z', CRect() },
+		{ ToolType::RectGrid,    L"그리드 (직교/방사형)", 0, CRect() },   // 그리드 그룹: 직교 그리드 / 방사형 그리드
 		// 동작 버튼 그룹 (도구가 아님): 그룹화 / 그룹 해제. 도구 묶음과 간격을 둠
 		{ ToolType::ActionGroup,        L"그룹 / 그룹 해제",          0, CRect(), {}, 12 },
 		// 순서(Z-order) 동작 그룹: 맨 앞으로 / 앞으로 / 뒤로 / 맨 뒤로
@@ -702,6 +703,19 @@ void CToolBoxPane::DrawButtonIcon(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* b
 	case ToolType::Donut: // 도넛: 두 동심원
 		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 7.0f, 7.0f), brush, 1.6f);
 		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 3.0f, 3.0f), brush, 1.6f);
+		break;
+	case ToolType::RectGrid: // 직교 그리드: 3x3 칸
+		rt->DrawRectangle(D2D1::RectF(cx - 8.0f, cy - 8.0f, cx + 8.0f, cy + 8.0f), brush, 1.4f);
+		rt->DrawLine(D2D1::Point2F(cx - 2.7f, cy - 8.0f), D2D1::Point2F(cx - 2.7f, cy + 8.0f), brush, 1.2f);
+		rt->DrawLine(D2D1::Point2F(cx + 2.7f, cy - 8.0f), D2D1::Point2F(cx + 2.7f, cy + 8.0f), brush, 1.2f);
+		rt->DrawLine(D2D1::Point2F(cx - 8.0f, cy - 2.7f), D2D1::Point2F(cx + 8.0f, cy - 2.7f), brush, 1.2f);
+		rt->DrawLine(D2D1::Point2F(cx - 8.0f, cy + 2.7f), D2D1::Point2F(cx + 8.0f, cy + 2.7f), brush, 1.2f);
+		break;
+	case ToolType::PolarGrid: // 방사형 그리드: 동심원 2개 + 방사선 4개
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 3.0f, 3.0f), brush, 1.2f);
+		rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy), 7.5f, 7.5f), brush, 1.2f);
+		rt->DrawLine(D2D1::Point2F(cx - 7.5f, cy), D2D1::Point2F(cx + 7.5f, cy), brush, 1.2f);
+		rt->DrawLine(D2D1::Point2F(cx, cy - 7.5f), D2D1::Point2F(cx, cy + 7.5f), brush, 1.2f);
 		break;
 	case ToolType::Frame: // 프레임
 	{
@@ -1432,6 +1446,8 @@ static const wchar_t* GetFlyoutToolName(ToolType t)
 	case ToolType::Spiral:   return L"스파이럴 (Spiral)";
 	case ToolType::Heart:    return L"하트 (Heart)";
 	case ToolType::ZoomIn:   return L"돋보기 확대 (Z)";
+	case ToolType::RectGrid: return L"직교 그리드";
+	case ToolType::PolarGrid: return L"방사형 그리드";
 	case ToolType::ZoomOut:  return L"돋보기 축소 (X)";
 	case ToolType::ActionGroup:   return L"그룹 (Ctrl+G)";
 	case ToolType::ActionUngroup: return L"그룹 해제 (Ctrl+Shift+G)";

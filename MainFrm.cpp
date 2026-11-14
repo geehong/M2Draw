@@ -690,7 +690,7 @@ static int SubToolImageIndex(UINT id)
 	case ID_TOOLMENU_TRIM: imgIdx = 62; break;
 	case ID_TOOLMENU_EYEDROPPER: imgIdx = 60; break;
 	case ID_TOOLMENU_POLARGRID: imgIdx = 59; break;
-	case ID_TOOLMENU_RECTGRID: imgIdx = 0; break;
+	case ID_TOOLMENU_RECTGRID: imgIdx = 34; break;
 	case ID_TOOL_RECT:          imgIdx = 0; break;
 	case ID_TOOL_TRIANGLE:      imgIdx = 1; break;
 	case ID_TOOL_POLYGON:       imgIdx = 2; break;
@@ -1216,6 +1216,7 @@ static void RecordRecentTool(UINT id)
 {
 	if (id == ID_TOOLMENU_SELECT) return;   // 선택은 기본 도구라 작업 뒤 자동으로 돌아온다 (기록하면 최근 목록이 선택으로 채워진다)
 	std::vector<UINT>& ids = RecentToolCache();
+	if (!ids.empty() && ids.front() == id) return;   // 이미 맨 앞이면 다시 저장하지 않는다 (메뉴 선택 시 두 번 호출되어도 한 번만 씀)
 	ids.erase(std::remove(ids.begin(), ids.end(), id), ids.end());
 	ids.insert(ids.begin(), id);
 	if (ids.size() > 8) ids.resize(8);

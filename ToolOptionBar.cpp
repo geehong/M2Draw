@@ -337,7 +337,12 @@ void CToolOptionBar::OnToolChanged(ToolType newTool)
 	auto isSelectOrNodeOrGrad = [](ToolType t) -> bool {
 		return t == ToolType::Select || t == ToolType::Node || t == ToolType::Gradient;
 	};
-	const bool keepSelection = isSelectOrNodeOrGrad(newTool) && isSelectOrNodeOrGrad(m_curTool);
+	// 스포이드·손도구·확대/축소는 선택 대상을 바꾸지 않는 도구라 선택을 유지한다 (스포이드는 선택 도형에 색을 적용해야 하므로)
+	auto isKeepTool = [](ToolType t) -> bool {
+		return t == ToolType::Eyedropper || t == ToolType::Pan || t == ToolType::ZoomIn || t == ToolType::ZoomOut;
+	};
+	const bool keepSelection = (isSelectOrNodeOrGrad(newTool) && isSelectOrNodeOrGrad(m_curTool)) ||
+		isKeepTool(newTool) || (isKeepTool(m_curTool) && isSelectOrNodeOrGrad(newTool));
 	if (!keepSelection) m_selectedNodeId = 0;
 	SetMode(newTool, false);
 	if (keepSelection) return;

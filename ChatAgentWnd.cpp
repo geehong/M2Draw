@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "ChatAgentWnd.h"
 #include "Resource.h"
 #include "AgentGuide.h"
@@ -32,20 +33,12 @@ struct ChatReply {
 
 std::wstring ChatWide(const std::string& s)
 {
-	if (s.empty()) return {};
-	const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-	std::wstring out(static_cast<size_t>(n), L'\0');
-	MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n);
-	return out;
+	return Utf8ToWide(s);
 }
 
 std::string ChatUtf8(const std::wstring& w)
 {
-	if (w.empty()) return {};
-	const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-	std::string out(static_cast<size_t>(n), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
-	return out;
+	return WideToUtf8(w);
 }
 
 void AppendUtf8Code(std::string& out, unsigned cp)

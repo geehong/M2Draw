@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "CodeViewWnd.h"
 #include "M2DrawDoc.h"
 #include "SvgWriter.h"
@@ -16,15 +17,6 @@ constexpr UINT IDC_CODE_VIEW = 3104;
 enum CodeKind { kSvg = 0, kDomTags = 1, kHtmlExport = 2 };
 
 // UTF-8 -> 와이드 문자열
-std::wstring Utf8ToWide(const std::string& s)
-{
-	if (s.empty()) return {};
-	const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-	std::wstring out(static_cast<size_t>(n), L'\0');
-	MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n);
-	return out;
-}
-
 // 편집 창은 줄바꿈을 CRLF 로 보여 줘야 한다 (LF 만 있으면 한 줄로 붙어 보인다)
 CString ToEditText(const std::wstring& w)
 {

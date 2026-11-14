@@ -1437,12 +1437,7 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 	// 4. 스냅 인디케이터(자석 원형/다이아몬드/삼각형/십자선) 렌더링
 	// --- 눈금자 가이드라인(Ruler Guides) 렌더링 ---
 	{
-		ID2D1StrokeStyle* pGuideStroke = nullptr;
-		D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(
-			D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
-			D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_DASH, 0.0f
-		);
-		m_pD2DFactory->CreateStrokeStyle(&sp, nullptr, 0, &pGuideStroke);
+		ID2D1StrokeStyle* pGuideStroke = ge::OverlayDotStyle(m_pD2DFactory);   // 가이드: 얇은 붉은 도트
 
 		// 기존 등록된 가이드라인 렌더링
 		const auto& guides = pDoc->GetDoc().GetGuides();
@@ -1454,43 +1449,42 @@ void CM2DrawView::OnDraw(CDC* /*pDC*/)
 
 			const auto& g = guides[i];
 			const bool isHovered = (static_cast<int>(i) == m_hoverGuideIndex);
-			// 기본 Cyan (0.0, 0.75, 1.0), 호버/선택 시 Magenta (1.0, 0.2, 0.7)
+			// 기본: 진한 붉은색 (파란색은 배경에서 잘 안 보임), 호버: 더 밝은 붉은색
 			if (isHovered)
-				m_pSolidBrush->SetColor(D2D1::ColorF(1.0f, 0.2f, 0.7f, 0.95f));
+				m_pSolidBrush->SetColor(D2D1::ColorF(0.95f, 0.15f, 0.1f, 1.0f));
 			else
-				m_pSolidBrush->SetColor(D2D1::ColorF(0.0f, 0.75f, 1.0f, 0.85f));
+				m_pSolidBrush->SetColor(D2D1::ColorF(0.7f, 0.05f, 0.05f, 0.95f));
 
 			if (g.isHorizontal)
 			{
 				float sy = g.worldPos * m_fZoom + m_ptPan.y;
-				m_pRenderTarget->DrawLine(D2D1::Point2F(0.0f, sy), D2D1::Point2F(width, sy), m_pSolidBrush, 1.2f, pGuideStroke);
+				m_pRenderTarget->DrawLine(D2D1::Point2F(0.0f, sy), D2D1::Point2F(width, sy), m_pSolidBrush, 1.0f, pGuideStroke);
 			}
 			else
 			{
 				float sx = g.worldPos * m_fZoom + m_ptPan.x;
-				m_pRenderTarget->DrawLine(D2D1::Point2F(sx, 0.0f), D2D1::Point2F(sx, height), m_pSolidBrush, 1.2f, pGuideStroke);
+				m_pRenderTarget->DrawLine(D2D1::Point2F(sx, 0.0f), D2D1::Point2F(sx, height), m_pSolidBrush, 1.0f, pGuideStroke);
 			}
 		}
 
 		// 드래그 중인 가이드라인 실시간 렌더링
 		if (m_guideDragMode != GuideDragMode::None)
 		{
-			m_pSolidBrush->SetColor(D2D1::ColorF(1.0f, 0.3f, 0.2f, 0.95f)); // 드래그 중에는 주황/붉은색
+			m_pSolidBrush->SetColor(D2D1::ColorF(0.95f, 0.15f, 0.1f, 1.0f)); // 드래그 중에는 밝은 붉은색
 			if (m_guideDragMode == GuideDragMode::CreateH ||
 			    (m_guideDragMode == GuideDragMode::MoveGuide && m_dragGuideIndex >= 0 &&
 			     static_cast<size_t>(m_dragGuideIndex) < guides.size() && guides[m_dragGuideIndex].isHorizontal))
 			{
 				float sy = m_dragGuideWorldPos * m_fZoom + m_ptPan.y;
-				m_pRenderTarget->DrawLine(D2D1::Point2F(0.0f, sy), D2D1::Point2F(width, sy), m_pSolidBrush, 1.5f, pGuideStroke);
+				m_pRenderTarget->DrawLine(D2D1::Point2F(0.0f, sy), D2D1::Point2F(width, sy), m_pSolidBrush, 1.0f, pGuideStroke);
 			}
 			else
 			{
 				float sx = m_dragGuideWorldPos * m_fZoom + m_ptPan.x;
-				m_pRenderTarget->DrawLine(D2D1::Point2F(sx, 0.0f), D2D1::Point2F(sx, height), m_pSolidBrush, 1.5f, pGuideStroke);
+				m_pRenderTarget->DrawLine(D2D1::Point2F(sx, 0.0f), D2D1::Point2F(sx, height), m_pSolidBrush, 1.0f, pGuideStroke);
 			}
 		}
 
-		if (pGuideStroke) pGuideStroke->Release();
 	}
 
 	if (m_lastSnap.snapped)

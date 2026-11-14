@@ -260,7 +260,7 @@ public:
 	std::wstring AgentRootForDoc() const;   // 에이전트 패키지를 둘 폴더 (프로젝트 안이면 <프로젝트>.m2data\agent)
 	virtual BOOL DoSave(LPCTSTR lpszPathName, BOOL bReplace = TRUE);
 	virtual void SetPathName(LPCTSTR lpszPathName, BOOL bAddToMRU = TRUE);
-	void SetModifiedFlag(BOOL bModified = TRUE);   // CDocument::SetModifiedFlag 는 가상 함수이므로 이 선언은 재정의(override)다
+	void SetModifiedFlag(BOOL bModified = TRUE) override;   // CDocument::SetModifiedFlag 재정의 (MFC 에서 가상 함수)
 	void UpdateTitleWithModified();
 	virtual void Serialize(CArchive& ar);
 #ifdef SHARED_HANDLERS

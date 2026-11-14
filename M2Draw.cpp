@@ -3,6 +3,7 @@
 //
 
 #include "pch.h"
+#include "CoreUtil.h"
 #include "framework.h"
 #include "afxwinappex.h"
 #include "afxdialogex.h"
@@ -109,9 +110,7 @@ BOOL CM2DrawApp::InitInstance()
 		std::wstring failure, log;
 		const bool ok = ge::test::RunReferenceAgentVerification(&failure, &log);
 		const std::wstring result = ok ? (L"ALL PASS\r\n" + log) : (L"FAIL: " + failure + L"\r\n" + log);
-		const int n = ::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), nullptr, 0, nullptr, nullptr);
-		std::string bytes(static_cast<size_t>(n), '\0');
-		::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), bytes.data(), n, nullptr, nullptr);
+		const std::string bytes = WideToUtf8(result);
 		wchar_t tmpDir[MAX_PATH] = {};
 		::GetTempPathW(MAX_PATH, tmpDir);
 		FILE* fp = nullptr;
@@ -125,9 +124,7 @@ BOOL CM2DrawApp::InitInstance()
 	// 선 마커 렌더 비용 측정 (실행: M2Draw.exe --bench-markers). 결과는 %TEMP%\m2draw_bench_markers.txt
 	if (m_lpCmdLine && wcsstr(m_lpCmdLine, L"--bench-markers")) {
 		const std::wstring result = ge::RunMarkerBenchmark();
-		const int n = ::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), nullptr, 0, nullptr, nullptr);
-		std::string bytes(static_cast<size_t>(n), '\0');
-		::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), bytes.data(), n, nullptr, nullptr);
+		const std::string bytes = WideToUtf8(result);
 		wchar_t tmpDir[MAX_PATH] = {};
 		::GetTempPathW(MAX_PATH, tmpDir);
 		FILE* fp = nullptr;
@@ -146,9 +143,7 @@ BOOL CM2DrawApp::InitInstance()
 		std::wstring result = (pureOk && runtimeOk) ? L"ALL PASS\r\n" : L"FAIL\r\n";
 		result += pureOk ? L"[PASS] 순수 모델 검증\r\n" : (L"[FAIL] 순수 모델 검증: " + pureFailure + L"\r\n");
 		result += runtimeOk ? L"[PASS] 런타임 검증\r\n" : (L"[FAIL] 런타임 검증: " + runtimeFailure + L"\r\n");
-		const int n = ::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), nullptr, 0, nullptr, nullptr);
-		std::string bytes(static_cast<size_t>(n), '\0');
-		::WideCharToMultiByte(CP_UTF8, 0, result.c_str(), static_cast<int>(result.size()), bytes.data(), n, nullptr, nullptr);
+		const std::string bytes = WideToUtf8(result);
 		wchar_t tmpDir[MAX_PATH] = {};
 		::GetTempPathW(MAX_PATH, tmpDir);
 		FILE* fp = nullptr;
@@ -179,9 +174,7 @@ BOOL CM2DrawApp::InitInstance()
 				FILE* fp = nullptr;
 				if (_wfopen_s(&fp, path.c_str(), L"wb") == 0 && fp) { fwrite(data, 1, n, fp); fclose(fp); }
 			};
-			const int u8len = ::WideCharToMultiByte(CP_UTF8, 0, status.c_str(), static_cast<int>(status.size()), nullptr, 0, nullptr, nullptr);
-			std::string statusUtf8(static_cast<size_t>(u8len > 0 ? u8len : 0), '\0');
-			if (u8len > 0) ::WideCharToMultiByte(CP_UTF8, 0, status.c_str(), static_cast<int>(status.size()), statusUtf8.data(), u8len, nullptr, nullptr);
+			const std::string statusUtf8 = WideToUtf8(status);
 			writeFile(base + L"m2draw_capture.txt", statusUtf8.data(), statusUtf8.size());
 			if (ok) {
 				writeFile(base + L"m2draw_capture.png", res.png.data(), res.png.size());

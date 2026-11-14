@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../D2DGraphicEngine.h"
+#include "../CoreUtil.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -47,8 +48,8 @@ std::vector<std::string> PropList(const FrameNode& f, const std::string& key);  
 // 직렬화 ("k=v;k=v", 구분자는 %xx 이스케이프) / UTF-8 <-> UTF-16
 std::string EncodeProps(const FrameNode::UiProps& p);
 FrameNode::UiProps DecodeProps(const std::string& s);
-std::wstring Utf8ToWide(const std::string& s);
-std::string  WideToUtf8(const std::wstring& s);
+using ::Utf8ToWide;   // 공용 구현 (CoreUtil.h)
+using ::WideToUtf8;
 
 // "#rrggbb" <-> Color
 Color  ColorFromHex(const std::string& hex, const Color& def);

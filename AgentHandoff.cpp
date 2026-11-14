@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "AgentHandoff.h"
 #include "SceneJsonWriter.h"
 #include "RasterExport.h"
@@ -17,22 +18,14 @@ namespace {
 
 std::string ToUtf8(const std::wstring& w)
 {
-	if (w.empty()) return {};
-	const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-	std::string out(static_cast<size_t>(n), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
-	return out;
+	return WideToUtf8(w);
 }
 
 bool WriteUtf8File(const std::filesystem::path& path, const std::string& content, std::wstring* err);
 
 std::wstring FromUtf8(const std::string& s)
 {
-	if (s.empty()) return {};
-	const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-	std::wstring out(static_cast<size_t>(n), L'\0');
-	MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n);
-	return out;
+	return Utf8ToWide(s);
 }
 
 // 기본 지침 (지침_템플릿.md 가 없을 때 만들어 두는 내용). 사용자가 파일에서 고칠 수 있다

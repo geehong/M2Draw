@@ -3,6 +3,7 @@
 //
 
 #include "pch.h"
+#include "CoreUtil.h"
 #include "framework.h"
 // SHARED_HANDLERS는 미리 보기, 축소판 그림 및 검색 필터 처리기를 구현하는 ATL 프로젝트에서 정의할 수 있으며
 // 해당 프로젝트와 문서 코드를 공유하도록 해 줍니다.
@@ -209,11 +210,7 @@ ProjectState g_project;
 // 프로젝트 파일 도우미 (목차 *.m2svg 읽기/쓰기)
 std::string ProjUtf8(const std::wstring& w)
 {
-	if (w.empty()) return {};
-	const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-	std::string out(static_cast<size_t>(n), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
-	return out;
+	return WideToUtf8(w);
 }
 
 std::string ProjEscape(const std::string& s)
@@ -2803,11 +2800,7 @@ void CM2DrawDoc::OnFileWebFontLink()
 namespace {
 std::string WideToUtf8Text(const std::wstring& w)
 {
-	if (w.empty()) return {};
-	const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-	std::string out(static_cast<size_t>(n), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
-	return out;
+	return WideToUtf8(w);
 }
 } // namespace
 // ---- 에이전트 작업 연결 (7.2.6) ----------------------------------------------
@@ -2815,20 +2808,12 @@ namespace {
 
 std::string AgentUtf8(const std::wstring& w)
 {
-	if (w.empty()) return {};
-	const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-	std::string out(static_cast<size_t>(n), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
-	return out;
+	return WideToUtf8(w);
 }
 
 std::wstring AgentWide(const std::string& s)
 {
-	if (s.empty()) return {};
-	const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
-	std::wstring out(static_cast<size_t>(n), L'\0');
-	MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), out.data(), n);
-	return out;
+	return Utf8ToWide(s);
 }
 
 // 파일 이름으로 쓸 수 없는 문자를 _ 로 바꾼다

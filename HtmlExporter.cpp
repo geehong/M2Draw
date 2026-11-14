@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "HtmlExporter.h"
 #include "ReferenceImport.h"
 #include "AnnotationNote.h"
@@ -30,14 +31,6 @@ static std::string EscapeHtml(const std::string& str) {
 	return res;
 }
 
-static std::string WideToUtf8(const std::wstring& w) {
-	if (w.empty()) return "";
-	int size = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
-	std::string s(size, 0);
-	WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), s.data(), size, nullptr, nullptr);
-	return s;
-}
-
 static std::string SanitizeClassName(const std::string& name) {
 	std::string res;
 	for (char c : name) {
@@ -52,26 +45,6 @@ static std::string SanitizeClassName(const std::string& name) {
 		res = "cls-" + res;
 	}
 	return res;
-}
-
-static std::string Base64Encode(const std::vector<uint8_t>& in)
-{
-	static const char* k = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	std::string out;
-	out.reserve((in.size() + 2) / 3 * 4);
-	size_t i = 0;
-	for (; i + 2 < in.size(); i += 3) {
-		const unsigned v = (in[i] << 16) | (in[i + 1] << 8) | in[i + 2];
-		out += k[(v >> 18) & 63]; out += k[(v >> 12) & 63]; out += k[(v >> 6) & 63]; out += k[v & 63];
-	}
-	if (i + 1 == in.size()) {
-		const unsigned v = in[i] << 16;
-		out += k[(v >> 18) & 63]; out += k[(v >> 12) & 63]; out += "==";
-	} else if (i + 2 == in.size()) {
-		const unsigned v = (in[i] << 16) | (in[i + 1] << 8);
-		out += k[(v >> 18) & 63]; out += k[(v >> 12) & 63]; out += k[(v >> 6) & 63]; out += '=';
-	}
-	return out;
 }
 
 // 테두리 종류: 대시 설정을 CSS border-style 로 (4.5.17)

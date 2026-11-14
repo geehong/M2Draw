@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "HtmlPreview.h"
 #include "M2Draw.h"
 #include "M2DrawDoc.h"
@@ -276,9 +277,7 @@ void CHtmlPreviewFrame::Refresh()
 	}
 	if (!m_webview) return;
 	if (html.size() < kMaxNavigateToString) {
-		const int n = ::MultiByteToWideChar(CP_UTF8, 0, html.c_str(), static_cast<int>(html.size()), nullptr, 0);
-		std::wstring w(n, L'\0');
-		::MultiByteToWideChar(CP_UTF8, 0, html.c_str(), static_cast<int>(html.size()), &w[0], n);
+		const std::wstring w = Utf8ToWide(html);
 		m_webview->NavigateToString(w.c_str());
 	} else if (WriteTempHtml(html, false)) {
 		const std::wstring url = L"file:///" + TempHtmlPath();

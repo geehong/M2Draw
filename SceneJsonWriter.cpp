@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "SceneJsonWriter.h"
 #include "D2DLayer.h"
 #include "ReferenceImport.h"
@@ -18,11 +19,7 @@ using Fields = std::vector<std::pair<std::string, std::string>>;   // 키, 이�
 
 std::string Utf8(const std::wstring& w)
 {
-	if (w.empty()) return {};
-	const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-	std::string out(static_cast<size_t>(n), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), out.data(), n, nullptr, nullptr);
-	return out;
+	return WideToUtf8(w);
 }
 
 // JSON 문자열 리터럴 (입력은 UTF-8)

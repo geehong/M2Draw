@@ -1572,6 +1572,11 @@ public:
 // 그릴 레이어 선택 (7.1.1): All = 앱 캔버스, ExcludeReference = PNG/JPG·SVG 내보내기, OnlyReference = 레퍼런스 원본 파일(투명도 무시)
 enum class RenderLayerFilter : uint8_t { All, ExcludeReference, OnlyReference };
 
+// 편집 오버레이(선택 점선, 눈금자 가이드)용 점선 스트로크. 팩터리마다 한 번만 만들어 재사용한다 (그리기 때마다 만들지 않음). 호출 측이 팩터리를 Release 해도 된다
+ID2D1StrokeStyle* OverlayDashStyle(ID2D1Factory* factory);
+// 눈금자 가이드용 도트(점) 스트로크. 같은 방식으로 팩터리마다 한 번만 만든다
+ID2D1StrokeStyle* OverlayDotStyle(ID2D1Factory* factory);
+
 class D2DRenderer : public IRenderer {
 public:
 	D2DRenderer() = default;

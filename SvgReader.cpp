@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "SvgReader.h"
 #include "HtmlComponents/UiComponents.h"
 #include "D2DGraphicEngine.h"
@@ -31,14 +32,6 @@ void SkipSeparators(const wchar_t*& p, const wchar_t* end) {
 	while (p < end && (iswspace(*p) || *p == L',')) {
 		++p;
 	}
-}
-
-static std::string WideToUtf8(const std::wstring& w) {
-	if (w.empty()) return "";
-	int size = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
-	std::string s(size, 0);
-	WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), s.data(), size, nullptr, nullptr);
-	return s;
 }
 
 // 실수 1개 파싱

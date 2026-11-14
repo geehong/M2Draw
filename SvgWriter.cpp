@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CoreUtil.h"
 #include "SvgWriter.h"
 #include "HtmlComponents/UiComponents.h"
 #include "D2DGraphicEngine.h"
@@ -81,15 +82,6 @@ std::string EscapeXml(const std::string& str) {
 }
 
 // wstring -> UTF-8 string 변환
-std::string WideToUtf8(const std::wstring& wstr) {
-	if (wstr.empty()) return {};
-	int len = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), nullptr, 0, nullptr, nullptr);
-	if (len <= 0) return {};
-	std::string res(len, '\0');
-	WideCharToMultiByte(CP_UTF8, 0, wstr.data(), static_cast<int>(wstr.size()), res.data(), len, nullptr, nullptr);
-	return res;
-}
-
 // 단위 행렬 여부 판별
 bool IsIdentity(const Matrix2D& m) {
 	return std::abs(m.m11 - 1.0f) < 0.0001f &&
@@ -673,26 +665,6 @@ void SvgWriter::Visit(GroupNode& node) {
 
 	AppendIndent();
 	m_output += "</g>\n";
-}
-
-static std::string Base64Encode(const std::vector<uint8_t>& in)
-{
-	static const char* k = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	std::string out;
-	out.reserve((in.size() + 2) / 3 * 4);
-	size_t i = 0;
-	for (; i + 2 < in.size(); i += 3) {
-		const unsigned v = (in[i] << 16) | (in[i + 1] << 8) | in[i + 2];
-		out += k[(v >> 18) & 63]; out += k[(v >> 12) & 63]; out += k[(v >> 6) & 63]; out += k[v & 63];
-	}
-	if (i + 1 == in.size()) {
-		const unsigned v = in[i] << 16;
-		out += k[(v >> 18) & 63]; out += k[(v >> 12) & 63]; out += "==";
-	} else if (i + 2 == in.size()) {
-		const unsigned v = (in[i] << 16) | (in[i + 1] << 8);
-		out += k[(v >> 18) & 63]; out += k[(v >> 12) & 63]; out += k[(v >> 6) & 63]; out += '=';
-	}
-	return out;
 }
 
 void SvgWriter::Visit(ImageNode& node) {

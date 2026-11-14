@@ -795,6 +795,9 @@ public:
 	void DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* pDoc) override;
 
 private:
+	bool           m_hover = false;         // 커서 아래에 추출할 색이 있음 (커서 옆 색 칩으로 실시간 표시)
+	D2D1_COLOR_F   m_hoverClr{};
+	D2D1_POINT_2F  m_cursorScreen{};
 	bool           m_pendingPick = false;   // 도형이 없는 곳/레퍼런스 위에서 눌렀음 (떼는 위치로 클릭인지 드래그인지 판단)
 	bool           m_measuring = false;     // 끌어서 거리 측정 중 (미리보기 선·글자, 자 커서)
 	D2D1_POINT_2F  m_startWorld{};

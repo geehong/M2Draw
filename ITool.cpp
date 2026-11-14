@@ -2053,47 +2053,51 @@ void SelectTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush,
 
 	ViewportTransform view = { zoom, { pan.x, pan.y } };
 
-	// 호버 미리보기: 마우스 밑에서 클릭하면 선택될 오브젝트를 파란 윤곽으로 보여 준다
+	// 호버 미리보기: 마우스 밑에서 클릭하면 선택될 오브젝트의 둘레를 얇은 파란 선으로 강조한다 (Figma 방식).
+	// 패스(사각형·둥근 사각형·원 포함)는 도형 자체의 윤곽, 그 밖은 사각 둘레라서 박스와 크기가 같은 도형도 구분된다
 	if (m_hoverId != 0 && m_mode == Mode::None) {
 		if (ge::Node* hn = pDoc->GetDoc().FindById(m_hoverId)) {
 			ge::Rect2 wb;
 			if (ge::Document::GetWorldBounds(*hn, wb)) {
-				const ge::Vec2 p0 = view.WorldToScreen(ge::Vec2{ wb.left, wb.top });
-				const ge::Vec2 p1 = view.WorldToScreen(ge::Vec2{ wb.right, wb.bottom });
-				brush->SetColor(D2D1::ColorF(0.10f, 0.45f, 1.0f, 0.7f));
-				// 파란 점선, 얇게 (실선은 너무 진해서 쓰지 않는다)
+				brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.95f));
+				bool drawn = false;
+				if (auto* pn = dynamic_cast<ge::PathNode*>(hn)) {
 					ID2D1Factory* hf = nullptr;
 					rt->GetFactory(&hf);
-					ID2D1StrokeStyle* dash = nullptr;
 					if (hf) {
-						const D2D1_STROKE_STYLE_PROPERTIES sp = D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT,
-							D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_DASH, 0.0f);
-						hf->CreateStrokeStyle(sp, nullptr, 0, &dash);
+						ComPtr<ID2D1PathGeometry> geo = ge::PathOp::GetCachedGeometry(*pn, hf);
+						if (geo) {
+							D2D1_MATRIX_3X2_F prev{};
+							rt->GetTransform(&prev);
+							rt->SetTransform((hn->GetWorldTransform() * view.ToMatrix()).ToD2D());
+							// 도형 자체의 파란 선과 겹치지 않도록 굵은 반투명 halo 를 먼저 깔고, 그 위에 얇은 진한 선을 그린다 (화면 기준 두께)
+							brush->SetColor(D2D1::ColorF(0.10f, 0.60f, 1.0f, 0.35f));
+							rt->DrawGeometry(geo.Get(), brush, 6.0f / zoom);
+							brush->SetColor(D2D1::ColorF(0.0f, 0.45f, 1.0f, 1.0f));
+							rt->DrawGeometry(geo.Get(), brush, 1.5f / zoom);
+							rt->SetTransform(prev);
+							drawn = true;
+						}
+						hf->Release();
 					}
-					rt->DrawRectangle(D2D1::RectF(p0.x, p0.y, p1.x, p1.y), brush, 1.0f, dash);
-					if (dash) dash->Release();
-					if (hf) hf->Release();
+				}
+				if (!drawn) {
+					const ge::Vec2 p0 = view.WorldToScreen(ge::Vec2{ wb.left, wb.top });
+					const ge::Vec2 p1 = view.WorldToScreen(ge::Vec2{ wb.right, wb.bottom });
+					const D2D1_RECT_F hr = D2D1::RectF(p0.x, p0.y, p1.x, p1.y);
+					brush->SetColor(D2D1::ColorF(0.10f, 0.60f, 1.0f, 0.35f));
+					rt->DrawRectangle(hr, brush, 6.0f);
+					brush->SetColor(D2D1::ColorF(0.0f, 0.45f, 1.0f, 1.0f));
+					rt->DrawRectangle(hr, brush, 1.5f);
+				}
+				// 호버한 도형의 중앙 십자 (겹친 도형에서 어느 도형인지 중심으로 알 수 있게)
+				const ge::Vec2 cc = view.WorldToScreen(ge::Vec2{ (wb.left + wb.right) * 0.5f, (wb.top + wb.bottom) * 0.5f });
+				brush->SetColor(D2D1::ColorF(0.0f, 0.45f, 1.0f, 1.0f));
+				rt->DrawLine(D2D1::Point2F(cc.x - 7.0f, cc.y), D2D1::Point2F(cc.x + 7.0f, cc.y), brush, 1.5f);
+				rt->DrawLine(D2D1::Point2F(cc.x, cc.y - 7.0f), D2D1::Point2F(cc.x, cc.y + 7.0f), brush, 1.5f);
+				rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cc.x, cc.y), 3.0f, 3.0f), brush, 1.5f);
 			}
 		}
-	}
-
-	// 1. 마키(Marquee) 드래그 선택 사각형 렌더링
-	if (m_mode == Mode::Marquee)
-	{
-		D2D1_POINT_2F p1 = view.WorldToScreen(m_dragStartWorld);
-		D2D1_POINT_2F p2 = view.WorldToScreen(m_dragCurrentWorld);
-		D2D1_RECT_F mr = D2D1::RectF(
-			(std::min)(p1.x, p2.x), (std::min)(p1.y, p2.y),
-			(std::max)(p1.x, p2.x), (std::max)(p1.y, p2.y)
-		);
-
-		// 반투명 파란색 채우기
-		brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.15f));
-		rt->FillRectangle(mr, brush);
-
-		// 점선/실선 테두리
-		brush->SetColor(D2D1::ColorF(0.12f, 0.55f, 0.95f, 0.85f));
-		rt->DrawRectangle(mr, brush, 1.2f);
 	}
 
 	const std::vector<ge::Node*>& sel = pDoc->GetDoc().GetSelection();
@@ -4109,33 +4113,58 @@ void NodeTool::SelectAnchor(ge::PathNode* p, int sp, int ni, bool addToSelection
 static void PickReferenceColor(const ToolEvent& e)
 {
 	ge::Color c;
-	if (!ge::SampleReferenceColor(e.pDoc->GetDoc(), ge::Vec2(e.worldPt.x, e.worldPt.y), c)) return;
+	if (!ge::SampleReferenceColor(e.pDoc->GetDoc(), ge::Vec2(e.worldPt.x, e.worldPt.y), c))
+		return;
 
+	const D2D1_COLOR_F clr = D2D1::ColorF(c.r, c.g, c.b, 1.0f);
+	RecentColors::Add(clr);   // 최근 색에 등록 (팔레트 위 줄에서 다시 쓸 수 있다)
 	const int r = static_cast<int>(std::lround(c.r * 255.0f)), g = static_cast<int>(std::lround(c.g * 255.0f)), b = static_cast<int>(std::lround(c.b * 255.0f));
 	CString hex;
 	hex.Format(_T("#%02X%02X%02X"), r, g, b);
-	RecentColors::Add(D2D1::ColorF(c.r, c.g, c.b, 1.0f));   // 최근 사용 색 줄에 등록 (검정·흰색은 제외됨)
+
+	// 적용 대상: 속성 창에서 지금 고른 채우기(Fill) 또는 윤곽선(Stroke)
+	int target = 0;
+	if (CMainFrame* mf = dynamic_cast<CMainFrame*>(AfxGetMainWnd()))
+		target = mf->GetPropertiesWnd().GetD2DPropView().GetColorTarget();
+
+	const auto& sel = e.pDoc->GetDoc().GetSelection();
+	if (sel.empty())
+	{
+		CString msg;
+		msg.Format(_T("[스포이드] %s 추출: 먼저 도형을 선택하세요"), (LPCTSTR)hex);
+		LogAppEvent(msg);
+		SetAppStatusText(msg);
+		return;
+	}
 
 	bool applied = false;
-	for (ge::Node* n : e.pDoc->GetDoc().GetSelection()) {
+	for (ge::Node* n : sel)
+	{
 		if (!n || n->Kind() == ge::NodeKind::Image || ge::IsReferenceNode(*n)) continue;
 		ge::Style s = n->GetStyle();
-		s.fill.type = ge::PaintType::Solid;
-		s.fill.color = ge::Color(c.r, c.g, c.b, 1.0f);
+		if (target == 1)
+		{
+			s.stroke.color = ge::Color(c.r, c.g, c.b, 1.0f);
+			if (s.stroke.width <= 0.001f) s.stroke.width = 1.0f;   // 선이 없던 도형은 1px 선을 켠다
+		}
+		else
+		{
+			s.fill.type = ge::PaintType::Solid;
+			s.fill.color = ge::Color(c.r, c.g, c.b, 1.0f);
+		}
 		n->SetStyle(s);
 		applied = true;
 	}
 	if (applied) {
-		e.pDoc->CommitUndoPoint(L"레퍼런스 색 적용");
+		e.pDoc->CommitUndoPoint(L"스포이드 색 적용");
 		e.pDoc->UpdateAllViews(nullptr);
-		// 속성창(색 휠·색 칸·hex)을 적용된 값으로 다시 맞춘다. 안 하면 예전 색이 남아 있다가 다음 동기화 때 되돌아간다
 		UpdateShapePropertiesSelection(e.pDoc->GetPrimarySelection(), e.pDoc);
 	}
 	CString msg;
-	msg.Format(_T("[스포이드] 레퍼런스 색 %s %s"), (LPCTSTR)hex, applied ? _T("을 선택 도형에 적용") : _T("추출 (선택한 도형 없음)"));
+	msg.Format(_T("[스포이드] %s → 선택 도형의 %s %s"), (LPCTSTR)hex, target == 1 ? _T("윤곽선") : _T("채우기"), applied ? _T("에 적용") : _T("에는 적용 못함"));
 	LogAppEvent(msg);
+	SetAppStatusText(msg);
 }
-
 // ---- 스포이드/거리 측정 커서와 미리보기 ------------------------------------
 namespace {
 
@@ -4219,6 +4248,14 @@ HCURSOR EyedropperTool::GetCursor() const
 
 void EyedropperTool::OnMove(const ToolEvent& e)
 {
+	// 커서 옆 색 칩: 클릭하기 전에 마우스 아래 색을 실시간으로 보여 준다
+	m_cursorScreen = D2D1::Point2F(static_cast<float>(e.screenPt.x), static_cast<float>(e.screenPt.y));
+	const bool hadHover = m_hover;
+	ge::Color hc;
+	m_hover = e.pDoc && ge::SampleReferenceColor(e.pDoc->GetDoc(), ge::Vec2(e.worldPt.x, e.worldPt.y), hc);
+	if (m_hover) m_hoverClr = D2D1::ColorF(hc.r, hc.g, hc.b, 1.0f);
+	if ((m_hover || hadHover) && e.pView) e.pView->Invalidate(FALSE);
+
 	if (!m_pendingPick) return;
 	m_currentWorld = e.worldPt;
 	const float dx = e.worldPt.x - m_startWorld.x;
@@ -4229,6 +4266,16 @@ void EyedropperTool::OnMove(const ToolEvent& e)
 // 끄는 동안: 시작점~현재점에 파란 점선과 "길이 … px" 글자를 미리 보여 준다
 void EyedropperTool::DrawOverlay(ID2D1RenderTarget* rt, ID2D1SolidColorBrush* brush, float zoom, D2D1_POINT_2F pan, CM2DrawDoc* /*pDoc*/)
 {
+	// 색 칩: 커서 오른쪽 아래에 추출될 색을 보여 준다 (흰 테두리 + 검은 외곽으로 밝은/어두운 배경 모두에서 보이게)
+	if (m_hover && !m_measuring && rt && brush) {
+		const float x = m_cursorScreen.x + 18.0f, y = m_cursorScreen.y + 18.0f;
+		brush->SetColor(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.9f));
+		rt->DrawRectangle(D2D1::RectF(x - 2.0f, y - 2.0f, x + 24.0f, y + 24.0f), brush, 1.0f);
+		brush->SetColor(m_hoverClr);
+		rt->FillRectangle(D2D1::RectF(x, y, x + 22.0f, y + 22.0f), brush);
+		brush->SetColor(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+		rt->DrawRectangle(D2D1::RectF(x, y, x + 22.0f, y + 22.0f), brush, 1.0f);
+	}
 	if (!m_measuring || !rt || !brush) return;
 
 	ViewportTransform view = { zoom, { pan.x, pan.y } };

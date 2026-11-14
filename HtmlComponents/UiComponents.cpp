@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "../CoreUtil.h"
 #include "UiComponents.h"
 #include <algorithm>
 #include <cmath>
@@ -824,24 +825,6 @@ FrameNode::UiProps DecodeProps(const std::string& s)
 		i = j + 1;
 	}
 	return out;
-}
-
-std::wstring Utf8ToWide(const std::string& s)
-{
-	if (s.empty()) return std::wstring();
-	const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0);
-	std::wstring w(n, L'\0');
-	MultiByteToWideChar(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), &w[0], n);
-	return w;
-}
-
-std::string WideToUtf8(const std::wstring& s)
-{
-	if (s.empty()) return std::string();
-	const int n = WideCharToMultiByte(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), nullptr, 0, nullptr, nullptr);
-	std::string o(n, '\0');
-	WideCharToMultiByte(CP_UTF8, 0, s.c_str(), static_cast<int>(s.size()), &o[0], n, nullptr, nullptr);
-	return o;
 }
 
 Color ColorFromHex(const std::string& hex, const Color& def)

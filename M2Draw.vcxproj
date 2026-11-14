@@ -271,6 +271,7 @@
     <ClInclude Include="PathTrim.h" />
     <ClInclude Include="ResponsiveLayout.h" />
     <ClInclude Include="LineMarkers.h" />
+    <ClInclude Include="CoreUtil.h" />
     <ClInclude Include="RecentColors.h" />
     <ClInclude Include="ImageRegistry.h" />
     <ClInclude Include="ProjectTreeWnd.h" />
@@ -310,6 +311,7 @@
     <ClCompile Include="PathTrim.cpp" />
     <ClCompile Include="ResponsiveLayout.cpp" />
     <ClCompile Include="LineMarkers.cpp" />
+    <ClCompile Include="CoreUtil.cpp" />
     <ClCompile Include="ProjectTreeWnd.cpp" />
     <ClCompile Include="ShapePresets.cpp" />
     <ClCompile Include="D2DPropertyView.cpp" />
