@@ -335,6 +335,16 @@ protected:
 	void InitControls();
 	void InitFrameSection();   // 프레임 속성 컨트롤 생성
 	void UpdateLayout(float width, float height);
+	void LayoutShapeTextSection(float left, float right, float contentW, float& y);
+	void LayoutShapeImageSection(float left, float right, float contentW, float& y);
+	void LayoutShapeFrameSection(float left, float right, float contentW, float& y);
+	void LayoutGridSection(float left, float right, float contentW, float& y);
+	void LayoutCanvasSection(float left, float right, float contentW, float& y);
+	void LayoutShapeConstraintSection(float left, float right, float contentW, float& y);
+	void LayoutShapeUiComponentSection(float left, float right, float contentW, float& y);
+	void LayoutShapeTableSection(float left, float right, float contentW, float& y);
+	void LayoutShapeAppearanceSection(float left, float right, float contentW, float& y);
+	void LayoutShapeGroupButtonsSection(float left, float right, float contentW, float& y);
 	void NotifyGridChanged();
 
 	// MFC 메시지 맵 핸들러

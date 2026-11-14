@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "D2DPropertyView.h"
 #include "HtmlComponents/UiComponents.h"
 #include "M2DrawDoc.h"
@@ -3066,6 +3066,589 @@ float CD2DPropertyView::LayoutGroupPanel(float left, float right, float contentW
 	return y;
 }
 
+// 도형 모드: 텍스트/버튼 속성 섹션 (Transform 바로 위)
+void CD2DPropertyView::LayoutShapeTextSection(float left, float right, float contentW, float& y)
+{
+	// 텍스트/버튼 속성: Transform 바로 위 (텍스트 또는 버튼이 선택된 경우)
+	{
+		const bool isText = IsTextSelected();
+		const bool isButton = IsButtonSelected();
+		const bool showTextProps = isText || isButton;
+
+		if (m_lblText)        m_lblText->SetVisible(showTextProps);
+		if (m_lblButtonLabel) m_lblButtonLabel->SetVisible(isButton);
+		if (m_txtButtonLabel) m_txtButtonLabel->SetVisible(isButton);
+		if (m_lblButtonAlign)  m_lblButtonAlign->SetVisible(isButton);
+		if (m_cboButtonAlignH) m_cboButtonAlignH->SetVisible(isButton);
+		if (m_cboButtonAlignV) m_cboButtonAlignV->SetVisible(isButton);
+		if (m_cboFont)        m_cboFont->SetVisible(showTextProps);
+		if (m_cboHeadingLevel) m_cboHeadingLevel->SetVisible(showTextProps);
+	if (m_spinFontSize)   m_spinFontSize->SetVisible(showTextProps);
+		if (m_cboTextAlign)   m_cboTextAlign->SetVisible(isText);   // 버튼은 자동 센터 정렬
+		if (m_chkBold)        m_chkBold->SetVisible(showTextProps);
+		if (m_chkItalic)      m_chkItalic->SetVisible(showTextProps);
+		if (m_chkTextArea)    m_chkTextArea->SetVisible(isText);
+		if (m_spinTextBoxW)   m_spinTextBoxW->SetVisible(isText && dynamic_cast<ge::TextNode*>(GetSelectedShape()) && static_cast<ge::TextNode*>(GetSelectedShape())->IsAreaText());
+
+		if (showTextProps)
+		{
+			const float halfTW = (contentW - 6.0f) * 0.5f;
+			if (m_lblText)
+			{
+				m_lblText->SetText(isButton ? L"● Button (Label, Font, Style)" : L"● Text (Font, Size, Style)");
+				m_lblText->SetBounds(left, y, right, y + 18.0f);
+				y += 20.0f;
+			}
+
+			if (isButton)
+			{
+				if (m_lblButtonLabel) { m_lblButtonLabel->SetBounds(left, y, right, y + 16.0f); y += 18.0f; }
+				if (m_txtButtonLabel) { m_txtButtonLabel->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+				if (m_lblButtonAlign) { m_lblButtonAlign->SetBounds(left, y, right, y + 16.0f); y += 18.0f; }
+				if (m_cboButtonAlignH) m_cboButtonAlignH->SetBounds(left, y, left + halfTW, y + 24.0f);
+				if (m_cboButtonAlignV) m_cboButtonAlignV->SetBounds(left + halfTW + 6.0f, y, right, y + 24.0f);
+				y += 28.0f;
+			}
+
+			if (m_cboFont)      { m_cboFont->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+			if (isButton)
+			{
+				if (m_spinFontSize) { m_spinFontSize->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+			}
+			else
+			{
+				if (m_cboHeadingLevel) { m_cboHeadingLevel->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+		if (m_spinFontSize) m_spinFontSize->SetBounds(left, y, left + halfTW, y + 24.0f);
+				if (m_cboTextAlign) m_cboTextAlign->SetBounds(left + halfTW + 6.0f, y, right, y + 24.0f);
+				y += 28.0f;
+			}
+
+			if (m_chkBold)      m_chkBold->SetBounds(left, y, left + halfTW, y + 20.0f);
+			if (m_chkItalic)    m_chkItalic->SetBounds(left + halfTW + 6.0f, y, right, y + 20.0f);
+			y += 26.0f;
+
+			if (isText)
+			{
+				if (m_chkTextArea)  m_chkTextArea->SetBounds(left, y, left + halfTW, y + 24.0f);
+				if (m_spinTextBoxW && m_spinTextBoxW->IsVisible()) m_spinTextBoxW->SetBounds(left + halfTW + 6.0f, y, right, y + 24.0f);
+				y += 30.0f;
+			}
+		}
+	}
+}
+
+// 도형 모드: 이미지 속성 섹션
+void CD2DPropertyView::LayoutShapeImageSection(float left, float right, float contentW, float& y)
+{
+	// 이미지 속성: Transform 바로 위 (이미지가 선택된 경우만)
+	{
+		const bool isImage = IsImageSelected();
+		if (m_lblImage)         m_lblImage->SetVisible(isImage);
+		if (m_lblImageInfo)     m_lblImageInfo->SetVisible(isImage);
+		if (m_cboImageFit)      m_cboImageFit->SetVisible(isImage);
+		if (m_btnImageRatio)    m_btnImageRatio->SetVisible(isImage);
+		if (m_btnImageReplace)  m_btnImageReplace->SetVisible(isImage);
+		if (isImage)
+		{
+			const float halfIW = (contentW - 6.0f) * 0.5f;
+			if (m_lblImage)      { m_lblImage->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			if (m_lblImageInfo)  { m_lblImageInfo->SetBounds(left, y, right, y + 18.0f); y += 22.0f; }
+			if (m_cboImageFit)   { m_cboImageFit->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+			if (m_btnImageRatio)   m_btnImageRatio->SetBounds(left, y, left + halfIW, y + 24.0f);
+			if (m_btnImageReplace) m_btnImageReplace->SetBounds(left + halfIW + 6.0f, y, right, y + 24.0f);
+			y += 30.0f;
+		}
+	}
+}
+
+// 도형 모드: 프레임 속성 섹션
+void CD2DPropertyView::LayoutShapeFrameSection(float left, float right, float contentW, float& y)
+{
+	// 프레임 속성: Transform 바로 위 (프레임이 선택된 경우만)
+	{
+		const bool isFrame = IsFrameSelected() && !GetSelectedUiComponent();   // UI 컴포넌트는 프레임 속성 대신 전용 구역
+		auto* frNode = isFrame ? dynamic_cast<ge::FrameNode*>(GetSelectedShape()) : nullptr;
+		const bool hasAutoLayout = isFrame && frNode && (frNode->GetLayoutMode() != ge::FrameLayoutMode::None);
+		auto* parentFr = frNode ? dynamic_cast<ge::FrameNode*>(frNode->GetParent()) : nullptr;
+		const bool parentAuto = parentFr && parentFr->GetLayoutMode() != ge::FrameLayoutMode::None;
+		const bool showSizing = isFrame && (hasAutoLayout || parentAuto);   // Fill 은 부모가 자동 배치일 때 의미가 있음
+
+		if (m_lblFrame)             m_lblFrame->SetVisible(isFrame);
+		if (m_chkFrameClip)         m_chkFrameClip->SetVisible(isFrame);
+		if (m_lblFrameRadius)       m_lblFrameRadius->SetVisible(false);   // 보조 라벨 숨김
+		if (m_spinFrameRadius)      m_spinFrameRadius->SetVisible(isFrame);
+		const bool topFrame = isFrame && frNode && frNode->GetParent() && frNode->GetParent()->Kind() == ge::NodeKind::Layer;   // 페이지 폭 프리셋은 최상위 프레임만
+		if (m_lblResp)              m_lblResp->SetVisible(topFrame);
+		if (m_cboResp)              m_cboResp->SetVisible(topFrame);
+		if (m_lblFrameLayout)       m_lblFrameLayout->SetVisible(isFrame);
+		if (m_cboFrameLayout)       m_cboFrameLayout->SetVisible(isFrame);
+		if (m_lblFrameGap)          m_lblFrameGap->SetVisible(false);
+		if (m_spinFrameGap)         m_spinFrameGap->SetVisible(hasAutoLayout);
+		if (m_spinFrameWrap)        m_spinFrameWrap->SetVisible(hasAutoLayout);
+		if (m_lblFramePadding)      m_lblFramePadding->SetVisible(false);
+		if (m_spinFramePadding)     m_spinFramePadding->SetVisible(hasAutoLayout);
+		if (m_lblFrameAlign)        m_lblFrameAlign->SetVisible(hasAutoLayout);
+		if (m_cboFrameMainAlign)    m_cboFrameMainAlign->SetVisible(hasAutoLayout);
+		if (m_cboFrameCrossAlign)   m_cboFrameCrossAlign->SetVisible(hasAutoLayout);
+		if (m_lblFrameSizing)       m_lblFrameSizing->SetVisible(showSizing);
+		if (m_cboFrameSizingW)      m_cboFrameSizingW->SetVisible(showSizing);
+		if (m_cboFrameSizingH)      m_cboFrameSizingH->SetVisible(showSizing);
+		{
+			const std::shared_ptr<M2DrawControl> extra[] = { m_cboFrameRole, m_spinRadTL, m_spinRadTR, m_spinRadBR, m_spinRadBL, m_chkBdrT, m_chkBdrR, m_chkBdrB, m_chkBdrL };
+			for (const auto& c : extra) if (c) c->SetVisible(isFrame);
+			const std::shared_ptr<M2DrawControl> padx[] = { m_spinPadT, m_spinPadR, m_spinPadB, m_spinPadL };
+			for (const auto& c : padx) if (c) c->SetVisible(hasAutoLayout);
+		}
+
+		if (isFrame)
+		{
+			const float halfFW = (contentW - 6.0f) * 0.5f;
+			if (m_lblFrame)         { m_lblFrame->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			if (m_chkFrameClip)     m_chkFrameClip->SetBounds(left, y, left + halfFW, y + 24.0f);
+			if (m_spinFrameRadius)  m_spinFrameRadius->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
+			y += 28.0f;
+				if (m_cboFrameRole) { m_cboFrameRole->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+				{
+					const float q = (contentW - 18.0f) * 0.25f;
+					const std::shared_ptr<M2DrawControl> rr[] = { m_spinRadTL, m_spinRadTR, m_spinRadBR, m_spinRadBL };
+					for (int k = 0; k < 4; ++k) if (rr[k]) rr[k]->SetBounds(left + k * (q + 6.0f), y, left + k * (q + 6.0f) + q, y + 24.0f);
+					y += 28.0f;
+					const std::shared_ptr<M2DrawControl> bb[] = { m_chkBdrT, m_chkBdrR, m_chkBdrB, m_chkBdrL };
+					for (int k = 0; k < 4; ++k) if (bb[k]) bb[k]->SetBounds(left + k * (q + 6.0f), y, left + k * (q + 6.0f) + q, y + 24.0f);
+					y += 28.0f;
+				}
+			if (topFrame)
+			{
+				if (m_lblResp) { m_lblResp->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+				if (m_cboResp) { m_cboResp->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+			}
+			if (m_lblFrameLayout)   { m_lblFrameLayout->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			if (m_cboFrameLayout)   { m_cboFrameLayout->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
+
+			if (hasAutoLayout)
+			{
+				if (m_spinFrameGap)     m_spinFrameGap->SetBounds(left, y, left + halfFW, y + 24.0f);
+				if (m_spinFramePadding) m_spinFramePadding->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
+				y += 28.0f;
+				if (m_spinFrameWrap) m_spinFrameWrap->SetBounds(left, y, left + halfFW, y + 24.0f);
+				y += 28.0f;
+					{
+						const float q =(contentW - 18.0f) * 0.25f;
+						const std::shared_ptr<M2DrawControl> pp[] = { m_spinPadT, m_spinPadR, m_spinPadB, m_spinPadL };
+						for (int k = 0; k < 4; ++k) if (pp[k]) pp[k]->SetBounds(left + k * (q + 6.0f), y, left + k * (q + 6.0f) + q, y + 24.0f);
+						y += 28.0f;
+					}
+				if (m_lblFrameAlign)      { m_lblFrameAlign->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+				if (m_cboFrameMainAlign)  m_cboFrameMainAlign->SetBounds(left, y, left + halfFW, y + 24.0f);
+				if (m_cboFrameCrossAlign) m_cboFrameCrossAlign->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
+				y += 28.0f;
+				y += 4.0f;
+			}
+			else
+			{
+				y += 4.0f;
+			}
+				if (showSizing)
+				{
+					if (m_lblFrameSizing)  { m_lblFrameSizing->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+					if (m_cboFrameSizingW) m_cboFrameSizingW->SetBounds(left, y, left + halfFW, y + 24.0f);
+					if (m_cboFrameSizingH) m_cboFrameSizingH->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
+					y += 32.0f;
+				}
+		}
+	}
+}
+
+// 격자/눈금자 설정 패널 섹션
+void CD2DPropertyView::LayoutGridSection(float left, float right, float contentW, float& y)
+{
+	// [MODE_GRID: Grid & Ruler Settings]
+	// 1. Header
+	if (m_lblGridHeader)
+	{
+		m_lblGridHeader->SetBounds(left, y, right, y + 20.0f);
+		y += 24.0f;
+	}
+
+	// 2. Checkboxes (View Grid, Snap to Grid, View Ruler)
+	float chkW = (contentW - 12.0f) / 3.0f;
+	if (m_chkGridView)  m_chkGridView->SetBounds(left, y, left + chkW, y + 24.0f);
+	if (m_chkGridSnap)  m_chkGridSnap->SetBounds(left + chkW + 6.0f, y, left + (chkW * 2.0f) + 6.0f, y + 24.0f);
+	if (m_chkRulerView) m_chkRulerView->SetBounds(left + (chkW * 2.0f) + 12.0f, y, right, y + 24.0f);
+	y += 32.0f;
+
+	// 오브젝트 스냅 (5.1.0): 2열 체크박스
+	if (m_lblObjSnap) { m_lblObjSnap->SetBounds(left, y, right, y + 20.0f); y += 24.0f; }
+	{
+		const float halfW = (contentW - 6.0f) * 0.5f;
+		const std::shared_ptr<M2DrawCheckBox> rows[][2] = {
+			{ m_chkSnapMaster, m_chkSmartGuides }, { m_chkEqualSpacing, m_chkSnapAnchor }, { m_chkSnapMid, m_chkSnapCenter },
+			{ m_chkSnapEdge, m_chkSnapInter }, { m_chkSnapAxis, nullptr } };
+		for (const auto& r : rows)
+		{
+			if (r[0]) r[0]->SetBounds(left, y, left + halfW, y + 24.0f);
+			if (r[1]) r[1]->SetBounds(left + halfW + 6.0f, y, right, y + 24.0f);
+			y += 26.0f;
+		}
+		y += 6.0f;
+	}
+
+	// 3. Measurement Unit ComboBox (Dropdown)
+	if (m_lblUnit)
+	{
+		m_lblUnit->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+	if (m_cboUnit)
+	{
+		m_cboUnit->SetBounds(left, y, right, y + 26.0f);
+		y += 34.0f;
+	}
+
+	// 4. Grid Step (Label + Bar + Number Input)
+	if (m_lblGridStep)
+	{
+		m_lblGridStep->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+	float numW = 75.0f;
+	float sliderW = contentW - numW - 8.0f;
+	if (m_sliderGridStep)
+	{
+		m_sliderGridStep->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+	}
+	if (m_spinGridStep)
+	{
+		m_spinGridStep->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+	}
+	y += 30.0f;
+
+	// 5. Major Line Frequency (Label + Bar + Number Input)
+	if (m_lblGridMajor)
+	{
+		m_lblGridMajor->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+	if (m_sliderGridMajor)
+	{
+		m_sliderGridMajor->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+	}
+	if (m_spinGridMajor)
+	{
+		m_spinGridMajor->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+	}
+	y += 32.0f;
+
+	// 6. Minor vs Major Grid Color Tabs
+	float halfTabW = (contentW - 6.0f) * 0.5f;
+	if (m_btnGridMinorClr) m_btnGridMinorClr->SetBounds(left, y, left + halfTabW, y + 26.0f);
+	if (m_btnGridMajorClr) m_btnGridMajorClr->SetBounds(left + halfTabW + 6.0f, y, right, y + 26.0f);
+	y += 32.0f;
+
+	// 7. Grid Color Wheel Expander
+	if (m_expGridWheel)
+	{
+		m_expGridWheel->SetVisible(true);
+		float expH = m_expGridWheel->GetHeaderHeight();
+		if (m_expGridWheel->IsExpanded())
+		{
+			float wheelH = min(contentW, 220.0f);
+			float wheelLeft = left + (contentW - wheelH) * 0.5f;
+			expH += wheelH + 10.0f;
+			if (m_gridWheel)
+			{
+				m_gridWheel->SetVisible(true);
+				m_gridWheel->SetBounds(wheelLeft, y + m_expGridWheel->GetHeaderHeight() + 6.0f, wheelLeft + wheelH, y + expH - 4.0f);
+			}
+		}
+		else
+		{
+			if (m_gridWheel) m_gridWheel->SetVisible(false);
+		}
+		m_expGridWheel->SetBounds(left, y, right, y + expH);
+		y += expH + 12.0f;
+	}
+
+	// 8. Grid Line Opacity (Label + Bar + Number Input)
+	if (m_lblGridOpacity)
+	{
+		m_lblGridOpacity->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+	if (m_sliderGridOpacity)
+	{
+		m_sliderGridOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+	}
+	if (m_spinGridOpacity)
+	{
+		m_spinGridOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+	}
+	y += 30.0f;
+}
+
+// 캔버스 설정 패널 섹션
+void CD2DPropertyView::LayoutCanvasSection(float left, float right, float contentW, float& y)
+{
+	// [MODE_CANVAS: Document & Canvas Settings]
+	if (m_lblCanvasHeader)
+	{
+		m_lblCanvasHeader->SetBounds(left, y, right, y + 20.0f);
+		y += 24.0f;
+	}
+
+	if (m_lblDocSize)
+	{
+		m_lblDocSize->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+
+	float halfW = (contentW - 6.0f) * 0.5f;
+	if (m_spinCanvasW)
+	{
+		m_spinCanvasW->SetBounds(left, y, left + halfW, y + 26.0f);
+	}
+	if (m_spinCanvasH)
+	{
+		m_spinCanvasH->SetBounds(left + halfW + 6.0f, y, right, y + 26.0f);
+	}
+	y += 32.0f;
+
+	if (m_cboCanvasPreset)
+	{
+		m_cboCanvasPreset->SetBounds(left, y, right, y + 26.0f);
+		y += 34.0f;
+	}
+
+	if (m_lblOriginMode)
+	{
+		m_lblOriginMode->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+
+	if (m_cboOriginMode)
+	{
+		m_cboOriginMode->SetBounds(left, y, right, y + 26.0f);
+		y += 34.0f;
+	}
+
+	// 2. Document Background Color (도큐멘트 용지 배경색)
+	if (m_lblDocBg)
+	{
+		m_lblDocBg->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+
+	if (m_paletteDocBg)
+	{
+		m_paletteDocBg->SetBounds(left, y, right, y + 42.0f);
+		y += 46.0f;
+	}
+
+	if (m_lblDocOpacity)
+	{
+		m_lblDocOpacity->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+	float numW = 75.0f;
+	float sliderW = contentW - numW - 8.0f;
+	if (m_sliderDocOpacity)
+	{
+		m_sliderDocOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+	}
+	if (m_spinDocOpacity)
+	{
+		m_spinDocOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+	}
+	y += 34.0f;
+
+	// 3. Canvas Workspace Color (전체 월드 화면 배경색)
+	if (m_lblCanvasBg)
+	{
+		m_lblCanvasBg->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+
+	if (m_paletteCanvasBg)
+	{
+		m_paletteCanvasBg->SetBounds(left, y, right, y + 42.0f);
+		y += 48.0f;
+	}
+}
+
+// 도형 모드: 제약(부모 자유 배치 프레임 안에서만)
+void CD2DPropertyView::LayoutShapeConstraintSection(float left, float right, float contentW, float& y)
+{
+	// 제약 (4.5.11): 부모가 자유 배치 프레임인 노드에서만 표시
+	{
+		ge::Node* sn = GetSelectedShape();
+		auto* pf = sn ? dynamic_cast<ge::FrameNode*>(sn->GetParent()) : nullptr;
+		const bool showCons = pf && pf->GetLayoutMode() == ge::FrameLayoutMode::None;
+		if (m_lblConstraint)  m_lblConstraint->SetVisible(showCons);
+		if (m_cboConstraintH) m_cboConstraintH->SetVisible(showCons);
+		if (m_cboConstraintV) m_cboConstraintV->SetVisible(showCons);
+		if (showCons)
+		{
+			const float hc = (contentW - 6.0f) * 0.5f;
+			if (m_lblConstraint)  { m_lblConstraint->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			if (m_cboConstraintH) m_cboConstraintH->SetBounds(left, y, left + hc, y + 24.0f);
+			if (m_cboConstraintV) m_cboConstraintV->SetBounds(left + hc + 6.0f, y, right, y + 24.0f);
+			y += 32.0f;
+		}
+	}
+}
+
+// 도형 모드: 표준 UI 컴포넌트 속성
+void CD2DPropertyView::LayoutShapeUiComponentSection(float left, float right, float contentW, float& y)
+{
+	// 표준 UI 컴포넌트 속성 (4.5.17): 종류별 슬롯을 Transform 바로 위에 배치
+	{
+		ge::FrameNode* uiComp = GetSelectedUiComponent();
+		if (m_lblUi) m_lblUi->SetVisible(uiComp != nullptr);
+		if (m_lblUi && uiComp) { m_lblUi->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+		for (int i = 0; i < kUiSlots; ++i)
+		{
+			const bool on = uiComp && !m_uiSlotKey[i].empty();
+			const int ty = m_uiSlotType[i];
+			using PT = ge::UiComp::PropDesc;
+			const bool isBool = on && ty == PT::Bool;
+			if (m_lblUiSlot[i]) m_lblUiSlot[i]->SetVisible(on && !isBool);
+			if (m_cboUiSlot[i]) m_cboUiSlot[i]->SetVisible(on && ty == PT::Choice);
+			if (m_chkUiSlot[i]) m_chkUiSlot[i]->SetVisible(isBool);
+			if (m_spinUiSlot[i]) m_spinUiSlot[i]->SetVisible(on && ty == PT::Number);
+			if (m_txtUiSlot[i]) m_txtUiSlot[i]->SetVisible(on && (ty == PT::Text || ty == PT::Multi || ty == PT::ColorHex));
+			if (!on) continue;
+			if (!isBool && m_lblUiSlot[i]) { m_lblUiSlot[i]->SetBounds(left, y, right, y + 16.0f); y += 18.0f; }
+			const std::shared_ptr<M2DrawControl> ctl =
+				ty == PT::Choice ? std::static_pointer_cast<M2DrawControl>(m_cboUiSlot[i]) :
+				ty == PT::Bool ? std::static_pointer_cast<M2DrawControl>(m_chkUiSlot[i]) :
+				ty == PT::Number ? std::static_pointer_cast<M2DrawControl>(m_spinUiSlot[i]) :
+				std::static_pointer_cast<M2DrawControl>(m_txtUiSlot[i]);
+			if (ctl) ctl->SetBounds(left, y, right, y + 24.0f);
+			y += 30.0f;
+		}
+		if (uiComp) y += 6.0f;
+	}
+}
+
+// 도형 모드: 테이블 속성
+void CD2DPropertyView::LayoutShapeTableSection(float left, float right, float contentW, float& y)
+{
+	// 테이블 속성: Transform 바로 위 (테이블이 선택된 경우만)
+	{
+		const bool isTable = dynamic_cast<ge::TableNode*>(GetSelectedShape()) != nullptr;
+		const std::shared_ptr<M2DrawControl> tblCtrls[] = { m_lblTable, m_spinTblRows, m_spinTblCols, m_spinTblPad, m_spinTblBorder, m_chkTblHeader,
+			m_cboTblAlign, m_btnTblAddRow, m_btnTblDelRow, m_btnTblAddCol, m_btnTblDelCol, m_btnTblMergeR, m_btnTblMergeD, m_btnTblSplit };
+		for (const auto& c : tblCtrls) if (c) c->SetVisible(isTable);
+		if (isTable)
+		{
+			const float hw = (contentW - 6.0f) * 0.5f;
+			auto pair = [&](const std::shared_ptr<M2DrawControl>& a, const std::shared_ptr<M2DrawControl>& b) {
+				if (a) a->SetBounds(left, y, left + hw, y + 24.0f);
+				if (b) b->SetBounds(left + hw + 6.0f, y, right, y + 24.0f);
+				y += 28.0f;
+			};
+			if (m_lblTable) { m_lblTable->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			pair(m_spinTblRows, m_spinTblCols);
+			pair(m_spinTblPad, m_spinTblBorder);
+			pair(m_chkTblHeader, m_cboTblAlign);
+			pair(m_btnTblAddRow, m_btnTblDelRow);
+			pair(m_btnTblAddCol, m_btnTblDelCol);
+			pair(m_btnTblMergeR, m_btnTblMergeD);
+			if (m_btnTblSplit) m_btnTblSplit->SetBounds(left, y, right, y + 24.0f);
+			y += 32.0f;
+		}
+	}
+}
+
+// 도형 모드: 공통 외형(그림자, 선)
+void CD2DPropertyView::LayoutShapeAppearanceSection(float left, float right, float contentW, float& y)
+{
+	// 공통 외형(Appearance): 선택이 있으면 모든 요소에서 같은 그림자 구역, 선 굵기/종류는 경로/프레임/표에서 (4.5.17.4, 4.5.18)
+	{
+		ge::Node* selN = GetSelectedShape();
+		const bool hasSel = selN != nullptr;
+		const bool hasLine = selN && (dynamic_cast<ge::PathNode*>(selN) || dynamic_cast<ge::FrameNode*>(selN) || dynamic_cast<ge::TableNode*>(selN));
+		const std::shared_ptr<M2DrawControl> shCtrls[] = { m_lblShadow, m_chkShadow, m_chkShadowInset, m_cboShadowColor, m_spinShX, m_spinShY, m_spinShBlur, m_spinShSpread, m_spinShAlpha, m_palShadow };
+		for (const auto& c : shCtrls) if (c) c->SetVisible(hasSel);
+		const std::shared_ptr<M2DrawControl> lnCtrls[] = { m_lblLine, m_spinLineW, m_cboLineKind };
+		for (const auto& c : lnCtrls) if (c) c->SetVisible(hasLine);
+		// 선 마커: 패스에만. 시작/끝은 열린 서브패스가 있을 때만 보인다
+		ge::PathNode* markerPath = selN ? dynamic_cast<ge::PathNode*>(selN) : nullptr;
+		const bool markerOpen = markerPath && ge::Markers::HasOpenSubPath(markerPath->GetPaths());
+		const std::shared_ptr<M2DrawControl> markerAlways[] = { m_lblMarker, m_cboMarkerMid, m_spinMarkerScale };
+		const std::shared_ptr<M2DrawControl> markerOpenOnly[] = { m_cboMarkerStart, m_cboMarkerEnd };
+		for (const auto& c : markerAlways) if (c) c->SetVisible(markerPath != nullptr);
+		for (const auto& c : markerOpenOnly) if (c) c->SetVisible(markerOpen);
+		if (hasSel)
+		{
+			const float hs = (contentW - 6.0f) * 0.5f;
+			if (m_lblShadow) { m_lblShadow->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			if (m_chkShadow) m_chkShadow->SetBounds(left, y, left + hs, y + 24.0f);
+			if (m_chkShadowInset) m_chkShadowInset->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
+			y += 28.0f;
+			if (m_spinShX) m_spinShX->SetBounds(left, y, left + hs, y + 24.0f);
+			if (m_spinShY) m_spinShY->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
+			y += 28.0f;
+			if (m_spinShBlur) m_spinShBlur->SetBounds(left, y, left + hs, y + 24.0f);
+			if (m_spinShSpread) m_spinShSpread->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
+			y += 28.0f;
+			if (m_cboShadowColor) m_cboShadowColor->SetBounds(left, y, left + hs, y + 24.0f);
+			if (m_spinShAlpha) m_spinShAlpha->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
+			y += 28.0f;
+			if (m_palShadow) { m_palShadow->SetBounds(left, y, right, y + 42.0f); y += 48.0f; }
+			if (hasLine)
+			{
+				if (m_lblLine) { m_lblLine->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+				if (m_spinLineW) m_spinLineW->SetBounds(left, y, left + hs, y + 24.0f);
+				if (m_cboLineKind) m_cboLineKind->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
+				y += 34.0f;
+				if (markerPath)
+				{
+					if (m_lblMarker) { m_lblMarker->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+					if (markerOpen)
+					{
+						const float w3 = (contentW - 12.0f) / 3.0f;
+						if (m_cboMarkerStart) m_cboMarkerStart->SetBounds(left, y, left + w3, y + 24.0f);
+						if (m_cboMarkerMid) m_cboMarkerMid->SetBounds(left + w3 + 6.0f, y, left + 2.0f * w3 + 6.0f, y + 24.0f);
+						if (m_cboMarkerEnd) m_cboMarkerEnd->SetBounds(left + 2.0f * w3 + 12.0f, y, right, y + 24.0f);
+					}
+					else if (m_cboMarkerMid) m_cboMarkerMid->SetBounds(left, y, right, y + 24.0f);
+					y += 28.0f;
+					if (m_spinMarkerScale) m_spinMarkerScale->SetBounds(left, y, left + hs, y + 24.0f);
+					y += 34.0f;
+				}
+			}
+			else y += 6.0f;
+		}
+	}
+}
+
+// 도형 모드: 그룹화/그룹 해제/프레임 감싸기 버튼
+void CD2DPropertyView::LayoutShapeGroupButtonsSection(float left, float right, float contentW, float& y)
+{
+	// 그룹화 / 그룹 해제 / 프레임으로 감싸기 버튼 (선택이 있을 때만 표시)
+	{
+		const bool hasSelection = m_pActiveDoc && !m_pActiveDoc->GetDoc().GetSelection().empty();
+		const bool canGrp = m_pActiveDoc && m_pActiveDoc->CanGroup();
+		const bool canUngrp = m_pActiveDoc && m_pActiveDoc->CanUngroup();
+		const bool canWrap = m_pActiveDoc && m_pActiveDoc->CanWrapInFrame();
+
+		if (m_btnGroup)     { m_btnGroup->SetVisible(hasSelection); m_btnGroup->SetEnabled(canGrp); }
+		if (m_btnUngroup)   { m_btnUngroup->SetVisible(hasSelection); m_btnUngroup->SetEnabled(canUngrp); }
+		if (m_btnWrapFrame) { m_btnWrapFrame->SetVisible(hasSelection); m_btnWrapFrame->SetEnabled(canWrap); }
+
+		if (hasSelection)
+		{
+			const float halfBtn = (contentW - 6.0f) * 0.5f;
+			if (m_btnGroup)   m_btnGroup->SetBounds(left, y, left + halfBtn, y + 24.0f);
+			if (m_btnUngroup) m_btnUngroup->SetBounds(left + halfBtn + 6.0f, y, right, y + 24.0f);
+			y += 28.0f;
+			if (m_btnWrapFrame) m_btnWrapFrame->SetBounds(left, y, right, y + 24.0f);
+			y += 30.0f;
+		}
+	}
+}
+
 void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 {
 	if (!m_pCurrentPanel) return;
@@ -3090,319 +3673,20 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			y += 24.0f;
 		}
 
-		// 텍스트/버튼 속성: Transform 바로 위 (텍스트 또는 버튼이 선택된 경우)
-		{
-			const bool isText = IsTextSelected();
-			const bool isButton = IsButtonSelected();
-			const bool showTextProps = isText || isButton;
+		LayoutShapeTextSection(left, right, contentW, y);
 
-			if (m_lblText)        m_lblText->SetVisible(showTextProps);
-			if (m_lblButtonLabel) m_lblButtonLabel->SetVisible(isButton);
-			if (m_txtButtonLabel) m_txtButtonLabel->SetVisible(isButton);
-			if (m_lblButtonAlign)  m_lblButtonAlign->SetVisible(isButton);
-			if (m_cboButtonAlignH) m_cboButtonAlignH->SetVisible(isButton);
-			if (m_cboButtonAlignV) m_cboButtonAlignV->SetVisible(isButton);
-			if (m_cboFont)        m_cboFont->SetVisible(showTextProps);
-			if (m_cboHeadingLevel) m_cboHeadingLevel->SetVisible(showTextProps);
-		if (m_spinFontSize)   m_spinFontSize->SetVisible(showTextProps);
-			if (m_cboTextAlign)   m_cboTextAlign->SetVisible(isText);   // 버튼은 자동 센터 정렬
-			if (m_chkBold)        m_chkBold->SetVisible(showTextProps);
-			if (m_chkItalic)      m_chkItalic->SetVisible(showTextProps);
-			if (m_chkTextArea)    m_chkTextArea->SetVisible(isText);
-			if (m_spinTextBoxW)   m_spinTextBoxW->SetVisible(isText && dynamic_cast<ge::TextNode*>(GetSelectedShape()) && static_cast<ge::TextNode*>(GetSelectedShape())->IsAreaText());
+		LayoutShapeImageSection(left, right, contentW, y);
 
-			if (showTextProps)
-			{
-				const float halfTW = (contentW - 6.0f) * 0.5f;
-				if (m_lblText)
-				{
-					m_lblText->SetText(isButton ? L"● Button (Label, Font, Style)" : L"● Text (Font, Size, Style)");
-					m_lblText->SetBounds(left, y, right, y + 18.0f);
-					y += 20.0f;
-				}
+		LayoutShapeFrameSection(left, right, contentW, y);
 
-				if (isButton)
-				{
-					if (m_lblButtonLabel) { m_lblButtonLabel->SetBounds(left, y, right, y + 16.0f); y += 18.0f; }
-					if (m_txtButtonLabel) { m_txtButtonLabel->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
-					if (m_lblButtonAlign) { m_lblButtonAlign->SetBounds(left, y, right, y + 16.0f); y += 18.0f; }
-					if (m_cboButtonAlignH) m_cboButtonAlignH->SetBounds(left, y, left + halfTW, y + 24.0f);
-					if (m_cboButtonAlignV) m_cboButtonAlignV->SetBounds(left + halfTW + 6.0f, y, right, y + 24.0f);
-					y += 28.0f;
-				}
-
-				if (m_cboFont)      { m_cboFont->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
-				if (isButton)
-				{
-					if (m_spinFontSize) { m_spinFontSize->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
-				}
-				else
-				{
-					if (m_cboHeadingLevel) { m_cboHeadingLevel->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
-			if (m_spinFontSize) m_spinFontSize->SetBounds(left, y, left + halfTW, y + 24.0f);
-					if (m_cboTextAlign) m_cboTextAlign->SetBounds(left + halfTW + 6.0f, y, right, y + 24.0f);
-					y += 28.0f;
-				}
-
-				if (m_chkBold)      m_chkBold->SetBounds(left, y, left + halfTW, y + 20.0f);
-				if (m_chkItalic)    m_chkItalic->SetBounds(left + halfTW + 6.0f, y, right, y + 20.0f);
-				y += 26.0f;
-
-				if (isText)
-				{
-					if (m_chkTextArea)  m_chkTextArea->SetBounds(left, y, left + halfTW, y + 24.0f);
-					if (m_spinTextBoxW && m_spinTextBoxW->IsVisible()) m_spinTextBoxW->SetBounds(left + halfTW + 6.0f, y, right, y + 24.0f);
-					y += 30.0f;
-				}
-			}
-		}
-
-		// 이미지 속성: Transform 바로 위 (이미지가 선택된 경우만)
-		{
-			const bool isImage = IsImageSelected();
-			if (m_lblImage)         m_lblImage->SetVisible(isImage);
-			if (m_lblImageInfo)     m_lblImageInfo->SetVisible(isImage);
-			if (m_cboImageFit)      m_cboImageFit->SetVisible(isImage);
-			if (m_btnImageRatio)    m_btnImageRatio->SetVisible(isImage);
-			if (m_btnImageReplace)  m_btnImageReplace->SetVisible(isImage);
-			if (isImage)
-			{
-				const float halfIW = (contentW - 6.0f) * 0.5f;
-				if (m_lblImage)      { m_lblImage->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-				if (m_lblImageInfo)  { m_lblImageInfo->SetBounds(left, y, right, y + 18.0f); y += 22.0f; }
-				if (m_cboImageFit)   { m_cboImageFit->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
-				if (m_btnImageRatio)   m_btnImageRatio->SetBounds(left, y, left + halfIW, y + 24.0f);
-				if (m_btnImageReplace) m_btnImageReplace->SetBounds(left + halfIW + 6.0f, y, right, y + 24.0f);
-				y += 30.0f;
-			}
-		}
-
-		// 프레임 속성: Transform 바로 위 (프레임이 선택된 경우만)
-		{
-			const bool isFrame = IsFrameSelected() && !GetSelectedUiComponent();   // UI 컴포넌트는 프레임 속성 대신 전용 구역
-			auto* frNode = isFrame ? dynamic_cast<ge::FrameNode*>(GetSelectedShape()) : nullptr;
-			const bool hasAutoLayout = isFrame && frNode && (frNode->GetLayoutMode() != ge::FrameLayoutMode::None);
-			auto* parentFr = frNode ? dynamic_cast<ge::FrameNode*>(frNode->GetParent()) : nullptr;
-			const bool parentAuto = parentFr && parentFr->GetLayoutMode() != ge::FrameLayoutMode::None;
-			const bool showSizing = isFrame && (hasAutoLayout || parentAuto);   // Fill 은 부모가 자동 배치일 때 의미가 있음
-
-			if (m_lblFrame)             m_lblFrame->SetVisible(isFrame);
-			if (m_chkFrameClip)         m_chkFrameClip->SetVisible(isFrame);
-			if (m_lblFrameRadius)       m_lblFrameRadius->SetVisible(false);   // 보조 라벨 숨김
-			if (m_spinFrameRadius)      m_spinFrameRadius->SetVisible(isFrame);
-			const bool topFrame = isFrame && frNode && frNode->GetParent() && frNode->GetParent()->Kind() == ge::NodeKind::Layer;   // 페이지 폭 프리셋은 최상위 프레임만
-			if (m_lblResp)              m_lblResp->SetVisible(topFrame);
-			if (m_cboResp)              m_cboResp->SetVisible(topFrame);
-			if (m_lblFrameLayout)       m_lblFrameLayout->SetVisible(isFrame);
-			if (m_cboFrameLayout)       m_cboFrameLayout->SetVisible(isFrame);
-			if (m_lblFrameGap)          m_lblFrameGap->SetVisible(false);
-			if (m_spinFrameGap)         m_spinFrameGap->SetVisible(hasAutoLayout);
-			if (m_spinFrameWrap)        m_spinFrameWrap->SetVisible(hasAutoLayout);
-			if (m_lblFramePadding)      m_lblFramePadding->SetVisible(false);
-			if (m_spinFramePadding)     m_spinFramePadding->SetVisible(hasAutoLayout);
-			if (m_lblFrameAlign)        m_lblFrameAlign->SetVisible(hasAutoLayout);
-			if (m_cboFrameMainAlign)    m_cboFrameMainAlign->SetVisible(hasAutoLayout);
-			if (m_cboFrameCrossAlign)   m_cboFrameCrossAlign->SetVisible(hasAutoLayout);
-			if (m_lblFrameSizing)       m_lblFrameSizing->SetVisible(showSizing);
-			if (m_cboFrameSizingW)      m_cboFrameSizingW->SetVisible(showSizing);
-			if (m_cboFrameSizingH)      m_cboFrameSizingH->SetVisible(showSizing);
-			{
-				const std::shared_ptr<M2DrawControl> extra[] = { m_cboFrameRole, m_spinRadTL, m_spinRadTR, m_spinRadBR, m_spinRadBL, m_chkBdrT, m_chkBdrR, m_chkBdrB, m_chkBdrL };
-				for (const auto& c : extra) if (c) c->SetVisible(isFrame);
-				const std::shared_ptr<M2DrawControl> padx[] = { m_spinPadT, m_spinPadR, m_spinPadB, m_spinPadL };
-				for (const auto& c : padx) if (c) c->SetVisible(hasAutoLayout);
-			}
-
-			if (isFrame)
-			{
-				const float halfFW = (contentW - 6.0f) * 0.5f;
-				if (m_lblFrame)         { m_lblFrame->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-				if (m_chkFrameClip)     m_chkFrameClip->SetBounds(left, y, left + halfFW, y + 24.0f);
-				if (m_spinFrameRadius)  m_spinFrameRadius->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
-				y += 28.0f;
-					if (m_cboFrameRole) { m_cboFrameRole->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
-					{
-						const float q = (contentW - 18.0f) * 0.25f;
-						const std::shared_ptr<M2DrawControl> rr[] = { m_spinRadTL, m_spinRadTR, m_spinRadBR, m_spinRadBL };
-						for (int k = 0; k < 4; ++k) if (rr[k]) rr[k]->SetBounds(left + k * (q + 6.0f), y, left + k * (q + 6.0f) + q, y + 24.0f);
-						y += 28.0f;
-						const std::shared_ptr<M2DrawControl> bb[] = { m_chkBdrT, m_chkBdrR, m_chkBdrB, m_chkBdrL };
-						for (int k = 0; k < 4; ++k) if (bb[k]) bb[k]->SetBounds(left + k * (q + 6.0f), y, left + k * (q + 6.0f) + q, y + 24.0f);
-						y += 28.0f;
-					}
-				if (topFrame)
-				{
-					if (m_lblResp) { m_lblResp->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-					if (m_cboResp) { m_cboResp->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
-				}
-				if (m_lblFrameLayout)   { m_lblFrameLayout->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-				if (m_cboFrameLayout)   { m_cboFrameLayout->SetBounds(left, y, right, y + 24.0f); y += 28.0f; }
-
-				if (hasAutoLayout)
-				{
-					if (m_spinFrameGap)     m_spinFrameGap->SetBounds(left, y, left + halfFW, y + 24.0f);
-					if (m_spinFramePadding) m_spinFramePadding->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
-					y += 28.0f;
-					if (m_spinFrameWrap) m_spinFrameWrap->SetBounds(left, y, left + halfFW, y + 24.0f);
-					y += 28.0f;
-						{
-							const float q =(contentW - 18.0f) * 0.25f;
-							const std::shared_ptr<M2DrawControl> pp[] = { m_spinPadT, m_spinPadR, m_spinPadB, m_spinPadL };
-							for (int k = 0; k < 4; ++k) if (pp[k]) pp[k]->SetBounds(left + k * (q + 6.0f), y, left + k * (q + 6.0f) + q, y + 24.0f);
-							y += 28.0f;
-						}
-					if (m_lblFrameAlign)      { m_lblFrameAlign->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-					if (m_cboFrameMainAlign)  m_cboFrameMainAlign->SetBounds(left, y, left + halfFW, y + 24.0f);
-					if (m_cboFrameCrossAlign) m_cboFrameCrossAlign->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
-					y += 28.0f;
-					y += 4.0f;
-				}
-				else
-				{
-					y += 4.0f;
-				}
-					if (showSizing)
-					{
-						if (m_lblFrameSizing)  { m_lblFrameSizing->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-						if (m_cboFrameSizingW) m_cboFrameSizingW->SetBounds(left, y, left + halfFW, y + 24.0f);
-						if (m_cboFrameSizingH) m_cboFrameSizingH->SetBounds(left + halfFW + 6.0f, y, right, y + 24.0f);
-						y += 32.0f;
-					}
-			}
-		}
-
-		// 제약 (4.5.11): 부모가 자유 배치 프레임인 노드에서만 표시
-		{
-			ge::Node* sn = GetSelectedShape();
-			auto* pf = sn ? dynamic_cast<ge::FrameNode*>(sn->GetParent()) : nullptr;
-			const bool showCons = pf && pf->GetLayoutMode() == ge::FrameLayoutMode::None;
-			if (m_lblConstraint)  m_lblConstraint->SetVisible(showCons);
-			if (m_cboConstraintH) m_cboConstraintH->SetVisible(showCons);
-			if (m_cboConstraintV) m_cboConstraintV->SetVisible(showCons);
-			if (showCons)
-			{
-				const float hc = (contentW - 6.0f) * 0.5f;
-				if (m_lblConstraint)  { m_lblConstraint->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-				if (m_cboConstraintH) m_cboConstraintH->SetBounds(left, y, left + hc, y + 24.0f);
-				if (m_cboConstraintV) m_cboConstraintV->SetBounds(left + hc + 6.0f, y, right, y + 24.0f);
-				y += 32.0f;
-			}
-		}
+		LayoutShapeConstraintSection(left, right, contentW, y);
 
 
-		// 표준 UI 컴포넌트 속성 (4.5.17): 종류별 슬롯을 Transform 바로 위에 배치
-		{
-			ge::FrameNode* uiComp = GetSelectedUiComponent();
-			if (m_lblUi) m_lblUi->SetVisible(uiComp != nullptr);
-			if (m_lblUi && uiComp) { m_lblUi->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-			for (int i = 0; i < kUiSlots; ++i)
-			{
-				const bool on = uiComp && !m_uiSlotKey[i].empty();
-				const int ty = m_uiSlotType[i];
-				using PT = ge::UiComp::PropDesc;
-				const bool isBool = on && ty == PT::Bool;
-				if (m_lblUiSlot[i]) m_lblUiSlot[i]->SetVisible(on && !isBool);
-				if (m_cboUiSlot[i]) m_cboUiSlot[i]->SetVisible(on && ty == PT::Choice);
-				if (m_chkUiSlot[i]) m_chkUiSlot[i]->SetVisible(isBool);
-				if (m_spinUiSlot[i]) m_spinUiSlot[i]->SetVisible(on && ty == PT::Number);
-				if (m_txtUiSlot[i]) m_txtUiSlot[i]->SetVisible(on && (ty == PT::Text || ty == PT::Multi || ty == PT::ColorHex));
-				if (!on) continue;
-				if (!isBool && m_lblUiSlot[i]) { m_lblUiSlot[i]->SetBounds(left, y, right, y + 16.0f); y += 18.0f; }
-				const std::shared_ptr<M2DrawControl> ctl =
-					ty == PT::Choice ? std::static_pointer_cast<M2DrawControl>(m_cboUiSlot[i]) :
-					ty == PT::Bool ? std::static_pointer_cast<M2DrawControl>(m_chkUiSlot[i]) :
-					ty == PT::Number ? std::static_pointer_cast<M2DrawControl>(m_spinUiSlot[i]) :
-					std::static_pointer_cast<M2DrawControl>(m_txtUiSlot[i]);
-				if (ctl) ctl->SetBounds(left, y, right, y + 24.0f);
-				y += 30.0f;
-			}
-			if (uiComp) y += 6.0f;
-		}
+		LayoutShapeUiComponentSection(left, right, contentW, y);
 
-		// 테이블 속성: Transform 바로 위 (테이블이 선택된 경우만)
-		{
-			const bool isTable = dynamic_cast<ge::TableNode*>(GetSelectedShape()) != nullptr;
-			const std::shared_ptr<M2DrawControl> tblCtrls[] = { m_lblTable, m_spinTblRows, m_spinTblCols, m_spinTblPad, m_spinTblBorder, m_chkTblHeader,
-				m_cboTblAlign, m_btnTblAddRow, m_btnTblDelRow, m_btnTblAddCol, m_btnTblDelCol, m_btnTblMergeR, m_btnTblMergeD, m_btnTblSplit };
-			for (const auto& c : tblCtrls) if (c) c->SetVisible(isTable);
-			if (isTable)
-			{
-				const float hw = (contentW - 6.0f) * 0.5f;
-				auto pair = [&](const std::shared_ptr<M2DrawControl>& a, const std::shared_ptr<M2DrawControl>& b) {
-					if (a) a->SetBounds(left, y, left + hw, y + 24.0f);
-					if (b) b->SetBounds(left + hw + 6.0f, y, right, y + 24.0f);
-					y += 28.0f;
-				};
-				if (m_lblTable) { m_lblTable->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-				pair(m_spinTblRows, m_spinTblCols);
-				pair(m_spinTblPad, m_spinTblBorder);
-				pair(m_chkTblHeader, m_cboTblAlign);
-				pair(m_btnTblAddRow, m_btnTblDelRow);
-				pair(m_btnTblAddCol, m_btnTblDelCol);
-				pair(m_btnTblMergeR, m_btnTblMergeD);
-				if (m_btnTblSplit) m_btnTblSplit->SetBounds(left, y, right, y + 24.0f);
-				y += 32.0f;
-			}
-		}
+		LayoutShapeTableSection(left, right, contentW, y);
 
-		// 공통 외형(Appearance): 선택이 있으면 모든 요소에서 같은 그림자 구역, 선 굵기/종류는 경로/프레임/표에서 (4.5.17.4, 4.5.18)
-		{
-			ge::Node* selN = GetSelectedShape();
-			const bool hasSel = selN != nullptr;
-			const bool hasLine = selN && (dynamic_cast<ge::PathNode*>(selN) || dynamic_cast<ge::FrameNode*>(selN) || dynamic_cast<ge::TableNode*>(selN));
-			const std::shared_ptr<M2DrawControl> shCtrls[] = { m_lblShadow, m_chkShadow, m_chkShadowInset, m_cboShadowColor, m_spinShX, m_spinShY, m_spinShBlur, m_spinShSpread, m_spinShAlpha, m_palShadow };
-			for (const auto& c : shCtrls) if (c) c->SetVisible(hasSel);
-			const std::shared_ptr<M2DrawControl> lnCtrls[] = { m_lblLine, m_spinLineW, m_cboLineKind };
-			for (const auto& c : lnCtrls) if (c) c->SetVisible(hasLine);
-			// 선 마커: 패스에만. 시작/끝은 열린 서브패스가 있을 때만 보인다
-			ge::PathNode* markerPath = selN ? dynamic_cast<ge::PathNode*>(selN) : nullptr;
-			const bool markerOpen = markerPath && ge::Markers::HasOpenSubPath(markerPath->GetPaths());
-			const std::shared_ptr<M2DrawControl> markerAlways[] = { m_lblMarker, m_cboMarkerMid, m_spinMarkerScale };
-			const std::shared_ptr<M2DrawControl> markerOpenOnly[] = { m_cboMarkerStart, m_cboMarkerEnd };
-			for (const auto& c : markerAlways) if (c) c->SetVisible(markerPath != nullptr);
-			for (const auto& c : markerOpenOnly) if (c) c->SetVisible(markerOpen);
-			if (hasSel)
-			{
-				const float hs = (contentW - 6.0f) * 0.5f;
-				if (m_lblShadow) { m_lblShadow->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-				if (m_chkShadow) m_chkShadow->SetBounds(left, y, left + hs, y + 24.0f);
-				if (m_chkShadowInset) m_chkShadowInset->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
-				y += 28.0f;
-				if (m_spinShX) m_spinShX->SetBounds(left, y, left + hs, y + 24.0f);
-				if (m_spinShY) m_spinShY->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
-				y += 28.0f;
-				if (m_spinShBlur) m_spinShBlur->SetBounds(left, y, left + hs, y + 24.0f);
-				if (m_spinShSpread) m_spinShSpread->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
-				y += 28.0f;
-				if (m_cboShadowColor) m_cboShadowColor->SetBounds(left, y, left + hs, y + 24.0f);
-				if (m_spinShAlpha) m_spinShAlpha->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
-				y += 28.0f;
-				if (m_palShadow) { m_palShadow->SetBounds(left, y, right, y + 42.0f); y += 48.0f; }
-				if (hasLine)
-				{
-					if (m_lblLine) { m_lblLine->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-					if (m_spinLineW) m_spinLineW->SetBounds(left, y, left + hs, y + 24.0f);
-					if (m_cboLineKind) m_cboLineKind->SetBounds(left + hs + 6.0f, y, right, y + 24.0f);
-					y += 34.0f;
-					if (markerPath)
-					{
-						if (m_lblMarker) { m_lblMarker->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-						if (markerOpen)
-						{
-							const float w3 = (contentW - 12.0f) / 3.0f;
-							if (m_cboMarkerStart) m_cboMarkerStart->SetBounds(left, y, left + w3, y + 24.0f);
-							if (m_cboMarkerMid) m_cboMarkerMid->SetBounds(left + w3 + 6.0f, y, left + 2.0f * w3 + 6.0f, y + 24.0f);
-							if (m_cboMarkerEnd) m_cboMarkerEnd->SetBounds(left + 2.0f * w3 + 12.0f, y, right, y + 24.0f);
-						}
-						else if (m_cboMarkerMid) m_cboMarkerMid->SetBounds(left, y, right, y + 24.0f);
-						y += 28.0f;
-						if (m_spinMarkerScale) m_spinMarkerScale->SetBounds(left, y, left + hs, y + 24.0f);
-						y += 34.0f;
-					}
-				}
-				else y += 6.0f;
-			}
-		}
+		LayoutShapeAppearanceSection(left, right, contentW, y);
 
 		// Transform Header & Inputs
 		if (m_lblTransformHeader)
@@ -3432,27 +3716,7 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 			y += 26.0f;
 		}
 
-		// 그룹화 / 그룹 해제 / 프레임으로 감싸기 버튼 (선택이 있을 때만 표시)
-		{
-			const bool hasSelection = m_pActiveDoc && !m_pActiveDoc->GetDoc().GetSelection().empty();
-			const bool canGrp = m_pActiveDoc && m_pActiveDoc->CanGroup();
-			const bool canUngrp = m_pActiveDoc && m_pActiveDoc->CanUngroup();
-			const bool canWrap = m_pActiveDoc && m_pActiveDoc->CanWrapInFrame();
-
-			if (m_btnGroup)     { m_btnGroup->SetVisible(hasSelection); m_btnGroup->SetEnabled(canGrp); }
-			if (m_btnUngroup)   { m_btnUngroup->SetVisible(hasSelection); m_btnUngroup->SetEnabled(canUngrp); }
-			if (m_btnWrapFrame) { m_btnWrapFrame->SetVisible(hasSelection); m_btnWrapFrame->SetEnabled(canWrap); }
-
-			if (hasSelection)
-			{
-				const float halfBtn = (contentW - 6.0f) * 0.5f;
-				if (m_btnGroup)   m_btnGroup->SetBounds(left, y, left + halfBtn, y + 24.0f);
-				if (m_btnUngroup) m_btnUngroup->SetBounds(left + halfBtn + 6.0f, y, right, y + 24.0f);
-				y += 28.0f;
-				if (m_btnWrapFrame) m_btnWrapFrame->SetBounds(left, y, right, y + 24.0f);
-				y += 30.0f;
-			}
-		}
+		LayoutShapeGroupButtonsSection(left, right, contentW, y);
 
 		// 일반 그룹(프레임 제외): 도형용 채우기/선 UI 대신 Appearance(불투명도/혼합 모드)만 표시
 		if (IsGroupSelected() && !IsFrameSelected())
@@ -3679,215 +3943,11 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 	}
 	else if (m_paneMode == MODE_GRID)
 	{
-		// [MODE_GRID: Grid & Ruler Settings]
-		// 1. Header
-		if (m_lblGridHeader)
-		{
-			m_lblGridHeader->SetBounds(left, y, right, y + 20.0f);
-			y += 24.0f;
-		}
-
-		// 2. Checkboxes (View Grid, Snap to Grid, View Ruler)
-		float chkW = (contentW - 12.0f) / 3.0f;
-		if (m_chkGridView)  m_chkGridView->SetBounds(left, y, left + chkW, y + 24.0f);
-		if (m_chkGridSnap)  m_chkGridSnap->SetBounds(left + chkW + 6.0f, y, left + (chkW * 2.0f) + 6.0f, y + 24.0f);
-		if (m_chkRulerView) m_chkRulerView->SetBounds(left + (chkW * 2.0f) + 12.0f, y, right, y + 24.0f);
-		y += 32.0f;
-
-		// 오브젝트 스냅 (5.1.0): 2열 체크박스
-		if (m_lblObjSnap) { m_lblObjSnap->SetBounds(left, y, right, y + 20.0f); y += 24.0f; }
-		{
-			const float halfW = (contentW - 6.0f) * 0.5f;
-			const std::shared_ptr<M2DrawCheckBox> rows[][2] = {
-				{ m_chkSnapMaster, m_chkSmartGuides }, { m_chkEqualSpacing, m_chkSnapAnchor }, { m_chkSnapMid, m_chkSnapCenter },
-				{ m_chkSnapEdge, m_chkSnapInter }, { m_chkSnapAxis, nullptr } };
-			for (const auto& r : rows)
-			{
-				if (r[0]) r[0]->SetBounds(left, y, left + halfW, y + 24.0f);
-				if (r[1]) r[1]->SetBounds(left + halfW + 6.0f, y, right, y + 24.0f);
-				y += 26.0f;
-			}
-			y += 6.0f;
-		}
-
-		// 3. Measurement Unit ComboBox (Dropdown)
-		if (m_lblUnit)
-		{
-			m_lblUnit->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-		if (m_cboUnit)
-		{
-			m_cboUnit->SetBounds(left, y, right, y + 26.0f);
-			y += 34.0f;
-		}
-
-		// 4. Grid Step (Label + Bar + Number Input)
-		if (m_lblGridStep)
-		{
-			m_lblGridStep->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-		float numW = 75.0f;
-		float sliderW = contentW - numW - 8.0f;
-		if (m_sliderGridStep)
-		{
-			m_sliderGridStep->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
-		}
-		if (m_spinGridStep)
-		{
-			m_spinGridStep->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
-		}
-		y += 30.0f;
-
-		// 5. Major Line Frequency (Label + Bar + Number Input)
-		if (m_lblGridMajor)
-		{
-			m_lblGridMajor->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-		if (m_sliderGridMajor)
-		{
-			m_sliderGridMajor->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
-		}
-		if (m_spinGridMajor)
-		{
-			m_spinGridMajor->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
-		}
-		y += 32.0f;
-
-		// 6. Minor vs Major Grid Color Tabs
-		float halfTabW = (contentW - 6.0f) * 0.5f;
-		if (m_btnGridMinorClr) m_btnGridMinorClr->SetBounds(left, y, left + halfTabW, y + 26.0f);
-		if (m_btnGridMajorClr) m_btnGridMajorClr->SetBounds(left + halfTabW + 6.0f, y, right, y + 26.0f);
-		y += 32.0f;
-
-		// 7. Grid Color Wheel Expander
-		if (m_expGridWheel)
-		{
-			m_expGridWheel->SetVisible(true);
-			float expH = m_expGridWheel->GetHeaderHeight();
-			if (m_expGridWheel->IsExpanded())
-			{
-				float wheelH = min(contentW, 220.0f);
-				float wheelLeft = left + (contentW - wheelH) * 0.5f;
-				expH += wheelH + 10.0f;
-				if (m_gridWheel)
-				{
-					m_gridWheel->SetVisible(true);
-					m_gridWheel->SetBounds(wheelLeft, y + m_expGridWheel->GetHeaderHeight() + 6.0f, wheelLeft + wheelH, y + expH - 4.0f);
-				}
-			}
-			else
-			{
-				if (m_gridWheel) m_gridWheel->SetVisible(false);
-			}
-			m_expGridWheel->SetBounds(left, y, right, y + expH);
-			y += expH + 12.0f;
-		}
-
-		// 8. Grid Line Opacity (Label + Bar + Number Input)
-		if (m_lblGridOpacity)
-		{
-			m_lblGridOpacity->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-		if (m_sliderGridOpacity)
-		{
-			m_sliderGridOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
-		}
-		if (m_spinGridOpacity)
-		{
-			m_spinGridOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
-		}
-		y += 30.0f;
+		LayoutGridSection(left, right, contentW, y);
 	}
 	else
 	{
-		// [MODE_CANVAS: Document & Canvas Settings]
-		if (m_lblCanvasHeader)
-		{
-			m_lblCanvasHeader->SetBounds(left, y, right, y + 20.0f);
-			y += 24.0f;
-		}
-
-		if (m_lblDocSize)
-		{
-			m_lblDocSize->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-
-		float halfW = (contentW - 6.0f) * 0.5f;
-		if (m_spinCanvasW)
-		{
-			m_spinCanvasW->SetBounds(left, y, left + halfW, y + 26.0f);
-		}
-		if (m_spinCanvasH)
-		{
-			m_spinCanvasH->SetBounds(left + halfW + 6.0f, y, right, y + 26.0f);
-		}
-		y += 32.0f;
-
-		if (m_cboCanvasPreset)
-		{
-			m_cboCanvasPreset->SetBounds(left, y, right, y + 26.0f);
-			y += 34.0f;
-		}
-
-		if (m_lblOriginMode)
-		{
-			m_lblOriginMode->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-
-		if (m_cboOriginMode)
-		{
-			m_cboOriginMode->SetBounds(left, y, right, y + 26.0f);
-			y += 34.0f;
-		}
-
-		// 2. Document Background Color (도큐멘트 용지 배경색)
-		if (m_lblDocBg)
-		{
-			m_lblDocBg->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-
-		if (m_paletteDocBg)
-		{
-			m_paletteDocBg->SetBounds(left, y, right, y + 42.0f);
-			y += 46.0f;
-		}
-
-		if (m_lblDocOpacity)
-		{
-			m_lblDocOpacity->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-		float numW = 75.0f;
-		float sliderW = contentW - numW - 8.0f;
-		if (m_sliderDocOpacity)
-		{
-			m_sliderDocOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
-		}
-		if (m_spinDocOpacity)
-		{
-			m_spinDocOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
-		}
-		y += 34.0f;
-
-		// 3. Canvas Workspace Color (전체 월드 화면 배경색)
-		if (m_lblCanvasBg)
-		{
-			m_lblCanvasBg->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-
-		if (m_paletteCanvasBg)
-		{
-			m_paletteCanvasBg->SetBounds(left, y, right, y + 42.0f);
-			y += 48.0f;
-		}
+		LayoutCanvasSection(left, right, contentW, y);
 	}
 
 	m_pCurrentPanel->SetBounds(0, 0, width, max(y + 20.0f, 600.0f));
