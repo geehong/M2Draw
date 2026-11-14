@@ -3649,6 +3649,231 @@ void CD2DPropertyView::LayoutShapeGroupButtonsSection(float left, float right, f
 	}
 }
 
+// 도형 모드: 채우기/윤곽선 탭, 채우기 모드, 그라디언트, 팔레트, 색 휠, 불투명도
+void CD2DPropertyView::LayoutShapeFillSection(float left, float right, float contentW, float& y)
+{
+	// 2. Tabs: [Fill] vs [Stroke]
+	float halfTabW = (contentW - 6.0f) * 0.5f;
+	if (m_btnTabFill)   m_btnTabFill->SetBounds(left, y, left + halfTabW, y + 26.0f);
+	if (m_btnTabStroke) m_btnTabStroke->SetBounds(left + halfTabW + 6.0f, y, right, y + 26.0f);
+	y += 32.0f;
+
+	bool isFill = (m_colorTarget == 0);
+
+	// 3. Fill Mode Toolbar (4 modes: None / Solid / Linear / Radial)
+	const int kFillModeCount = static_cast<int>(m_btnFillModes.size());
+	if (isFill)
+	{
+		float btnW = (contentW - ((kFillModeCount - 1) * 6.0f)) / static_cast<float>(kFillModeCount);
+		for (int i = 0; i < kFillModeCount; ++i)
+		{
+			float bx1 = left + i * (btnW + 6.0f);
+			m_btnFillModes[i]->SetVisible(true);
+			m_btnFillModes[i]->SetBounds(bx1, y, bx1 + btnW, y + 24.0f);
+		}
+		y += 30.0f;
+	}
+	else
+	{
+		for (int i = 0; i < kFillModeCount; ++i)
+			m_btnFillModes[i]->SetVisible(false);
+	}
+
+	// 3-1. 그라디언트 편집: 컬러 스톱 바, 스톱 버튼, 시작/끝(방사형: 중심/초점/반지름) 수치
+	const bool gradUI = isFill && IsGradientMode();
+	SetGradientControlsVisible(gradUI);
+	if (gradUI)
+	{
+		if (m_gradBar)
+		{
+			m_gradBar->SetBounds(left, y, right, y + 42.0f);
+			y += 46.0f;
+		}
+		const float thirdW = (contentW - 12.0f) / 3.0f;
+		if (m_btnStopAdd)     m_btnStopAdd->SetBounds(left, y, left + thirdW, y + 24.0f);
+		if (m_btnStopRemove)  m_btnStopRemove->SetBounds(left + thirdW + 6.0f, y, left + thirdW * 2.0f + 6.0f, y + 24.0f);
+		if (m_btnStopReverse) m_btnStopReverse->SetBounds(left + (thirdW + 6.0f) * 2.0f, y, right, y + 24.0f);
+		y += 32.0f;
+
+	}
+
+	// 4. Standard 16-Color Palette
+	if (m_palette16)
+	{
+		m_palette16->SetVisible(true);
+		m_palette16->SetBounds(left, y, right, y + 42.0f);
+		y += 48.0f;
+	}
+
+	// 5. Color Wheel Expander
+	if (m_expShapeWheel)
+	{
+		m_expShapeWheel->SetVisible(true);
+		float expH = m_expShapeWheel->GetHeaderHeight();
+		if (m_expShapeWheel->IsExpanded())
+		{
+			float wheelH = min(contentW, 220.0f);
+			float wheelLeft = left + (contentW - wheelH) * 0.5f;
+			expH += wheelH + 10.0f;
+			if (m_shapeWheel)
+			{
+				m_shapeWheel->SetVisible(true);
+				m_shapeWheel->SetBounds(wheelLeft, y + m_expShapeWheel->GetHeaderHeight() + 6.0f, wheelLeft + wheelH, y + expH - 4.0f);
+			}
+		}
+		else
+		{
+			if (m_shapeWheel) m_shapeWheel->SetVisible(false);
+		}
+		m_expShapeWheel->SetBounds(left, y, right, y + expH);
+		y += expH + 12.0f;
+	}
+
+	// 6. Opacity (Label + Slider Bar + Number Input)
+	if (m_lblOpacity)
+	{
+		m_lblOpacity->SetBounds(left, y, right, y + 18.0f);
+		y += 20.0f;
+	}
+	float numW = 80.0f; // 100% 텍스트가 잘리거나 줄바꿈되지 않도록 80px로 넉넉하게 확장
+	float sliderW = contentW - numW - 8.0f;
+	if (m_sliderOpacity)
+	{
+		m_sliderOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+	}
+	if (m_spinOpacity)
+	{
+		m_spinOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+	}
+	y += 30.0f;
+
+	// 6-1. 그라디언트 기하 수치 (시작/끝 또는 중심/초점/반지름): 자주 쓰는 스톱 바·팔레트·불투명도 아래에 배치
+	if (gradUI)
+	{
+		const float halfXY = (contentW - 6.0f) * 0.5f;
+		if (m_lblGradStart) { m_lblGradStart->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+		if (m_spinGradX1) m_spinGradX1->SetBounds(left, y, left + halfXY, y + 24.0f);
+		if (m_spinGradY1) m_spinGradY1->SetBounds(left + halfXY + 6.0f, y, right, y + 24.0f);
+		y += 30.0f;
+		if (m_lblGradEnd) { m_lblGradEnd->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+		if (m_spinGradX2) m_spinGradX2->SetBounds(left, y, left + halfXY, y + 24.0f);
+		if (m_spinGradY2) m_spinGradY2->SetBounds(left + halfXY + 6.0f, y, right, y + 24.0f);
+		y += 30.0f;
+		if (m_fillMode == FILL_RADIAL_GRAD)
+		{
+			if (m_lblGradRadius) { m_lblGradRadius->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
+			if (m_spinGradR) m_spinGradR->SetBounds(left, y, left + halfXY, y + 24.0f);
+			y += 30.0f;
+		}
+		y += 4.0f;
+	}
+}
+
+// 도형 모드: 선 굵기와 대시 스타일 (윤곽선 모드)
+void CD2DPropertyView::LayoutShapeStrokeSection(float left, float right, float contentW, float& y)
+{
+	const bool isFill = (m_colorTarget == 0);
+	const float numW = 80.0f;   // 불투명도 칸과 같은 폭 규칙
+	const float sliderW = contentW - numW - 8.0f;
+	// 7. Stroke Width & Dash Styles (Stroke Mode only)
+	if (!isFill)
+	{
+		if (m_lblStrokeWidth)
+		{
+			m_lblStrokeWidth->SetVisible(true);
+			m_lblStrokeWidth->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+		if (m_sliderStrokeWidth)
+		{
+			m_sliderStrokeWidth->SetVisible(true);
+			m_sliderStrokeWidth->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
+		}
+		if (m_spinStrokeWidth)
+		{
+			m_spinStrokeWidth->SetVisible(true);
+			m_spinStrokeWidth->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
+		}
+		y += 30.0f;
+
+		float dashW = (contentW - (3.0f * 6.0f)) / 4.0f;
+		for (int i = 0; i < 4; ++i)
+		{
+			float bx1 = left + i * (dashW + 6.0f);
+			m_btnDashStyles[i]->SetVisible(true);
+			m_btnDashStyles[i]->SetBounds(bx1, y, bx1 + dashW, y + 24.0f);
+		}
+		y += 32.0f;
+
+		// 사용자 정의 Dash Array 입력
+		if (m_lblDashArray)
+		{
+			m_lblDashArray->SetVisible(true);
+			m_lblDashArray->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+		if (m_txtDashArray)
+		{
+			m_txtDashArray->SetVisible(true);
+			m_txtDashArray->SetBounds(left, y, right, y + 24.0f);
+			y += 32.0f;
+		}
+
+		// Cap / Join 콤보 (좌우 반반)
+		if (m_lblCapJoin)
+		{
+			m_lblCapJoin->SetVisible(true);
+			m_lblCapJoin->SetBounds(left, y, right, y + 18.0f);
+			y += 20.0f;
+		}
+		const float comboW = (contentW - 6.0f) * 0.5f;
+		if (m_cboLineCap)
+		{
+			m_cboLineCap->SetVisible(true);
+			m_cboLineCap->SetBounds(left, y, left + comboW, y + 26.0f);
+		}
+		if (m_cboLineJoin)
+		{
+			m_cboLineJoin->SetVisible(true);
+			m_cboLineJoin->SetBounds(left + comboW + 6.0f, y, right, y + 26.0f);
+		}
+		y += 34.0f;
+	}
+	else
+	{
+		if (m_lblStrokeWidth) m_lblStrokeWidth->SetVisible(false);
+		if (m_sliderStrokeWidth) m_sliderStrokeWidth->SetVisible(false);
+		if (m_spinStrokeWidth) m_spinStrokeWidth->SetVisible(false);
+		for (int i = 0; i < 4; ++i)
+			m_btnDashStyles[i]->SetVisible(false);
+		if (m_lblDashArray) m_lblDashArray->SetVisible(false);
+		if (m_txtDashArray) m_txtDashArray->SetVisible(false);
+		if (m_lblCapJoin)   m_lblCapJoin->SetVisible(false);
+		if (m_cboLineCap)   m_cboLineCap->SetVisible(false);
+		if (m_cboLineJoin)  m_cboLineJoin->SetVisible(false);
+	}
+}
+
+// 도형 모드: 경로 닫기 체크박스
+void CD2DPropertyView::LayoutShapeCloseSection(float left, float right, float contentW, float& y)
+{
+	// 8. Close Shape Checkbox (For PathShape)
+	if (m_chkCloseShape)
+	{
+		bool isPath = false;
+		if (GetSelectedShape())
+		{
+			isPath = (dynamic_cast<ge::PathNode*>(GetSelectedShape()) != nullptr);
+		}
+		m_chkCloseShape->SetVisible(isPath);
+		if (isPath)
+		{
+			m_chkCloseShape->SetBounds(left, y, right, y + 24.0f);
+			y += 30.0f;
+		}
+	}
+}
+
 void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 {
 	if (!m_pCurrentPanel) return;
@@ -3731,215 +3956,11 @@ void CD2DPropertyView::UpdateLayout(float width, float /*height*/)
 		if (m_btnTabFill)   m_btnTabFill->SetVisible(true);
 		if (m_btnTabStroke) m_btnTabStroke->SetVisible(true);
 
-		// 2. Tabs: [Fill] vs [Stroke]
-		float halfTabW = (contentW - 6.0f) * 0.5f;
-		if (m_btnTabFill)   m_btnTabFill->SetBounds(left, y, left + halfTabW, y + 26.0f);
-		if (m_btnTabStroke) m_btnTabStroke->SetBounds(left + halfTabW + 6.0f, y, right, y + 26.0f);
-		y += 32.0f;
+		LayoutShapeFillSection(left, right, contentW, y);
 
-		bool isFill = (m_colorTarget == 0);
+		LayoutShapeStrokeSection(left, right, contentW, y);
 
-		// 3. Fill Mode Toolbar (4 modes: None / Solid / Linear / Radial)
-		const int kFillModeCount = static_cast<int>(m_btnFillModes.size());
-		if (isFill)
-		{
-			float btnW = (contentW - ((kFillModeCount - 1) * 6.0f)) / static_cast<float>(kFillModeCount);
-			for (int i = 0; i < kFillModeCount; ++i)
-			{
-				float bx1 = left + i * (btnW + 6.0f);
-				m_btnFillModes[i]->SetVisible(true);
-				m_btnFillModes[i]->SetBounds(bx1, y, bx1 + btnW, y + 24.0f);
-			}
-			y += 30.0f;
-		}
-		else
-		{
-			for (int i = 0; i < kFillModeCount; ++i)
-				m_btnFillModes[i]->SetVisible(false);
-		}
-
-		// 3-1. 그라디언트 편집: 컬러 스톱 바, 스톱 버튼, 시작/끝(방사형: 중심/초점/반지름) 수치
-		const bool gradUI = isFill && IsGradientMode();
-		SetGradientControlsVisible(gradUI);
-		if (gradUI)
-		{
-			if (m_gradBar)
-			{
-				m_gradBar->SetBounds(left, y, right, y + 42.0f);
-				y += 46.0f;
-			}
-			const float thirdW = (contentW - 12.0f) / 3.0f;
-			if (m_btnStopAdd)     m_btnStopAdd->SetBounds(left, y, left + thirdW, y + 24.0f);
-			if (m_btnStopRemove)  m_btnStopRemove->SetBounds(left + thirdW + 6.0f, y, left + thirdW * 2.0f + 6.0f, y + 24.0f);
-			if (m_btnStopReverse) m_btnStopReverse->SetBounds(left + (thirdW + 6.0f) * 2.0f, y, right, y + 24.0f);
-			y += 32.0f;
-
-		}
-
-		// 4. Standard 16-Color Palette
-		if (m_palette16)
-		{
-			m_palette16->SetVisible(true);
-			m_palette16->SetBounds(left, y, right, y + 42.0f);
-			y += 48.0f;
-		}
-
-		// 5. Color Wheel Expander
-		if (m_expShapeWheel)
-		{
-			m_expShapeWheel->SetVisible(true);
-			float expH = m_expShapeWheel->GetHeaderHeight();
-			if (m_expShapeWheel->IsExpanded())
-			{
-				float wheelH = min(contentW, 220.0f);
-				float wheelLeft = left + (contentW - wheelH) * 0.5f;
-				expH += wheelH + 10.0f;
-				if (m_shapeWheel)
-				{
-					m_shapeWheel->SetVisible(true);
-					m_shapeWheel->SetBounds(wheelLeft, y + m_expShapeWheel->GetHeaderHeight() + 6.0f, wheelLeft + wheelH, y + expH - 4.0f);
-				}
-			}
-			else
-			{
-				if (m_shapeWheel) m_shapeWheel->SetVisible(false);
-			}
-			m_expShapeWheel->SetBounds(left, y, right, y + expH);
-			y += expH + 12.0f;
-		}
-
-		// 6. Opacity (Label + Slider Bar + Number Input)
-		if (m_lblOpacity)
-		{
-			m_lblOpacity->SetBounds(left, y, right, y + 18.0f);
-			y += 20.0f;
-		}
-		float numW = 80.0f; // 100% 텍스트가 잘리거나 줄바꿈되지 않도록 80px로 넉넉하게 확장
-		float sliderW = contentW - numW - 8.0f;
-		if (m_sliderOpacity)
-		{
-			m_sliderOpacity->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
-		}
-		if (m_spinOpacity)
-		{
-			m_spinOpacity->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
-		}
-		y += 30.0f;
-
-		// 6-1. 그라디언트 기하 수치 (시작/끝 또는 중심/초점/반지름): 자주 쓰는 스톱 바·팔레트·불투명도 아래에 배치
-		if (gradUI)
-		{
-			const float halfXY = (contentW - 6.0f) * 0.5f;
-			if (m_lblGradStart) { m_lblGradStart->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-			if (m_spinGradX1) m_spinGradX1->SetBounds(left, y, left + halfXY, y + 24.0f);
-			if (m_spinGradY1) m_spinGradY1->SetBounds(left + halfXY + 6.0f, y, right, y + 24.0f);
-			y += 30.0f;
-			if (m_lblGradEnd) { m_lblGradEnd->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-			if (m_spinGradX2) m_spinGradX2->SetBounds(left, y, left + halfXY, y + 24.0f);
-			if (m_spinGradY2) m_spinGradY2->SetBounds(left + halfXY + 6.0f, y, right, y + 24.0f);
-			y += 30.0f;
-			if (m_fillMode == FILL_RADIAL_GRAD)
-			{
-				if (m_lblGradRadius) { m_lblGradRadius->SetBounds(left, y, right, y + 18.0f); y += 20.0f; }
-				if (m_spinGradR) m_spinGradR->SetBounds(left, y, left + halfXY, y + 24.0f);
-				y += 30.0f;
-			}
-			y += 4.0f;
-		}
-
-		// 7. Stroke Width & Dash Styles (Stroke Mode only)
-		if (!isFill)
-		{
-			if (m_lblStrokeWidth)
-			{
-				m_lblStrokeWidth->SetVisible(true);
-				m_lblStrokeWidth->SetBounds(left, y, right, y + 18.0f);
-				y += 20.0f;
-			}
-			if (m_sliderStrokeWidth)
-			{
-				m_sliderStrokeWidth->SetVisible(true);
-				m_sliderStrokeWidth->SetBounds(left, y + 2.0f, left + sliderW, y + 22.0f);
-			}
-			if (m_spinStrokeWidth)
-			{
-				m_spinStrokeWidth->SetVisible(true);
-				m_spinStrokeWidth->SetBounds(left + sliderW + 8.0f, y, right, y + 24.0f);
-			}
-			y += 30.0f;
-
-			float dashW = (contentW - (3.0f * 6.0f)) / 4.0f;
-			for (int i = 0; i < 4; ++i)
-			{
-				float bx1 = left + i * (dashW + 6.0f);
-				m_btnDashStyles[i]->SetVisible(true);
-				m_btnDashStyles[i]->SetBounds(bx1, y, bx1 + dashW, y + 24.0f);
-			}
-			y += 32.0f;
-
-			// 사용자 정의 Dash Array 입력
-			if (m_lblDashArray)
-			{
-				m_lblDashArray->SetVisible(true);
-				m_lblDashArray->SetBounds(left, y, right, y + 18.0f);
-				y += 20.0f;
-			}
-			if (m_txtDashArray)
-			{
-				m_txtDashArray->SetVisible(true);
-				m_txtDashArray->SetBounds(left, y, right, y + 24.0f);
-				y += 32.0f;
-			}
-
-			// Cap / Join 콤보 (좌우 반반)
-			if (m_lblCapJoin)
-			{
-				m_lblCapJoin->SetVisible(true);
-				m_lblCapJoin->SetBounds(left, y, right, y + 18.0f);
-				y += 20.0f;
-			}
-			const float comboW = (contentW - 6.0f) * 0.5f;
-			if (m_cboLineCap)
-			{
-				m_cboLineCap->SetVisible(true);
-				m_cboLineCap->SetBounds(left, y, left + comboW, y + 26.0f);
-			}
-			if (m_cboLineJoin)
-			{
-				m_cboLineJoin->SetVisible(true);
-				m_cboLineJoin->SetBounds(left + comboW + 6.0f, y, right, y + 26.0f);
-			}
-			y += 34.0f;
-		}
-		else
-		{
-			if (m_lblStrokeWidth) m_lblStrokeWidth->SetVisible(false);
-			if (m_sliderStrokeWidth) m_sliderStrokeWidth->SetVisible(false);
-			if (m_spinStrokeWidth) m_spinStrokeWidth->SetVisible(false);
-			for (int i = 0; i < 4; ++i)
-				m_btnDashStyles[i]->SetVisible(false);
-			if (m_lblDashArray) m_lblDashArray->SetVisible(false);
-			if (m_txtDashArray) m_txtDashArray->SetVisible(false);
-			if (m_lblCapJoin)   m_lblCapJoin->SetVisible(false);
-			if (m_cboLineCap)   m_cboLineCap->SetVisible(false);
-			if (m_cboLineJoin)  m_cboLineJoin->SetVisible(false);
-		}
-
-		// 8. Close Shape Checkbox (For PathShape)
-		if (m_chkCloseShape)
-		{
-			bool isPath = false;
-			if (GetSelectedShape())
-			{
-				isPath = (dynamic_cast<ge::PathNode*>(GetSelectedShape()) != nullptr);
-			}
-			m_chkCloseShape->SetVisible(isPath);
-			if (isPath)
-			{
-				m_chkCloseShape->SetBounds(left, y, right, y + 24.0f);
-				y += 30.0f;
-			}
-		}
+		LayoutShapeCloseSection(left, right, contentW, y);
 	}
 	else if (m_paneMode == MODE_GRID)
 	{

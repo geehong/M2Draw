@@ -400,4 +400,84 @@ std::wstring RunMarkerBenchmark()
 	if (SUCCEEDED(coHr)) CoUninitialize();
 	return out;
 }
+// 도형이 많은 문서의 렌더 성능 측정 (6.5.3): 사각형 N 개를 흩뿌린 문서를 창 없이 1920x1080 에 그린 평균 프레임 시간 (실행: --bench-render)
+std::wstring RunRenderBenchmark()
+{
+	const HRESULT coHr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+	std::wstring out;
+	ComPtr<IWICImagingFactory> wic;
+	ComPtr<ID2D1Factory> d2d;
+	ComPtr<IWICBitmap> bmp;
+	ComPtr<ID2D1RenderTarget> rt;
+	const unsigned W = 1920, H = 1080;
+	if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic))) ||
+	    FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2d.GetAddressOf())) ||
+	    FAILED(wic->CreateBitmap(W, H, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bmp))) {
+		if (SUCCEEDED(coHr)) CoUninitialize();
+		return L"렌더 환경(WIC/D2D)을 초기화하지 못했습니다.\r\n";
+	}
+	const D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+		D2D1::PixelFormat(DXGI_FORMAT_UNKNOWN, D2D1_ALPHA_MODE_PREMULTIPLIED), 96.0f, 96.0f);
+	if (FAILED(d2d->CreateWicBitmapRenderTarget(bmp.Get(), props, &rt))) {
+		if (SUCCEEDED(coHr)) CoUninitialize();
+		return L"오프스크린 렌더 타깃을 만들지 못했습니다.\r\n";
+	}
+	D2DRenderer renderer;
+	if (!renderer.Initialize(rt.Get(), d2d.Get())) {
+		if (SUCCEEDED(coHr)) CoUninitialize();
+		return L"렌더러를 초기화하지 못했습니다.\r\n";
+	}
+	renderer.SetEditOverlays(false);
+
+	// 같은 결과가 나오도록 고정된 난수열로 도형을 배치한다 (세계 6000x4000 에 흩뿌림: 1:1 화면에는 일부만 보임)
+	auto build = [](int n) {
+		Document d;
+		d.width = 6000.0f; d.height = 4000.0f;
+		unsigned seed = 12345u;
+		auto rnd = [&seed]() { seed = seed * 1664525u + 1013904223u; return static_cast<float>((seed >> 8) & 0xFFFF) / 65535.0f; };
+		for (int i = 0; i < n; ++i) {
+			auto p = MakeRect(rnd() * 5800.0f, rnd() * 3800.0f, 40.0f + rnd() * 160.0f, 30.0f + rnd() * 120.0f, Color(rnd(), rnd(), rnd(), 1.0f));
+			if (i % 3 == 0) {
+				Style st = p->GetStyle();
+				st.stroke.width = 2.0f;
+				st.stroke.color = Color(0.0f, 0.0f, 0.0f, 1.0f);
+				p->SetStyle(st);
+			}
+			d.AddShape(std::move(p));
+		}
+		return d;
+	};
+	LARGE_INTEGER freq;
+	QueryPerformanceFrequency(&freq);
+	auto frameMs = [&](Document& d, float zoom, int frames, bool panning) -> double {
+		Viewport vp;
+		vp.zoom = zoom;
+		auto drawOnce = [&](int i) {
+			vp.pan = Vec2{ -1000.0f * zoom - (panning ? i * 13.0f : 0.0f), -700.0f * zoom - (panning ? i * 7.0f : 0.0f) };
+			rt->BeginDraw();
+			rt->Clear(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f));
+			renderer.DrawDocument(d, vp);
+			rt->EndDraw();
+		};
+		for (int i = 0; i < 3; ++i) drawOnce(0);   // 예열 (지오메트리 캐시, 장치 초기화 비용 제외)
+		LARGE_INTEGER t0, t1;
+		QueryPerformanceCounter(&t0);
+		for (int i = 0; i < frames; ++i) drawOnce(i);
+		QueryPerformanceCounter(&t1);
+		return static_cast<double>(t1.QuadPart - t0.QuadPart) * 1000.0 / static_cast<double>(freq.QuadPart) / frames;
+	};
+	wchar_t line[256];
+	for (int n : { 200, 1000, 3000 }) {
+		Document d = build(n);
+		const double zoomIn = frameMs(d, 1.0f, 30, false);     // 1:1 (일부만 화면에 보임)
+		const double zoomOut = frameMs(d, 0.25f, 30, false);   // 축소 (대부분이 화면에 들어옴)
+		const double panning = frameMs(d, 1.0f, 30, true);     // 1:1 에서 화면을 계속 옮김
+		swprintf_s(line, L"도형 %d개: 1:1 %.2f ms / 축소(0.25배) %.2f ms / 1:1 이동 %.2f ms (한 프레임 평균, 60fps 기준 16.7 ms)\r\n", n, zoomIn, zoomOut, panning);
+		out += line;
+	}
+	renderer.Shutdown();
+	rt.Reset();
+	if (SUCCEEDED(coHr)) CoUninitialize();
+	return out;
+}
 } // namespace ge

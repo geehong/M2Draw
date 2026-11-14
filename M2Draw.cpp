@@ -121,6 +121,19 @@ BOOL CM2DrawApp::InitInstance()
 		return FALSE;   // 창을 띄우지 않고 종료
 	}
 
+	// 도형이 많은 문서의 렌더 성능 측정 (실행: M2Draw.exe --bench-render). 결과는 %TEMP%\m2draw_bench_render.txt
+	if (m_lpCmdLine && wcsstr(m_lpCmdLine, L"--bench-render")) {
+		const std::wstring result = ge::RunRenderBenchmark();
+		const std::string bytes = WideToUtf8(result);
+		wchar_t tmpDir[MAX_PATH] = {};
+		::GetTempPathW(MAX_PATH, tmpDir);
+		FILE* fp = nullptr;
+		if (_wfopen_s(&fp, (std::wstring(tmpDir) + L"m2draw_bench_render.txt").c_str(), L"wb") == 0 && fp) {
+			fwrite(bytes.data(), 1, bytes.size(), fp);
+			fclose(fp);
+		}
+		return FALSE;
+	}
 	// 선 마커 렌더 비용 측정 (실행: M2Draw.exe --bench-markers). 결과는 %TEMP%\m2draw_bench_markers.txt
 	if (m_lpCmdLine && wcsstr(m_lpCmdLine, L"--bench-markers")) {
 		const std::wstring result = ge::RunMarkerBenchmark();

@@ -345,6 +345,9 @@ protected:
 	void LayoutShapeTableSection(float left, float right, float contentW, float& y);
 	void LayoutShapeAppearanceSection(float left, float right, float contentW, float& y);
 	void LayoutShapeGroupButtonsSection(float left, float right, float contentW, float& y);
+	void LayoutShapeFillSection(float left, float right, float contentW, float& y);
+	void LayoutShapeStrokeSection(float left, float right, float contentW, float& y);
+	void LayoutShapeCloseSection(float left, float right, float contentW, float& y);
 	void NotifyGridChanged();
 
 	// MFC 메시지 맵 핸들러

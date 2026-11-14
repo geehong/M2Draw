@@ -25,5 +25,7 @@ bool RasterExportPixelSize(const Document& doc, const RasterExportOptions& opt, 
 bool RunRuntimeVerification(std::wstring* failure);
 // 선 마커 렌더 비용 측정 (6.25.3): 같은 선을 마커 없음 / 화살촉 / 점+화살촉 으로 내보낸 평균 시간 (실행: --bench-markers)
 std::wstring RunMarkerBenchmark();
+// 도형이 많은 문서의 렌더 성능 측정 (6.5.3): 도형 N 개 문서를 창 없이 그린 평균 프레임 시간 (실행: --bench-render)
+std::wstring RunRenderBenchmark();
 
 } // namespace ge

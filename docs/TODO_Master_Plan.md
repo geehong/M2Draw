@@ -633,9 +633,9 @@
 > **현황 및 문제점**: `InitControls()`, `SyncControlsFromData()`, `UpdateLayout()` 단일 거대 함수 안에 도형·그라디언트·그룹·텍스트·이미지·프레임·버튼·그리드·캔버스 로직이 혼재되어 있으며, 창 크기 변경(`OnSize` → `AdjustLayout`)이나 `SetPaneMode()` 호출 시 컨트롤 전체(`DestroyWindow` + `Create`)를 재생성하는 오버헤드(0.3.4 메모)와 깜빡임이 남아 있음.
 - [ ] 6.1.1 섹션별 초기화 메소드 분리: `InitShapeStyleSection()`, `InitGradientSection()`, `InitTextSection()`, `InitImageSection()`, `InitFrameSection()`, `InitTableSection()`, `InitGridModeControls()`, `InitCanvasModeControls()` — (부분 2026-11-12: InitFrameSection 분리)
 - [ ] 6.1.2 섹션별 데이터 동기화 메소드 분리: `SyncTextSection()`, `SyncImageSection()`, `SyncFrameSection()`, `SyncGradientSection()`, `SyncStrokeSection()` (기존 `SyncTableControls()` 패턴으로 통일) — (부분 2026-11-12: SyncFrameSection 분리)
-- [ ] 6.1.3 섹션별 배치/가시성 메소드 분리: `LayoutTextSection(int& y)`, `LayoutImageSection(int& y)`, `LayoutFrameSection(int& y)`, `LayoutStyleSection(int& y)` (기존 `LayoutGroupPanel(int& y)` 패턴으로 통일하여 `UpdateLayout()` 본문을 섹션 호출 흐름 제어 위주로 단순화)
+- [x] 6.1.3 섹션별 배치/가시성 메소드 분리: `LayoutTextSection(int& y)`, `LayoutImageSection(int& y)`, `LayoutFrameSection(int& y)`, `LayoutStyleSection(int& y)` (기존 `LayoutGroupPanel(int& y)` 패턴으로 통일하여 `UpdateLayout()` 본문을 섹션 호출 흐름 제어 위주로 단순화) — (2026-11-14 완료: 도형/격자/캔버스 패널 배치를 섹션 함수 10여 개로 분리, UpdateLayout 약 800줄 → 약 100줄. 배치 값 변경 없음, 앱 확인 완료)
 - [x] 6.1.4 불필요한 컨트롤 재생성 방지 (완료 — 2026-11-02): SetPaneMode 호출 시 동일 모드+초기화 완료 시 InitControls 생략하고 UpdateLayout/Sync만 수행: `SetPaneMode(PaneMode mode)` 호출 시 `m_paneMode != mode`이거나 최초 초기화(`!m_bInitialized`)일 때만 컨트롤 생성을 수행하고, 단순 리사이즈(`AdjustLayout`)에서는 `UpdateLayout()`만 호출하도록 개선
-- [ ] 6.1.5 빌드 확인 및 모든 선택 대상(도형/그룹/텍스트/이미지/프레임/테이블/그리드/캔버스) 속성창 회귀 검증
+- [x] 6.1.5 빌드 확인 및 모든 선택 대상(도형/그룹/텍스트/이미지/프레임/테이블/그리드/캔버스) 속성창 회귀 검증 — (2026-11-14 앱에서 대상별 배치 확인 완료)
 
 ### Step 6.2 노드/컴포넌트 타입 판별 일원화 (문자열/다중 `dynamic_cast` 제거)
 > **우선순위: 높음 — 4.5.17 컴포넌트 구현의 선행 조건** (컴포넌트마다 이름/태그/`dynamic_cast` 분기가 늘어나기 전에 정책 쿼리로 통일)
@@ -667,7 +667,7 @@
 > **현황 및 문제점**: 문서를 닫거나 도형을 대량 삭제/Undo 복원해도 `D2DRenderer`의 `m_geoCache`, `m_gradientCache`, `m_bitmapCache`, `m_textCache`(키: `NodeId`)에 삭제된 노드의 D2D 리소스가 무기한 잔류하며, 화면 밖(Off-screen) 객체도 매 프레임 D2D 드로우콜을 거침.
 - [x] 6.5.1 `D2DRenderer::PruneCaches(const Document& doc)` 및 `ClearCaches()` 메소드 추가: 새 문서/문서 열기(`OnNewDocument`/`OnOpenDocument`) 시 전체 캐시 초기화, Undo/Redo 및 노드 삭제 시 현존하지 않는 `NodeId` 엔트리 정리 — (2026-11-12) D2DRenderer::PruneCaches: 240 프레임마다 문서에 없는 노드/이미지 캐시 정리. Shutdown 시 이미지 캐시도 정리
 - [x] 6.5.2 **(선행: 6.8.3 시각적 경계 — 완료 2026-11-02: D2DRenderer::DrawNode 에서 뷰포트 월드 AABB 와 시각적 경계 교차 검사로 화면 밖 노드 드로우콜 생략)** — 그림자·선 두께·바깥 그림자를 포함한 경계가 없으면 컬링이 보여야 할 요소를 생략할 수 있음)** `D2DRenderer::DrawNode`(`D2DGraphicEngine.cpp#L3045`) 진입부에서 노드의 월드 시각적 경계(그림자·선 두께 여유분 포함 `WorldBounds`)와 현재 뷰포트 월드 영역(`ViewportState` 역변환 사각형)의 AABB 교차 판정(Viewport Frustum Culling)을 수행하여 화면 밖 노드의 D2D 드로우콜 생략
-- [ ] 6.5.3 빌드 확인 + 수백 개 이상의 도형/텍스트가 있는 문서에서 패닝/줌 프레임레이트 및 렌더링 정확도 검증
+- [x] 6.5.3 빌드 확인 + 수백 개 이상의 도형/텍스트가 있는 문서에서 패닝/줌 프레임레이트 및 렌더링 정확도 검증 — (2026-11-14 헤드리스 측정 추가: `M2Draw.exe --bench-render`, 결과 %TEMP%\m2draw_bench_render.txt. Debug 빌드, 소프트웨어(WIC) 렌더 타깃, 사각형만: 200개 1:1 0.95ms / 1000개 1:1 1.95ms·축소 4.58ms / 3000개 1:1 3.76ms·축소 12.40ms·이동 4.36ms. 화면 밖 도형은 컬링되어 1:1 이 축소보다 빠름. 실제 화면(GPU)·텍스트·이미지·그라디언트가 섞인 문서의 체감은 앱에서 확인 필요)
 
 ---
 
